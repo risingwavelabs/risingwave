@@ -120,3 +120,102 @@
               └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Dynamic filter join on unequal types
+  sql: |
+    create table t1 (v1 int);
+    create table t2 (v2 bigint);
+    with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.v1::Int64 > max(t2.v2)), output: [t1.v1] }
+    ├─LogicalProject { exprs: [t1.v1, t1.v1::Int64] }
+    | └─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalAgg { aggs: [max(t2.v2)] }
+      └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamProject { exprs: [t1.v1, t1._row_id] }
+      └─StreamDynamicFilter { predicate: (t1.v1::Int64 > max(max(t2.v2))), output: [t1.v1, t1.v1::Int64, t1._row_id] }
+        ├─StreamProject { exprs: [t1.v1, t1.v1::Int64, t1._row_id] }
+        | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamProject { exprs: [max(max(t2.v2))] }
+            └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+              └─StreamExchange { dist: Single }
+                └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
+                  └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
+                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Dynamic filter on semi join
+  sql: |
+    create table t1 (v1 int);
+    create table t2 (v2 int);
+    with max_v2 as (select max(v2) max from t2) select v1 from t1 where exists (select * from max_v2 where v1 > max);
+  stream_plan: |
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamDynamicFilter { predicate: (t1.v1 > max(max(t2.v2))), output: [t1.v1, t1._row_id] }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+            └─StreamExchange { dist: Single }
+              └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Complex expression on RHS of condition will still result in dynamic filter
+  before:
+  - create_tables
+  sql: |
+    with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > 2 * max;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.v1 > (2:Int32 * max(t2.v2))), output: [t1.v1] }
+    ├─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalProject { exprs: [(2:Int32 * max(t2.v2))] }
+      └─LogicalAgg { aggs: [max(t2.v2)] }
+        └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamDynamicFilter { predicate: (t1.v1 > (2:Int32 * max(max(t2.v2)))), output: [t1.v1, t1._row_id] }
+      ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [(2:Int32 * max(max(t2.v2)))] }
+          └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+            └─StreamExchange { dist: Single }
+              └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
+                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Temporal filter works on complex columns on LHS
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts + interval '1 hour' > now();
+  stream_plan: |
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamProject { exprs: [t1.ts, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ((t1.ts + '01:00:00':Interval) > now), output: [t1.ts, (t1.ts + '01:00:00':Interval), t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, (t1.ts + '01:00:00':Interval), t1._row_id] }
+        | └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamNow { output: [now] }
+- name: Temporal filter works on complex columns on LHS (part 2)
+  sql: |
+    create table t1 (ts timestamp with time zone, time_to_live interval);
+    select * from t1 where ts + time_to_live * 1.5 > now();
+  stream_plan: |
+    StreamMaterialize { columns: [ts, time_to_live, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamProject { exprs: [t1.ts, t1.time_to_live, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ((t1.ts + (t1.time_to_live * 1.5:Decimal)) > now), output: [t1.ts, t1.time_to_live, (t1.ts + (t1.time_to_live * 1.5:Decimal)), t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, t1.time_to_live, (t1.ts + (t1.time_to_live * 1.5:Decimal)), t1._row_id] }
+        | └─StreamTableScan { table: t1, columns: [t1.ts, t1.time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamNow { output: [now] }
+- name: Temporal filter works on complex columns on LHS (part 2, flipped)
+  sql: |
+    create table t1 (ts timestamp with time zone, additional_time_to_live interval);
+    select * from t1 where now() - interval '15 minutes' > ts + additional_time_to_live * 1.5;
+  stream_plan: |
+    StreamMaterialize { columns: [ts, additional_time_to_live, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ((t1.ts + (t1.additional_time_to_live * 1.5:Decimal)) < (now - '00:15:00':Interval)), output: [t1.ts, t1.additional_time_to_live, (t1.ts + (t1.additional_time_to_live * 1.5:Decimal)), t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, (t1.ts + (t1.additional_time_to_live * 1.5:Decimal)), t1._row_id] }
+        | └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamProject { exprs: [(now - '00:15:00':Interval)], watermark_columns: [(now - '00:15:00':Interval)] }
+            └─StreamNow { output: [now] }
