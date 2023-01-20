@@ -20,7 +20,7 @@ use risingwave_common::util::compress::decompress_data;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::meta::{FragmentParallelUnitMapping, SubscribeResponse};
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -121,12 +121,18 @@ impl ObserverState for FrontendObserverNode {
             snapshot
                 .parallel_unit_mappings
                 .iter()
-                .map(|mapping| {
-                    (
-                        mapping.fragment_id,
-                        decompress_data(&mapping.original_indices, &mapping.data),
-                    )
-                })
+                .map(
+                    |FragmentParallelUnitMapping {
+                         fragment_id,
+                         mapping,
+                     }| {
+                        let mapping = mapping.as_ref().unwrap();
+                        (
+                            *fragment_id,
+                            decompress_data(&mapping.original_indices, &mapping.data),
+                        )
+                    },
+                )
                 .collect(),
         );
         self.hummock_snapshot_manager
@@ -267,32 +273,29 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
-                Operation::Add => {
-                    let fragment_id = parallel_unit_mapping.fragment_id;
-                    let mapping = decompress_data(
-                        &parallel_unit_mapping.original_indices,
-                        &parallel_unit_mapping.data,
-                    );
-                    self.worker_node_manager
-                        .insert_fragment_mapping(fragment_id, mapping);
+            Info::ParallelUnitMapping(parallel_unit_mapping) => {
+                let fragment_id = parallel_unit_mapping.fragment_id;
+                let mapping = || {
+                    let mapping = parallel_unit_mapping.mapping.as_ref().unwrap();
+                    decompress_data(&mapping.original_indices, &mapping.data)
+                };
+
+                match resp.operation() {
+                    Operation::Add => {
+                        self.worker_node_manager
+                            .insert_fragment_mapping(fragment_id, mapping());
+                    }
+                    Operation::Delete => {
+                        self.worker_node_manager
+                            .remove_fragment_mapping(&fragment_id);
+                    }
+                    Operation::Update => {
+                        self.worker_node_manager
+                            .update_fragment_mapping(fragment_id, mapping());
+                    }
+                    _ => panic!("receive an unsupported notify {:?}", resp),
                 }
-                Operation::Delete => {
-                    let fragment_id = parallel_unit_mapping.fragment_id;
-                    self.worker_node_manager
-                        .remove_fragment_mapping(&fragment_id);
-                }
-                Operation::Update => {
-                    let fragment_id = parallel_unit_mapping.fragment_id;
-                    let mapping = decompress_data(
-                        &parallel_unit_mapping.original_indices,
-                        &parallel_unit_mapping.data,
-                    );
-                    self.worker_node_manager
-                        .update_fragment_mapping(fragment_id, mapping);
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
+            }
             _ => unreachable!(),
         }
     }

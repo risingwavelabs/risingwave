@@ -248,7 +248,7 @@ impl Scheduler {
         parallel_units: &[ParallelUnit],
     ) -> MetaResult<ParallelUnitMapping> {
         let vnode_mapping = ParallelUnitMapping::build(parallel_units);
-        fragment.vnode_mapping = Some(vnode_mapping.to_protobuf(fragment.fragment_id));
+        fragment.vnode_mapping = Some(vnode_mapping.to_protobuf());
         Ok(vnode_mapping)
     }
 }

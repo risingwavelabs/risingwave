@@ -22,6 +22,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ParallelUnitId, VirtualNode};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
+use risingwave_pb::meta::FragmentParallelUnitMapping as FragmentParallelUnitMappingProto;
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use crate::model::{ActorId, FragmentId};
@@ -140,18 +141,18 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Create a vnode mapping from the given mapping from items to bitmaps, where each bitmap
     /// represents the vnodes mapped to the item.
     pub fn from_bitmaps(bitmaps: &HashMap<T::Item, Bitmap>) -> Self {
-        let mut raw = vec![None; VirtualNode::COUNT];
+        let mut items = vec![None; VirtualNode::COUNT];
 
         for (&item, bitmap) in bitmaps {
             assert_eq!(bitmap.len(), VirtualNode::COUNT);
             for idx in bitmap.iter_ones() {
-                if let Some(prev) = raw[idx].replace(item) {
+                if let Some(prev) = items[idx].replace(item) {
                     panic!("mapping at index `{idx}` is set to both `{prev:?}` and `{item:?}`");
                 }
             }
         }
 
-        let items = raw
+        let items = items
             .into_iter()
             .enumerate()
             .map(|(i, o)| o.unwrap_or_else(|| panic!("mapping at index `{i}` is not set")))
@@ -256,12 +257,20 @@ impl ParallelUnitMapping {
     }
 
     /// Convert this parallel unit mapping to the protobuf representation.
-    // TODO: remove the `fragment_id`
-    pub fn to_protobuf(&self, fragment_id: FragmentId) -> ParallelUnitMappingProto {
+    pub fn to_protobuf(&self) -> ParallelUnitMappingProto {
         ParallelUnitMappingProto {
-            fragment_id,
             original_indices: self.original_indices.clone(),
             data: self.data.clone(),
+        }
+    }
+
+    pub fn to_fragment_protobuf(
+        &self,
+        fragment_id: FragmentId,
+    ) -> FragmentParallelUnitMappingProto {
+        FragmentParallelUnitMappingProto {
+            fragment_id,
+            mapping: Some(self.to_protobuf()),
         }
     }
 }
