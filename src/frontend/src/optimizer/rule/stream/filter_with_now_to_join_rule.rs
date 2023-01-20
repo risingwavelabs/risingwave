@@ -38,7 +38,7 @@ impl Rule for FilterWithNowToJoinRule {
 
         let mut rewriter = NowAsInputRef::new(lhs_len);
 
-        // If the `now` is not a valid dynamic filter expression,
+        // If the `now` is not a valid dynamic filter expression, we will not push it down.
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
@@ -51,6 +51,10 @@ impl Rule for FilterWithNowToJoinRule {
                 remainder.push(expr.clone());
             }
         });
+
+        // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former 
+        // will introduce a watermark that can reduce state (since `now_expr` is monotonically increasing)
+        now_filters.sort_by(|(l, r)| rank_cmp(l).cmp(&rank_cmp(r)));
 
         if now_filters.is_empty() {
             return None;
@@ -86,6 +90,14 @@ impl Rule for FilterWithNowToJoinRule {
 impl FilterWithNowToJoinRule {
     pub fn create() -> BoxedRule {
         Box::new(FilterWithNowToJoinRule {})
+    }
+}
+
+fn rank_cmp(cmp: Type) -> u8 {
+    match cmp {
+        Type::GreaterThan | Type::GreaterThanOrEqual => 0,
+        Type::LessThan | Type::LessThanOrEqual => 1,
+        _ => 2,
     }
 }
 
