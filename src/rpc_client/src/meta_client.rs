@@ -1135,8 +1135,6 @@ impl GrpcMetaClient {
         tracing::info!("GrpcMetaClient originally connected against {}", addr);
         let channel = get_channel_with_defaults(addr).await?;
 
-        let mut leader_client = LeaderServiceClient::new(channel.clone());
-
         // Dummy address forces a client failover
         let dummy_address = HostAddress {
             host: "dummy".to_owned(),

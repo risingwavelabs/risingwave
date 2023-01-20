@@ -55,8 +55,7 @@ impl LoadBalancerService {
 
         let mut file_content = String::new();
         file_content.push_str(
-            r#"
-# This file was created based on the config in risedev.yaml
+            r#"# This file was created based on the config in risedev.yaml
 
 daemon off;
 error_log stderr;
