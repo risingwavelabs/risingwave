@@ -78,7 +78,7 @@ impl KafkaConfig {
         let use_txn = values
             .get("use_transaction")
             .map(|v| v == "true")
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         let topic = values.get("kafka.topic").expect("kafka.topic must be set");
 
@@ -459,12 +459,15 @@ pub struct KafkaTransactionConductor {
 
 impl KafkaTransactionConductor {
     async fn new(config: KafkaConfig) -> Result<Self> {
-        let inner: ThreadedProducer<DefaultProducerContext> = ClientConfig::new()
-            .set("bootstrap.servers", &config.brokers)
-            .set("message.timeout.ms", "5000")
-            .set("transactional.id", &config.identifier) // required by kafka transaction
-            .create()
-            .await?;
+        let inner: ThreadedProducer<DefaultProducerContext> = {
+            let mut c = ClientConfig::new();
+            c.set("bootstrap.servers", &config.brokers)
+                .set("message.timeout.ms", "5000");
+            if config.use_transaction {
+                c.set("transactional.id", &config.identifier); // required by kafka transaction
+            }
+            c.create().await?
+        };
 
         if config.use_transaction {
             inner.init_transactions(config.timeout).await?;
