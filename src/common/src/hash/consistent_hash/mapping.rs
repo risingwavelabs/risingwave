@@ -26,6 +26,7 @@ use super::vnode::{ParallelUnitId, VirtualNode};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
 
+// TODO: find a better place for this.
 pub type ActorId = u32;
 
 /// Trait for items that can be used as keys in [`VnodeMapping`].
@@ -34,7 +35,7 @@ pub trait VnodeMappingItem {
     ///
     /// Currently, there are two types of items: [`ParallelUnitId`] and [`ActorId`]. We don't use
     /// them directly as the generic parameter because they're the same type aliases.
-    type Item: Copy + Eq + Hash + Debug;
+    type Item: Copy + Eq + Ord + Hash + Debug;
 }
 
 pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
@@ -102,12 +103,16 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
             .unwrap_or(0)
     }
 
-    pub fn get(&self, vnode: VirtualNode) -> T::Item {
-        self[vnode]
+    pub fn is_empty(&self) -> bool {
+        self.original_indices.is_empty()
     }
 
-    pub fn iter_unique(&self) -> impl Iterator<Item = T::Item> + '_ {
-        self.data.iter().copied()
+    /// Get the item mapped to the given `vnode` by binary search.
+    ///
+    /// Note: to achieve better mapping performance, one should convert the mapping to the
+    /// [`ExpandedMapping`] first and directly access the item by index.
+    pub fn get(&self, vnode: VirtualNode) -> T::Item {
+        self[vnode]
     }
 
     /// Iterate over all items in this mapping, in the order of vnodes.
@@ -129,6 +134,12 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self.iter()
             .enumerate()
             .map(|(v, item)| (VirtualNode::from_index(v), item))
+    }
+
+    /// Iterate over all unique items in this mapping. The order is deterministic.
+    pub fn iter_unique(&self) -> impl Iterator<Item = T::Item> + '_ {
+        // Note: we can't ensure there's no duplicated items in the `data` after some scaling.
+        self.data.iter().copied().sorted().dedup()
     }
 
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents
@@ -247,6 +258,7 @@ impl ActorMapping {
 
     /// Create an actor mapping from the protobuf representation.
     pub fn from_protobuf(proto: &ActorMappingProto) -> Self {
+        assert_eq!(proto.original_indices.len(), proto.data.len());
         Self {
             original_indices: proto.original_indices.clone(),
             data: proto.data.clone(),
@@ -276,6 +288,7 @@ impl ParallelUnitMapping {
 
     /// Create a parallel unit mapping from the protobuf representation.
     pub fn from_protobuf(proto: &ParallelUnitMappingProto) -> Self {
+        assert_eq!(proto.original_indices.len(), proto.data.len());
         Self {
             original_indices: proto.original_indices.clone(),
             data: proto.data.clone(),
