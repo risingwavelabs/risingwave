@@ -944,20 +944,6 @@ async fn get_channel(
     do_request().await
 }
 
-// TODO: remove notes
-// internal mutability
-// https://doc.rust-lang.org/book/ch15-05-interior-mutability.html
-// see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
-// atomic may also work
-// arc mutex
-
-// TODO: remove notes
-// - I need internal mutability, because I need to change the clients inside the GrpcMetaClient
-// - Mutex implements internal mutability, but we can also implement that from scratch?
-// - If we use mutex we cannot move futures around, since MutexGuard does not implement Send
-// - If we do not use a mutex, we get "cannot borrow data in a `&` reference as mutable"
-// - Async Mutex? https://tokio.rs/tokio/tutorial/shared-state
-
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
