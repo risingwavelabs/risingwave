@@ -15,7 +15,33 @@ if [ -f "${PREFIX_BIN}/nginx" ]; then
     exit 0
 fi
 echo "Load balancer Nginx not found, downloading"
-# TODO: Download bin depending on system
+
+# Handle everything not mac here
+if ! command -v brew &> /dev/null
+then
+    echo "brew could not be found. Installing Nginx from source"
+    tmpdir=$(mktemp -d)
+    bin_dir=$(pwd)/.risingwave/bin
+
+    # Download nginx source
+    pushd $tmpdir
+    wget http://nginx.org/download/nginx-1.23.3.tar.gz  
+    tar -zxvf nginx-1.23.3.tar.gz  
+
+    # configure and install
+    cd nginx-1.23.3
+    ./configure --without-http_rewrite_module --prefix=${bin_dir} --sbin-path=${bin_dir}
+
+    make
+    make install
+
+    # get bin and cleanup
+    popd 
+    rm -rf ${tmpdir}
+    exit 0
+fi
+
+# Handle installation on mac here
 brew install nginx
 cp /opt/homebrew/bin/nginx "${PREFIX_BIN}/nginx"
 chmod +x "${PREFIX_BIN}/nginx"
@@ -24,3 +50,7 @@ brew uninstall nginx
 "${PREFIX_BIN}/nginx" -v
 exit 0
 '''
+
+
+
+
