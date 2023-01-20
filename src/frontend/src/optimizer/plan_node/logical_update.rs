@@ -48,7 +48,7 @@ impl LogicalUpdate {
     /// Create a [`LogicalUpdate`] node. Used internally by optimizer.
     pub fn new(
         input: PlanRef,
-        table_source_name: String,
+        table_name: String,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
         returning: bool,
@@ -63,7 +63,7 @@ impl LogicalUpdate {
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
-            table_name: table_source_name,
+            table_name,
             table_id,
             input,
             exprs,
@@ -74,18 +74,12 @@ impl LogicalUpdate {
     /// Create a [`LogicalUpdate`] node. Used by planner.
     pub fn create(
         input: PlanRef,
-        table_source_name: String,
+        table_name: String,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
         returning: bool,
     ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_source_name,
-            table_id,
-            exprs,
-            returning,
-        ))
+        Ok(Self::new(input, table_name, table_id, exprs, returning))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
