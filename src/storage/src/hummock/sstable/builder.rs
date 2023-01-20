@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
+use std::ops::BitXor;
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -212,7 +213,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // 2. extract_key key is not duplicate
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
-                self.user_key_hashes.push(xxh32::xxh32(extract_key, 0));
+                self.user_key_hashes
+                    .push(xxh32::xxh32(extract_key, 0).bitxor(table_id));
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
             }

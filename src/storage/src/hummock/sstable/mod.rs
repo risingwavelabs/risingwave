@@ -18,6 +18,7 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
+use std::ops::BitXor;
 
 pub use block::*;
 mod block_iterator;
@@ -147,7 +148,7 @@ impl Sstable {
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
-            self.surely_not_have_hashvalue(hash)
+            self.surely_not_have_hashvalue(hash, 0)
         } else {
             false
         }
@@ -159,9 +160,10 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
+    pub fn surely_not_have_hashvalue(&self, hash: u32, table_id: u32) -> bool {
+        let hash_with_table_id = hash.bitxor(table_id);
         let bloom = Bloom::new(&self.meta.bloom_filter);
-        bloom.surely_not_have_hash(hash)
+        bloom.surely_not_have_hash(hash_with_table_id)
     }
 
     pub fn block_count(&self) -> usize {

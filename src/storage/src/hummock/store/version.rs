@@ -596,7 +596,13 @@ impl HummockVersionReader {
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
             if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
+                let table_id = read_options.table_id.table_id();
+                if !hit_sstable_bloom_filter(
+                    table_holder.value(),
+                    *prefix_hash,
+                    &mut local_stats,
+                    table_id,
+                ) {
                     continue;
                 }
             }
@@ -716,7 +722,12 @@ impl HummockVersionReader {
                     assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
+                        if !hit_sstable_bloom_filter(
+                            sstable.value(),
+                            *key_hash,
+                            &mut local_stats,
+                            read_options.table_id.table_id(),
+                        ) {
                             continue;
                         }
                     }
@@ -742,8 +753,12 @@ impl HummockVersionReader {
                     assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
+                        if !hit_sstable_bloom_filter(
+                            sstable.value(),
+                            *dist_hash,
+                            &mut local_stats,
+                            read_options.table_id.table_id(),
+                        ) {
                             continue;
                         }
                     }
