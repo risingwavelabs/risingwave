@@ -265,3 +265,83 @@ impl ParallelUnitMapping {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Test;
+    impl VnodeMappingItem for Test {
+        type Item = u32;
+    }
+
+    struct Test2;
+    impl VnodeMappingItem for Test2 {
+        type Item = u32;
+    }
+
+    type TestMapping = VnodeMapping<Test>;
+    type Test2Mapping = VnodeMapping<Test2>;
+
+    const ITEM_COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT];
+
+    #[test]
+    fn test_uniform() {
+        for &item_count in ITEM_COUNTS {
+            let items = (0..VirtualNode::COUNT as u32).take(item_count);
+            let vnode_mapping = TestMapping::new_uniform(items);
+
+            assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
+
+            let mut check: HashMap<u32, Vec<_>> = HashMap::new();
+            for (vnode, item) in vnode_mapping.iter_with_vnode() {
+                check.entry(item).or_default().push(vnode);
+            }
+
+            assert_eq!(check.len(), item_count);
+
+            let (min, max) = check
+                .values()
+                .map(|indexes| indexes.len())
+                .minmax()
+                .into_option()
+                .unwrap();
+
+            assert!(max - min <= 1);
+        }
+    }
+
+    #[test]
+    fn test_from_to_bitmaps() {
+        for &item_count in ITEM_COUNTS {
+            let items = (0..VirtualNode::COUNT as u32).take(item_count);
+            let vnode_mapping = TestMapping::new_uniform(items);
+
+            let bitmaps = vnode_mapping.to_bitmaps();
+            let new_vnode_mapping = TestMapping::from_bitmaps(&bitmaps);
+
+            assert_eq!(vnode_mapping, new_vnode_mapping);
+        }
+    }
+
+    #[test]
+    fn test_transform() {
+        for &item_count in ITEM_COUNTS {
+            let items = (0..VirtualNode::COUNT as u32).take(item_count);
+            let vnode_mapping = TestMapping::new_uniform(items.clone());
+
+            let transform_map: HashMap<_, _> = items.map(|item| (item, item + 1)).collect();
+            let vnode_mapping_2: Test2Mapping = vnode_mapping.transform(&transform_map);
+
+            for (item, item_2) in vnode_mapping.iter().zip_eq(vnode_mapping_2.iter()) {
+                assert_eq!(item + 1, item_2);
+            }
+
+            let transform_back_map: HashMap<_, _> =
+                transform_map.into_iter().map(|(k, v)| (v, k)).collect();
+            let new_vnode_mapping: TestMapping = vnode_mapping_2.transform(&transform_back_map);
+
+            assert_eq!(vnode_mapping, new_vnode_mapping);
+        }
+    }
+}
