@@ -20,18 +20,12 @@ mod tests {
     use maplit::btreeset;
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::hash::{ParallelUnitId, VirtualNode};
-    use risingwave_common::util::compress::decompress_data;
     use risingwave_pb::common::ParallelUnit;
-    use risingwave_pb::stream_plan::{ActorMapping, StreamActor};
+    use risingwave_pb::stream_plan::StreamActor;
 
     use crate::model::ActorId;
-    use crate::stream::mapping::{
-        actor_mapping_from_bitmaps, build_vnode_mapping, vnode_mapping_to_bitmaps,
-    };
     use crate::stream::scale::rebalance_actor_vnode;
-    use crate::stream::{
-        actor_mapping_to_parallel_unit_mapping, parallel_unit_mapping_to_actor_mapping,
-    };
+    use crate::stream::{ActorMapping2, ParallelUnitMapping2};
 
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT];
@@ -49,7 +43,8 @@ mod tests {
     fn build_fake_actors(info: &[(ActorId, ParallelUnitId)]) -> Vec<StreamActor> {
         let parallel_units = generate_parallel_units(info);
 
-        let vnode_bitmaps = vnode_mapping_to_bitmaps(build_vnode_mapping(&parallel_units));
+        let vnode_bitmaps =
+            ParallelUnitMapping2::new_uniform_parallel_units(&parallel_units).to_bitmaps();
 
         info.iter()
             .map(|(actor_id, parallel_unit_id)| StreamActor {
@@ -111,13 +106,13 @@ mod tests {
                 .map(|i| (i as ActorId, i as ParallelUnitId))
                 .collect_vec();
             let parallel_units = generate_parallel_units(&info);
-            let vnode_mapping = build_vnode_mapping(&parallel_units);
+            let vnode_mapping = ParallelUnitMapping2::new_uniform_parallel_units(&parallel_units);
 
             assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
 
             let mut check: HashMap<u32, Vec<_>> = HashMap::new();
-            for (idx, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
-                check.entry(parallel_unit_id).or_default().push(idx);
+            for (vnode, parallel_unit_id) in vnode_mapping.iter_with_vnode() {
+                check.entry(parallel_unit_id).or_default().push(vnode);
             }
 
             assert_eq!(check.len(), parallel_units_num);
@@ -140,7 +135,8 @@ mod tests {
                 .map(|i| (i as ActorId, i as ParallelUnitId))
                 .collect_vec();
             let parallel_units = generate_parallel_units(&info);
-            let bitmaps = vnode_mapping_to_bitmaps(build_vnode_mapping(&parallel_units));
+            let bitmaps =
+                ParallelUnitMapping2::new_uniform_parallel_units(&parallel_units).to_bitmaps();
             check_bitmaps(&bitmaps);
         }
     }
@@ -153,29 +149,22 @@ mod tests {
             let actor_to_parallel_unit_map = (0..parallel_unit_num)
                 .map(|i| (i as ActorId, i as ParallelUnitId))
                 .collect();
-            let parallel_unit_mapping = actor_mapping_to_parallel_unit_mapping(
-                1,
-                &actor_to_parallel_unit_map,
-                &actor_mapping,
-            );
+            let parallel_unit_mapping = actor_mapping.to_parallel_unit(&actor_to_parallel_unit_map);
 
             let parallel_unit_to_actor_map: HashMap<_, _> = actor_to_parallel_unit_map
                 .into_iter()
                 .map(|(k, v)| (v, k))
                 .collect();
 
-            let new_actor_mapping = parallel_unit_mapping_to_actor_mapping(
-                &parallel_unit_mapping,
-                &parallel_unit_to_actor_map,
-            );
+            let new_actor_mapping = parallel_unit_mapping.to_actor(&parallel_unit_to_actor_map);
 
-            assert!(actor_mapping.eq(&new_actor_mapping))
+            assert_eq!(actor_mapping, new_actor_mapping)
         }
     }
 
     fn generate_actor_mapping(
         parallel_unit_num: usize,
-    ) -> (ActorMapping, HashMap<ActorId, Bitmap>) {
+    ) -> (ActorMapping2, HashMap<ActorId, Bitmap>) {
         let parallel_units = (0..parallel_unit_num)
             .map(|i| (i as ActorId, i as ParallelUnitId))
             .collect_vec();
@@ -191,7 +180,7 @@ mod tests {
             })
             .collect();
 
-        (actor_mapping_from_bitmaps(&bitmaps), bitmaps)
+        (ActorMapping2::from_bitmaps(&bitmaps), bitmaps)
     }
 
     #[test]
@@ -200,17 +189,10 @@ mod tests {
             let (actor_mapping, bitmaps) = generate_actor_mapping(parallel_unit_num);
             check_bitmaps(&bitmaps);
 
-            let ActorMapping {
-                original_indices,
-                data,
-            } = actor_mapping;
-
-            let raw = decompress_data(&original_indices, &data);
-
             for (actor_id, bitmap) in &bitmaps {
-                for (idx, value) in raw.iter().enumerate() {
-                    if bitmap.is_set(idx) {
-                        assert_eq!(*value, *actor_id);
+                for (vnode, value) in actor_mapping.iter_with_vnode() {
+                    if bitmap.is_set(vnode.to_index()) {
+                        assert_eq!(value, *actor_id);
                     }
                 }
             }

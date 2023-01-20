@@ -19,15 +19,13 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::hash::VnodeMapping;
-use risingwave_common::util::compress::compress_data;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
+use super::ParallelUnitMapping2;
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
-use crate::stream::{build_vnode_mapping, vnode_mapping_to_bitmaps};
 use crate::MetaResult;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
@@ -218,7 +216,7 @@ impl Scheduler {
 
             // Build vnode mapping according to the parallel units.
             let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
-            let vnode_bitmaps = vnode_mapping_to_bitmaps(vnode_mapping);
+            let vnode_bitmaps = vnode_mapping.to_bitmaps();
 
             // Record actor locations and set vnodes into the actors.
             for (actor, parallel_unit) in fragment.actors.iter_mut().zip_eq(parallel_units) {
@@ -248,15 +246,9 @@ impl Scheduler {
         &self,
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
-    ) -> MetaResult<VnodeMapping> {
-        let vnode_mapping = build_vnode_mapping(parallel_units);
-        let (original_indices, data) = compress_data(&vnode_mapping);
-        fragment.vnode_mapping = Some(ParallelUnitMapping {
-            original_indices,
-            data,
-            fragment_id: fragment.fragment_id,
-        });
-
+    ) -> MetaResult<ParallelUnitMapping2> {
+        let vnode_mapping = ParallelUnitMapping2::new_uniform_parallel_units(parallel_units);
+        fragment.vnode_mapping = Some(vnode_mapping.to_protobuf(fragment.fragment_id));
         Ok(vnode_mapping)
     }
 }

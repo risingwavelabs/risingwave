@@ -39,7 +39,7 @@ use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, TableFragments, ValTransaction,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::{actor_mapping_to_parallel_unit_mapping, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -694,11 +694,9 @@ where
                     }
 
                     if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                        *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
-                            fragment_id,
-                            &actor_to_parallel_unit,
-                            actor_mapping,
-                        )
+                        *vnode_mapping = actor_mapping
+                            .to_parallel_unit(&actor_to_parallel_unit)
+                            .to_protobuf(fragment_id);
                     }
 
                     if !fragment.state_table_ids.is_empty() {
@@ -728,7 +726,10 @@ where
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
                                 if let DispatcherType::Hash = dispatcher.r#type() {
-                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping
+                                        .as_ref()
+                                        .map(|m| m.to_protobuf())
+                                        .clone();
                                 }
 
                                 update_actors(

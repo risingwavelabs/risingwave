@@ -25,8 +25,8 @@ use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, UpdateMutation,
+    AddMutation, Dispatcher, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -38,7 +38,9 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
+use crate::stream::{
+    build_actor_connector_splits, ActorMapping2, SourceManagerRef, SplitAssignment,
+};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -56,7 +58,7 @@ pub struct Reschedule {
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
     /// New hash mapping of the upstream dispatcher to be updated.
-    pub upstream_dispatcher_mapping: Option<ActorMapping>,
+    pub upstream_dispatcher_mapping: Option<ActorMapping2>,
 
     /// The downstream fragments of this fragment.
     pub downstream_fragment_ids: Vec<FragmentId>,
@@ -290,6 +292,8 @@ where
                                         dispatcher_id,
                                         hash_mapping: reschedule
                                             .upstream_dispatcher_mapping
+                                            .as_ref()
+                                            .map(|m| m.to_protobuf())
                                             .clone(),
                                         added_downstream_actor_id: reschedule.added_actors.clone(),
                                         removed_downstream_actor_id: reschedule

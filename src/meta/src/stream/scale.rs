@@ -31,8 +31,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ActorMapping, DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor,
-    StreamNode,
+    DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor, StreamNode,
 };
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -43,8 +42,7 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::mapping::actor_mapping_from_bitmaps;
-use crate::stream::GlobalStreamManager;
+use crate::stream::{ActorMapping2, GlobalStreamManager};
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -993,19 +991,15 @@ where
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
                     } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                        Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![
-                                *parallel_unit_to_actor_after_reschedule
-                                    .first_key_value()
-                                    .unwrap()
-                                    .1,
-                            ],
-                        })
+                        let actor_id = *parallel_unit_to_actor_after_reschedule
+                            .first_key_value()
+                            .unwrap()
+                            .1;
+                        Some(ActorMapping2::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution
-                        Some(actor_mapping_from_bitmaps(
-                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
+                        Some(ActorMapping2::from_bitmaps(
+                            &fragment_actor_bitmap[&fragment_id],
                         ))
                     }
                 }
@@ -1440,7 +1434,7 @@ where
                     fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
                     // If downstream scale in/out
-                    *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
+                    *mapping = ActorMapping2::from_bitmaps(downstream_updated_bitmap).to_protobuf();
                 }
             }
         }

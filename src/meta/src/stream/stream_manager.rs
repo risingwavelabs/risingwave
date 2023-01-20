@@ -19,20 +19,19 @@ use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamNode};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
-use super::ScheduledLocations;
+use super::{ActorMapping2, ParallelUnitMapping2, ScheduledLocations};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
@@ -40,7 +39,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{parallel_unit_mapping_to_actor_mapping, Scheduler, SourceManagerRef};
+use crate::stream::{Scheduler, SourceManagerRef};
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -441,9 +440,15 @@ where
         let actor_to_vnode_mapping = {
             let mut mapping = HashMap::new();
             for fragment in table_fragments.fragments.values() {
+                let vnode_mapping = fragment
+                    .vnode_mapping
+                    .as_ref()
+                    .map(|m| ParallelUnitMapping2::from_protobuf(m))
+                    .clone();
+
                 for actor in &fragment.actors {
                     mapping
-                        .try_insert(actor.actor_id, fragment.vnode_mapping.clone())
+                        .try_insert(actor.actor_id, vnode_mapping.clone())
                         .unwrap();
                 }
             }
@@ -468,10 +473,8 @@ where
                     // workaround, we specially compute the consistent hash mapping here.
                     // This arm could be removed after the optimizer has been fully implemented.
                     &[single_downstream_actor] => {
-                        dispatcher.hash_mapping = Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![single_downstream_actor],
-                        });
+                        dispatcher.hash_mapping =
+                            Some(ActorMapping2::new_single(single_downstream_actor).to_protobuf());
                     }
 
                     // For normal cases, we can simply transform the mapping from downstream actors
@@ -499,10 +502,11 @@ where
                             .collect::<HashMap<_, _>>();
 
                         // Transform the mapping of parallel unit to the mapping of actor.
-                        dispatcher.hash_mapping = Some(parallel_unit_mapping_to_actor_mapping(
-                            downstream_vnode_mapping,
-                            &parallel_unit_actor_map,
-                        ));
+                        dispatcher.hash_mapping = Some(
+                            downstream_vnode_mapping
+                                .to_actor(&parallel_unit_actor_map)
+                                .to_protobuf(),
+                        );
                     }
                 }
             }

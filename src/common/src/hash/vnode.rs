@@ -49,7 +49,7 @@ impl VirtualNode {
 }
 
 /// An iterator over all virtual nodes.
-pub type AllVirtualNodeIter = impl Iterator<Item = VirtualNode>;
+pub type AllVirtualNodeIter = std::iter::Map<std::ops::Range<usize>, fn(usize) -> VirtualNode>;
 
 impl VirtualNode {
     /// The maximum value of the virtual node.
