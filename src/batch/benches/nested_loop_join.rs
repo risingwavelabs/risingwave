@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
+use risingwave_common::enable_jemalloc_on_linux;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
@@ -25,11 +26,9 @@ use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
 use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
-use tikv_jemallocator::Jemalloc;
 use utils::{bench_join, create_input};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,

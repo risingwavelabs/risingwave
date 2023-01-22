@@ -1,5 +1,5 @@
 statement ok
-create materialized source s1 (v1 int, v2 float) with (
+create table s1 (v1 int, v2 float) with (
     connector = 'datagen',
     fields.v1.kind = 'sequence',
     fields.v1.start = '1',
@@ -33,10 +33,10 @@ select v1, v2 from s1 where v1 is not null limit 15;
 9 19
 
 statement ok
-drop source s1;
+drop table s1;
 
 statement ok
-create materialized source s1 (v1 int)  with (
+create table s1 (v1 int)  with (
     connector = 'datagen',
     fields.v1.kind = 'sequence',
     fields.v1.start = '1',
@@ -66,10 +66,10 @@ select v1 from s1 order by v1 limit 10;
 10
 
 statement ok
-drop source s1;
+drop table s1;
 
 statement ok
-create materialized source s1 (v1 struct<v2 int>)  with (
+create table s1 (v1 struct<v2 int>)  with (
     connector = 'datagen',
     fields.v1.v2.kind = 'sequence',
     fields.v1.v2.start = '1',
@@ -99,10 +99,10 @@ select (v1).v2 from s1 order by v1 limit 10;
 10
 
 statement ok
-drop source s1;
+drop table s1;
 
 statement ok
-create materialized source s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
+create table s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
     connector = 'datagen',
     fields.v1.v2.kind = 'random',
     fields.v1.v2.min = '1',
@@ -136,10 +136,10 @@ select l.len, count(*) > 2*10 from (select length(s1.c1) as len from s1) as l gr
 100 t
 
 statement ok
-drop source s1;
+drop table s1;
 
 statement ok
-create materialized source s1 (v1 struct<v2 int> [], c1 varchar []) with (
+create table s1 (v1 struct<v2 int> [], c1 varchar []) with (
     connector = 'datagen',
     fields.v1.length = '2',
     fields.v1._.v2.kind = 'random',
@@ -166,4 +166,4 @@ select count(*) > 10 from s1;
 t
 
 statement ok
-drop source s1;
+drop table s1;

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -201,6 +201,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_ROLES, vec![0], read_roles_info },
     { PG_CATALOG, PG_SHDESCRIPTION, vec![0], read_shdescription_info },
     { PG_CATALOG, PG_TABLESPACE, vec![0], read_tablespace_info },
+    { PG_CATALOG, PG_STAT_ACTIVITY, vec![0], read_stat_activity },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },

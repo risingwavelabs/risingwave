@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,26 +20,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", proto_dir);
 
     let proto_files = vec![
+        "backup_service",
+        "batch_plan",
         "catalog",
         "common",
+        "compactor",
         "compute",
+        "connector_service",
         "data",
         "ddl_service",
         "expr",
-        "plan_common",
+        "health",
+        "hummock",
+        "leader",
         "meta",
-        "batch_plan",
-        "task_service",
-        "connector_service",
+        "monitor_service",
+        "plan_common",
+        "source",
         "stream_plan",
         "stream_service",
-        "compactor",
-        "hummock",
+        "task_service",
         "user",
-        "source",
-        "monitor_service",
-        "health",
-        "backup_service",
     ];
     let protos: Vec<String> = proto_files
         .iter()

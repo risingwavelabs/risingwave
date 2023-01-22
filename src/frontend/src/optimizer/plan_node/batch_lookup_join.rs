@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
+use super::generic::GenericPlanRef;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -193,7 +194,12 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
+                    .map(|x| {
+                        self.base
+                            .ctx()
+                            .expr_with_session_timezone(x)
+                            .to_expr_proto()
+                    }),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -228,7 +234,12 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
+                    .map(|x| {
+                        self.base
+                            .ctx()
+                            .expr_with_session_timezone(x)
+                            .to_expr_proto()
+                    }),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()

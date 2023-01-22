@@ -1,5 +1,5 @@
 statement ok
-CREATE MATERIALIZED SOURCE customer (
+CREATE TABLE customer (
     c_id INTEGER,
     c_d_id INTEGER,
     c_w_id INTEGER,
@@ -31,7 +31,7 @@ CREATE MATERIALIZED SOURCE customer (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE district (
+CREATE TABLE district (
     d_id INTEGER,
     d_w_id INTEGER,
     d_name VARCHAR,
@@ -52,7 +52,7 @@ CREATE MATERIALIZED SOURCE district (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE history (
+CREATE TABLE history (
     h_c_id INTEGER,
     h_c_d_id INTEGER,
     h_c_w_id INTEGER,
@@ -70,7 +70,7 @@ CREATE MATERIALIZED SOURCE history (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE item (
+CREATE TABLE item (
     i_id INTEGER,
     i_im_id INTEGER,
     i_name VARCHAR,
@@ -85,7 +85,7 @@ CREATE MATERIALIZED SOURCE item (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE neworder (
+CREATE TABLE neworder (
     no_o_id INTEGER,
     no_d_id INTEGER,
     no_w_id INTEGER,
@@ -98,7 +98,7 @@ CREATE MATERIALIZED SOURCE neworder (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE orderline (
+CREATE TABLE orderline (
     ol_o_id INTEGER,
     ol_d_id INTEGER,
     ol_w_id INTEGER,
@@ -118,7 +118,7 @@ CREATE MATERIALIZED SOURCE orderline (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE orders (
+CREATE TABLE orders (
     o_id INTEGER,
     o_d_id INTEGER,
     o_w_id INTEGER,
@@ -136,7 +136,7 @@ CREATE MATERIALIZED SOURCE orders (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE stock (
+CREATE TABLE stock (
     s_i_id INTEGER,
     s_w_id INTEGER,
     s_quantity INTEGER,
@@ -164,7 +164,7 @@ CREATE MATERIALIZED SOURCE stock (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE warehouse (
+CREATE TABLE warehouse (
     w_id INTEGER,
     w_name VARCHAR,
     w_street_1 VARCHAR,
@@ -183,7 +183,7 @@ CREATE MATERIALIZED SOURCE warehouse (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE supplier (
+CREATE TABLE supplier (
     SU_SUPPKEY SMALLINT,
     SU_NAME VARCHAR,
     SU_ADDRESS VARCHAR,
@@ -200,7 +200,7 @@ CREATE MATERIALIZED SOURCE supplier (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE region (
+CREATE TABLE region (
     R_REGIONKEY INTEGER,
     R_NAME VARCHAR,
     R_COMMENT VARCHAR,
@@ -213,7 +213,7 @@ CREATE MATERIALIZED SOURCE region (
 ) ROW FORMAT DEBEZIUM_JSON;
 
 statement ok
-CREATE MATERIALIZED SOURCE nation (
+CREATE TABLE nation (
     N_NATIONKEY INTEGER,
     N_NAME VARCHAR,
     N_REGIONKEY INTEGER,

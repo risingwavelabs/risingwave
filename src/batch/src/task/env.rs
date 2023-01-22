@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::BatchTaskMetrics;
@@ -89,7 +89,7 @@ impl BatchEnvironment {
     pub fn for_test() -> Self {
         use risingwave_rpc_client::ComputeClientPool;
         use risingwave_source::dml_manager::DmlManager;
-        use risingwave_storage::monitor::StateStoreMetrics;
+        use risingwave_storage::monitor::MonitoredStorageMetrics;
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new(BatchConfig::default())),
@@ -97,7 +97,7 @@ impl BatchEnvironment {
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
-                StateStoreMetrics::unused(),
+                MonitoredStorageMetrics::unused(),
             )),
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),

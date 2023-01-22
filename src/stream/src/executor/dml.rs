@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,8 +16,8 @@ use futures::future::Either;
 use futures::stream::select;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_connector::source::StreamChunkWithState;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
@@ -73,15 +73,15 @@ impl DmlExecutor {
         let mut upstream = self.upstream.execute();
 
         // Construct the reader of batch data (DML from users). We must create a variable to hold
-        // this `Arc<TableSource>` here, or it will be dropped due to the `Weak` reference in
+        // this `Arc<TableDmlHandle>` here, or it will be dropped due to the `Weak` reference in
         // `DmlManager`.
         let batch_reader = self
             .dml_manager
             .register_reader(self.table_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
         let batch_reader = batch_reader
-            .stream_reader_v2()
-            .into_stream_v2()
+            .stream_reader()
+            .into_stream()
             .map(Either::Right);
 
         // The first barrier message should be propagated.
@@ -104,8 +104,9 @@ impl DmlExecutor {
                 }
                 Either::Right(chunk) => {
                     // Batch data.
-                    let chunk: StreamChunk = chunk.map_err(StreamExecutorError::connector_error)?;
-                    yield Message::Chunk(chunk);
+                    let chunk: StreamChunkWithState =
+                        chunk.map_err(StreamExecutorError::connector_error)?;
+                    yield Message::Chunk(chunk.chunk);
                 }
             }
         }
@@ -134,6 +135,7 @@ impl Executor for DmlExecutor {
 mod tests {
     use std::sync::Arc;
 
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;

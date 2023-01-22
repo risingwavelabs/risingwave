@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,18 +23,18 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use tokio::sync::oneshot;
 
-use crate::{TableSource, TableSourceRef};
+use crate::{TableDmlHandle, TableDmlHandleRef};
 
 pub type DmlManagerRef = Arc<DmlManager>;
 
 /// [`DmlManager`] manages the communication between batch data manipulation and streaming
 /// processing.
-/// NOTE: `TableSource` is used here as an out-of-the-box solution. It should be renamed
-/// as `BatchDml` later. We should further optimize its implementation (e.g. directly expose a
-/// channel instead of offering a `write_chunk` interface).
+/// NOTE: `TableDmlHandle` is used here as an out-of-the-box solution. We should further optimize
+/// its implementation (e.g. directly expose a channel instead of offering a `write_chunk`
+/// interface).
 #[derive(Default, Debug)]
 pub struct DmlManager {
-    table_readers: RwLock<HashMap<TableId, Weak<TableSource>>>,
+    table_readers: RwLock<HashMap<TableId, Weak<TableDmlHandle>>>,
 }
 
 impl DmlManager {
@@ -48,7 +48,7 @@ impl DmlManager {
         &self,
         table_id: TableId,
         column_descs: &[ColumnDesc],
-    ) -> Result<TableSourceRef> {
+    ) -> Result<TableDmlHandleRef> {
         let mut table_readers = self.table_readers.write();
 
         // Clear invalid table readers.
@@ -63,7 +63,7 @@ impl DmlManager {
                 .into()
             }),
             Entry::Vacant(v) => {
-                let reader = Arc::new(TableSource::new(column_descs.to_vec()));
+                let reader = Arc::new(TableDmlHandle::new(column_descs.to_vec()));
                 v.insert(Arc::downgrade(&reader));
                 Ok(reader)
             }

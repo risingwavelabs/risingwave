@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -1228,7 +1228,7 @@ pub mod tests {
             levels,
             l0: Some(l0),
         };
-        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
 
         // pick_l0_to_sub_level
@@ -1326,7 +1326,7 @@ pub mod tests {
             levels,
             l0: Some(l0),
         };
-        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
 
         // pick l3 -> l4

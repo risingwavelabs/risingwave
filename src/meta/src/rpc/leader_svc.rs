@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,7 @@ use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::leader::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
@@ -31,9 +32,7 @@ use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use tokio::sync::oneshot::Sender as OneSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
-use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
@@ -47,22 +46,17 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::server::AddressInfo;
+use crate::rpc::server::{AddressInfo, ElectionClientRef};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
+use crate::rpc::service::leader_service::LeaderServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
-
-// simple wrapper containing election sync related objects
-pub struct ElectionCoordination {
-    pub election_handle: JoinHandle<()>,
-    pub election_shutdown: OneSender<()>,
-}
 
 /// Starts all services needed for the meta leader node
 /// Only call this function once, since initializing the services multiple times will result in an
@@ -76,12 +70,12 @@ pub async fn start_leader_srv<S: MetaStore>(
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
     current_leader: MetaLeaderInfo,
-    election_coordination: ElectionCoordination,
+    election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
@@ -281,10 +275,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .await,
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-    sub_tasks.push((
-        election_coordination.election_handle,
-        election_coordination.election_shutdown,
-    ));
+
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
@@ -309,8 +300,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         }
     };
 
-    // FIXME: Add service discovery for leader
-    // https://github.com/risingwavelabs/risingwave/issues/6755
+    let leader_srv = LeaderServiceImpl::new(election_client, current_leader);
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
@@ -319,6 +309,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .add_service(StreamManagerServiceServer::new(stream_srv))
         .add_service(HummockManagerServiceServer::new(hummock_srv))
         .add_service(NotificationServiceServer::new(notification_srv))
+        .add_service(LeaderServiceServer::new(leader_srv))
         .add_service(DdlServiceServer::new(ddl_srv))
         .add_service(UserServiceServer::new(user_srv))
         .add_service(ScaleServiceServer::new(scale_srv))

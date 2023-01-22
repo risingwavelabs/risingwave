@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,7 +35,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -286,7 +286,8 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
-    metrics: Arc<StateStoreMetrics>,
+    metrics: Arc<HummockStateStoreMetrics>,
+    table_id: TableId,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -299,7 +300,7 @@ impl StateStoreIter for HummockStorageIterator {
             let iter = &mut self.inner;
 
             if iter.is_valid() {
-                let kv = (iter.key().clone(), Bytes::copy_from_slice(iter.value()));
+                let kv = (iter.key().clone(), iter.value().clone());
                 iter.next().await?;
                 Ok(Some(kv))
             } else {
@@ -312,9 +313,14 @@ impl StateStoreIter for HummockStorageIterator {
 impl HummockStorageIterator {
     pub fn new(
         inner: UserIterator<HummockStorageIteratorPayload>,
-        metrics: Arc<StateStoreMetrics>,
+        metrics: Arc<HummockStateStoreMetrics>,
+        table_id: TableId,
     ) -> Self {
-        Self { inner, metrics }
+        Self {
+            inner,
+            metrics,
+            table_id,
+        }
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -326,6 +332,6 @@ impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics);
+        stats.report(&self.metrics, self.table_id.to_string().as_str());
     }
 }

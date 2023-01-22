@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,9 +30,14 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
-use super::filesystem::{
-    FsSplit, FsSplitReader, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR,
-};
+use super::datagen::DatagenMeta;
+use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
+use super::google_pubsub::GooglePubsubMeta;
+use super::kafka::KafkaMeta;
+use super::monitor::SourceMetrics;
+use super::nexmark::source::message::NexmarkMeta;
+use super::SourceInfo;
+use crate::parser::ParserConfig;
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
     POSTGRES_CDC_CONNECTOR,
@@ -60,6 +65,7 @@ use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::pulsar::{
     PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
 };
+use crate::source::BoxSourceWithStateStream;
 use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
@@ -90,8 +96,25 @@ pub trait SplitReader: Sized {
     fn into_stream(self) -> BoxSourceStream;
 }
 
+/// [`SplitReaderV2`] is a new abstraction of the external connector read interface which is
+/// responsible for parsing, it is used to read messages from the outside and transform them into a
+/// stream of parsed [`StreamChunk`]
+#[async_trait]
+pub trait SplitReaderV2: Sized {
+    type Properties;
+
+    async fn new(
+        properties: Self::Properties,
+        state: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
+    ) -> Result<Self>;
+
+    fn into_stream(self) -> BoxSourceWithStateStream;
+}
+
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
-pub type BoxFsSourceStream = BoxStream<'static, Result<Vec<FsSourceMessage>>>;
 
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
@@ -169,6 +192,13 @@ impl SplitImpl {
             _ => Err(()),
         }
     }
+
+    pub fn as_fs(&self) -> Option<&FsSplit> {
+        match self {
+            Self::S3(split) => Some(split),
+            _ => None,
+        }
+    }
 }
 
 pub enum SplitReaderImpl {
@@ -183,26 +213,35 @@ pub enum SplitReaderImpl {
     GooglePubsub(Box<PubsubSplitReader>),
 }
 
-pub enum FsSplitReaderImpl {
+pub enum SplitReaderV2Impl {
     S3(Box<S3FileReader>),
+    Dummy(Box<DummySplitReader>),
 }
 
-impl FsSplitReaderImpl {
-    pub fn into_stream(self) -> BoxFsSourceStream {
+impl SplitReaderV2Impl {
+    pub fn into_stream(self) -> BoxSourceWithStateStream {
         match self {
-            Self::S3(s3_reader) => s3_reader.into_stream(),
+            Self::S3(s3_reader) => SplitReaderV2::into_stream(*s3_reader),
+            Self::Dummy(dummy_reader) => SplitReaderV2::into_stream(*dummy_reader),
         }
     }
 
     pub async fn create(
         config: ConnectorProperties,
-        state: Vec<FsSplit>,
+        state: ConnectorState,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        if state.is_none() {
+            return Ok(Self::Dummy(Box::new(DummySplitReader {})));
+        }
+        let state = state.unwrap();
         let reader = match config {
-            ConnectorProperties::S3(s3_props) => {
-                Self::S3(Box::new(S3FileReader::new(*s3_props, state).await?))
-            }
+            ConnectorProperties::S3(s3_props) => Self::S3(Box::new(
+                S3FileReader::new(*s3_props, state, parser_config, metrics, source_info).await?,
+            )),
             _ => todo!(),
         };
         Ok(reader)
@@ -282,22 +321,34 @@ pub type SplitId = Arc<str>;
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
     pub split_id: SplitId,
+
+    pub meta: SourceMeta,
 }
 
-/// The message pumped from the external source service.
-/// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct FsSourceMessage {
-    pub payload: Option<Bytes>,
-    pub offset: usize,
-    pub split_size: usize,
-    pub split_id: SplitId,
+#[derive(Debug, Clone)]
+pub enum SourceMeta {
+    Kafka(KafkaMeta),
+    Nexmark(NexmarkMeta),
+    GooglePubsub(GooglePubsubMeta),
+    Datagen(DatagenMeta),
+    // For the source that doesn't have meta data.
+    Empty,
 }
+
+/// Implement Eq manually to ignore the `meta` field.
+impl PartialEq for SourceMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset
+            && self.split_id == other.split_id
+            && self.payload == other.payload
+    }
+}
+impl Eq for SourceMessage {}
 
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {

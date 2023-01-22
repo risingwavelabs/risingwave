@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,7 +41,7 @@ use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
 use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::CompactorMetrics;
 use risingwave_storage::storage_value::StorageValue;
 
 use crate::test_utils::prepare_first_valid_version;
@@ -75,7 +75,7 @@ pub async fn prepare_local_version_manager(
         opt.clone(),
         sstable_store,
         hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
+        Arc::new(CompactorMetrics::unused()),
         sstable_id_manager,
         filter_key_extractor_manager,
     ));

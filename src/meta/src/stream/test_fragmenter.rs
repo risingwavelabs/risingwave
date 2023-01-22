@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,14 +29,14 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
-    StreamNode, StreamSource,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamEnvironment,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::CreateStreamingJobContext;
+use crate::stream::{CreateStreamingJobContext, StreamFragmentGraph};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -161,6 +161,10 @@ fn make_empty_table(id: u32) -> ProstTable {
     }
 }
 
+fn make_materialize_table(id: u32) -> ProstTable {
+    make_internal_table(id, true)
+}
+
 /// [`make_stream_fragments`] build all stream fragments for SQL as follow:
 /// ```sql
 /// create table t (v1 int, v2 int);
@@ -184,7 +188,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::Source(SourceNode {
             source_inner: Some(StreamSource {
                 source_id: 1,
-                state_table: Some(make_source_internal_table(1)),
+                state_table: Some(make_source_internal_table(0)),
                 columns,
                 ..Default::default()
             }),
@@ -321,6 +325,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
+            watermark_input_key: vec![],
+            watermark_output_key: vec![],
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
@@ -336,7 +342,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
-            table: Some(make_internal_table(4, true)),
+            table: Some(make_materialize_table(888)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
             handle_pk_conflict: false,
         })),
@@ -383,32 +389,40 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
     ]
 }
 
-fn make_stream_graph() -> StreamFragmentGraph {
+fn make_stream_graph() -> StreamFragmentGraphProto {
     let fragments = make_stream_fragments();
-    StreamFragmentGraph {
+    StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
+        env: Some(StreamEnvironment::default()),
         dependent_table_ids: vec![],
-        table_ids_cnt: 4,
+        table_ids_cnt: 3,
+        parallelism: None,
     }
 }
 
-// TODO: enable this test with madsim
 #[tokio::test]
-async fn test_fragmenter() -> MetaResult<()> {
+async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let mut ctx = CreateStreamingJobContext::default();
-    let graph = make_stream_graph();
+    let job = StreamingJob::Table(None, make_materialize_table(888));
 
-    let actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), graph, parallel_degree, &mut ctx).await?;
+    let graph = make_stream_graph();
+    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+
+    let mut ctx = CreateStreamingJobContext {
+        internal_tables: fragment_graph.internal_tables(),
+        ..Default::default()
+    };
+
+    let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
 
     let graph = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
 
-    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let table_fragments =
+        TableFragments::new(TableId::default(), graph, StreamEnvironment::default());
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
@@ -416,7 +430,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(actors.len(), 9);
     assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
-    assert_eq!(2, internal_table_ids.len());
+    assert_eq!(internal_table_ids.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
         .fragments

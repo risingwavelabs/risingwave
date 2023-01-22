@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,6 +30,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(assert_matches)]
+#![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
@@ -67,6 +68,9 @@ pub struct MetaNodeOpts {
 
     #[clap(long)]
     host: Option<String>,
+
+    #[clap(long)]
+    endpoint: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -130,6 +134,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
+        let endpoint = opts.endpoint.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
@@ -157,13 +162,14 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
+            endpoint,
             addr: meta_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, _shutdown_send) = rpc_serve(
+        let (join_handle, leader_lost_handle, _shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -172,7 +178,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_recovery: !config.meta.disable_recovery,
                 barrier_interval,
                 in_flight_barrier_nums,
-                minimal_scheduling: config.streaming.minimal_scheduling,
                 max_idle_ms,
                 checkpoint_frequency,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
@@ -192,6 +197,14 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         )
         .await
         .unwrap();
-        join_handle.await.unwrap();
+
+        if let Some(leader_lost_handle) = leader_lost_handle {
+            tokio::select! {
+                _ = join_handle => {},
+                _ = leader_lost_handle => {},
+            }
+        } else {
+            join_handle.await.unwrap();
+        }
     })
 }

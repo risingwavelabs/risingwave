@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId};
+use super::{ColumnId, RelationCatalog, SourceId};
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
@@ -31,7 +32,7 @@ pub struct SourceCatalog {
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
-    pub owner: u32,
+    pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
@@ -69,5 +70,11 @@ impl From<&ProstSource> for SourceCatalog {
             row_id_index,
             properties: with_options.into_inner(),
         }
+    }
+}
+
+impl RelationCatalog for SourceCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

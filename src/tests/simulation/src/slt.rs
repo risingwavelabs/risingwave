@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,6 +33,16 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
+const KILL_IGNORE_FILES: &[&str] = &[
+    // TPCH queries are too slow for recovery.
+    "tpch_snapshot.slt",
+    "tpch_upstream.slt",
+    // We already have visibility_all cases.
+    "visibility_checkpoint.slt",
+    // This depends on session config.
+    "session_timezone.slt",
+];
+
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
     let host = cluster.rand_frontend_ip();
@@ -44,11 +54,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        if kill && (path.ends_with("tpch_snapshot.slt") || path.ends_with("tpch_upstream.slt")) {
-            // Simply ignore the tpch test cases when enable kill nodes.
+        if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
             continue;
         }
-
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
@@ -83,8 +91,11 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         match tester.run_async(record.clone()).await {
                             Ok(_) => break,
                             // cluster could be still under recovering if killed before, retry if
-                            // meets `Get source table id not exists`.
-                            Err(e) if !e.to_string().contains("not exists") || i >= 5 => {
+                            // meets `no reader for dml in table with id {}`.
+                            Err(e)
+                                if !e.to_string().contains("no reader for dml in table")
+                                    || i >= 5 =>
+                            {
                                 panic!("failed to run test after retry {i} times: {e}")
                             }
                             Err(e) => {
@@ -167,12 +178,12 @@ pub async fn run_parallel_slt_task(
 fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let content = std::fs::read_to_string(path).expect("failed to read file");
     let simple_avsc_full_path =
-        std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+        std::fs::canonicalize("src/connector/src/test_data/simple-schema.avsc")
             .expect("failed to get schema path");
     let complex_avsc_full_path =
-        std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
+        std::fs::canonicalize("src/connector/src/test_data/complex-schema.avsc")
             .expect("failed to get schema path");
-    let proto_full_path = std::fs::canonicalize("src/source/src/test_data/complex-schema")
+    let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
         .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,6 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -107,7 +106,7 @@ impl EncodedJoinRow {
 
 impl EstimateSize for EncodedJoinRow {
     fn estimated_heap_size(&self) -> usize {
-        self.compacted_row.row.estimated_heap_size()
+        self.compacted_row.row.len()
     }
 }
 
@@ -159,6 +158,8 @@ pub struct JoinHashMapMetrics {
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
+    /// How many times have we miss the cache when insert row
+    insert_cache_miss_count: usize,
 }
 
 impl JoinHashMapMetrics {
@@ -169,6 +170,7 @@ impl JoinHashMapMetrics {
             side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
+            insert_cache_miss_count: 0,
         }
     }
 
@@ -181,8 +183,13 @@ impl JoinHashMapMetrics {
             .join_total_lookup_count
             .with_label_values(&[&self.actor_id, self.side])
             .inc_by(self.total_lookup_count as u64);
+        self.metrics
+            .join_insert_cache_miss_count
+            .with_label_values(&[&self.actor_id, self.side])
+            .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
+        self.insert_cache_miss_count = 0;
     }
 }
 
@@ -212,6 +219,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     degree_state: TableInner<S>,
     /// If degree table is need
     need_degree_table: bool,
+    /// Pk is part of the join key.
+    pk_contained_in_jk: bool,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -240,6 +249,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_pk_indices: Vec<usize>,
         null_matched: FixedBitSet,
         need_degree_table: bool,
+        pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
         side: &'static str,
@@ -283,6 +293,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             state,
             degree_state,
             need_degree_table,
+            pk_contained_in_jk,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
@@ -309,6 +320,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
             self.inner.clear();
         }
+    }
+
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        // TODO: remove data in cache.
+        self.state.table.update_watermark(watermark.clone());
+        self.degree_state.table.update_watermark(watermark);
     }
 
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
@@ -371,7 +388,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row: Cow<'_, OwnedRow> = row?;
+                let row: OwnedRow = row?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
@@ -391,31 +408,51 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) {
+    #[allow(clippy::unused_async)]
+    pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+        let pk = (&value.row)
+            .project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer);
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk = (&value.row)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
+            // Update cache
             entry.insert(pk, value.encode());
+        } else if self.pk_contained_in_jk {
+            // Refill cache when the join key exist in neither cache or storage.
+            self.metrics.insert_cache_miss_count += 1;
+            let mut state = JoinEntryState::default();
+            state.insert(pk, value.encode());
+            self.update_state(key, state.into());
         }
-        // If no cache maintained, only update the flush buffer.
+
+        // Update the flush buffer.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.insert(row);
         self.degree_state.table.insert(degree);
+        Ok(())
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: impl Row) {
+    #[allow(clippy::unused_async)]
+    pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
+        let join_row = JoinRow::new(&value, 0);
+        let pk = (&value)
+            .project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer);
         if let Some(entry) = self.inner.get_mut(key) {
-            let join_row = JoinRow::new(&value, 0);
-            let pk = (&value)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
+            // Update cache
             entry.insert(pk, join_row.encode());
+        } else if self.pk_contained_in_jk {
+            // Refill cache when the join key exist in neither cache or storage.
+            self.metrics.insert_cache_miss_count += 1;
+            let mut state = JoinEntryState::default();
+            state.insert(pk, join_row.encode());
+            self.update_state(key, state.into());
         }
-        // If no cache maintained, only update the state table.
+
+        // Update the flush buffer.
         self.state.table.insert(value);
+        Ok(())
     }
 
     /// Delete a join row

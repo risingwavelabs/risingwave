@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -55,6 +55,9 @@ pub struct LogicalAgg {
     core: generic::Agg<PlanRef>,
 }
 
+/// We insert a `count(*)` agg at the beginning of stream agg calls.
+const STREAM_ROW_COUNT_COLUMN: usize = 0;
+
 impl LogicalAgg {
     /// Infer agg result table for streaming agg.
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
@@ -78,7 +81,10 @@ impl LogicalAgg {
                 .iter()
                 .enumerate()
                 .map(|(partial_output_idx, agg_call)| {
-                    agg_call.partial_to_total_agg_call(partial_output_idx)
+                    agg_call.partial_to_total_agg_call(
+                        partial_output_idx,
+                        partial_output_idx == STREAM_ROW_COUNT_COLUMN,
+                    )
                 })
                 .collect(),
             vec![],
@@ -131,7 +137,10 @@ impl LogicalAgg {
                     .iter()
                     .enumerate()
                     .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                        agg_call.partial_to_total_agg_call(
+                            n_local_group_key + partial_output_idx,
+                            partial_output_idx == STREAM_ROW_COUNT_COLUMN,
+                        )
                     })
                     .collect(),
                 self.group_key().to_vec(),
@@ -147,8 +156,10 @@ impl LogicalAgg {
                         .iter()
                         .enumerate()
                         .map(|(partial_output_idx, agg_call)| {
-                            agg_call
-                                .partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                            agg_call.partial_to_total_agg_call(
+                                n_local_group_key + partial_output_idx,
+                                partial_output_idx == STREAM_ROW_COUNT_COLUMN,
+                            )
                         })
                         .collect(),
                     self.group_key().to_vec(),
@@ -937,7 +948,7 @@ impl ToStream for LogicalAgg {
         // LogicalAgg.
         // Please note that the index of group key need not be changed.
 
-        let mut output_indices = (0..self.schema().len()).into_iter().collect_vec();
+        let mut output_indices = (0..self.schema().len()).collect_vec();
         output_indices
             .iter_mut()
             .skip(self.group_key().len())

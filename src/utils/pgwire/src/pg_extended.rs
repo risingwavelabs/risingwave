@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -172,6 +172,9 @@ where
         }
 
         if result.is_empty() {
+            // Run the callback before sending the response.
+            result.run_callback().await?;
+
             msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if result.is_query() {
             // fetch row data
@@ -206,6 +209,9 @@ where
                 query_end = true;
             }
             if query_end {
+                // Run the callback before sending the `CommandComplete` message.
+                result.run_callback().await?;
+
                 msg_stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
                         stmt_type: result.get_stmt_type(),
@@ -216,6 +222,9 @@ where
                 msg_stream.write_no_flush(&BeMessage::PortalSuspended)?;
             }
         } else {
+            // Run the callback before sending the `CommandComplete` message.
+            result.run_callback().await?;
+
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: result.get_stmt_type(),
                 rows_cnt: result

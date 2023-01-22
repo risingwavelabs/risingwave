@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -108,7 +108,7 @@ macro_rules! impl_split_reader {
         impl SplitReaderImpl {
             pub fn into_stream(self) -> BoxSourceStream {
                 match self {
-                    $( Self::$variant_name(inner) => inner.into_stream(), )*
+                    $( Self::$variant_name(inner) => $crate::source::SplitReader::into_stream(*inner), )*
                 }
             }
 
@@ -122,7 +122,7 @@ macro_rules! impl_split_reader {
                 }
 
                 let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, state, columns).await?)), )*
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new(<$split_reader_name as $crate::source::SplitReader>::new(*props, state, columns).await?)), )*
                     _ => todo!()
                 };
 

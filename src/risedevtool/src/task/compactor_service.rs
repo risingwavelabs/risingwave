@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::{
@@ -45,7 +45,19 @@ impl CompactorService {
     }
 
     /// Apply command args according to config
-    pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
+    pub fn apply_command_args(
+        cmd: &mut Command,
+        config: &CompactorConfig,
+        hummock_in_memory_strategy: HummockInMemoryStrategy,
+    ) -> Result<()> {
+        if matches!(
+            hummock_in_memory_strategy,
+            HummockInMemoryStrategy::Isolated
+        ) {
+            return Err(anyhow!(
+                "compactor cannot use in-memory hummock if remote object store is not provided"
+            ));
+        }
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -72,7 +84,7 @@ impl CompactorService {
             &config.id,
             provide_minio,
             provide_aws_s3,
-            HummockInMemoryStrategy::Shared,
+            hummock_in_memory_strategy,
             cmd,
         )?;
 
@@ -110,7 +122,7 @@ impl Task for CompactorService {
 
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-        Self::apply_command_args(&mut cmd, &self.config)?;
+        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Disallowed)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

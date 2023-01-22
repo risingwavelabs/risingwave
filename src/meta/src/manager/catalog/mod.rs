@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -53,6 +53,7 @@ pub type SinkId = u32;
 pub type RelationId = u32;
 pub type IndexId = u32;
 pub type ViewId = u32;
+pub type FunctionId = u32;
 
 pub type UserId = u32;
 
@@ -447,6 +448,59 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("view", view_id))
         }
+    }
+
+    pub async fn create_function(&self, function: &Function) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(function.database_id)?;
+        database_core.ensure_schema_id(function.schema_id)?;
+
+        #[cfg(not(test))]
+        user_core.ensure_user_id(function.owner)?;
+
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        functions.insert(function.id, function.clone());
+        commit_meta!(self, functions)?;
+
+        user_core.increase_ref(function.owner);
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let function = functions
+            .remove(function_id)
+            .ok_or_else(|| anyhow!("function not found"))?;
+
+        let objects = &[Object::FunctionId(function_id)];
+        let users_need_update = Self::update_user_privileges(&mut users, objects);
+
+        commit_meta!(self, functions, users)?;
+
+        user_core.decrease_ref(function.owner);
+
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
+                .await;
+        }
+
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Function(function))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn start_create_stream_job_procedure(

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,45 +17,41 @@ pub use plan_node::PlanRef;
 pub mod property;
 
 mod delta_join_solver;
-mod heuristic;
-mod max_one_row_visitor;
-mod plan_correlated_id_finder;
+mod heuristic_optimizer;
 mod plan_rewriter;
+pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
 mod rule;
-mod share_parent_counter;
-mod share_source_rewriter;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
+use plan_rewriter::ShareSourceRewriter;
 use property::Order;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
-use self::heuristic::{ApplyOrder, HeuristicOptimizer};
+use self::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
     StreamSink,
 };
+#[cfg(debug_assertions)]
+use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{
-    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
-    has_logical_over_agg,
+    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update, has_logical_apply,
+    has_logical_over_agg, HasMaxOneRowApply,
 };
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::TableType;
-use crate::handler::create_table::DmlFlag;
-use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
+use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::optimizer::plan_node::{
-    BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
+    BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
 };
-use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
-use crate::optimizer::share_source_rewriter::ShareSourceRewriter;
 use crate::utils::Condition;
 use crate::WithOptions;
 
@@ -197,6 +193,10 @@ impl PlanRoot {
 
     /// Apply logical optimization to the plan.
     pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
+        self.gen_optimized_logical_plan_inner(false)
+    }
+
+    fn gen_optimized_logical_plan_inner(&self, for_stream: bool) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -319,6 +319,16 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // If for stream, push down predicates with now into a left-semi join
+        if for_stream {
+            plan = self.optimize_by_rules(
+                plan,
+                "Push down filter with now into a left semijoin".to_string(),
+                vec![FilterWithNowToJoinRule::create()],
+                ApplyOrder::TopDown,
+            );
+        }
+
         // Push down the calculation of inputs of join's condition.
         plan = self.optimize_by_rules(
             plan,
@@ -417,6 +427,11 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
+        ctx.store_logical(plan.explain_to_string().unwrap());
+
         Ok(plan)
     }
 
@@ -436,6 +451,8 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
         assert!(!has_batch_exchange(plan.clone()), "{}", plan);
 
@@ -451,12 +468,25 @@ impl PlanRoot {
     /// As we always run the root stage locally, we should ensure that singleton table scan is not
     /// the root stage. Returns `true` if we must insert an additional exchange to ensure this.
     fn require_additional_exchange_on_root(plan: PlanRef) -> bool {
-        assert_eq!(plan.distribution(), &Distribution::Single);
+        fn is_candidate_table_scan(plan: &PlanRef) -> bool {
+            if let Some(node) = plan.as_batch_seq_scan()
+            && !node.logical().is_sys_table() {
+                true
+            } else {
+                plan.node_type() == PlanNodeType::BatchSource
+            }
+        }
 
-        !has_batch_exchange(plan.clone()) // there's no (single) exchange
-            && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
-            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
-            || has_batch_source(plan)) // or there's a source
+        fn no_exchange_before_table_scan(plan: PlanRef) -> bool {
+            if plan.node_type() == PlanNodeType::BatchExchange {
+                return false;
+            }
+            is_candidate_table_scan(&plan)
+                || plan.inputs().into_iter().any(no_exchange_before_table_scan)
+        }
+
+        assert_eq!(plan.distribution(), &Distribution::Single);
+        no_exchange_before_table_scan(plan)
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -480,15 +510,11 @@ impl PlanRoot {
             ctx.trace("To Batch Distributed Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-
-        let insert_exchange = match plan.node_type() {
-            // Always insert a exchange singleton for batch dml.
-            PlanNodeType::BatchInsert | PlanNodeType::BatchDelete | PlanNodeType::BatchUpdate => {
-                true
-            }
-            _ => Self::require_additional_exchange_on_root(plan.clone()),
-        };
-        if insert_exchange {
+        if has_batch_insert(plan.clone())
+            || has_batch_delete(plan.clone())
+            || has_batch_update(plan.clone())
+            || Self::require_additional_exchange_on_root(plan.clone())
+        {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
@@ -529,6 +555,10 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    pub fn gen_optimized_logical_plan_for_stream(&self) -> Result<PlanRef> {
+        self.gen_optimized_logical_plan_inner(true)
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
@@ -536,7 +566,7 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
-                let plan = self.gen_optimized_logical_plan()?;
+                let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
@@ -571,40 +601,36 @@ impl PlanRoot {
         //     ApplyOrder::BottomUp,
         // );
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
         Ok(plan)
     }
 
     /// Optimize and generate a create table plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         &mut self,
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
         row_id_index: Option<usize>,
-        dml_flag: DmlFlag,
+        append_only: bool,
+        version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
 
-        match dml_flag {
-            // TODO: remove this branch after we deprecate the materialized source
-            DmlFlag::Disable => { /* do nothing */ }
-
-            // NOTE(stonepage): we can not use this the plan's input append-only property here
-            DmlFlag::All | DmlFlag::AppendOnly => {
-                // Add DML node.
-                stream_plan = StreamDml::new(
-                    stream_plan,
-                    dml_flag == DmlFlag::AppendOnly,
-                    columns.iter().map(|c| c.column_desc.clone()).collect(),
-                )
-                .into();
-                // Add RowIDGen node if needed.
-                if let Some(row_id_index) = row_id_index {
-                    stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
-                }
-            }
-        };
+        // Add DML node.
+        stream_plan = StreamDml::new(
+            stream_plan,
+            append_only,
+            columns.iter().map(|c| c.column_desc.clone()).collect(),
+        )
+        .into();
+        // Add RowIDGen node if needed.
+        if let Some(row_id_index) = row_id_index {
+            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+        }
 
         StreamMaterialize::create_for_table(
             stream_plan,
@@ -613,8 +639,9 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            handle_pk_conflict,
+            !append_only,
             row_id_index,
+            version,
         )
     }
 

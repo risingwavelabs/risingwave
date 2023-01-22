@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,12 @@
 
 use std::assert_matches::assert_matches;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
-use std::ops::RangeBounds;
+use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -59,8 +60,19 @@ pub struct StorageTable<S: StateStore> {
     /// RowSeqScanExecutor.
     schema: Schema,
 
-    /// Used for serializing the primary key.
+    /// Used for serializing and deserializing the primary key.
     pk_serializer: OrderedRowSerde,
+
+    output_indices: Vec<usize>,
+
+    /// the key part of output_indices.
+    key_output_indices: Option<Vec<usize>>,
+
+    /// the value part of output_indices.
+    value_output_indices: Vec<usize>,
+
+    /// used for deserializing key part of output row from pk.
+    output_row_in_key_indices: Vec<usize>,
 
     /// Mapping from column id to column index for deserializing the row.
     mapping: Arc<ColumnMapping>,
@@ -139,9 +151,9 @@ impl<S: StateStore> StorageTable<S> {
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
     ) -> Self {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
-        let value_indices = (0..columns.len()).collect_vec();
         Self::new_inner(
             store,
             table_id,
@@ -154,6 +166,10 @@ impl<S: StateStore> StorageTable<S> {
             value_indices,
             0,
         )
+    }
+
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+        &self.pk_serializer
     }
 }
 
@@ -177,27 +193,58 @@ impl<S: StateStore> StorageTable<S> {
         assert_eq!(order_types.len(), pk_indices.len());
 
         let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
-        assert!(
-            output_indices.iter().all(|i| value_indices.contains(i)),
-            "output_indices must be a subset of value_indices"
-        );
+        let mut value_output_indices = vec![];
+        let mut key_output_indices = vec![];
+
+        for idx in &output_indices {
+            if value_indices.contains(idx) {
+                value_output_indices.push(*idx);
+            } else {
+                key_output_indices.push(*idx);
+            }
+        }
+
+        let output_row_in_value_indices = value_output_indices
+            .iter()
+            .map(|&di| value_indices.iter().position(|&pi| di == pi).unwrap())
+            .collect_vec();
+        let output_row_in_key_indices = key_output_indices
+            .iter()
+            .map(|&di| pk_indices.iter().position(|&pi| di == pi).unwrap())
+            .collect_vec();
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
-        let mapping = ColumnMapping::new(output_indices);
+
+        let mapping = ColumnMapping::new(output_row_in_value_indices);
 
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
-        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
+        let all_data_types = table_columns
+            .iter()
+            .map(|d| d.data_type.clone())
+            .collect_vec();
+        let data_types = value_indices
+            .iter()
+            .map(|idx| all_data_types[*idx].clone())
+            .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-        let row_deserializer = RowDeserializer::new(all_data_types);
+        let row_deserializer = RowDeserializer::new(data_types);
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        let key_output_indices = match key_output_indices.is_empty() {
+            true => None,
+            false => Some(key_output_indices),
+        };
         Self {
             table_id,
             store,
             schema,
             pk_serializer,
+            output_indices,
+            key_output_indices,
+            value_output_indices,
+            output_row_in_key_indices,
             mapping: Arc::new(mapping),
             row_deserializer: Arc::new(row_deserializer),
             pk_indices,
@@ -242,24 +289,59 @@ impl<S: StateStore> StorageTable<S> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        self.store.try_wait_epoch(wait_epoch).await?;
+        self.store.try_wait_epoch(wait_epoch.clone()).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
 
+        let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
+        {
+            Some(serialized_pk.slice(VirtualNode::SIZE..))
+        } else {
+            None
+        };
+
         let read_options = ReadOptions {
-            prefix_hint: None,
-            check_bloom_filter: self.read_prefix_len_hint != 0
-                && self.read_prefix_len_hint == pk.len(),
+            prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
+            // Refer to [`StorageTableIterInner::new`] for necessity of `validate_read_epoch`.
+            self.store.validate_read_epoch(wait_epoch)?;
             let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row = self.mapping.project(full_row).into_owned_row();
-            Ok(Some(result_row))
+            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            match &self.key_output_indices {
+                Some(key_output_indices) => {
+                    let result_row_in_key =
+                        pk.project(&self.output_row_in_key_indices).into_owned_row();
+                    let mut result_row_vec = vec![];
+                    for idx in &self.output_indices {
+                        if self.value_output_indices.contains(idx) {
+                            let item_position_in_value_indices = &self
+                                .value_output_indices
+                                .iter()
+                                .position(|p| idx == p)
+                                .unwrap();
+                            result_row_vec.push(
+                                result_row_in_value
+                                    .index(*item_position_in_value_indices)
+                                    .clone(),
+                            );
+                        } else {
+                            let item_position_in_pk_indices =
+                                key_output_indices.iter().position(|p| idx == p).unwrap();
+                            result_row_vec
+                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        }
+                    }
+                    let result_row = OwnedRow::new(result_row_vec);
+                    Ok(Some(result_row))
+                }
+                None => Ok(Some(result_row_in_value)),
+            }
         } else {
             Ok(None)
         }
@@ -288,7 +370,7 @@ impl<S: StateStore> StorageTable<S> {
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Bytes>,
         encoded_key_range: R,
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
@@ -334,18 +416,25 @@ impl<S: StateStore> StorageTable<S> {
             let wait_epoch = wait_epoch.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
-                let check_bloom_filter = prefix_hint.is_some();
                 let read_options = ReadOptions {
                     prefix_hint,
-                    check_bloom_filter,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
                 };
+                let pk_serializer = match self.output_row_in_key_indices.is_empty() {
+                    true => None,
+                    false => Some(Arc::new(self.pk_serializer.clone())),
+                };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.store,
                     self.mapping.clone(),
+                    pk_serializer,
+                    self.output_indices.clone(),
+                    self.key_output_indices.clone(),
+                    self.value_output_indices.clone(),
+                    self.output_row_in_key_indices.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
                     read_options,
@@ -445,7 +534,6 @@ impl<S: StateStore> StorageTable<S> {
 
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
-            .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
@@ -459,9 +547,8 @@ impl<S: StateStore> StorageTable<S> {
             };
             let prefix_len = self
                 .pk_serializer
-                .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)
-                .unwrap();
-            Some(encoded_prefix[..prefix_len].to_vec())
+                .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)?;
+            Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
                     "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
@@ -526,13 +613,33 @@ struct StorageTableIterInner<S: StateStore> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<RowDeserializer>,
+
+    /// Used for serializing and deserializing the primary key.
+    pk_serializer: Option<Arc<OrderedRowSerde>>,
+
+    output_indices: Vec<usize>,
+
+    /// the key part of output_indices.
+    key_output_indices: Option<Vec<usize>>,
+
+    /// the value part of output_indices.
+    value_output_indices: Vec<usize>,
+
+    /// used for deserializing key part of output row from pk.
+    output_row_in_key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
+    #[allow(clippy::too_many_arguments)]
     async fn new<R, B>(
         store: &S,
         mapping: Arc<ColumnMapping>,
+        pk_serializer: Option<Arc<OrderedRowSerde>>,
+        output_indices: Vec<usize>,
+        key_output_indices: Option<Vec<usize>>,
+        value_output_indices: Vec<usize>,
+        output_row_in_key_indices: Vec<usize>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
         read_options: ReadOptions,
@@ -547,12 +654,22 @@ impl<S: StateStore> StorageTableIterInner<S> {
             raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
             raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
         );
-        store.try_wait_epoch(epoch).await?;
+        store.try_wait_epoch(epoch.clone()).await?;
         let iter = store.iter(range, raw_epoch, read_options).await?;
+        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
+        // `HummockReadEpoch::Current` read incomplete.
+        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
+        // result if any recovery has happened after `try_wait_epoch`.
+        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,
             row_deserializer,
+            pk_serializer,
+            output_indices,
+            key_output_indices,
+            value_output_indices,
+            output_row_in_key_indices,
         };
         Ok(iter)
     }
@@ -571,9 +688,46 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
+
             let full_row = self.row_deserializer.deserialize(value)?;
-            let row = self.mapping.project(full_row).into_owned_row();
-            yield (key.to_vec(), row)
+            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            match &self.key_output_indices {
+                Some(key_output_indices) => {
+                    let result_row_in_key = match self.pk_serializer.clone() {
+                        Some(pk_serializer) => {
+                            let pk = pk_serializer.deserialize(key)?;
+
+                            pk.project(&self.output_row_in_key_indices).into_owned_row()
+                        }
+                        None => OwnedRow::empty(),
+                    };
+
+                    let mut result_row_vec = vec![];
+                    for idx in &self.output_indices {
+                        if self.value_output_indices.contains(idx) {
+                            let item_position_in_value_indices = &self
+                                .value_output_indices
+                                .iter()
+                                .position(|p| idx == p)
+                                .unwrap();
+                            result_row_vec.push(
+                                result_row_in_value
+                                    .index(*item_position_in_value_indices)
+                                    .clone(),
+                            );
+                        } else {
+                            let item_position_in_pk_indices =
+                                key_output_indices.iter().position(|p| idx == p).unwrap();
+                            result_row_vec
+                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        }
+                    }
+                    let row = OwnedRow::new(result_row_vec);
+
+                    yield (key.to_vec(), row)
+                }
+                None => yield (key.to_vec(), result_row_in_value),
+            }
         }
     }
 }

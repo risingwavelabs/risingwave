@@ -31,7 +31,7 @@ create source s4 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create materialized source s5 (v1 int, v2 varchar) with (
+create table s5 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -61,7 +61,7 @@ WITH (
 ROW format JSON;
 
 statement ok
-create materialized source s8 (v1 int, v2 varchar) with (
+create table s8 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -75,6 +75,18 @@ select * from s1
 2 22
 3 333
 4 4444
+
+query IT rowsort
+select * from s1 where _rw_kafka_timestamp > '1977-01-01 00:00:00+00:00'
+----
+1 1
+2 22
+3 333
+4 4444
+
+query IT
+select * from s1 where _rw_kafka_timestamp > '2045-01-01 0:00:00+00:00'
+----
 
 query IT rowsort
 select * from s1 limit 2
@@ -124,7 +136,7 @@ select count(*) from s5
 100
 
 statement ok
-drop source s5
+drop table s5
 
 query I
 select count(*) from s6
@@ -148,4 +160,4 @@ select count(*) from s8
 0
 
 statement ok
-drop source s8
+drop table s8

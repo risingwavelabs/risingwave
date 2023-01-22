@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Interface for generating a query
+//! We construct Query based on the AST representation,
+//! as defined in the [`risingwave_sqlparser`] module.
+use std::sync::Arc;
 use std::vec;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
+use risingwave_common::types::struct_type::StructType;
+use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
     With,
@@ -25,6 +30,11 @@ use risingwave_sqlparser::ast::{
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
+
+static STRUCT_FIELD_NAMES: [&str; 26] = [
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
+    "t", "u", "v", "w", "x", "y", "z",
+];
 
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -43,12 +53,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
         let (with, with_tables) = self.gen_with();
         let (query, schema) = self.gen_set_expr(with_tables);
+        let order_by = self.gen_order_by();
+        let has_order_by = !order_by.is_empty();
         (
             Query {
                 with,
                 body: query,
-                order_by: self.gen_order_by(),
-                limit: self.gen_limit(),
+                order_by,
+                limit: self.gen_limit(has_order_by),
                 offset: None,
                 fetch: None,
             },
@@ -85,8 +97,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a query with correlated context to ensure proper recursion.
     /// Used by Exists `Subquery`
     /// TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
-    fn _gen_correlated_query(&mut self) -> (Query, Vec<Column>) {
-        let old_ctxt = self._clone_local_context();
+    pub(crate) fn gen_correlated_query(&mut self) -> (Query, Vec<Column>) {
+        let old_ctxt = self.clone_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
         t
@@ -151,8 +163,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         order_by
     }
 
-    fn gen_limit(&mut self) -> Option<String> {
-        if !self.is_mview && self.rng.gen_bool(0.2) {
+    fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
+        if (!self.is_mview || has_order_by) && self.rng.gen_bool(0.2) {
             Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
@@ -187,9 +199,36 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unzip()
     }
 
-    fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
-        use DataTypeName as T;
-        let ret_type = *[
+    fn gen_list_data_type(&mut self, depth: usize) -> DataType {
+        DataType::List {
+            datatype: Box::new(self.gen_data_type_inner(depth)),
+        }
+    }
+
+    fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
+        let num_fields = self.rng.gen_range(1..10);
+        let fields = (0..num_fields)
+            .map(|_| self.gen_data_type_inner(depth))
+            .collect();
+        let field_names = STRUCT_FIELD_NAMES[0..num_fields]
+            .iter()
+            .map(|s| (*s).into())
+            .collect();
+        DataType::Struct(Arc::new(StructType {
+            fields,
+            field_names,
+        }))
+    }
+
+    fn gen_data_type(&mut self) -> DataType {
+        // Depth of struct/list nesting
+        let depth = self.rng.gen_range(0..=1);
+        self.gen_data_type_inner(depth)
+    }
+
+    fn gen_data_type_inner(&mut self, depth: usize) -> DataType {
+        use {DataType as S, DataTypeName as T};
+        let mut candidate_ret_types = vec![
             T::Boolean,
             T::Int16,
             T::Int32,
@@ -200,14 +239,42 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Varchar,
             T::Date,
             T::Timestamp,
-            T::Timestamptz,
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
+            // T::Timestamptz,
             T::Time,
             T::Interval,
-        ]
-        .choose(&mut self.rng)
-        .unwrap();
+        ];
+        if depth > 0 {
+            candidate_ret_types.push(T::Struct);
+            candidate_ret_types.push(T::List);
+        }
 
-        let expr = self.gen_expr(ret_type, context);
+        let ret_type = candidate_ret_types.choose(&mut self.rng).unwrap();
+
+        match ret_type {
+            T::Boolean => S::Boolean,
+            T::Int16 => S::Int16,
+            T::Int32 => S::Int32,
+            T::Int64 => S::Int64,
+            T::Decimal => S::Decimal,
+            T::Float32 => S::Float32,
+            T::Float64 => S::Float64,
+            T::Varchar => S::Varchar,
+            T::Date => S::Date,
+            T::Timestamp => S::Timestamp,
+            T::Timestamptz => S::Timestamptz,
+            T::Time => S::Time,
+            T::Interval => S::Interval,
+            T::Struct => self.gen_struct_data_type(depth - 1),
+            T::List => self.gen_list_data_type(depth - 1),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
+        let ret_type = self.gen_data_type();
+
+        let expr = self.gen_expr(&ret_type, context);
 
         let alias = format!("col_{}", i);
         (
@@ -234,12 +301,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             vec![rel]
         };
 
+        // We short-circuit here for mview to avoid streaming nested loop join,
+        // since CROSS JOIN below maybe correlated.
         if self.is_mview {
-            // TODO: These constraints are workarounds required by mview.
-            // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
             return from;
         }
+
+        // Generate CROSS JOIN
         let mut lateral_contexts = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
@@ -255,7 +324,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_where(&mut self) -> Option<Expr> {
         if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
-            Some(self.gen_expr(DataTypeName::Boolean, context))
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }
@@ -280,7 +349,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
             let context = SqlGeneratorContext::new();
-            Some(self.gen_expr(DataTypeName::Boolean, context))
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }

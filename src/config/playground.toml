@@ -1,4 +1,0 @@
-[meta]
-disable_recovery = true
-dangerous_max_idle_secs = 1800
-max_heartbeat_interval_secs = 600

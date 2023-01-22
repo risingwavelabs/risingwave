@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{Sink as ProstSink, Table};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
     TableWithJoins,
@@ -89,7 +90,7 @@ pub fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name)?;
 
-    let definition = query.to_string();
+    let definition = context.normalized_sql().to_owned();
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -136,10 +137,14 @@ pub async fn handle_create_sink(
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
-        let context = OptimizerContext::new_with_handler_args(handle_args);
+        let context = OptimizerContext::from_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
-
-        (sink, build_graph(plan))
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
+        (sink, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();

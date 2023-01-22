@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -301,15 +301,7 @@ impl Binder {
                 .get_table_by_name(db_name, schema_path, table_name)?;
 
         match table.table_type() {
-            TableType::Table => {
-                // TODO(Yuanxin): Remove this after supporting `CREATE TABLE WITH connector`.
-                if table.associated_source_id().is_some() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "cannot change materialized source \"{table_name}\""
-                    ))
-                    .into());
-                }
-            }
+            TableType::Table => {}
             TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{table_name}\""

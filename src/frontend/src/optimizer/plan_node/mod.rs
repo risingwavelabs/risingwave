@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,7 +34,9 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -89,6 +91,12 @@ impl ColPrunable for PlanRef {
             // Check the share cache first. If cache exists, it means this is the second round of
             // column pruning.
             if let Some((new_share, merge_required_cols)) = ctx.get_share_cache(self.id()) {
+                // Piggyback share remove if its has only one parent.
+                if ctx.get_parent_num(logical_share) == 1 {
+                    let input: PlanRef = logical_share.input();
+                    return input.prune_col(required_cols, ctx);
+                }
+
                 // If it is the first visit, recursively call `prune_col` for its input and
                 // replace it.
                 if ctx.visit_share_at_second_round(self.id()) {
@@ -173,6 +181,12 @@ impl PredicatePushdown for PlanRef {
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
+            // Piggyback share remove if its has only one parent.
+            if ctx.get_parent_num(logical_share) == 1 {
+                let input: PlanRef = logical_share.input();
+                return input.predicate_pushdown(predicate, ctx);
+            }
+
             // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
             // here.
             // Basically, we need to wait for all parents of `LogicalShare` to push down the
@@ -321,6 +335,10 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
+    pub fn watermark_columns(&self) -> &FixedBitSet {
+        &self.plan_base().watermark_columns
+    }
+
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
@@ -438,6 +456,7 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_now;
 mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
@@ -510,6 +529,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_now::LogicalNow;
 pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
@@ -588,6 +608,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Union }
             , { Logical, OverAgg }
             , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -667,6 +688,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Union }
             , { Logical, OverAgg }
             , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -395,6 +395,12 @@ impl DataType {
     }
 }
 
+impl From<DataType> for ProstDataType {
+    fn from(data_type: DataType) -> Self {
+        data_type.to_protobuf()
+    }
+}
+
 /// `Scalar` is a trait over all possible owned types in the evaluation
 /// framework.
 ///
@@ -424,11 +430,6 @@ pub trait Scalar:
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
 pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRefType<'_>> {
     scalar.as_ref().map(|x| x.as_scalar_ref())
-}
-
-/// Convert an `Option<ScalarRef>` to corresponding `Option<Scalar>`.
-pub fn option_to_owned_scalar<S: Scalar>(scalar: &Option<S::ScalarRefType<'_>>) -> Option<S> {
-    scalar.map(|x| x.to_owned_scalar())
 }
 
 /// `ScalarRef` is a trait over all possible references in the evaluation
@@ -801,7 +802,6 @@ macro_rules! scalar_impl_hash {
             }
         }
 
-        #[expect(clippy::derive_hash_xor_eq)]
         impl Hash for ScalarImpl {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {
@@ -900,17 +900,20 @@ impl ScalarImpl {
             Ty::Time => Self::NaiveTime({
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
-                NaiveTimeWrapper::with_secs_nano(secs, nano)?
+                NaiveTimeWrapper::with_secs_nano(secs, nano)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
-                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
+                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = i32::deserialize(de)?;
-                NaiveDateWrapper::with_days(days)?
+                NaiveDateWrapper::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),

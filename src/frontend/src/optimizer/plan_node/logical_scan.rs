@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::OrderType;
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
     StreamTableScan, ToBatch, ToStream,
@@ -116,7 +116,7 @@ impl LogicalScan {
         Self::new(
             table_name,
             is_sys_table,
-            (0..table_desc.columns.len()).into_iter().collect(),
+            (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
             ctx,
@@ -570,9 +570,21 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        if !self.indexes().is_empty() {
+        // rewrite the condition before converting to batch as we will handle the expressions in a
+        // special way
+        let new_predicate = Condition {
+            conjunctions: self
+                .predicate()
+                .conjunctions
+                .iter()
+                .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
+                .collect(),
+        };
+        let new = self.clone_with_predicate(new_predicate);
+
+        if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(self.clone().into()) {
+            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
                     return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
@@ -586,12 +598,12 @@ impl ToBatch for LogicalScan {
                 }
             } else {
                 // Try to make use of index if it satisfies the required order
-                if let Some(plan_ref) = self.use_index_scan_if_order_is_satisfied(required_order) {
+                if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
                     return plan_ref;
                 }
             }
         }
-        self.to_batch_inner_with_required(required_order)
+        new.to_batch_inner_with_required(required_order)
     }
 }
 

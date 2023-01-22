@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,7 @@ use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IsOptional, Parser, ParserError};
+use crate::parser::{IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -90,7 +90,7 @@ pub enum SourceSchema {
     Avro(AvroSchema), // Keyword::AVRO
     Maxwell,          // Keyword::MAXWELL
     CanalJson,        // Keyword::CANAL_JSON
-    CSV(CsvInfo),     // Keyword::CSV
+    Csv(CsvInfo),     // Keyword::CSV
 }
 
 impl ParseTo for SourceSchema {
@@ -111,7 +111,7 @@ impl ParseTo for SourceSchema {
             SourceSchema::CanalJson
         } else if p.parse_keywords(&[Keyword::CSV]) {
             impl_parse_to!(csv_info: CsvInfo, p);
-            SourceSchema::CSV(csv_info)
+            SourceSchema::Csv(csv_info)
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
@@ -130,7 +130,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
-            SourceSchema::CSV(csv_ingo) => write!(f, "CSV {}", csv_ingo),
+            SourceSchema::Csv(csv_ingo) => write!(f, "CSV {}", csv_ingo),
         }
     }
 }
@@ -270,9 +270,14 @@ impl ParseTo for CreateSourceStatement {
         let option = with_properties
             .0
             .iter()
-            .find(|&opt| opt.name.real_value() == "connector");
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         // row format for cdc source must be debezium json
         let source_schema = if let Some(opt) = option && opt.value.to_string().contains("-cdc") {
+            if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+            {
+                return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+            }
             SourceSchema::DebeziumJson
         } else {
             impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);

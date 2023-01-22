@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,19 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+#[cfg(target_os = "linux")]
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
+#[cfg(target_os = "linux")]
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
+#[cfg(target_os = "linux")]
 use tracing;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
 /// the memory usage.
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
@@ -38,7 +43,9 @@ pub struct GlobalMemoryManager {
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
 impl GlobalMemoryManager {
+    #[cfg(target_os = "linux")]
     const EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
+    #[cfg(target_os = "linux")]
     const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
     pub fn new(
@@ -62,15 +69,26 @@ impl GlobalMemoryManager {
         self.watermark_epoch.clone()
     }
 
+    #[cfg(target_os = "linux")]
     fn set_watermark_time_ms(&self, time_ms: u64) {
+        use std::sync::atomic::Ordering;
+
         let epoch = Epoch::from_physical_time(time_ms).0;
         let watermark_epoch = self.watermark_epoch.as_ref();
         watermark_epoch.store(epoch, Ordering::Relaxed);
     }
 
+    // FIXME: remove such limitation after #7180
+    /// Jemalloc is not supported on Windows, because of tikv-jemalloc's own reasons.
+    /// See the comments for the macro `enable_jemalloc_on_linux!()`
+    #[cfg(not(target_os = "linux"))]
+    #[expect(clippy::unused_async)]
+    pub async fn run(self: Arc<Self>, _: Arc<BatchManager>, _: Arc<LocalStreamManager>) {}
+
     /// Memory manager will get memory usage from batch and streaming, and do some actions.
     /// 1. if batch exceeds, kill running query.
     /// 2. if streaming exceeds, evict cache by watermark.
+    #[cfg(target_os = "linux")]
     pub async fn run(
         self: Arc<Self>,
         _batch_mgr: Arc<BatchManager>,

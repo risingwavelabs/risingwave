@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::BitAnd;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
@@ -22,6 +23,7 @@ use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
@@ -58,6 +60,17 @@ impl StreamHashJoin {
             logical.right().distribution(),
             &logical,
         );
+        let watermark_columns = {
+            let from_left = logical
+                .l2i_col_mapping()
+                .rewrite_bitset(logical.left().watermark_columns());
+
+            let from_right = logical
+                .r2i_col_mapping()
+                .rewrite_bitset(logical.right().watermark_columns());
+            let watermark_columns = from_left.bitand(&from_right);
+            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+        };
 
         // TODO: derive from input
         let base = PlanBase::new_stream(
@@ -67,6 +80,7 @@ impl StreamHashJoin {
             logical.functional_dependency().clone(),
             dist,
             append_only,
+            watermark_columns,
         );
 
         Self {
@@ -235,7 +249,12 @@ impl StreamNode for StreamHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|x| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(x)
+                        .to_expr_proto()
+                }),
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),

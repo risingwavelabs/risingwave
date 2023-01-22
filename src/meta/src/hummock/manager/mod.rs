@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,12 +23,11 @@ use arc_swap::ArcSwap;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, HummockLevelsExt, HummockVersionExt,
+    add_new_sub_level, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
@@ -66,7 +65,6 @@ use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
 mod compaction_group_manager;
@@ -491,9 +489,9 @@ where
     async fn commit_trx(
         &self,
         meta_store: &S,
-        mut trx: Transaction,
+        trx: Transaction,
         context_id: Option<HummockContextId>,
-        info: MetaLeaderInfo,
+        _info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
@@ -504,11 +502,6 @@ where
             }
         }
 
-        trx.check_equal(
-            META_CF_NAME.to_owned(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            info.encode_to_vec(),
-        );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
@@ -1860,34 +1853,7 @@ where
         read_lock!(self, versioning).await
     }
 
-    /// Reset current version to empty
-    #[named]
-    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        // Reset current version to empty
-        let mut init_version = HummockVersion {
-            id: FIRST_VERSION_ID,
-            levels: Default::default(),
-            max_committed_epoch: INVALID_EPOCH,
-            safe_epoch: INVALID_EPOCH,
-        };
-
-        // Initialize independent levels via corresponding compaction group' config.
-        for compaction_group in self.compaction_groups().await {
-            init_version.levels.insert(
-                compaction_group.group_id(),
-                <Levels as HummockLevelsExt>::build_initial_levels(
-                    &compaction_group.compaction_config(),
-                ),
-            );
-        }
-
-        let old_version = versioning_guard.current_version.clone();
-        versioning_guard.current_version = init_version;
-        Ok(old_version)
-    }
-
-    pub async fn init_metadata_for_replay(
+    pub async fn init_metadata_for_version_replay(
         &self,
         table_catalogs: Vec<Table>,
         compaction_groups: Vec<ProstCompactionGroup>,

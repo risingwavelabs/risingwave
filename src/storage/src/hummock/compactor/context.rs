@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,10 +20,10 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
-use crate::hummock::compactor::{CompactionExecutor, CompactorSstableStoreRef};
+use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableIdManagerRef};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::CompactorMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
@@ -38,7 +38,7 @@ pub struct Context {
     pub sstable_store: SstableStoreRef,
 
     /// Statistics.
-    pub stats: Arc<StateStoreMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
@@ -59,7 +59,7 @@ impl Context {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        stats: Arc<StateStoreMetrics>,
+        compactor_metrics: Arc<CompactorMetrics>,
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Self {
@@ -76,7 +76,7 @@ impl Context {
             options,
             hummock_meta_client,
             sstable_store,
-            stats,
+            compactor_metrics,
             is_share_buffer_compact: true,
             compaction_executor,
             filter_key_extractor_manager,
@@ -89,29 +89,22 @@ impl Context {
 #[derive(Clone)]
 pub struct CompactorContext {
     pub context: Arc<Context>,
-    pub sstable_store: CompactorSstableStoreRef,
     config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
 }
 
 impl CompactorContext {
-    pub fn new(context: Arc<Context>, sstable_store: CompactorSstableStoreRef) -> Self {
+    pub fn new(context: Arc<Context>) -> Self {
         Self::with_config(
             context,
-            sstable_store,
             CompactorRuntimeConfig {
                 max_concurrent_task_number: u64::MAX,
             },
         )
     }
 
-    pub fn with_config(
-        context: Arc<Context>,
-        sstable_store: CompactorSstableStoreRef,
-        config: CompactorRuntimeConfig,
-    ) -> Self {
+    pub fn with_config(context: Arc<Context>, config: CompactorRuntimeConfig) -> Self {
         Self {
             context,
-            sstable_store,
             config: Arc::new(tokio::sync::Mutex::new(config)),
         }
     }

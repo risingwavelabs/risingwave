@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -84,16 +84,6 @@ where
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
             current_version: Some(current_version),
-        }))
-    }
-
-    async fn reset_current_version(
-        &self,
-        _request: Request<ResetCurrentVersionRequest>,
-    ) -> Result<Response<ResetCurrentVersionResponse>, Status> {
-        let old_version = self.hummock_manager.reset_current_version().await?;
-        Ok(Response::new(ResetCurrentVersionResponse {
-            old_version: Some(old_version),
         }))
     }
 
@@ -499,7 +489,7 @@ where
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_replay(tables, compaction_groups)
+            .init_metadata_for_version_replay(tables, compaction_groups)
             .await?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }

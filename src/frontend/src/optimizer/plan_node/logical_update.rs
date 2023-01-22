@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,45 +41,59 @@ pub struct LogicalUpdate {
     table_id: TableId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
+    returning: bool,
 }
 
 impl LogicalUpdate {
     /// Create a [`LogicalUpdate`] node. Used internally by optimizer.
     pub fn new(
         input: PlanRef,
-        table_source_name: String,
+        table_name: String,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
+        returning: bool,
     ) -> Self {
         let ctx = input.ctx();
-        // TODO: support `RETURNING`.
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let fd_set = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
-            table_name: table_source_name,
+            table_name,
             table_id,
             input,
             exprs,
+            returning,
         }
     }
 
     /// Create a [`LogicalUpdate`] node. Used by planner.
     pub fn create(
         input: PlanRef,
-        table_source_name: String,
+        table_name: String,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
+        returning: bool,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, table_id, exprs))
+        Ok(Self::new(input, table_name, table_id, exprs, returning))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ table: {}, exprs: {:?} }}",
-            name, self.table_name, self.exprs
+            "{} {{ table: {}, exprs: {:?}{} }}",
+            name,
+            self.table_name,
+            self.exprs,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
         )
     }
 
@@ -90,6 +104,10 @@ impl LogicalUpdate {
 
     pub fn exprs(&self) -> &[ExprImpl] {
         self.exprs.as_ref()
+    }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
     }
 }
 
@@ -104,6 +122,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
             self.table_name.clone(),
             self.table_id,
             self.exprs.clone(),
+            self.returning,
         )
     }
 }

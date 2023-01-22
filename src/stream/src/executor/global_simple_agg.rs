@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -225,13 +225,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let mut builders = schema.create_array_builders(2);
             let mut new_ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
+            let curr_outputs = agg_group.get_outputs(storages).await?;
             let AggChangesInfo {
                 result_row,
                 prev_outputs,
                 n_appended_ops,
-            } = agg_group
-                .build_changes(&mut builders, &mut new_ops, storages)
-                .await?;
+            } = agg_group.build_changes(curr_outputs, &mut builders, &mut new_ops);
 
             if n_appended_ops == 0 {
                 // Agg result is not changed.

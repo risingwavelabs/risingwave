@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -104,10 +104,12 @@ impl HummockValue<Vec<u8>> {
             _ => Err(HummockError::decode_error("non-empty but format error")),
         }
     }
+}
 
+impl<B: AsRef<[u8]>> HummockValue<B> {
     pub fn as_slice(&self) -> HummockValue<&[u8]> {
         match self {
-            HummockValue::Put(data) => HummockValue::Put(data),
+            HummockValue::Put(data) => HummockValue::Put(data.as_ref()),
             HummockValue::Delete => HummockValue::Delete,
         }
     }
@@ -136,13 +138,6 @@ impl<'a> HummockValue<&'a [u8]> {
 }
 
 impl HummockValue<Bytes> {
-    pub fn as_slice(&self) -> HummockValue<&[u8]> {
-        match self {
-            HummockValue::Put(data) => HummockValue::Put(&data[..]),
-            HummockValue::Delete => HummockValue::Delete,
-        }
-    }
-
     pub fn to_vec(&self) -> HummockValue<Vec<u8>> {
         match self {
             HummockValue::Put(data) => HummockValue::Put(data.to_vec()),

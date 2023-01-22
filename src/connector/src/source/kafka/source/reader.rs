@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,8 +29,10 @@ use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
+    start_offset: Option<i64>,
     stop_offset: Option<i64>,
     bytes_per_second: usize,
+    max_num_messages: usize,
 }
 
 #[async_trait]
@@ -73,6 +75,7 @@ impl SplitReader for KafkaSplitReader {
             .await
             .context("failed to create kafka consumer")?;
 
+        let mut start_offset = None;
         let mut stop_offset = None;
         if let Some(splits) = state {
             assert_eq!(splits.len(), 1);
@@ -81,6 +84,7 @@ impl SplitReader for KafkaSplitReader {
             for split in &splits {
                 if let SplitImpl::Kafka(k) = split {
                     if let Some(offset) = k.start_offset {
+                        start_offset = Some(offset);
                         tpl.add_partition_offset(
                             k.topic.as_str(),
                             k.partition,
@@ -96,17 +100,27 @@ impl SplitReader for KafkaSplitReader {
             consumer.assign(&tpl)?;
         }
 
+        // The two parameters below are only used by developers for performance testing purposes,
+        // so we panic here on purpose if the input is not correctly recognized.
         let bytes_per_second = match properties.bytes_per_second {
             None => usize::MAX,
             Some(number) => number
                 .parse::<usize>()
                 .expect("bytes.per.second expect usize"),
         };
+        let max_num_messages = match properties.max_num_messages {
+            None => usize::MAX,
+            Some(number) => number
+                .parse::<usize>()
+                .expect("max.num.messages expect usize"),
+        };
 
         Ok(Self {
             consumer,
+            start_offset,
             stop_offset,
             bytes_per_second,
+            max_num_messages,
         })
     }
 
@@ -118,13 +132,19 @@ impl SplitReader for KafkaSplitReader {
 impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
-        if let Some(stop_offset) = self.stop_offset && stop_offset == 0{
-            yield Vec::new();
-            return Ok(());
+        if let Some(stop_offset) = self.stop_offset {
+            if let Some(start_offset) = self.start_offset && (start_offset+1) >= stop_offset {
+                yield Vec::new();
+                return Ok(());
+            } else if stop_offset == 0 {
+                yield Vec::new();
+                return Ok(());
+            }
         }
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;
         let mut bytes_current_second = 0;
+        let mut num_messages = 0;
         let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
@@ -135,6 +155,7 @@ impl KafkaSplitReader {
                     None => 0,
                     Some(payload) => payload.len(),
                 };
+                num_messages += 1;
                 res.push(SourceMessage::from(msg));
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
@@ -156,6 +177,10 @@ impl KafkaSplitReader {
                     interval.tick().await;
                     bytes_current_second = 0;
                     res.clear();
+                }
+                if num_messages >= self.max_num_messages {
+                    yield res;
+                    break 'for_outer_loop;
                 }
             }
             let mut cur = Vec::with_capacity(res.capacity());

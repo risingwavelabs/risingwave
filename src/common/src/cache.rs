@@ -1,4 +1,4 @@
-//  Copyright 2022 Singularity Data
+//  Copyright 2023 Singularity Data
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -614,7 +614,6 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shards,
             shard_usages,
             shard_lru_usages,
-
             listener,
         }
     }

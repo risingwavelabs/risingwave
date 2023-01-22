@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -28,7 +29,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
-use crate::handler::privilege::{check_privileges, ObjectCheckItem};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
@@ -68,14 +69,11 @@ pub(crate) fn gen_create_index_plan(
         );
     }
 
-    check_privileges(
-        session,
-        &vec![ObjectCheckItem::new(
-            table.owner,
-            Action::Select,
-            Object::TableId(table.id.table_id),
-        )],
-    )?;
+    session.check_privileges(&[ObjectCheckItem::new(
+        table.owner,
+        Action::Select,
+        Object::TableId(table.id.table_id),
+    )])?;
 
     let table_desc = Rc::new(table.table_desc());
     let table_desc_map = table_desc
@@ -164,6 +162,18 @@ pub(crate) fn gen_create_index_plan(
 
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
+    {
+        use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+        let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
+
+        // Inherit table properties
+        table.properties.get(&retention_second_string_key).map(|v| {
+            index_table_prost
+                .properties
+                .insert(retention_second_string_key, v.clone())
+        });
+    }
+
     index_table_prost.owner = session.user_id();
 
     let index_prost = ProstIndex {
@@ -285,7 +295,6 @@ fn assemble_materialize(
         )),
         Order::new(
             (0..index_columns.len())
-                .into_iter()
                 .map(FieldOrder::ascending)
                 .collect(),
         ),
@@ -353,7 +362,7 @@ pub async fn handle_create_index(
             }
         }
 
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),
@@ -363,8 +372,11 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, index_table, index)
     };
 

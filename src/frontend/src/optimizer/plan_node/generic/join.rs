@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -173,7 +173,9 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             }
 
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::RightSemi | JoinType::RightAnti => {
+                ColIndexMapping::empty(right_len, left_len)
+            }
             JoinType::Unspecified => unreachable!(),
         }
     }
@@ -187,7 +189,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len, right_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
             JoinType::Unspecified => unreachable!(),
         }

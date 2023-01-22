@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -20,13 +20,19 @@ use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::Value;
 
-use crate::source::{SourceMessage, SplitId};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 pub struct DatagenEventGenerator {
     fields_map: HashMap<String, FieldGeneratorImpl>,
     offset: u64,
     split_id: SplitId,
     partition_rows_per_second: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DatagenMeta {
+    // timestamp(milliseconds) of the data generated
+    pub timestamp: Option<i64>,
 }
 
 impl DatagenEventGenerator {
@@ -78,6 +84,14 @@ impl DatagenEventGenerator {
                         payload: Some(Bytes::from(value.to_string())),
                         offset: self.offset.to_string(),
                         split_id: self.split_id.clone(),
+                        meta: SourceMeta::Datagen(DatagenMeta {
+                            timestamp: Some(
+                                SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as i64,
+                            ),
+                        }),
                     });
                     self.offset += 1;
                     rows_generated_this_second += 1;

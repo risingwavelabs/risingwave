@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 Singularity Data
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,7 +40,7 @@ import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { StreamNode } from "../proto/gen/stream_plan"
-import { getFragments, getRelations } from "./api/streaming"
+import { getFragments, getStreamingJobs } from "./api/streaming"
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
@@ -128,7 +128,7 @@ function useFetch<T>(fetchFn: () => Promise<T>) {
 }
 
 export default function Streaming() {
-  const { response: relationList } = useFetch(getRelations)
+  const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
@@ -280,26 +280,22 @@ export default function Streaming() {
             ></Input>
             <datalist id="relationList">
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.name} key={r.id}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.name} key={r.id}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </datalist>
             <Select
               value={router.query.id}
               onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.id} key={r.name}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.id} key={r.name}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </Select>
           </FormControl>
           <FormControl>

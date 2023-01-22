@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,25 +18,38 @@ use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
-use risingwave_sqlparser::ast::{DataType, Expr, Value};
+use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
+use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
-        use DataTypeName as T;
-        match typ {
+    pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
+        use DataType as T;
+        // NOTE(kwannoel): Since this generates many invalid queries,
+        // its probability should be set to low, e.g. 0.02.
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7327
+        if self.rng.gen_bool(0.0) {
+            // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
+            // expressions. For instance agg calls such as `max(NULL)` may be generated,
+            // and coerced to VARCHAR, where we require a `NULL::int` instead.
+            return Expr::Cast {
+                expr: Box::new(sql_null()),
+                data_type: data_type_to_ast_data_type(typ),
+            };
+        }
+        match *typ {
             T::Int64 => Expr::Value(Value::Number(
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
             )),
             T::Int32 => Expr::TypedString {
-                data_type: DataType::Int(None),
+                data_type: AstDataType::Int,
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
             },
             T::Int16 => Expr::TypedString {
-                data_type: DataType::SmallInt(None),
+                data_type: AstDataType::SmallInt,
                 value: self.gen_int(i16::MIN as isize, i16::MAX as isize),
             },
             T::Varchar => Expr::Value(Value::SingleQuotedString(
@@ -46,32 +59,53 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             )),
             T::Decimal => Expr::Value(Value::Number(self.gen_float())),
             T::Float64 => Expr::TypedString {
-                data_type: DataType::Float(None),
+                data_type: AstDataType::Float(None),
                 value: self.gen_float(),
             },
             T::Float32 => Expr::TypedString {
-                data_type: DataType::Real,
+                data_type: AstDataType::Real,
                 value: self.gen_float(),
             },
             T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
             T::Date => Expr::TypedString {
-                data_type: DataType::Date,
+                data_type: AstDataType::Date,
                 value: self.gen_temporal_scalar(typ),
             },
             T::Time => Expr::TypedString {
-                data_type: DataType::Time(false),
+                data_type: AstDataType::Time(false),
                 value: self.gen_temporal_scalar(typ),
             },
-            T::Timestamp | T::Timestamptz => Expr::TypedString {
-                data_type: DataType::Timestamp(false),
+            T::Timestamp => Expr::TypedString {
+                data_type: AstDataType::Timestamp(false),
+                value: self.gen_temporal_scalar(typ),
+            },
+            T::Timestamptz => Expr::TypedString {
+                data_type: AstDataType::Timestamp(true),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Interval => Expr::TypedString {
-                data_type: DataType::Interval,
+                data_type: AstDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             },
+            T::List { datatype: ref ty } => {
+                let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
+                Expr::Array(self.gen_simple_scalar_list(ty, n))
+            }
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934
+            // T::Struct(ref inner) => Expr::Row(
+            //     inner
+            //         .fields
+            //         .iter()
+            //         .map(|typ| self.gen_simple_scalar(typ))
+            //         .collect(),
+            // ),
             _ => sql_null(),
         }
+    }
+
+    /// Generates a list of [`n`] simple scalar values of a specific [`type`].
+    fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Vec<Expr> {
+        (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }
 
     fn gen_int(&mut self, _min: isize, max: isize) -> String {
@@ -104,27 +138,35 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         n.to_string()
     }
 
-    fn gen_temporal_scalar(&mut self, typ: DataTypeName) -> String {
-        use DataTypeName as T;
+    fn gen_temporal_scalar(&mut self, typ: &DataType) -> String {
+        use DataType as T;
 
         let rand_secs = self.rng.gen_range(2..1000000) as u64;
         let minute = 60;
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        // `0` is not generated due to:
-        // Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/4504>
-        // It is tracked under refinements:
-        // <https://github.com/risingwavelabs/risingwave/issues/3896>
-        let choices = [1, minute, hour, day, week, rand_secs];
+        let choices = [0, 1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
 
         let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
+            // T::Timestamptz => {
+            //     let timestamp = tm.format("%Y-%m-%d %H:%M:%S");
+            //     let timezone = self.rng.gen_range(0..=15);
+            //     format!("{}+{}", timestamp, timezone)
+            // }
             T::Time => tm.format("%T").to_string(),
-            T::Interval => secs.to_string(),
+            T::Interval => {
+                if self.rng.gen_bool(0.5) {
+                    (-(*secs as i64)).to_string()
+                } else {
+                    secs.to_string()
+                }
+            }
             _ => unreachable!(),
         }
     }

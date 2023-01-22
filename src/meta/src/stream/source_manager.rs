@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
@@ -120,6 +121,18 @@ impl ConnectorSourceWorker {
     }
 
     fn extract_source_schema(source: &Source) -> TableSchema {
+        let pk_indices = source
+            .pk_column_ids
+            .iter()
+            .map(|&id| {
+                source
+                    .columns
+                    .iter()
+                    .position(|col| col.column_desc.as_ref().unwrap().column_id == id)
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
         TableSchema {
             columns: source
                 .columns
@@ -130,7 +143,7 @@ impl ConnectorSourceWorker {
                     data_type: col.column_type.as_ref().unwrap().type_name,
                 })
                 .collect(),
-            pk_indices: source.pk_column_ids.iter().map(|i| *i as u32).collect(),
+            pk_indices,
         }
     }
 }

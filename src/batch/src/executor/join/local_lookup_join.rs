@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -193,7 +193,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(OwnedRow::empty())?
+                cast_expr.eval_row(&OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);
@@ -553,7 +553,7 @@ mod tests {
             lookup_prefix_len: 1,
             chunk_builder: DataChunkBuilder::new(original_schema.data_types(), CHUNK_SIZE),
             schema: original_schema.clone(),
-            output_indices: (0..original_schema.len()).into_iter().collect(),
+            output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
         }

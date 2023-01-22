@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,7 @@ use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
 /// not globally unique.
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ColumnId(i32);
 
 impl std::fmt::Debug for ColumnId {
@@ -37,8 +37,14 @@ impl ColumnId {
 }
 
 impl ColumnId {
-    pub fn get_id(&self) -> i32 {
+    pub const fn get_id(&self) -> i32 {
         self.0
+    }
+
+    /// Returns the subsequent column id.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self(self.0 + 1)
     }
 }
 

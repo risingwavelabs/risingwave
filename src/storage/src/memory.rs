@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,7 +41,7 @@ pub trait RangeKv: Clone + Send + Sync + 'static {
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
-    ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>>;
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>>;
 
     fn ingest_batch(
         &self,
@@ -58,13 +58,13 @@ impl RangeKv for BTreeMapRangeKv {
         &self,
         range: BytesFullKeyRange,
         limit: Option<usize>,
-    ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+    ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
         let limit = limit.unwrap_or(usize::MAX);
         Ok(self
             .read()
             .range(range)
             .take(limit)
-            .map(|(key, value)| (key.to_ref().to_vec(), value.clone()))
+            .map(|(key, value)| (key.clone(), value.clone()))
             .collect())
     }
 
@@ -123,7 +123,7 @@ pub mod sled {
             &self,
             range: BytesFullKeyRange,
             limit: Option<usize>,
-        ) -> StorageResult<Vec<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+        ) -> StorageResult<Vec<(BytesFullKey, Option<Bytes>)>> {
             let (left, right) = range;
             let full_key_ref_bound = (
                 left.as_ref().map(FullKey::to_ref),
@@ -137,7 +137,7 @@ pub mod sled {
             let mut ret = vec![];
             for result in self.inner.range((left_encoded, right_encoded)).take(limit) {
                 let (key, value) = result?;
-                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).to_vec();
+                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
                 if !full_key_ref_bound.contains(&full_key.to_ref()) {
                     continue;
                 }
@@ -293,7 +293,7 @@ mod batched_iter {
     pub struct Iter<R: RangeKv> {
         inner: R,
         range: BytesFullKeyRange,
-        current: std::vec::IntoIter<(FullKey<Vec<u8>>, Option<Bytes>)>,
+        current: std::vec::IntoIter<(FullKey<Bytes>, Option<Bytes>)>,
     }
 
     impl<R: RangeKv> Iter<R> {
@@ -325,7 +325,7 @@ mod batched_iter {
             if let Some((last_key, _)) = batch.last() {
                 let full_key = FullKey::new(
                     last_key.user_key.table_id,
-                    TableKey(Bytes::from(last_key.user_key.table_key.0.clone())),
+                    TableKey(last_key.user_key.table_key.0.clone()),
                     last_key.epoch,
                 );
                 self.range.0 = Bound::Excluded(full_key);
@@ -337,15 +337,12 @@ mod batched_iter {
 
     impl<R: RangeKv> Iter<R> {
         #[allow(clippy::type_complexity)]
-        pub fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>> {
+        pub fn next(&mut self) -> StorageResult<Option<(BytesFullKey, Option<Bytes>)>> {
             match self.current.next() {
-                Some((key, value)) => Ok(Some((key.to_ref().to_vec(), value))),
+                Some((key, value)) => Ok(Some((key, value))),
                 None => {
                     self.refill()?;
-                    Ok(self
-                        .current
-                        .next()
-                        .map(|(key, value)| (key.to_ref().to_vec(), value)))
+                    Ok(self.current.next())
                 }
             }
         }
@@ -642,6 +639,10 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
     }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        Ok(())
+    }
 }
 
 pub struct RangeKvStateStoreIter<R: RangeKv> {
@@ -649,7 +650,7 @@ pub struct RangeKvStateStoreIter<R: RangeKv> {
 
     epoch: HummockEpoch,
 
-    last_key: Option<UserKey<Vec<u8>>>,
+    last_key: Option<UserKey<Bytes>>,
 
     /// For supporting semantic of `Fuse`
     stopped: bool,

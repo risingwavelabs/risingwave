@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -22,7 +22,7 @@ use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::spawn;
@@ -99,7 +99,6 @@ pub struct HummockEventHandler {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-    seal_epoch: Arc<AtomicU64>,
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
@@ -142,7 +141,6 @@ impl HummockEventHandler {
         pinned_version: PinnedVersion,
         compactor_context: Arc<Context>,
     ) -> Self {
-        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
@@ -163,7 +161,6 @@ impl HummockEventHandler {
             hummock_event_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
-            seal_epoch,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
             read_version_mapping,
@@ -171,10 +168,6 @@ impl HummockEventHandler {
             last_instance_id: 0,
             sstable_id_manager,
         }
-    }
-
-    pub fn sealed_epoch(&self) -> Arc<AtomicU64> {
-        self.seal_epoch.clone()
     }
 
     pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
@@ -463,7 +456,6 @@ impl HummockEventHandler {
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
                             }
-                            self.seal_epoch.store(epoch, Ordering::SeqCst);
                         }
                         #[cfg(any(test, feature = "test"))]
                         HummockEvent::FlushEvent(sender) => {

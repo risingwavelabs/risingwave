@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,20 +15,24 @@
 mod query_mode;
 mod search_path;
 mod transaction_isolation_level;
+mod visibility_mode;
 
 use std::ops::Deref;
 
+use chrono_tz::Tz;
+use derivative::{self, Derivative};
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
+use crate::session_config::visibility_mode::VisibilityMode;
 use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 12] = [
+const CONFIG_KEYS: [&str; 15] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -41,6 +45,9 @@ const CONFIG_KEYS: [&str; 12] = [
     "TRANSACTION ISOLATION LEVEL",
     "QUERY_EPOCH",
     "RW_BATCH_ENABLE_SORT_AGG",
+    "VISIBILITY_MODE",
+    "TIMEZONE",
+    "STREAMING_PARALLELISM",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -57,6 +64,9 @@ const SEARCH_PATH: usize = 8;
 const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 const QUERY_EPOCH: usize = 10;
 const BATCH_ENABLE_SORT_AGG: usize = 11;
+const VISIBILITY_MODE: usize = 12;
+const TIMEZONE: usize = 13;
+const STREAMING_PARALLELISM: usize = 14;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -250,8 +260,11 @@ type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, true>;
 type BatchEnableSortAgg = ConfigBool<BATCH_ENABLE_SORT_AGG, true>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
+type Timezone = ConfigString<TIMEZONE>;
+type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 
-#[derive(Default)]
+#[derive(Derivative)]
+#[derivative(Default)]
 pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
@@ -288,11 +301,22 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     search_path: SearchPath,
 
+    /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
+    visibility_mode: VisibilityMode,
+
     /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
     transaction_isolation_level: IsolationLevel,
 
     /// select as of specific epoch
     query_epoch: QueryEpoch,
+
+    /// Session timezone. Defaults to UTC.
+    #[derivative(Default(value = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
+    timezone: Timezone,
+
+    /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
+    /// streaming parallelism.
+    streaming_parallelism: StreamingParallelism,
 }
 
 impl ConfigMap {
@@ -318,8 +342,20 @@ impl ConfigMap {
             self.max_split_range_gap = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             self.search_path = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
+            self.visibility_mode = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             self.query_epoch = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
+            let raw: Timezone = val.as_slice().try_into()?;
+            // Check if the provided string is a valid timezone.
+            Tz::from_str_insensitive(&raw.0).map_err(|_e| ErrorCode::InvalidConfigValue {
+                config_entry: Timezone::entry_name().to_string(),
+                config_value: raw.0.to_string(),
+            })?;
+            self.timezone = raw;
+        } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
+            self.streaming_parallelism = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -348,10 +384,16 @@ impl ConfigMap {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             Ok(self.search_path.to_string())
+        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
+            Ok(self.visibility_mode.to_string())
         } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
             Ok(self.transaction_isolation_level.to_string())
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             Ok(self.query_epoch.to_string())
+        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
+            Ok(self.timezone.clone())
+        } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
+            Ok(self.streaming_parallelism.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -409,10 +451,25 @@ impl ConfigMap {
                 setting : self.search_path.to_string(),
                 description : String::from("Sets the order in which schemas are searched when an object (table, data type, function, etc.) is referenced by a simple name with no schema specified")
             },
-            VariableInfo {
+            VariableInfo{
+                name : VisibilityMode::entry_name().to_lowercase(),
+                setting : self.visibility_mode.to_string(),
+                description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
+            },
+            VariableInfo{
                 name: QueryEpoch::entry_name().to_lowercase(),
                 setting : self.query_epoch.to_string(),
                 description : String::from("Sets the historical epoch for querying data. If 0, querying latest data.")
+            },
+            VariableInfo{
+                name : Timezone::entry_name().to_lowercase(),
+                setting : self.timezone.to_string(),
+                description : String::from("The session timezone. This will affect how timestamps are cast into timestamps with timezone.")
+            },
+            VariableInfo{
+                name : StreamingParallelism::entry_name().to_lowercase(),
+                setting : self.streaming_parallelism.to_string(),
+                description: String::from("Sets the parallelism for streaming. If 0, use default value.")
             }
         ]
     }
@@ -461,9 +518,24 @@ impl ConfigMap {
         self.search_path.clone()
     }
 
+    pub fn only_checkpoint_visible(&self) -> bool {
+        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
+    }
+
     pub fn get_query_epoch(&self) -> Option<Epoch> {
         if self.query_epoch.0 != 0 {
             return Some((self.query_epoch.0).into());
+        }
+        None
+    }
+
+    pub fn get_timezone(&self) -> &str {
+        &self.timezone
+    }
+
+    pub fn get_streaming_parallelism(&self) -> Option<u64> {
+        if self.streaming_parallelism.0 != 0 {
+            return Some(self.streaming_parallelism.0);
         }
         None
     }

@@ -10,7 +10,7 @@ export interface ExprNode {
   rexNode?: { $case: "inputRef"; inputRef: InputRefExpr } | { $case: "constant"; constant: Datum } | {
     $case: "funcCall";
     funcCall: FunctionCall;
-  };
+  } | { $case: "udf"; udf: UserDefinedFunction };
 }
 
 /**
@@ -40,6 +40,8 @@ export const ExprNode_Type = {
   OR: "OR",
   NOT: "NOT",
   IN: "IN",
+  SOME: "SOME",
+  ALL: "ALL",
   /** BITWISE_AND - bitwise operators */
   BITWISE_AND: "BITWISE_AND",
   BITWISE_OR: "BITWISE_OR",
@@ -62,6 +64,8 @@ export const ExprNode_Type = {
    * e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
    */
   TO_TIMESTAMP1: "TO_TIMESTAMP1",
+  /** CAST_WITH_TIME_ZONE - Performs a cast with additional timezone information. */
+  CAST_WITH_TIME_ZONE: "CAST_WITH_TIME_ZONE",
   /** CAST - other functions */
   CAST: "CAST",
   SUBSTR: "SUBSTR",
@@ -122,13 +126,16 @@ export const ExprNode_Type = {
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
-  /** SEARCH - Search operator and Search ARGument */
-  SEARCH: "SEARCH",
-  SARG: "SARG",
-  /** VNODE - Internal functions */
+  /**
+   * VNODE - Non-pure functions below (> 600)
+   * ------------------------
+   * Internal functions
+   */
   VNODE: "VNODE",
   /** NOW - Non-deterministic functions */
   NOW: "NOW",
+  /** UDF - User defined functions */
+  UDF: "UDF",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -190,6 +197,12 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 24:
     case "IN":
       return ExprNode_Type.IN;
+    case 25:
+    case "SOME":
+      return ExprNode_Type.SOME;
+    case 26:
+    case "ALL":
+      return ExprNode_Type.ALL;
     case 31:
     case "BITWISE_AND":
       return ExprNode_Type.BITWISE_AND;
@@ -226,6 +239,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 107:
     case "TO_TIMESTAMP1":
       return ExprNode_Type.TO_TIMESTAMP1;
+    case 108:
+    case "CAST_WITH_TIME_ZONE":
+      return ExprNode_Type.CAST_WITH_TIME_ZONE;
     case 201:
     case "CAST":
       return ExprNode_Type.CAST;
@@ -370,18 +386,15 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 533:
     case "ARRAY_PREPEND":
       return ExprNode_Type.ARRAY_PREPEND;
-    case 998:
-    case "SEARCH":
-      return ExprNode_Type.SEARCH;
-    case 999:
-    case "SARG":
-      return ExprNode_Type.SARG;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
     case 2022:
     case "NOW":
       return ExprNode_Type.NOW;
+    case 3000:
+    case "UDF":
+      return ExprNode_Type.UDF;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -427,6 +440,10 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "NOT";
     case ExprNode_Type.IN:
       return "IN";
+    case ExprNode_Type.SOME:
+      return "SOME";
+    case ExprNode_Type.ALL:
+      return "ALL";
     case ExprNode_Type.BITWISE_AND:
       return "BITWISE_AND";
     case ExprNode_Type.BITWISE_OR:
@@ -451,6 +468,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "DATE_TRUNC";
     case ExprNode_Type.TO_TIMESTAMP1:
       return "TO_TIMESTAMP1";
+    case ExprNode_Type.CAST_WITH_TIME_ZONE:
+      return "CAST_WITH_TIME_ZONE";
     case ExprNode_Type.CAST:
       return "CAST";
     case ExprNode_Type.SUBSTR:
@@ -547,14 +566,12 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_APPEND";
     case ExprNode_Type.ARRAY_PREPEND:
       return "ARRAY_PREPEND";
-    case ExprNode_Type.SEARCH:
-      return "SEARCH";
-    case ExprNode_Type.SARG:
-      return "SARG";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
       return "NOW";
+    case ExprNode_Type.UDF:
+      return "UDF";
     case ExprNode_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -771,6 +788,14 @@ export interface AggCall_OrderByField {
   nullsFirst: boolean;
 }
 
+export interface UserDefinedFunction {
+  children: ExprNode[];
+  name: string;
+  argTypes: DataType[];
+  language: string;
+  path: string;
+}
+
 function createBaseExprNode(): ExprNode {
   return { exprType: ExprNode_Type.UNSPECIFIED, returnType: undefined, rexNode: undefined };
 }
@@ -786,6 +811,8 @@ export const ExprNode = {
         ? { $case: "constant", constant: Datum.fromJSON(object.constant) }
         : isSet(object.funcCall)
         ? { $case: "funcCall", funcCall: FunctionCall.fromJSON(object.funcCall) }
+        : isSet(object.udf)
+        ? { $case: "udf", udf: UserDefinedFunction.fromJSON(object.udf) }
         : undefined,
     };
   },
@@ -801,6 +828,8 @@ export const ExprNode = {
       (obj.constant = message.rexNode?.constant ? Datum.toJSON(message.rexNode?.constant) : undefined);
     message.rexNode?.$case === "funcCall" &&
       (obj.funcCall = message.rexNode?.funcCall ? FunctionCall.toJSON(message.rexNode?.funcCall) : undefined);
+    message.rexNode?.$case === "udf" &&
+      (obj.udf = message.rexNode?.udf ? UserDefinedFunction.toJSON(message.rexNode?.udf) : undefined);
     return obj;
   },
 
@@ -830,6 +859,9 @@ export const ExprNode = {
       object.rexNode?.funcCall !== null
     ) {
       message.rexNode = { $case: "funcCall", funcCall: FunctionCall.fromPartial(object.rexNode.funcCall) };
+    }
+    if (object.rexNode?.$case === "udf" && object.rexNode?.udf !== undefined && object.rexNode?.udf !== null) {
+      message.rexNode = { $case: "udf", udf: UserDefinedFunction.fromPartial(object.rexNode.udf) };
     }
     return message;
   },
@@ -1091,6 +1123,50 @@ export const AggCall_OrderByField = {
     message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
     message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
     message.nullsFirst = object.nullsFirst ?? false;
+    return message;
+  },
+};
+
+function createBaseUserDefinedFunction(): UserDefinedFunction {
+  return { children: [], name: "", argTypes: [], language: "", path: "" };
+}
+
+export const UserDefinedFunction = {
+  fromJSON(object: any): UserDefinedFunction {
+    return {
+      children: Array.isArray(object?.children) ? object.children.map((e: any) => ExprNode.fromJSON(e)) : [],
+      name: isSet(object.name) ? String(object.name) : "",
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      language: isSet(object.language) ? String(object.language) : "",
+      path: isSet(object.path) ? String(object.path) : "",
+    };
+  },
+
+  toJSON(message: UserDefinedFunction): unknown {
+    const obj: any = {};
+    if (message.children) {
+      obj.children = message.children.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.children = [];
+    }
+    message.name !== undefined && (obj.name = message.name);
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.language !== undefined && (obj.language = message.language);
+    message.path !== undefined && (obj.path = message.path);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<UserDefinedFunction>, I>>(object: I): UserDefinedFunction {
+    const message = createBaseUserDefinedFunction();
+    message.children = object.children?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.language = object.language ?? "";
+    message.path = object.path ?? "";
     return message;
   },
 };

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -36,8 +36,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    ClusterManagerRef, DatabaseId, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, SchemaId,
-    WorkerId,
+    ClusterManagerRef, FragmentManagerRef, FragmentVNodeInfo, MetaSrvEnv, WorkerId,
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
@@ -57,21 +56,13 @@ pub struct CreateStreamingJobContext {
     pub table_mview_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
     pub dependent_table_ids: HashSet<TableId>,
-    /// Table id offset get from meta id generator. Used to calculate global unique table id.
-    pub table_id_offset: u32,
     /// Internal TableID to Table mapping
-    pub internal_table_id_map: HashMap<u32, Table>,
+    pub internal_tables: HashMap<u32, Table>,
     /// The upstream tables of all fragments containing chain nodes.
     /// These fragments need to be colocated with their upstream tables.
     ///
     /// They are scheduled in `resolve_chain_node`.
     pub chain_fragment_upstream_table_map: HashMap<FragmentId, TableId>,
-    /// SchemaId of streaming job
-    pub schema_id: SchemaId,
-    /// DatabaseId of streaming job
-    pub database_id: DatabaseId,
-    /// Name of streaming job, for internal table name generation.
-    pub streaming_job_name: String,
     /// The SQL definition of this streaming job. Used for debugging only.
     pub streaming_definition: String,
 
@@ -80,11 +71,11 @@ pub struct CreateStreamingJobContext {
 
 impl CreateStreamingJobContext {
     pub fn internal_tables(&self) -> Vec<Table> {
-        self.internal_table_id_map.values().cloned().collect()
+        self.internal_tables.values().cloned().collect()
     }
 
     pub fn internal_table_ids(&self) -> Vec<u32> {
-        self.internal_table_id_map.keys().cloned().collect_vec()
+        self.internal_tables.keys().copied().collect()
     }
 }
 
@@ -1065,7 +1056,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments =
+            TableFragments::new(table_id, fragments, StreamEnvironment::default());
         services.create_materialized_view(table_fragments).await?;
 
         for actor in actors {
@@ -1151,7 +1143,8 @@ mod tests {
             },
         );
 
-        let table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments =
+            TableFragments::new(table_id, fragments, StreamEnvironment::default());
         services
             .create_materialized_view(table_fragments)
             .await

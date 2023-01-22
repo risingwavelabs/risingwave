@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,6 +29,7 @@ pub mod pg_operator;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
+pub mod pg_stat_activity;
 pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
@@ -54,6 +55,7 @@ pub use pg_operator::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
+pub use pg_stat_activity::*;
 pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
@@ -437,7 +439,12 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(t.definition.clone().into())),
                             Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(json!(fragments).to_string().into())),
+                            Some(ScalarImpl::Utf8(
+                                fragments.get_env().unwrap().get_timezone().clone().into(),
+                            )),
+                            Some(ScalarImpl::Utf8(
+                                json!(fragments.get_fragments()).to_string().into(),
+                            )),
                         ]));
                     }
                 });
@@ -586,5 +593,9 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_tablespace_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_TABLESPACE_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
     }
 }

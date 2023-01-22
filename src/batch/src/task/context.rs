@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
@@ -58,6 +59,10 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn get_config(&self) -> &BatchConfig;
 
     fn source_metrics(&self) -> Arc<SourceMetrics>;
+
+    fn store_mem_usage(&self, val: usize);
+
+    fn get_mem_usage(&self) -> usize;
 }
 
 /// Batch task context on compute node.
@@ -66,6 +71,12 @@ pub struct ComputeNodeContext {
     env: BatchEnvironment,
     // None: Local mode don't record metrics.
     task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
+
+    // Last mem usage value. Init to be 0. Should be the last value of `cur_mem_val`.
+    last_mem_val: Arc<AtomicUsize>,
+    // How many memory bytes have been used in this task for the latest report value. Will be moved
+    // to `last_mem_val` if new value comes in.
+    cur_mem_val: Arc<AtomicUsize>,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -106,6 +117,22 @@ impl BatchTaskContext for ComputeNodeContext {
     fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.env.source_metrics()
     }
+
+    fn store_mem_usage(&self, val: usize) {
+        // Record the last mem val.
+        // Calculate the difference between old val and new value, and apply the diff to total
+        // memory usage value.
+        let old_value = self.cur_mem_val.load(Ordering::Relaxed);
+        self.last_mem_val.store(old_value, Ordering::Relaxed);
+        let diff = val as i64 - old_value as i64;
+        self.env.task_manager().apply_mem_diff(diff);
+
+        self.cur_mem_val.store(val, Ordering::Relaxed);
+    }
+
+    fn get_mem_usage(&self) -> usize {
+        self.cur_mem_val.load(Ordering::Relaxed)
+    }
 }
 
 impl ComputeNodeContext {
@@ -114,6 +141,8 @@ impl ComputeNodeContext {
         Self {
             env: BatchEnvironment::for_test(),
             task_metrics: None,
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
         }
     }
 
@@ -122,6 +151,8 @@ impl ComputeNodeContext {
         Self {
             env,
             task_metrics: Some(task_metrics),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
         }
     }
 
@@ -129,6 +160,12 @@ impl ComputeNodeContext {
         Self {
             env,
             task_metrics: None,
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
         }
+    }
+
+    pub fn mem_usage(&self) -> usize {
+        self.cur_mem_val.load(Ordering::Relaxed)
     }
 }

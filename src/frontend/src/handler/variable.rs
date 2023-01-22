@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, SetVariableValue};
+use risingwave_sqlparser::ast::{Ident, SetVariableValue, Value};
 
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
@@ -28,7 +28,15 @@ pub fn handle_set(
     name: Ident,
     value: Vec<SetVariableValue>,
 ) -> Result<RwPgResponse> {
-    let string_vals = value.into_iter().map(|v| v.to_string()).collect_vec();
+    // Strip double and single quotes
+    let string_vals = value
+        .into_iter()
+        .map(|v| match v {
+            SetVariableValue::Literal(Value::DoubleQuotedString(s))
+            | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s,
+            _ => v.to_string(),
+        })
+        .collect_vec();
 
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
@@ -51,7 +59,7 @@ pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Re
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(1),
+        None,
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
@@ -79,7 +87,7 @@ pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse>
 
     Ok(RwPgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(all_variables.len() as i32),
+        None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(

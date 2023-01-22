@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -55,6 +55,8 @@ impl TableCatalogBuilder {
         // Add column desc.
         let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
 
+        // Replace dot of the internal table column name with underline.
+        column_desc.name = column_desc.name.replace('.', "_");
         // Avoid column name duplicate.
         self.avoid_duplicate_col_name(&mut column_desc);
 
@@ -135,6 +137,7 @@ impl TableCatalogBuilder {
             definition: "".into(),
             handle_pk_conflict: false,
             read_prefix_len_hint: self.read_prefix_len_hint,
+            version: None, // the internal table is not versioned and can't be schema changed
         }
     }
 

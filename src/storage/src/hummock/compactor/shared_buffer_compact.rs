@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -203,7 +203,7 @@ async fn compact_shared_buffer(
         .acquire(existing_table_ids)
         .await;
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-    let stats = context.stats.clone();
+    let compactor_metrics = context.compactor_metrics.clone();
 
     let parallelism = splits.len();
     let mut compact_success = true;
@@ -221,7 +221,6 @@ async fn compact_shared_buffer(
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
-            stats.clone(),
             &mut local_stats,
             Arc::new(SstableIteratorReadOptions::default()),
         )
@@ -236,7 +235,7 @@ async fn compact_shared_buffer(
         });
         compaction_futures.push(handle);
     }
-    local_stats.report(stats.as_ref());
+    local_stats.report_compactor(compactor_metrics.as_ref());
 
     let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
     let mut err = None;
@@ -272,7 +271,7 @@ async fn compact_shared_buffer(
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
-                    .stats
+                    .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
             }

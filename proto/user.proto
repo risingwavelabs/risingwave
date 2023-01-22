@@ -4,6 +4,7 @@ package user;
 
 import "common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // AuthInfo is the information required to login to a server.
@@ -57,6 +58,7 @@ message GrantPrivilege {
     uint32 source_id = 4;
     uint32 sink_id = 5;
     uint32 view_id = 6;
+    uint32 function_id = 8;
 
     uint32 all_tables_schema_id = 11;
     uint32 all_sources_schema_id = 12;

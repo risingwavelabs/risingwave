@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
+use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -109,6 +110,10 @@ impl StateStore for PanicStateStore {
         async {
             panic!("should not call new local from the panic state store");
         }
+    }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        panic!("should not call validate_read_epoch from the panic state store");
     }
 }
 

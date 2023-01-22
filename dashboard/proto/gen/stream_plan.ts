@@ -364,6 +364,13 @@ export interface SinkNode_PropertiesEntry {
 
 export interface ProjectNode {
   selectList: ExprNode[];
+  /**
+   * this two field is expressing a list of usize pair, which means when project receives a
+   * watermark with `watermark_input_key[i]` column index, it should derive a new watermark
+   * with `watermark_output_key[i]`th expression
+   */
+  watermarkInputKey: number[];
+  watermarkOutputKey: number[];
 }
 
 export interface FilterNode {
@@ -828,6 +835,12 @@ export interface StreamActor {
   mviewDefinition: string;
 }
 
+/** The environment associated with a stream plan */
+export interface StreamEnvironment {
+  /** The timezone associated with the streaming plan. Only applies to MV for now. */
+  timezone: string;
+}
+
 export interface StreamFragmentGraph {
   /** all the fragments in the graph. */
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
@@ -835,6 +848,11 @@ export interface StreamFragmentGraph {
   edges: StreamFragmentGraph_StreamFragmentEdge[];
   dependentTableIds: number[];
   tableIdsCnt: number;
+  env:
+    | StreamEnvironment
+    | undefined;
+  /** If none, default parallelism will be applied. */
+  parallelism: StreamFragmentGraph_Parallelism | undefined;
 }
 
 export interface StreamFragmentGraph_StreamFragment {
@@ -869,6 +887,10 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   linkId: number;
   upstreamId: number;
   downstreamId: number;
+}
+
+export interface StreamFragmentGraph_Parallelism {
+  parallelism: number;
 }
 
 export interface StreamFragmentGraph_FragmentsEntry {
@@ -1869,13 +1891,19 @@ export const SinkNode_PropertiesEntry = {
 };
 
 function createBaseProjectNode(): ProjectNode {
-  return { selectList: [] };
+  return { selectList: [], watermarkInputKey: [], watermarkOutputKey: [] };
 }
 
 export const ProjectNode = {
   fromJSON(object: any): ProjectNode {
     return {
       selectList: Array.isArray(object?.selectList) ? object.selectList.map((e: any) => ExprNode.fromJSON(e)) : [],
+      watermarkInputKey: Array.isArray(object?.watermarkInputKey)
+        ? object.watermarkInputKey.map((e: any) => Number(e))
+        : [],
+      watermarkOutputKey: Array.isArray(object?.watermarkOutputKey)
+        ? object.watermarkOutputKey.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -1886,12 +1914,24 @@ export const ProjectNode = {
     } else {
       obj.selectList = [];
     }
+    if (message.watermarkInputKey) {
+      obj.watermarkInputKey = message.watermarkInputKey.map((e) => Math.round(e));
+    } else {
+      obj.watermarkInputKey = [];
+    }
+    if (message.watermarkOutputKey) {
+      obj.watermarkOutputKey = message.watermarkOutputKey.map((e) => Math.round(e));
+    } else {
+      obj.watermarkOutputKey = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ProjectNode>, I>>(object: I): ProjectNode {
     const message = createBaseProjectNode();
     message.selectList = object.selectList?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.watermarkInputKey = object.watermarkInputKey?.map((e) => e) || [];
+    message.watermarkOutputKey = object.watermarkOutputKey?.map((e) => e) || [];
     return message;
   },
 };
@@ -3719,8 +3759,30 @@ export const StreamActor = {
   },
 };
 
+function createBaseStreamEnvironment(): StreamEnvironment {
+  return { timezone: "" };
+}
+
+export const StreamEnvironment = {
+  fromJSON(object: any): StreamEnvironment {
+    return { timezone: isSet(object.timezone) ? String(object.timezone) : "" };
+  },
+
+  toJSON(message: StreamEnvironment): unknown {
+    const obj: any = {};
+    message.timezone !== undefined && (obj.timezone = message.timezone);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamEnvironment>, I>>(object: I): StreamEnvironment {
+    const message = createBaseStreamEnvironment();
+    message.timezone = object.timezone ?? "";
+    return message;
+  },
+};
+
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0 };
+  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3742,6 +3804,8 @@ export const StreamFragmentGraph = {
         ? object.dependentTableIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
+      parallelism: isSet(object.parallelism) ? StreamFragmentGraph_Parallelism.fromJSON(object.parallelism) : undefined,
     };
   },
 
@@ -3764,6 +3828,9 @@ export const StreamFragmentGraph = {
       obj.dependentTableIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
+    message.parallelism !== undefined &&
+      (obj.parallelism = message.parallelism ? StreamFragmentGraph_Parallelism.toJSON(message.parallelism) : undefined);
     return obj;
   },
 
@@ -3780,6 +3847,12 @@ export const StreamFragmentGraph = {
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
     message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
+    message.parallelism = (object.parallelism !== undefined && object.parallelism !== null)
+      ? StreamFragmentGraph_Parallelism.fromPartial(object.parallelism)
+      : undefined;
     return message;
   },
 };
@@ -3877,6 +3950,30 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;
+    return message;
+  },
+};
+
+function createBaseStreamFragmentGraph_Parallelism(): StreamFragmentGraph_Parallelism {
+  return { parallelism: 0 };
+}
+
+export const StreamFragmentGraph_Parallelism = {
+  fromJSON(object: any): StreamFragmentGraph_Parallelism {
+    return { parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0 };
+  },
+
+  toJSON(message: StreamFragmentGraph_Parallelism): unknown {
+    const obj: any = {};
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamFragmentGraph_Parallelism>, I>>(
+    object: I,
+  ): StreamFragmentGraph_Parallelism {
+    const message = createBaseStreamFragmentGraph_Parallelism();
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };

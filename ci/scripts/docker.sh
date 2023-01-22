@@ -1,7 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
+
+# Build docker image ${BUILDKITE_COMMIT}-${arch}
 
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
@@ -10,6 +12,15 @@ arch="$(uname -m)"
 
 echo "--- docker build and tag"
 docker build -f docker/Dockerfile -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
+
+echo "--- check the image can start correctly"
+container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" risingwave)
+ret_code=$(docker inspect --format='{{.State.ExitCode}}' "$container_id")
+if [ "$ret_code" -ne 0 ]; then
+  echo "docker run failed with exit code $ret_code"
+  docker logs "$container_id"
+  exit 1
+fi
 
 echo "--- docker images"
 docker images

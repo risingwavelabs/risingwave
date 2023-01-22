@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -100,7 +100,8 @@ pub struct MetaConfig {
     pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
-    /// will disable all auto scheduling of compaction tasks
+    /// will disable all auto scheduling of compaction tasks.
+    /// Should only be used in e2e tests.
     #[serde(default)]
     pub enable_compaction_deterministic: bool,
 
@@ -174,11 +175,6 @@ pub struct StreamingConfig {
     /// There will be a checkpoint for every n barriers
     #[serde(default = "default::streaming::checkpoint_frequency")]
     pub checkpoint_frequency: usize,
-
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    #[serde(default)]
-    pub minimal_scheduling: bool,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -437,11 +433,11 @@ mod default {
         }
 
         pub fn block_size_kb() -> u32 {
-            1024
+            64
         }
 
         pub fn bloom_false_positive() -> f64 {
-            0.01
+            0.001
         }
 
         pub fn share_buffers_sync_parallelism() -> u32 {
@@ -465,11 +461,11 @@ mod default {
         }
 
         pub fn block_cache_capacity_mb() -> usize {
-            256
+            512
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
-            64
+            128
         }
 
         pub fn disable_remote_compactor() -> bool {
