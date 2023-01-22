@@ -91,7 +91,6 @@ impl GlobalMemoryManager {
         use std::time::Duration;
 
         use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
-        use tracing;
         let mem_threshold_graceful =
             (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;
         let mem_threshold_aggressive = (self.total_memory_available_bytes as f64
