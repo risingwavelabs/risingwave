@@ -883,7 +883,15 @@ impl HummockMetaClient for MetaClient {
 pub async fn get_channel_no_retry(
     addr: &str,
 ) -> std::result::Result<Channel, tonic::transport::Error> {
-    get_channel(addr, 0, 0, 0, 0, false).await
+    get_channel(
+        addr,
+        GRPC_CONN_RETRY_MAX_INTERVAL_MS,
+        GRPC_CONN_RETRY_BASE_INTERVAL_MS,
+        GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+        GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+        false,
+    )
+    .await
 }
 
 /// wrapper for `get_channel`
@@ -916,9 +924,6 @@ async fn get_channel(
 ) -> std::result::Result<Channel, tonic::transport::Error> {
     let endpoint = Endpoint::from_shared(addr.to_string())?
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-    let retry_strategy = ExponentialBackoff::from_millis(retry_base_interval)
-        .max_delay(Duration::from_millis(max_retry_ms))
-        .map(jitter);
     let do_request = || async {
         let endpoint = endpoint.clone();
         endpoint
@@ -939,6 +944,9 @@ async fn get_channel(
     };
 
     if retry {
+        let retry_strategy = ExponentialBackoff::from_millis(retry_base_interval)
+            .max_delay(Duration::from_millis(max_retry_ms))
+            .map(jitter);
         return tokio_retry::Retry::spawn(retry_strategy, do_request).await;
     }
     do_request().await
@@ -1021,10 +1029,17 @@ impl GrpcMetaClient {
 
     // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
     async fn get_current_leader_from_service(&self) -> HostAddress {
+        tracing::info!("in get_current_leader_from_service");
         // TODO: address of the service channel should not be hardcoded
-        let service_channel = get_channel_with_defaults("http://127.0.0.1:1234")
+        let service_addr = "http://127.0.0.1:1234";
+        let service_channel = get_channel_with_defaults(service_addr)
             .await
-            .unwrap();
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Unable to establish channel against Meta Service at {}",
+                    service_addr
+                );
+            });
         let mut lc = LeaderServiceClient::new(service_channel);
         // TODO: retry this. May be send to overwhelmed node
         let response = lc.leader(LeaderRequest {}).await;
@@ -1057,7 +1072,7 @@ impl GrpcMetaClient {
                 current_leader.get_port()
             );
             tracing::info!("Failing over to new meta leader {}", addr);
-            let leader_channel = match get_channel_with_defaults(addr.as_str()).await {
+            let leader_channel = match get_channel_no_retry(addr.as_str()).await {
                 Ok(lc) => lc,
                 Err(_) => {
                     tracing::error!("Failed to establish connection leader {}. Seems to be stale leader info. Retrying...", addr);
@@ -1105,12 +1120,12 @@ impl GrpcMetaClient {
         {
             let connected_node = self.leader_address.as_ref().lock().await.clone();
             if current_leader.is_some() && current_leader.unwrap() == connected_node {
-                tracing::info!("failover was NOT needed");
+                tracing::info!("failover is NOT needed");
                 return false;
             }
             // release mutex guard after this scope
         }
-        tracing::info!("failover was NEEDED");
+        tracing::info!("failover is NEEDED");
         self.do_failover(current_leader_clone).await;
         true
     }
