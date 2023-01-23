@@ -1032,7 +1032,6 @@ impl GrpcMetaClient {
     // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
     async fn get_current_leader_from_service(&self) -> HostAddress {
         tracing::info!("in get_current_leader_from_service");
-        // TODO: address of the service channel should not be hardcoded
         let service_addr = &self.leader_service_addr;
         let service_channel = get_channel_with_defaults(service_addr)
             .await
