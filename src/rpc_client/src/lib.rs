@@ -53,13 +53,6 @@ pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
-// TODO: Can I remove this import?
-#[allow(unused_imports)]
-use crate::meta_client::get_channel_no_retry;
-// TODO: Can I remove this import?
-#[allow(unused_imports)]
-use crate::meta_client::get_channel_with_defaults;
-
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
     async fn new_client(host_addr: HostAddr) -> Result<Self>;
