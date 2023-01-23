@@ -102,7 +102,7 @@ tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
 url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
+uuid = { version = "1", features = ["fast-rng", "macro-diagnostics", "serde", "v4"] }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -194,6 +194,6 @@ tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
 url = { version = "2", features = ["serde"] }
-uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
+uuid = { version = "1", features = ["fast-rng", "macro-diagnostics", "serde", "v4"] }
 
 ### END HAKARI SECTION
