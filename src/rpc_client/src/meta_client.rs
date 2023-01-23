@@ -1020,10 +1020,7 @@ impl GrpcMetaClient {
                 .into_inner()
                 .leader_addr
                 .expect("Meta node is supposed to know who the leader is");
-            tracing::info!(
-                "try_get_leader_from_connected_node: {:?}",
-                current_leader.clone()
-            ); // TODO: Remove line
+            tracing::info!("try_get_leader_from_connected_node: {:?}", current_leader); // TODO: Remove line
             return Some(current_leader);
         }
         None
@@ -1056,10 +1053,7 @@ impl GrpcMetaClient {
             .into_inner()
             .leader_addr
             .expect("Meta node is supposed to know who the leader is");
-        tracing::info!(
-            "get_current_leader_from_service: {:?}",
-            current_leader.clone()
-        ); // TODO: Remove line
+        tracing::info!("get_current_leader_from_service: {:?}", current_leader); // TODO: Remove line
         current_leader
     }
 

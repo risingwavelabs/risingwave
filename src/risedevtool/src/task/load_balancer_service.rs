@@ -101,7 +101,7 @@ http {
 }
 "#,
         );
-        file.write(file_content.as_bytes()).unwrap();
+        file.write_all(file_content.as_bytes()).unwrap();
 
         format!("{}", dir_clone.as_path().display())
     }
