@@ -81,6 +81,7 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
+    // get request retry strategy
     pub fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
         GrpcMetaClient::retry_strategy_for_request()
     }
@@ -957,6 +958,7 @@ async fn get_channel(
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
+    leader_service_addr: String,
     leader_address: Arc<Mutex<HostAddress>>,
     leader_client: Arc<Mutex<LeaderServiceClient<Channel>>>,
     cluster_client: Arc<Mutex<ClusterServiceClient<Channel>>>,
@@ -1031,7 +1033,7 @@ impl GrpcMetaClient {
     async fn get_current_leader_from_service(&self) -> HostAddress {
         tracing::info!("in get_current_leader_from_service");
         // TODO: address of the service channel should not be hardcoded
-        let service_addr = "http://127.0.0.1:1234";
+        let service_addr = &self.leader_service_addr;
         let service_channel = get_channel_with_defaults(service_addr)
             .await
             .unwrap_or_else(|_| {
@@ -1041,8 +1043,15 @@ impl GrpcMetaClient {
                 );
             });
         let mut lc = LeaderServiceClient::new(service_channel);
-        // TODO: retry this. May be send to overwhelmed node
-        let response = lc.leader(LeaderRequest {}).await;
+        let mut response = lc.leader(LeaderRequest {}).await;
+        for retry in self.get_retry_strategy() {
+            if response.is_ok() {
+                break;
+            }
+            tokio::time::sleep(retry).await;
+            response = lc.leader(LeaderRequest {}).await;
+        }
+
         let current_leader = response
             .unwrap()
             .into_inner()
@@ -1142,6 +1151,7 @@ impl GrpcMetaClient {
         };
 
         let client = GrpcMetaClient {
+            leader_service_addr: addr.to_owned(),
             leader_address: Arc::new(Mutex::new(dummy_address)),
             leader_client: Arc::new(Mutex::new(LeaderServiceClient::new(channel.clone()))),
             cluster_client: Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone()))),
