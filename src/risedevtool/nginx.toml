@@ -35,7 +35,7 @@ then
 
     # configure and install
     cd nginx-1.23.3
-    ./configure --without-http_rewrite_module --with-http_v2_module --prefix=${bin_dir} --sbin-path=${bin_dir}
+    ./configure --with-http_v2_module --prefix=${bin_dir} --sbin-path=${bin_dir}
 
     make
     make install
