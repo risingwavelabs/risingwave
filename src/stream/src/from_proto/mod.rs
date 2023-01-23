@@ -141,6 +141,7 @@ pub async fn create_executor(
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
+        NodeBody::AppendOnlyGroupTopN => GroupTopNExecutorBuilder,
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
         NodeBody::Dml => DmlExecutorBuilder,

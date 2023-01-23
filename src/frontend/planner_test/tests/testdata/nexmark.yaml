@@ -953,7 +953,7 @@
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], pk_columns: [bid._row_id] }
     └─StreamExchange { dist: HashShard(bid._row_id) }
       └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-        └─StreamGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
+        └─StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
           └─StreamExchange { dist: HashShard(bid.bidder, bid.auction) }
             └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
@@ -964,8 +964,7 @@
 
     Fragment 1
       StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-        StreamGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
-            state table: 0
+        StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
           StreamExchange Hash([1, 0]) from 2
 
     Fragment 2
@@ -973,7 +972,6 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$1 ASC, $0 ASC, $5 DESC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1, 0] }
      Table 4294967294 { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
 - id: nexmark_q19
   before:

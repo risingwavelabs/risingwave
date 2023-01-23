@@ -20,6 +20,7 @@ use top_n_cache::TopNCacheTrait;
 
 // `TopN` variants
 mod group_top_n;
+mod group_top_n_appendonly;
 mod top_n_appendonly;
 mod top_n_plain;
 
