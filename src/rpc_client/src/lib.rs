@@ -71,7 +71,7 @@ pub struct RpcClientPool<S> {
 
     // moka::Cache internally uses system thread, so we can't use it in simulation
     #[cfg(madsim)]
-    clients: Arc<Mutex<HashMap<HostAddr, S>>>,
+    clients: Arc<tokio::sync::Mutex<std::collections::HashMap<HostAddr, S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>
@@ -93,7 +93,7 @@ where
             #[cfg(not(madsim))]
             clients: Cache::new(u64::MAX),
             #[cfg(madsim)]
-            clients: Arc::new(Mutex::new(HashMap::new())),
+            clients: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
