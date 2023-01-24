@@ -17,6 +17,7 @@ use std::iter::once;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
@@ -479,7 +480,7 @@ impl Binder {
                     // FIXME: the session id is not global unique in multi-frontend env.
                     return Ok(ExprImpl::literal_int(binder.session_id.0));
                 })),
-                ("pg_cancel_backend", guard_by_len(1, raw(|_binder, inputs| {
+                ("pg_cancel_backend", guard_by_len(1, raw(|_binder, _inputs| {
                         // TODO: implement real cancel rather than just return false as an workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
@@ -511,13 +512,38 @@ impl Binder {
             .collect()
         });
 
+        static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
+            let mut tree = BKTree::new(metrics::Levenshtein);
+
+            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            for k in HANDLES.keys() {
+                tree.add(*k);
+            }
+
+            tree
+        });
+
         match HANDLES.get(function_name) {
             Some(handle) => handle(self, inputs),
-            None => Err(ErrorCode::NotImplemented(
-                format!("unsupported function: {:?}", function_name),
-                112.into(),
-            )
-            .into()),
+            None => Err({
+                let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
+
+                let candidates = FUNCTIONS_BKTREE.find(function_name, allowed_distance).map(|(_idx, c)| c);
+
+                let mut candidates = candidates.peekable();
+
+                let err_msg = if candidates.peek().is_none() {
+                    format!("unsupported function: {}", function_name)
+                } else {
+                    format!(
+                        "unsupported function {}, do you mean {}?",
+                        function_name,
+                        candidates.join(" or ")
+                    )
+                };
+
+                ErrorCode::NotImplemented(err_msg, 112.into()).into()
+            }),
         }
     }
 
