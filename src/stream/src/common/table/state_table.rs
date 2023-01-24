@@ -562,10 +562,10 @@ where
     ) -> StreamExecutorResult<Option<CompactedRow>> {
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
-        let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
+        let mem_table_res = self.mem_table.get_key_op(&serialized_pk);
 
         match mem_table_res {
-            Some(row_op) => match row_op {
+            Some(key_op) => match key_op {
                 KeyOp::Insert(row_bytes) => Ok(Some(CompactedRow {
                     row: row_bytes.clone(),
                 })),
@@ -783,14 +783,6 @@ where
         Ok(())
     }
 
-    /// used for unit test, and do not need to assert epoch.
-    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
-        self.update_epoch(new_epoch);
-        Ok(())
-    }
-
     // TODO(st1page): maybe we should extract a pub struct to do it
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
@@ -835,11 +827,11 @@ where
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        for (pk, row_op) in buffer {
+        for (pk, key_op) in buffer {
             if let Some(ref range_end) = range_end_suffix && &pk[VirtualNode::SIZE..] < range_end.as_slice() {
                 continue;
             }
-            match row_op {
+            match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As a
                 // workaround you may call disable the check by initializing the state store with
                 // `disable_sanity_check=true`.
@@ -1226,8 +1218,8 @@ where
                 }
                 // The stream side has come to an end, return data from the mem table.
                 (None, Some(_)) => {
-                    let (pk, row_op) = mem_table_iter.next().unwrap();
-                    match row_op {
+                    let (pk, key_op) = mem_table_iter.next().unwrap();
+                    match key_op {
                         KeyOp::Insert(row_bytes) | KeyOp::Update((_, row_bytes)) => {
                             let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
@@ -1247,9 +1239,9 @@ where
                             // both memtable and storage contain the key, so we advance both
                             // iterators and return the data in memory.
 
-                            let (pk, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, key_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
-                            match row_op {
+                            match key_op {
                                 KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
@@ -1270,9 +1262,9 @@ where
                         }
                         Ordering::Greater => {
                             // yield data from mem table
-                            let (pk, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, key_op) = mem_table_iter.next().unwrap();
 
-                            match row_op {
+                            match key_op {
                                 KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 

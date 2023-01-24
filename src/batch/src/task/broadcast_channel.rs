@@ -28,7 +28,6 @@ use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSende
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
-#[derive(Clone)]
 pub struct BroadcastSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     broadcast_info: BroadcastInfo,

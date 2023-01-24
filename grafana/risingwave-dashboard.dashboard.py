@@ -957,6 +957,16 @@ def section_streaming(panels):
                 )
             ],
         ),
+        panels.timeseries_rowsps(
+            "Source Throughput(rows) per barrier",
+            "",
+            [
+                panels.target(
+                    f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
+                    "actor={{actor_id}} source={{source_id}} @ {{instance}}"
+                )
+            ]
+        ),
         panels.timeseries_count(
             "Barrier Number",
             "",
@@ -1305,6 +1315,10 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
+                            "total lookups {{actor_id}} {{side}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
                             "total lookups {{actor_id}} {{side}}",
                         ),
                     ],

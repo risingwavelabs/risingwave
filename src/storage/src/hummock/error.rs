@@ -44,6 +44,8 @@ enum HummockErrorInner {
     SharedBufferError(String),
     #[error("Wait epoch error {0}.")]
     WaitEpoch(String),
+    #[error("Read current epoch error {0}.")]
+    ReadCurrentEpoch(String),
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
@@ -113,6 +115,10 @@ impl HummockError {
 
     pub fn wait_epoch(error: impl ToString) -> HummockError {
         HummockErrorInner::WaitEpoch(error.to_string()).into()
+    }
+
+    pub fn read_current_epoch(error: impl ToString) -> HummockError {
+        HummockErrorInner::ReadCurrentEpoch(error.to_string()).into()
     }
 
     pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> HummockError {

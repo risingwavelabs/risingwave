@@ -218,18 +218,21 @@ fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {
     let secs = data.get_u32_le();
     let nano = data.get_u32_le();
-    NaiveTimeWrapper::with_secs_nano_value(secs, nano)
+    NaiveTimeWrapper::with_secs_nano(secs, nano)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))
 }
 
 fn deserialize_naivedatetime(data: &mut impl Buf) -> Result<NaiveDateTimeWrapper> {
     let secs = data.get_i64_le();
     let nsecs = data.get_u32_le();
-    NaiveDateTimeWrapper::with_secs_nsecs_value(secs, nsecs)
+    NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))
 }
 
 fn deserialize_naivedate(data: &mut impl Buf) -> Result<NaiveDateWrapper> {
     let days = data.get_i32_le();
-    NaiveDateWrapper::with_days_value(days)
+    NaiveDateWrapper::with_days(days)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
