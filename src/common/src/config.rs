@@ -74,6 +74,9 @@ pub struct RwConfig {
     pub frontend: FrontendConfig,
 
     #[serde(default)]
+    pub compute_node: ComputeNodeConfig,
+
+    #[serde(default)]
     pub compactor: CompactorConfig,
 }
 
@@ -193,6 +196,13 @@ impl Default for MetaConfig {
     }
 }
 
+#[derive(Copy, Clone, Debug, ArgEnum, Serialize, Deserialize)]
+pub enum AsyncStackTraceOption {
+    Off,
+    On,
+    Verbose,
+}
+
 /// The section `[frontend]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -218,6 +228,59 @@ pub struct FrontendConfig {
 }
 
 impl Default for FrontendConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// The section `[coompute_node]` in `risingwave.toml`. This section only applies to the compactor.
+/// A subset of the configs can be overwritten by CLI arguments.
+pub struct ComputeNodeConfig {
+    #[serde(default = "default::compute_node::listen_addr")]
+    pub listen_addr: String,
+
+    pub client_address: Option<String>,
+
+    #[serde(default = "default::compute_node::state_store")]
+    pub state_store: String,
+
+    #[serde(default = "default::compute_node::prometheus_listen_addr")]
+    pub prometheus_listener_addr: String,
+
+    #[serde(default = "default::compute_node::metrics_level")]
+    pub metrics_level: u32,
+
+    #[serde(default = "default::compute_node::meta_address")]
+    pub meta_address: String,
+
+    /// Enable reporting tracing information to jaeger.
+    #[serde(default = "default::compute_node::enable_jaeger_tracing")]
+    pub enable_jaeger_tracing: bool,
+
+    /// Enable async stack tracing for risectl.
+    #[serde(default = "default::compute_node::async_stack_trace")]
+    pub async_stack_trace: AsyncStackTraceOption,
+
+    /// Path to file cache data directory.
+    /// Left empty to disable file cache.
+    #[serde(default = "default::compute_node::file_cache_dir")]
+    pub file_cache_dir: String,
+
+    /// Endpoint of the connector node,
+    pub connector_rpc_endpoint: Option<String>,
+
+    /// Total available memory in bytes, used by LRU Manager
+    #[serde(default = "default::compute_node::total_memory_bytes")]
+    pub total_memory_bytes: usize,
+
+    /// The parallelism that the compute node will register to the scheduler of the meta service.
+    #[serde(default = "default::compute_node::parallelism")]
+    pub parallelism: usize,
+}
+
+impl Default for ComputeNodeConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -592,6 +655,52 @@ mod default {
 
         pub fn metrics_level() -> u32 {
             0
+        }
+    }
+
+    pub mod compute_node {
+        use crate::config::AsyncStackTraceOption;
+        use crate::util::resource_util::cpu::total_cpu_available;
+        use crate::util::resource_util::memory::total_memory_available_bytes;
+
+        pub fn listen_addr() -> String {
+            "127.0.0.1:5688".to_string()
+        }
+
+        pub fn state_store() -> String {
+            "hummock+memory".to_string()
+        }
+
+        pub fn prometheus_listen_addr() -> String {
+            "127.0.0.1:1222".to_string()
+        }
+
+        pub fn metrics_level() -> u32 {
+            0
+        }
+
+        pub fn meta_address() -> String {
+            "http://127.0.0.1:5690".to_string()
+        }
+
+        pub fn enable_jaeger_tracing() -> bool {
+            false
+        }
+
+        pub fn async_stack_trace() -> AsyncStackTraceOption {
+            AsyncStackTraceOption::On
+        }
+
+        pub fn file_cache_dir() -> String {
+            "".to_string()
+        }
+
+        pub fn total_memory_bytes() -> usize {
+            total_memory_available_bytes()
+        }
+
+        pub fn parallelism() -> usize {
+            total_cpu_available().ceil() as usize
         }
     }
 

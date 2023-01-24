@@ -20,7 +20,7 @@ use async_stack_trace::StackTraceManager;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::config::{RwConfig, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -61,16 +61,15 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeOpts};
+use crate::AsyncStackTraceOption;
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
-    opts: ComputeNodeOpts,
+    config: RwConfig,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.clone()));
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
@@ -83,10 +82,10 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let meta_client = MetaClient::register_new(
-        &opts.meta_address,
+        &config.compute_node.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
-        opts.parallelism,
+        config.compute_node.parallelism,
     )
     .await
     .unwrap();
@@ -118,14 +117,14 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &opts.state_store,
-        &opts.file_cache_dir,
+        &config.compute_node.state_store,
+        &config.compute_node.file_cache_dir,
         &config,
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if opts.enable_jaeger_tracing {
+        if config.compute_node.enable_jaeger_tracing {
             Arc::new(
                 risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
                     "127.0.0.1:6831".to_string(),
@@ -146,8 +145,8 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
-        if opts.state_store == "hummock+memory"
-            || opts.state_store.starts_with("hummock+disk")
+        if config.compute_node.state_store == "hummock+memory"
+            || config.compute_node.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");
@@ -192,7 +191,7 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
-    let async_stack_trace_config = match opts.async_stack_trace {
+    let async_stack_trace_config = match config.compute_node.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => Some(async_stack_trace::TraceConfig {
             report_detached: true,
@@ -215,7 +214,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
     let mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
+        config.compute_node.total_memory_bytes,
         config.streaming.barrier_interval_ms,
         streaming_metrics.clone(),
     );
@@ -246,7 +245,7 @@ pub async fn compute_node_serve(
     );
 
     let connector_params = risingwave_connector::ConnectorParams {
-        connector_rpc_endpoint: opts.connector_rpc_endpoint,
+        connector_rpc_endpoint: config.compute_node.connector_rpc_endpoint,
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
@@ -314,9 +313,9 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.compute_node.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
+            config.compute_node.prometheus_listener_addr.clone(),
             registry.clone(),
         );
     }
