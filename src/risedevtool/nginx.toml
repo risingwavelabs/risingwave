@@ -11,10 +11,6 @@ description = "Download and extract Nginx. Used as Load Balancer"
 script = '''
 #!/bin/bash
 set -e
-
-# TODO: remove exit here
-exit 0
-
 if [ -f "${PREFIX_BIN}/nginx" ]; then
     exit 0
 fi
