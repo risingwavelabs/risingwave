@@ -85,9 +85,6 @@ pub struct FrontendOpts {
     #[clap(long)]
     pub health_check_listener_addr: Option<String>,
 
-    /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
     #[clap(long)]
     pub metrics_level: Option<u32>,
 

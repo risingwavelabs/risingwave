@@ -145,7 +145,7 @@ impl FrontendEnv {
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         tracing::info!(
             "Starting frontend node with\nfrontend config {:?}",
-            config.server
+            config.frontend
         );
         let batch_config = config.batch;
 

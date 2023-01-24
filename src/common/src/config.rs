@@ -223,6 +223,9 @@ pub struct FrontendConfig {
     #[serde(default = "default::frontend::health_check_listener_addr")]
     pub health_check_listener_addr: String,
 
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
     #[serde(default = "default::frontend::metrics_level")]
     pub metrics_level: u32,
 }
@@ -249,6 +252,9 @@ pub struct ComputeNodeConfig {
     #[serde(default = "default::compute_node::prometheus_listen_addr")]
     pub prometheus_listener_addr: String,
 
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
     #[serde(default = "default::compute_node::metrics_level")]
     pub metrics_level: u32,
 
@@ -303,6 +309,9 @@ pub struct CompactorConfig {
     #[serde(default = "default::compactor::prometheus_listen_addr")]
     pub prometheus_listener_addr: String,
 
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
     #[serde(default = "default::compactor::metrics_level")]
     pub metrics_level: u32,
 
