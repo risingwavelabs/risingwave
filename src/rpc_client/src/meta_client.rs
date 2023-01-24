@@ -1015,11 +1015,14 @@ impl GrpcMetaClient {
                 tokio::time::sleep(retry).await;
                 continue;
             }
-            let current_leader = response
-                .unwrap()
-                .into_inner()
-                .leader_addr
-                .expect("Meta node is supposed to know who the leader is (from current node)");
+            let current_leader = response.unwrap().into_inner().leader_addr;
+            if current_leader.is_none() {
+                tracing::warn!("Meta node did not know who leader is (current connected node). Trying again...");
+                tokio::time::sleep(retry).await;
+                continue;
+            }
+            let current_leader = current_leader.unwrap();
+
             tracing::info!("try_get_leader_from_connected_node: {:?}", current_leader); // TODO: Remove line
             return Some(current_leader);
         }
@@ -1027,43 +1030,61 @@ impl GrpcMetaClient {
     }
 
     // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
-    async fn get_current_leader_from_service(&self) -> HostAddress {
-        tracing::info!("in get_current_leader_from_service");
-        let service_addr = &self.leader_service_addr;
-        let service_channel = get_channel_with_defaults(service_addr)
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "Unable to establish channel against Meta Service at {}",
-                    service_addr
-                );
-            });
-        let mut lc = LeaderServiceClient::new(service_channel);
-        let mut response = lc.leader(LeaderRequest {}).await;
-        for retry in self.get_retry_strategy() {
-            if response.is_ok() {
-                break;
+    async fn get_current_leader_from_service(&self) -> Option<HostAddress> {
+        for retry in GrpcMetaClient::retry_strategy_for_request() {
+            tracing::info!("in get_current_leader_from_service");
+            let service_addr = &self.leader_service_addr;
+            let service_channel = get_channel_with_defaults(service_addr)
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "Unable to establish channel against Meta Service at {}",
+                        service_addr
+                    );
+                });
+            let mut lc = LeaderServiceClient::new(service_channel);
+            let mut response = lc.leader(LeaderRequest {}).await;
+            for retry in self.get_retry_strategy() {
+                if response.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(retry).await;
+                response = lc.leader(LeaderRequest {}).await;
             }
-            tokio::time::sleep(retry).await;
-            response = lc.leader(LeaderRequest {}).await;
-        }
 
-        let current_leader = response
-            .unwrap()
-            .into_inner()
-            .leader_addr
-            .expect("Meta node is supposed to know who the leader is (from service)");
-        tracing::info!("get_current_leader_from_service: {:?}", current_leader); // TODO: Remove line
-        current_leader
+            let current_leader = response.unwrap().into_inner().leader_addr;
+            if current_leader.is_none() {
+                tracing::warn!("Meta node did not know who leader is (service). Trying again...");
+                tokio::time::sleep(retry).await;
+                continue;
+            }
+            let current_leader = current_leader.unwrap();
+
+            //     .expect("Meta node is supposed to know who the leader is (from service)");
+            tracing::info!("get_current_leader_from_service: {:?}", current_leader); // TODO: Remove line
+            return Some(current_leader);
+        }
+        None
     }
 
     async fn do_failover(&self, mut current_leader_init: Option<HostAddress>) {
         for retry in self.get_retry_strategy() {
             tracing::info!("in do_failover"); // TODO: Remove line
-            let current_leader = match current_leader_init {
-                Some(l) => l,
-                None => self.get_current_leader_from_service().await,
+
+            let current_leader = if current_leader_init.is_some() {
+                current_leader_init.clone()
+            } else {
+                self.get_current_leader_from_service().await
             };
+            if current_leader.is_none() {
+                // May happen if all meta nodes are down OR if there is a problem with Nginx routing
+                // the request to the meta nodes
+                tracing::warn!("Unable to retrieve leader address via service. Retrying...");
+                tokio::time::sleep(retry).await;
+                continue;
+            }
+            let current_leader = current_leader.unwrap();
+
             // always use service for retries
             current_leader_init = None;
 
@@ -1077,7 +1098,7 @@ impl GrpcMetaClient {
             let leader_channel = match get_channel_no_retry(addr.as_str()).await {
                 Ok(lc) => lc,
                 Err(_) => {
-                    tracing::error!("Failed to establish connection leader {}. Seems to be stale leader info. Retrying...", addr);
+                    tracing::warn!("Failed to establish connection leader {}. Seems to be stale leader info. Retrying...", addr);
                     tokio::time::sleep(retry).await;
                     continue;
                 }
