@@ -12,7 +12,7 @@ RisingWave uses [tikv-jemallocator](https://crates.io/crates/tikv-jemallocator) 
 
 Luckily, jemalloc provides built-in profiling support ([official wiki](https://github.com/jemalloc/jemalloc/wiki/Use-Case%3A-Heap-Profiling)). jemallocator exposes the feature via a cargo feature ‘profiling’. [Here](https://gist.github.com/ordian/928dc2bd45022cddd547528f64db9174) is a simple guide to profiling with jemallocator.
 
-For RisingWave, [feat: support heap profiling from risedev by fuyufjh · Pull Request #4871](https://github.com/singularity-data/risingwave/pull/4871) added all things needed. Please just follow the below steps.
+For RisingWave, [feat: support heap profiling from risedev by fuyufjh · Pull Request #4871](https://github.com/risingwave-labs/risingwave/pull/4871) added all things needed. Please just follow the below steps.
 
 ## Step 1 - Deploy and Run
 

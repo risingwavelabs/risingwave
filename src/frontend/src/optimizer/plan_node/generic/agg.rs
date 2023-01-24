@@ -66,7 +66,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.len()).into_iter().collect_vec())
+        Some((0..self.group_key.len()).collect_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

@@ -38,7 +38,7 @@ use tracing::log::warn;
 use super::iterator::{
     ConcatIteratorInner, DirectedUserIterator, DirectionEnum, HummockIteratorUnion,
 };
-use super::utils::validate_epoch;
+use super::utils::validate_safe_epoch;
 use super::{
     get_from_order_sorted_uncommitted_data, get_from_sstable_info, hit_sstable_bloom_filter,
     HummockStorageV1, SstableIteratorType,
@@ -251,7 +251,7 @@ impl HummockStorageV1 {
                 .read_filter(epoch, read_options.table_id, table_key_range);
 
         // Check epoch validity
-        validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+        validate_safe_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
 
         Ok(read_version)
     }
@@ -635,6 +635,11 @@ impl StateStore for HummockStorageV1 {
 
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
+    }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        // Returns Ok directly, since removal of HummockStorageV1 is planned.
+        Ok(())
     }
 }
 
