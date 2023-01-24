@@ -66,8 +66,8 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
-/// CLI argguments received by meta node. Overwrites fields in
-/// [`risingwave_common::config::CompactorConfig`].
+/// CLI arguments received by meta node. Overwrites fields in
+/// [`risingwave_common::config::FrontendConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     #[clap(long = "host")]

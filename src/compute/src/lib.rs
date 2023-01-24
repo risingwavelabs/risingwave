@@ -35,7 +35,8 @@ use risingwave_common::config::{
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
-/// Command-line arguments for compute-node.
+/// CLI arguments received by compute node. Overwrites fields in
+/// [`risingwave_common::config::ComputeNodeConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
@@ -170,7 +171,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .client_address
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to client address");
+                tracing::warn!("Client address is not specified, defaulting to listen address");
                 &config.compute_node.listen_addr
             })
             .parse()

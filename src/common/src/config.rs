@@ -28,7 +28,7 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-/// For non-user-facing components where the CLI arguments do not override the config file.
+/// For non-user-facing components where the CLI arguments do not overwrite the config file.
 pub const NO_OVERWRITE: Option<NoOverwrite> = None;
 
 pub fn load_config(path: &str, cli_overwrite: Option<impl OverwriteConfig>) -> RwConfig
@@ -233,10 +233,10 @@ impl Default for FrontendConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 /// The section `[coompute_node]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     #[serde(default = "default::compute_node::listen_addr")]
     pub listen_addr: String,

@@ -21,7 +21,7 @@ use risingwave_common::config::{load_config, OverwriteConfig, RwConfig};
 
 use crate::server::compactor_serve;
 
-/// CLI argguments received by meta node. Overwrites fields in
+/// CLI arguments received by meta node. Overwrites fields in
 /// [`risingwave_common::config::CompactorConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct CompactorOpts {

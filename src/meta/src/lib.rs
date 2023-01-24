@@ -54,7 +54,7 @@ pub use error::{MetaError, MetaResult};
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
-/// CLI argguments received by meta node. Overwrites fields in
+/// CLI arguments received by meta node. Overwrites fields in
 /// [`risingwave_common::config::MetaConfig`].
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
