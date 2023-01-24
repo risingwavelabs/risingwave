@@ -366,7 +366,7 @@ impl Binder {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
-                        return Ok(ExprImpl::literal_varchar(v));
+                        Ok(ExprImpl::literal_varchar(v))
                     }),
                 ),
                 ("current_database", guard_by_len(0, raw(|binder, _inputs| {
@@ -431,15 +431,15 @@ impl Binder {
                         }
                     }
 
-                    return Ok(ExprImpl::literal_list(
+                    Ok(ExprImpl::literal_list(
                         ListValue::new(schema_names),
                         DataType::Varchar,
-                    ));
+                    ))
                 })),
                 ("session_user", guard_by_len(0, raw(|binder, _inputs| {
-                    return Ok(ExprImpl::literal_varchar(
+                    Ok(ExprImpl::literal_varchar(
                         binder.auth_context.user_name.clone(),
-                    ));
+                    ))
                 }))),
                 ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
                         let input = &inputs[0];
@@ -458,7 +458,7 @@ impl Binder {
                     }
                 ))),
                 ("pg_get_expr", raw(|_binder, inputs|{
-                    return if inputs.len() == 2 || inputs.len() == 3 {
+                    if inputs.len() == 2 || inputs.len() == 3 {
                         // TODO: implement pg_get_expr rather than just return empty as an workaround.
                         Ok(ExprImpl::literal_varchar("".into()))
                     } else {
@@ -466,7 +466,7 @@ impl Binder {
                             "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
                         )
                         .into())
-                    };
+                    }
                 })),
                 ("format_type", guard_by_len(2, raw(|_binder, _inputs| {
                         // TODO
@@ -478,7 +478,7 @@ impl Binder {
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_backend_pid", raw(|binder, _inputs| {
                     // FIXME: the session id is not global unique in multi-frontend env.
-                    return Ok(ExprImpl::literal_int(binder.session_id.0));
+                    Ok(ExprImpl::literal_int(binder.session_id.0))
                 })),
                 ("pg_cancel_backend", guard_by_len(1, raw(|_binder, _inputs| {
                         // TODO: implement real cancel rather than just return false as an workaround.
