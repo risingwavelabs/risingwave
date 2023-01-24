@@ -29,7 +29,7 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig};
+use risingwave_common::config::{BatchConfig, RwConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
@@ -68,7 +68,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::PgResponseStream;
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -141,21 +141,21 @@ impl FrontendEnv {
     }
 
     pub async fn init(
-        opts: &FrontendOpts,
+        config: RwConfig,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(&opts.config_path.clone(), Some(opts.clone()));
         tracing::info!(
             "Starting frontend node with\nfrontend config {:?}",
             config.server
         );
         let batch_config = config.batch;
 
-        let frontend_address: HostAddr = opts
+        let frontend_address: HostAddr = config
+            .frontend
             .client_address
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("Client address is not specified, defaulting to listen address");
+                &config.frontend.listen_addr
             })
             .parse()
             .unwrap();
@@ -163,7 +163,7 @@ impl FrontendEnv {
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let meta_client = MetaClient::register_new(
-            opts.meta_addr.clone().as_str(),
+            config.frontend.meta_address.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
             0,
@@ -229,12 +229,15 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
-        if opts.metrics_level > 0 {
-            MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
+        if config.frontend.metrics_level > 0 {
+            MetricsManager::boot_metrics_service(
+                config.frontend.prometheus_listener_addr.clone(),
+                registry,
+            );
         }
 
         let health_srv = HealthServiceImpl::new();
-        let host = opts.health_check_listener_addr.clone();
+        let host = config.frontend.health_check_listener_addr.clone();
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
@@ -244,7 +247,7 @@ impl FrontendEnv {
         });
         tracing::info!(
             "Health Check RPC Listener is set up on {}",
-            opts.health_check_listener_addr.clone()
+            config.frontend.health_check_listener_addr.clone()
         );
 
         Ok((
@@ -584,9 +587,9 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 }
 
 impl SessionManagerImpl {
-    pub async fn new(opts: &FrontendOpts) -> Result<Self> {
+    pub async fn new(config: RwConfig) -> Result<Self> {
         let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
-            FrontendEnv::init(opts).await?;
+            FrontendEnv::init(config).await?;
         Ok(Self {
             env,
             _observer_join_handle: join_handle,

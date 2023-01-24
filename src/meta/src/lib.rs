@@ -58,7 +58,6 @@ use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 /// [`risingwave_common::config::MetaConfig`].
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
-    // TODO: rename to listen_address and separate out the port.
     #[clap(long)]
     listen_addr: Option<String>,
 

@@ -71,6 +71,9 @@ pub struct RwConfig {
     pub meta: MetaConfig,
 
     #[serde(default)]
+    pub frontend: FrontendConfig,
+
+    #[serde(default)]
     pub compactor: CompactorConfig,
 }
 
@@ -185,6 +188,36 @@ pub struct MetaConfig {
 }
 
 impl Default for MetaConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+/// The section `[frontend]` in `risingwave.toml`. This section only applies to the compactor.
+/// A subset of the configs can be overwritten by CLI arguments.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrontendConfig {
+    // Below configs are CLI configurable.
+    #[serde(default = "default::frontend::listen_addr")]
+    pub listen_addr: String,
+
+    pub client_address: Option<String>,
+
+    #[serde(default = "default::frontend::meta_address")]
+    pub meta_address: String,
+
+    #[serde(default = "default::frontend::prometheus_listen_addr")]
+    pub prometheus_listener_addr: String,
+
+    #[serde(default = "default::frontend::health_check_listener_addr")]
+    pub health_check_listener_addr: String,
+
+    #[serde(default = "default::frontend::metrics_level")]
+    pub metrics_level: u32,
+}
+
+impl Default for FrontendConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -536,6 +569,29 @@ mod default {
 
         pub fn node_num_monitor_interval_sec() -> u64 {
             10
+        }
+    }
+
+    pub mod frontend {
+
+        pub fn listen_addr() -> String {
+            "127.0.0.1:4566".to_string()
+        }
+
+        pub fn meta_address() -> String {
+            "http://127.0.0.1:5690".to_string()
+        }
+
+        pub fn prometheus_listen_addr() -> String {
+            "127.0.0.1:2222".to_string()
+        }
+
+        pub fn health_check_listener_addr() -> String {
+            "127.0.0.1:6786".to_string()
+        }
+
+        pub fn metrics_level() -> u32 {
+            0
         }
     }
 

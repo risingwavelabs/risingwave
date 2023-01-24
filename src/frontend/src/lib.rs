@@ -47,7 +47,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common::config::{OverwriteConfig, RwConfig};
+use risingwave_common::config::{load_config, OverwriteConfig, RwConfig};
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -66,52 +66,65 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
+/// CLI argguments received by meta node. Overwrites fields in
+/// [`risingwave_common::config::CompactorConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
-    // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:4566")]
-    pub host: String,
+    #[clap(long)]
+    pub listen_addr: Option<String>,
 
-    // Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
-    // TODO: This is currently unused.
     #[clap(long)]
-    pub port: Option<u16>,
+    pub meta_address: Option<String>,
 
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
-    pub meta_addr: String,
+    #[clap(long)]
+    pub prometheus_listener_addr: Option<String>,
 
-    #[clap(long, default_value = "127.0.0.1:2222")]
-    pub prometheus_listener_addr: String,
-
-    #[clap(long, default_value = "127.0.0.1:6786")]
-    pub health_check_listener_addr: String,
+    #[clap(long)]
+    pub health_check_listener_addr: Option<String>,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
-    #[clap(long, default_value = "0")]
-    pub metrics_level: u32,
+    #[clap(long)]
+    pub metrics_level: Option<u32>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    ///
-    /// Note that internal system parameters should be defined in the configuration file at
-    /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
-}
-
-impl OverwriteConfig for FrontendOpts {
-    fn overwrite(self, _config: &mut RwConfig) {}
 }
 
 impl Default for FrontendOpts {
     fn default() -> Self {
         FrontendOpts::parse_from(iter::empty::<OsString>())
+    }
+}
+
+impl OverwriteConfig for FrontendOpts {
+    fn overwrite(self, config: &mut RwConfig) {
+        let mut c = &mut config.frontend;
+        if let Some(v) = self.listen_addr {
+            c.listen_addr = v;
+        }
+        if self.client_address.is_some() {
+            c.client_address = self.client_address;
+        }
+        if let Some(v) = self.meta_address {
+            c.meta_address = v;
+        }
+        if let Some(v) = self.prometheus_listener_addr {
+            c.prometheus_listener_addr = v;
+        }
+        if let Some(v) = self.health_check_listener_addr {
+            c.health_check_listener_addr = v;
+        }
+        if let Some(v) = self.metrics_level {
+            c.metrics_level = v;
+        }
     }
 }
 
@@ -125,8 +138,10 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-        pg_serve(&opts.host, session_mgr, Some(TlsConfig::new_default()))
+        let config = load_config(&opts.config_path.clone(), Some(opts));
+        let meta_addr = config.frontend.meta_address.clone();
+        let session_mgr = Arc::new(SessionManagerImpl::new(config).await.unwrap());
+        pg_serve(&meta_addr, session_mgr, Some(TlsConfig::new_default()))
             .await
             .unwrap();
     })
