@@ -47,6 +47,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+use risingwave_common::config::{OverwriteConfig, RwConfig};
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -102,6 +103,10 @@ pub struct FrontendOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+}
+
+impl OverwriteConfig for FrontendOpts {
+    fn overwrite(self, _config: &mut RwConfig) {}
 }
 
 impl Default for FrontendOpts {

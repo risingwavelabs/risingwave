@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::config::load_config;
+use risingwave_common::config::RwConfig;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -40,26 +40,24 @@ use tokio::task::JoinHandle;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::CompactorServiceImpl;
-use crate::CompactorOpts;
 
 /// Fetches and runs compaction tasks.
 pub async fn compactor_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
-    opts: CompactorOpts,
+    config: RwConfig,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    let config = load_config(&opts.config_path);
-    tracing::info!(
-        "Starting compactor with config {:?} and opts {:?}",
-        config,
-        opts
-    );
+    tracing::info!("Starting compactor with config {:?}", config);
 
     // Register to the cluster.
-    let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
-            .await
-            .unwrap();
+    let meta_client = MetaClient::register_new(
+        &config.compactor.meta_address,
+        WorkerType::Compactor,
+        &client_addr,
+        0,
+    )
+    .await
+    .unwrap();
     tracing::info!("Assigned compactor id {}", meta_client.worker_id());
     meta_client.activate(&client_addr).await.unwrap();
 
@@ -80,7 +78,9 @@ pub async fn compactor_serve(
     let storage_config = Arc::new(config.storage);
     let object_store = Arc::new(
         parse_remote_object_store(
-            opts.state_store
+            config
+                .compactor
+                .state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
@@ -122,7 +122,7 @@ pub async fn compactor_serve(
         compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(
-            opts.compaction_worker_threads_number,
+            config.compactor.compaction_worker_threads_number,
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         read_memory_limiter: memory_limiter,
@@ -132,7 +132,7 @@ pub async fn compactor_serve(
     let compactor_context = Arc::new(CompactorContext::with_config(
         context,
         CompactorRuntimeConfig {
-            max_concurrent_task_number: opts.max_concurrent_task_number,
+            max_concurrent_task_number: config.compactor.max_concurrent_task_number,
         },
     ));
     let sub_tasks = vec![
@@ -176,9 +176,9 @@ pub async fn compactor_serve(
     });
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.compactor.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
-            opts.prometheus_listener_addr.clone(),
+            config.compactor.prometheus_listener_addr.clone(),
             registry.clone(),
         );
     }

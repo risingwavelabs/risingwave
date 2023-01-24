@@ -30,6 +30,7 @@ pub mod server;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
+use risingwave_common::config::{OverwriteConfig, RwConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
@@ -101,6 +102,10 @@ pub struct ComputeNodeOpts {
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, default_value_t = default_parallelism())]
     pub parallelism: usize,
+}
+
+impl OverwriteConfig for ComputeNodeOpts {
+    fn overwrite(self, _config: &mut RwConfig) {}
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {

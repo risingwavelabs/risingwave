@@ -17,39 +17,35 @@ mod rpc;
 mod server;
 
 use clap::Parser;
+use risingwave_common::config::{load_config, OverwriteConfig, RwConfig};
 
 use crate::server::compactor_serve;
 
-/// Command-line arguments for compute-node.
+/// CLI argguments received by meta node. Overwrites fields in
+/// [`risingwave_common::config::CompactorConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct CompactorOpts {
-    // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:6660")]
-    pub host: String,
+    #[clap(long)]
+    pub listen_addr: Option<String>,
 
-    // Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
-    // TODO: This is currently unused.
     #[clap(long)]
-    pub port: Option<u16>,
+    pub state_store: Option<String>,
 
-    #[clap(long, default_value = "")]
-    pub state_store: String,
+    #[clap(long)]
+    pub prometheus_listener_addr: Option<String>,
 
-    #[clap(long, default_value = "127.0.0.1:1260")]
-    pub prometheus_listener_addr: String,
+    #[clap(long)]
+    pub metrics_level: Option<u32>,
 
-    #[clap(long, default_value = "0")]
-    pub metrics_level: u32,
-
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
-    pub meta_address: String,
+    #[clap(long)]
+    pub meta_address: Option<String>,
 
     /// It's a hint used by meta node.
-    #[clap(long, default_value = "16")]
-    pub max_concurrent_task_number: u64,
+    #[clap(long)]
+    pub max_concurrent_task_number: Option<u64>,
 
     #[clap(long)]
     pub compaction_worker_threads_number: Option<usize>,
@@ -57,11 +53,38 @@ pub struct CompactorOpts {
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    ///
-    /// Note that internal system parameters should be defined in the configuration file at
-    /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+}
+
+impl OverwriteConfig for CompactorOpts {
+    fn overwrite(self, config: &mut RwConfig) {
+        let mut c = &mut config.compactor;
+        if let Some(v) = self.listen_addr {
+            c.listen_addr = v;
+        }
+        if self.client_address.is_some() {
+            c.client_address = self.client_address;
+        }
+        if let Some(v) = self.state_store {
+            c.state_store = v;
+        }
+        if let Some(v) = self.prometheus_listener_addr {
+            c.prometheus_listener_addr = v;
+        }
+        if let Some(v) = self.metrics_level {
+            c.metrics_level = v;
+        }
+        if let Some(v) = self.meta_address {
+            c.meta_address = v;
+        }
+        if let Some(v) = self.max_concurrent_task_number {
+            c.max_concurrent_task_number = v;
+        }
+        if self.compaction_worker_threads_number.is_some() {
+            c.compaction_worker_threads_number = self.compaction_worker_threads_number;
+        }
+    }
 }
 
 use std::future::Future;
@@ -71,24 +94,26 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        tracing::info!("meta address: {}", opts.meta_address.clone());
+        let config = load_config(&opts.config_path.clone(), Some(opts));
+        tracing::info!("meta address: {}", config.compactor.meta_address);
 
-        let listen_address = opts.host.parse().unwrap();
+        let listen_address = config.compactor.listen_addr.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
 
-        let client_address = opts
+        let client_address = config
+            .compactor
             .client_address
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("Client address is not specified, defaulting to listen address");
+                &config.compactor.listen_addr
             })
             .parse()
             .unwrap();
         tracing::info!("Client address is {}", client_address);
 
         let (join_handle, observer_join_handle, _shutdown_sender) =
-            compactor_serve(listen_address, client_address, opts).await;
+            compactor_serve(listen_address, client_address, config).await;
 
         join_handle.await.unwrap();
         observer_join_handle.await.unwrap();

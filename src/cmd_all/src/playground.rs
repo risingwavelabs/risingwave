@@ -155,7 +155,7 @@ pub async fn playground() -> Result<()> {
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
 
-                let _config = load_config(&opts.config_path);
+                let _config = load_config(&opts.config_path.clone(), Some(opts.clone()));
 
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {

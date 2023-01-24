@@ -25,7 +25,7 @@ use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig};
+use risingwave_common::config::{load_config, StorageConfig, NO_OVERWRITE};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -83,7 +83,7 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
     })
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, NO_OVERWRITE);
     let mut storage_config = config.storage;
     storage_config.enable_state_store_v1 = false;
     let compaction_config = CompactionConfigBuilder::new().build();

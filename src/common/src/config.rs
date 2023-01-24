@@ -19,6 +19,7 @@
 
 use std::fs;
 
+use clap::ArgEnum;
 use serde::{Deserialize, Serialize};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -27,8 +28,10 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
+/// For non-user-facing components where the CLI arguments do not override the config file.
+pub const NO_OVERWRITE: Option<NoOverwrite> = None;
 
-pub fn load_config(path: &str) -> RwConfig
+pub fn load_config(path: &str, cli_overwrite: Option<impl OverwriteConfig>) -> RwConfig
 where
 {
     if path.is_empty() {
@@ -37,7 +40,12 @@ where
     }
     let config_str = fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-    toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+    let mut config =
+        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e));
+    if let Some(cli_overwrite) = cli_overwrite {
+        cli_overwrite.overwrite(&mut config);
+    }
+    config
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
@@ -46,9 +54,6 @@ where
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
-
-    #[serde(default)]
-    pub meta: MetaConfig,
 
     #[serde(default)]
     pub batch: BatchConfig,
@@ -61,12 +66,78 @@ pub struct RwConfig {
 
     #[serde(default)]
     pub backup: BackupConfig,
+
+    #[serde(default)]
+    pub meta: MetaConfig,
+
+    #[serde(default)]
+    pub compactor: CompactorConfig,
 }
 
-/// The section `[meta]` in `risingwave.toml`.
+pub trait OverwriteConfig {
+    fn overwrite(self, config: &mut RwConfig);
+}
+
+/// A dummy struct for `NO_OVERWRITE`. Do NOT use it directly.
+#[derive(Clone, Copy)]
+pub struct NoOverwrite {}
+
+impl OverwriteConfig for NoOverwrite {
+    fn overwrite(self, _config: &mut RwConfig) {}
+}
+
+#[derive(Copy, Clone, Debug, ArgEnum, Serialize, Deserialize)]
+pub enum MetaBackend {
+    Mem,
+    Etcd,
+}
+
+/// The section `[meta]` in `risingwave.toml`. This section only applies to the meta node.
+/// A subset of the configs can be overwritten by CLI arguments.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
+    // Below configs are CLI configurable.
+    #[serde(default = "default::meta::listen_addr")]
+    pub listen_addr: String,
+
+    pub host: Option<String>,
+
+    pub endpoint: Option<String>,
+
+    pub dashboard_host: Option<String>,
+
+    pub prometheus_host: Option<String>,
+
+    #[serde(default = "default::meta::backend")]
+    pub backend: MetaBackend,
+
+    #[serde(default = "default::meta::etcd_endpoints")]
+    pub etcd_endpoints: String,
+
+    /// Whether to enable authentication with etcd. By default disabled.
+    #[serde(default)]
+    pub etcd_auth: bool,
+
+    /// Username of etcd, required when --etcd-auth is enabled.
+    #[serde(default = "default::meta::etcd_username")]
+    pub etcd_username: String,
+
+    /// Password of etcd, required when --etcd-auth is enabled.
+    // TODO: it may be unsafe to put password in a file
+    #[serde(default = "default::meta::etcd_password")]
+    pub etcd_password: String,
+
+    pub dashboard_ui_path: Option<String>,
+
+    /// For dashboard service to fetch cluster info.
+    pub prometheus_endpoint: Option<String>,
+
+    /// Endpoint of the connector node, there will be a sidecar connector node
+    /// colocated with Meta node in the cloud environment
+    pub connector_rpc_endpoint: Option<String>,
+
+    // Below configs are NOT CLI configurable.
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
     #[serde(default = "default::meta::min_sst_retention_time_sec")]
@@ -114,6 +185,41 @@ pub struct MetaConfig {
 }
 
 impl Default for MetaConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+/// The section `[compactor]` in `risingwave.toml`. This section only applies to the compactor.
+/// A subset of the configs can be overwritten by CLI arguments.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactorConfig {
+    // Below configs are CLI configurable.
+    #[serde(default = "default::compactor::listen_addr")]
+    pub listen_addr: String,
+
+    pub client_address: Option<String>,
+
+    #[serde(default = "default::compactor::state_store")]
+    pub state_store: String,
+
+    #[serde(default = "default::compactor::prometheus_listen_addr")]
+    pub prometheus_listener_addr: String,
+
+    #[serde(default = "default::compactor::metrics_level")]
+    pub metrics_level: u32,
+
+    #[serde(default = "default::compactor::meta_address")]
+    pub meta_address: String,
+
+    #[serde(default = "default::compactor::max_concurrent_task_number")]
+    pub max_concurrent_task_number: u64,
+
+    pub compaction_worker_threads_number: Option<usize>,
+}
+
+impl Default for CompactorConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -382,6 +488,28 @@ impl Default for BackupConfig {
 
 mod default {
     pub mod meta {
+        use crate::config::MetaBackend;
+
+        pub fn listen_addr() -> String {
+            "127.0.9.1:5690".to_string()
+        }
+
+        pub fn backend() -> MetaBackend {
+            MetaBackend::Mem
+        }
+
+        pub fn etcd_endpoints() -> String {
+            "".to_string()
+        }
+
+        pub fn etcd_username() -> String {
+            "".to_string()
+        }
+
+        pub fn etcd_password() -> String {
+            "".to_string()
+        }
+
         pub fn min_sst_retention_time_sec() -> u64 {
             604800
         }
@@ -408,6 +536,33 @@ mod default {
 
         pub fn node_num_monitor_interval_sec() -> u64 {
             10
+        }
+    }
+
+    pub mod compactor {
+
+        pub fn listen_addr() -> String {
+            "127.0.0.1:6660".to_string()
+        }
+
+        pub fn state_store() -> String {
+            "".to_string()
+        }
+
+        pub fn prometheus_listen_addr() -> String {
+            "127.0.0.1:1260".to_string()
+        }
+
+        pub fn metrics_level() -> u32 {
+            0
+        }
+
+        pub fn meta_address() -> String {
+            "http://127.0.0.1:5690".to_string()
+        }
+
+        pub fn max_concurrent_task_number() -> u64 {
+            16
         }
     }
 

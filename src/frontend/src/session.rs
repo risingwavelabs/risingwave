@@ -143,7 +143,7 @@ impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(&opts.config_path);
+        let config = load_config(&opts.config_path.clone(), Some(opts.clone()));
         tracing::info!(
             "Starting frontend node with\nfrontend config {:?}",
             config.server

@@ -48,23 +48,19 @@ mod stream;
 
 use std::time::Duration;
 
-use clap::{ArgEnum, Parser};
+use clap::Parser;
 pub use error::{MetaError, MetaResult};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
-#[derive(Copy, Clone, Debug, ArgEnum)]
-pub enum Backend {
-    Mem,
-    Etcd,
-}
-
+/// CLI argguments received by meta node. Overwrites fields in
+/// [`risingwave_common::config::MetaConfig`].
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:5690")]
-    listen_addr: String,
+    #[clap(long)]
+    listen_addr: Option<String>,
 
     #[clap(long)]
     host: Option<String>,
@@ -78,79 +74,122 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     prometheus_host: Option<String>,
 
-    #[clap(long, arg_enum, default_value_t = Backend::Mem)]
-    backend: Backend,
+    #[clap(long, arg_enum)]
+    backend: Option<MetaBackend>,
 
-    #[clap(long, default_value_t = String::from(""))]
-    etcd_endpoints: String,
-
-    /// Enable authentication with etcd. By default disabled.
     #[clap(long)]
-    etcd_auth: bool,
+    etcd_endpoints: Option<String>,
 
-    /// Username of etcd, required when --etcd-auth is enabled.
+    #[clap(long)]
+    etcd_auth: Option<bool>,
+
     /// Default value is read from the 'ETCD_USERNAME' environment variable.
-    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
-    etcd_username: String,
+    #[clap(long, env = "ETCD_USERNAME")]
+    etcd_username: Option<String>,
 
-    /// Password of etcd, required when --etcd-auth is enabled.
     /// Default value is read from the 'ETCD_PASSWORD' environment variable.
-    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
-    etcd_password: String,
+    #[clap(long, env = "ETCD_PASSWORD")]
+    etcd_password: Option<String>,
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
 
-    /// For dashboard service to fetch cluster info.
     #[clap(long)]
     prometheus_endpoint: Option<String>,
 
-    /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
+    /// Default value is read from the 'META_CONNECTOR_RPC_ENDPOINT' environment variable.
     #[clap(long, env = "META_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    ///
-    /// Note that internal system parameters should be defined in the configuration file at
-    /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+}
+
+impl OverwriteConfig for MetaNodeOpts {
+    fn overwrite(self, config: &mut RwConfig) {
+        let mut c = &mut config.meta;
+        if let Some(v) = self.listen_addr {
+            c.listen_addr = v;
+        }
+        if self.host.is_some() {
+            c.host = self.host;
+        }
+        if self.endpoint.is_some() {
+            c.endpoint = self.endpoint;
+        }
+        if self.dashboard_host.is_some() {
+            c.dashboard_host = self.dashboard_host;
+        }
+        if self.prometheus_host.is_some() {
+            c.prometheus_host = self.prometheus_host;
+        }
+        if let Some(v) = self.backend {
+            c.backend = v;
+        }
+        if let Some(v) = self.etcd_endpoints {
+            c.etcd_endpoints = v;
+        }
+        if let Some(v) = self.etcd_auth {
+            c.etcd_auth = v;
+        }
+        if let Some(v) = self.etcd_username {
+            c.etcd_username = v;
+        }
+        if let Some(v) = self.etcd_password {
+            c.etcd_password = v;
+        }
+        if self.dashboard_ui_path.is_some() {
+            c.dashboard_ui_path = self.dashboard_ui_path;
+        }
+        if self.prometheus_endpoint.is_some() {
+            c.prometheus_endpoint = self.prometheus_endpoint;
+        }
+        if self.connector_rpc_endpoint.is_some() {
+            c.connector_rpc_endpoint = self.connector_rpc_endpoint;
+        }
+    }
 }
 
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::config::load_config;
+use risingwave_common::config::{load_config, MetaBackend, OverwriteConfig, RwConfig};
 
 /// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let config = load_config(&opts.config_path);
+        let config = load_config(&opts.config_path, Some(opts.clone()));
         tracing::info!("Starting meta node with config {:?}", config);
-        tracing::info!("Starting meta node with options {:?}", opts);
-        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
-        let endpoint = opts.endpoint.unwrap_or_else(|| opts.listen_addr.clone());
-        let listen_addr = opts.listen_addr.parse().unwrap();
-        let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
-        let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let backend = match opts.backend {
-            Backend::Etcd => MetaStoreBackend::Etcd {
-                endpoints: opts
+        let meta_addr = config
+            .meta
+            .host
+            .unwrap_or_else(|| config.meta.listen_addr.clone());
+        let endpoint = config
+            .meta
+            .endpoint
+            .unwrap_or_else(|| config.meta.listen_addr.clone());
+        let listen_addr = config.meta.listen_addr.parse().unwrap();
+        let dashboard_addr = config.meta.dashboard_host.map(|x| x.parse().unwrap());
+        let prometheus_addr = config.meta.prometheus_host.map(|x| x.parse().unwrap());
+        let backend = match config.meta.backend {
+            MetaBackend::Etcd => MetaStoreBackend::Etcd {
+                endpoints: config
+                    .meta
                     .etcd_endpoints
                     .split(',')
                     .map(|x| x.to_string())
                     .collect(),
-                credentials: match opts.etcd_auth {
-                    true => Some((opts.etcd_username, opts.etcd_password)),
+                credentials: match config.meta.etcd_auth {
+                    true => Some((config.meta.etcd_username, config.meta.etcd_password)),
                     false => None,
                 },
             },
-            Backend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Mem => MetaStoreBackend::Mem,
         };
 
         let max_heartbeat_interval =
@@ -167,7 +206,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             listen_addr,
             prometheus_addr,
             dashboard_addr,
-            ui_path: opts.dashboard_ui_path,
+            ui_path: config.meta.dashboard_ui_path,
         };
         let (join_handle, leader_lost_handle, _shutdown_send) = rpc_serve(
             add_info,
@@ -189,8 +228,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
-                prometheus_endpoint: opts.prometheus_endpoint,
-                connector_rpc_endpoint: opts.connector_rpc_endpoint,
+                prometheus_endpoint: config.meta.prometheus_endpoint,
+                connector_rpc_endpoint: config.meta.connector_rpc_endpoint,
                 backup_storage_url: config.backup.storage_url,
                 backup_storage_directory: config.backup.storage_directory,
             },
