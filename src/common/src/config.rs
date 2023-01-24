@@ -587,7 +587,7 @@ mod default {
         use crate::config::MetaBackend;
 
         pub fn listen_addr() -> String {
-            "127.0.9.1:5690".to_string()
+            "127.0.0.1:5690".to_string()
         }
 
         pub fn backend() -> MetaBackend {
