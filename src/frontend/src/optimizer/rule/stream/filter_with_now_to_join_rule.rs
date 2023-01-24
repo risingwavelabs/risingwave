@@ -16,7 +16,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{try_derive_watermark, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -29,7 +29,6 @@ pub struct FilterWithNowToJoinRule {}
 impl Rule for FilterWithNowToJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        // if filter.predicate().conjunctions.iter().(|)
 
         let lhs_len = filter.base.schema().len();
 
@@ -38,21 +37,33 @@ impl Rule for FilterWithNowToJoinRule {
 
         let mut rewriter = NowAsInputRef::new(lhs_len);
 
-        // If the `now` is not a valid dynamic filter expression,
+        // If the `now` is not a valid dynamic filter expression, we will not push it down.
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
-                now_filters.push(
-                    FunctionCall::new(cmp, vec![input_expr, now_expr])
-                        .unwrap()
-                        .into(),
-                );
+
+                // as a sanity check, ensure that this expression will derive a watermark
+                // on the output of the now executor
+                debug_assert_eq!(try_derive_watermark(&now_expr), Some(lhs_len));
+
+                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
             } else {
                 remainder.push(expr.clone());
             }
         });
 
-        if now_filters.is_empty() {
+        // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former
+        // will introduce a watermark that can reduce state (since `now_expr` is monotonically
+        // increasing)
+        now_filters.sort_by_key(|l| rank_cmp(l.get_expr_type()));
+
+        // Ignore no now filter & forbid now filters that do not create a watermark
+        if now_filters.is_empty()
+            || !matches!(
+                now_filters[0].get_expr_type(),
+                Type::GreaterThan | Type::GreaterThanOrEqual
+            )
+        {
             return None;
         }
         let mut new_plan = plan.inputs()[0].clone();
@@ -63,7 +74,7 @@ impl Rule for FilterWithNowToJoinRule {
                 LogicalNow::new(plan.ctx()).into(),
                 JoinType::LeftSemi,
                 Condition {
-                    conjunctions: vec![now_filter],
+                    conjunctions: vec![now_filter.into()],
                 },
             )
             .into()
@@ -86,6 +97,14 @@ impl Rule for FilterWithNowToJoinRule {
 impl FilterWithNowToJoinRule {
     pub fn create() -> BoxedRule {
         Box::new(FilterWithNowToJoinRule {})
+    }
+}
+
+fn rank_cmp(cmp: Type) -> u8 {
+    match cmp {
+        Type::GreaterThan | Type::GreaterThanOrEqual => 0,
+        Type::LessThan | Type::LessThanOrEqual => 1,
+        _ => 2,
     }
 }
 

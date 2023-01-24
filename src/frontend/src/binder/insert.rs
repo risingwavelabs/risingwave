@@ -47,8 +47,9 @@ pub struct BoundInsert {
 
     pub source: BoundQuery,
 
-    /// Used as part of an extra `Project` when the column types of `source` query does not match
-    /// `table_source`. This does not include a simple `VALUE`. See comments in code for details.
+    /// Used as part of an extra `Project` when the column types of the query does not match
+    /// those of the table. This does not include a simple `VALUE`. See comments in code for
+    /// details.
     pub cast_exprs: Vec<ExprImpl>,
 
     // used for the 'RETURNING" keyword to indicate the returning items and schema
@@ -68,7 +69,6 @@ impl Binder {
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        // let table_source = self.bind_table_source(schema_name.as_deref(), &table_name)?;
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
