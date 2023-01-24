@@ -20,6 +20,8 @@ use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::catalog::ColumnId;
+use crate::row::{Row, RowDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -236,6 +238,42 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     Ok(Decimal::unordered_deserialize(bytes))
 }
 
+pub trait ValueRowSerializer {
+    fn new(column_ids: &[ColumnId]) -> Self;
+    fn serialize_row(&self, row: impl Row) -> Vec<u8>;
+}
+
+pub trait ValueRowDeserializer {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self;
+    fn deserialize_row(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
+}
+
+pub struct Serializer {}
+
+impl ValueRowSerializer for Serializer {
+    fn new(_column_ids: &[ColumnId]) -> Self {
+        Serializer {}
+    }
+
+    fn serialize_row(&self, row: impl Row) -> Vec<u8> {
+        let mut buf = vec![];
+        for datum in row.iter() {
+            serialize_datum_into(datum, &mut buf);
+        }
+        buf
+    }
+}
+
+impl ValueRowDeserializer for RowDeserializer {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> Self {
+        RowDeserializer::new(schema.to_vec())
+    }
+
+    fn deserialize_row(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use row_encoding;
@@ -255,7 +293,7 @@ mod tests {
         let mut array = vec![];
         let serializer = row_encoding::Serializer::new(&column_ids);
         for row in &rows {
-            let row_bytes = serializer.serialize_row_column_aware(row);
+            let row_bytes = serializer.serialize_row(row);
             array.push(row_bytes);
         }
         let zero_le_bytes = 0_i32.to_le_bytes();
@@ -296,10 +334,10 @@ mod tests {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
         let serializer = row_encoding::Serializer::new(&column_ids);
-        let row_bytes = serializer.serialize_row_column_aware(row1);
+        let row_bytes = serializer.serialize_row(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let deserializer = row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
-        let decoded = deserializer.decode(&row_bytes[..]);
+        let decoded = deserializer.deserialize_row(&row_bytes[..]);
         assert_eq!(
             decoded.unwrap(),
             vec![Some(Int16(5)), Some(Utf8("abc".into()))]

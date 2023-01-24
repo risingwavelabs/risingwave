@@ -99,7 +99,20 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    pub fn new(column_ids: &[ColumnId]) -> Self {
+    fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
+        let mut row_bytes = vec![];
+        row_bytes.put_u8(encoding.flag);
+        row_bytes.extend(self.encoded_datum_num.iter());
+        row_bytes.extend(self.encoded_column_ids.iter());
+        row_bytes.extend(encoding.offsets.iter());
+        row_bytes.extend(encoding.buf.iter());
+
+        row_bytes
+    }
+}
+
+impl ValueRowSerializer for Serializer {
+    fn new(column_ids: &[ColumnId]) -> Self {
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
@@ -115,34 +128,23 @@ impl Serializer {
         }
     }
 
-    pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
+    fn serialize_row(&self, row: impl Row) -> Vec<u8> {
         assert_eq!(row.len(), self.datum_num);
         let mut encoding = RowEncoding::new();
         encoding.encode(row.iter());
         self.serialize(encoding)
     }
-
-    fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
-        let mut row_bytes = vec![];
-        row_bytes.put_u8(encoding.flag);
-        row_bytes.extend(self.encoded_datum_num.iter());
-        row_bytes.extend(self.encoded_column_ids.iter());
-        row_bytes.extend(encoding.offsets.iter());
-        row_bytes.extend(encoding.buf.iter());
-
-        row_bytes
-    }
 }
 
 /// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
 /// Should non-null default values be specified, a new field could be added to Deserializer
-pub struct Deserializer<'a> {
+pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
-    schema: &'a [DataType],
+    schema: Vec<DataType>,
 }
 
-impl<'a> Deserializer<'a> {
-    pub fn new(column_ids: &'a [ColumnId], schema: &'a [DataType]) -> Self {
+impl ValueRowDeserializer for Deserializer {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self {
         assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids
@@ -150,11 +152,11 @@ impl<'a> Deserializer<'a> {
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<BTreeMap<_, _>>(),
-            schema,
+            schema: schema.to_vec(),
         }
     }
 
-    pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+    fn deserialize_row(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = encoded_bytes.get_u8();
         let offset_bytes = match flag & 0b11 {
             0b01 => 1,
