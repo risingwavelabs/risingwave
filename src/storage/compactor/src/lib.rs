@@ -25,7 +25,7 @@ use crate::server::compactor_serve;
 /// [`risingwave_common::config::CompactorConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct CompactorOpts {
-    #[clap(long)]
+    #[clap(long = "host")]
     pub listen_addr: Option<String>,
 
     #[clap(long)]

@@ -214,8 +214,8 @@ pub struct FrontendConfig {
 
     pub client_address: Option<String>,
 
-    #[serde(default = "default::frontend::meta_address")]
-    pub meta_address: String,
+    #[serde(default = "default::frontend::meta_addr")]
+    pub meta_addr: String,
 
     #[serde(default = "default::frontend::prometheus_listen_addr")]
     pub prometheus_listener_addr: String,
@@ -252,8 +252,8 @@ pub struct ComputeNodeConfig {
     #[serde(default = "default::compute_node::metrics_level")]
     pub metrics_level: u32,
 
-    #[serde(default = "default::compute_node::meta_address")]
-    pub meta_address: String,
+    #[serde(default = "default::compute_node::meta_addr")]
+    pub meta_addr: String,
 
     /// Enable reporting tracing information to jaeger.
     #[serde(default = "default::compute_node::enable_jaeger_tracing")]
@@ -641,7 +641,7 @@ mod default {
             "127.0.0.1:4566".to_string()
         }
 
-        pub fn meta_address() -> String {
+        pub fn meta_addr() -> String {
             "http://127.0.0.1:5690".to_string()
         }
 
@@ -679,7 +679,7 @@ mod default {
             0
         }
 
-        pub fn meta_address() -> String {
+        pub fn meta_addr() -> String {
             "http://127.0.0.1:5690".to_string()
         }
 

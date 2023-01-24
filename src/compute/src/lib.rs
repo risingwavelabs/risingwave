@@ -39,7 +39,7 @@ use risingwave_common::util::resource_util::memory::total_memory_available_bytes
 #[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
-    #[clap(long)]
+    #[clap(long = "host")]
     pub listen_addr: Option<String>,
 
     #[clap(long)]
@@ -102,7 +102,7 @@ impl OverwriteConfig for ComputeNodeOpts {
             c.metrics_level = v;
         }
         if let Some(v) = self.meta_address {
-            c.meta_address = v;
+            c.meta_addr = v;
         }
         if let Some(v) = self.enable_jaeger_tracing {
             c.enable_jaeger_tracing = v;

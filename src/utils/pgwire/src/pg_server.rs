@@ -102,6 +102,7 @@ pub async fn pg_serve<VS>(
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
 {
+    println!("meta addr: {:?}", addr);
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
     tracing::info!("Server Listening at {}", addr);

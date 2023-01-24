@@ -82,7 +82,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let meta_client = MetaClient::register_new(
-        &config.compute_node.meta_address,
+        &config.compute_node.meta_addr,
         WorkerType::ComputeNode,
         &client_addr,
         config.compute_node.parallelism,

@@ -70,14 +70,14 @@ use session::SessionManagerImpl;
 /// [`risingwave_common::config::CompactorConfig`].
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
-    #[clap(long)]
+    #[clap(long = "host")]
     pub listen_addr: Option<String>,
 
     #[clap(long)]
     pub client_address: Option<String>,
 
     #[clap(long)]
-    pub meta_address: Option<String>,
+    pub meta_addr: Option<String>,
 
     #[clap(long)]
     pub prometheus_listener_addr: Option<String>,
@@ -113,8 +113,8 @@ impl OverwriteConfig for FrontendOpts {
         if self.client_address.is_some() {
             c.client_address = self.client_address;
         }
-        if let Some(v) = self.meta_address {
-            c.meta_address = v;
+        if let Some(v) = self.meta_addr {
+            c.meta_addr = v;
         }
         if let Some(v) = self.prometheus_listener_addr {
             c.prometheus_listener_addr = v;
@@ -139,9 +139,9 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         let config = load_config(&opts.config_path.clone(), Some(opts));
-        let meta_addr = config.frontend.meta_address.clone();
+        let listen_addr = config.frontend.listen_addr.clone();
         let session_mgr = Arc::new(SessionManagerImpl::new(config).await.unwrap());
-        pg_serve(&meta_addr, session_mgr, Some(TlsConfig::new_default()))
+        pg_serve(&listen_addr, session_mgr, Some(TlsConfig::new_default()))
             .await
             .unwrap();
     })
