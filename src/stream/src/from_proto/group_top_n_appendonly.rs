@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{ActorContextRef, GroupTopNExecutor};
+use crate::executor::{ActorContextRef, AppendOnlyGroupTopNExecutor};
 use crate::task::AtomicU64Ref;
 
 pub struct AppendOnlyGroupTopNExecutorBuilder;
