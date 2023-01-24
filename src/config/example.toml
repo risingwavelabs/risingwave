@@ -3,8 +3,6 @@ heartbeat_interval_ms = 1000
 max_heartbeat_interval_secs = 600
 connection_pool_size = 16
 
-[meta]
-
 [batch]
 
 [streaming]
@@ -41,3 +39,15 @@ stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 unsafe_stream_extreme_cache_size = 1024
 stream_chunk_size = 1024
+
+[meta]
+listen_addr = "127.0.9.1:5690"
+
+[frontend]
+listen_addr = "127.0.0.1:4566"
+
+[compute_node]
+listen_addr = "127.0.0.1:5688"
+
+[compactor]
+listen_addr = "127.0.0.1:6660"
