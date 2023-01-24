@@ -128,7 +128,7 @@ impl ValueRowSerializer for Serializer {
         }
     }
 
-    fn serialize_row(&self, row: impl Row) -> Vec<u8> {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
         assert_eq!(row.len(), self.datum_num);
         let mut encoding = RowEncoding::new();
         encoding.encode(row.iter());
@@ -156,7 +156,7 @@ impl ValueRowDeserializer for Deserializer {
         }
     }
 
-    fn deserialize_row(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+    fn deserialize(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = encoded_bytes.get_u8();
         let offset_bytes = match flag & 0b11 {
             0b01 => 1,

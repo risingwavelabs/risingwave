@@ -79,7 +79,7 @@ fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
     let seralizer = row_encoding::Serializer::new(&c.column_ids);
     let mut array = vec![];
     for row in &c.rows {
-        let row_bytes = seralizer.serialize_row(row);
+        let row_bytes = seralizer.serialize(row);
         array.push(row_bytes);
     }
     array
@@ -169,7 +169,7 @@ fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>
     let deserializer = row_encoding::Deserializer::new(&c.needed_ids, &c.needed_schema);
     let mut res = vec![];
     for byte in bytes {
-        let row = deserializer.deserialize_row(byte)?;
+        let row = deserializer.deserialize(byte)?;
         res.push(row);
     }
     Ok(res)

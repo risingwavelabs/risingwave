@@ -34,6 +34,9 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::{
+    BasicSerializer, ValueRowDeserializer, ValueRowSerializer,
+};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
@@ -58,7 +61,12 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTable<S, Se, De>
+where
+    S: StateStore,
+    Se: ValueRowSerializer,
+    De: ValueRowDeserializer,
+{
     /// Id for this table.
     table_id: TableId,
 
@@ -72,7 +80,10 @@ pub struct StateTable<S: StateStore> {
     pk_serde: OrderedRowSerde,
 
     /// Row deserializer with value encoding
-    row_deserializer: RowDeserializer,
+    row_serializer: Se,
+
+    /// Row deserializer with value encoding
+    row_deserializer: De,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -123,7 +134,12 @@ pub struct StateTable<S: StateStore> {
 }
 
 // initialize
-impl<S: StateStore> StateTable<S> {
+impl<S, Se, De> StateTable<S, Se, De>
+where
+    S: StateStore,
+    Se: ValueRowSerializer,
+    De: ValueRowDeserializer,
+{
     /// Create state table from table catalog and store.
     pub async fn from_table_catalog(
         table_catalog: &Table,
@@ -214,6 +230,11 @@ impl<S: StateStore> StateTable<S> {
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect();
 
+        let column_ids = input_value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].column_id.clone())
+            .collect();
+
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
         // if value_indices is the no shuffle full columns.
@@ -229,7 +250,8 @@ impl<S: StateStore> StateTable<S> {
             mem_table: MemTable::new(),
             local_store: local_state_store,
             pk_serde,
-            row_deserializer: RowDeserializer::new(data_types),
+            row_serializer: Se::new(column_ids),
+            row_deserializer: De::new(column_ids, data_types),
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -404,13 +426,22 @@ impl<S: StateStore> StateTable<S> {
                 .collect(),
             None => table_columns.iter().map(|c| c.data_type.clone()).collect(),
         };
+
+        let column_ids = match &value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .map(|idx| table_columns[*idx].column_id.clone())
+                .collect(),
+            None => table_columns.iter().map(|c| c.column_id.clone()).collect(),
+        };
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
             mem_table: MemTable::new(),
             local_store: local_state_store,
             pk_serde,
-            row_deserializer: RowDeserializer::new(data_types),
+            row_serializer: Se::new(column_ids),
+            row_deserializer: De::new(column_ids, data_types),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -504,7 +535,12 @@ impl<S: StateStore> StateTable<S> {
 const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 // point get
-impl<S: StateStore> StateTable<S> {
+impl<S, Se, De> StateTable<S, Se, De>
+where
+    S: StateStore,
+    Se: ValueRowSerializer,
+    De: ValueRowDeserializer,
+{
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
@@ -595,7 +631,12 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 // write
-impl<S: StateStore> StateTable<S> {
+impl<S, Se, De> StateTable<S, Se, De>
+where
+    S: StateStore,
+    Se: ValueRowSerializer,
+    De: ValueRowDeserializer,
+{
     #[expect(clippy::boxed_local)]
     fn handle_mem_table_error(&self, e: Box<MemTableError>) {
         match *e {
@@ -614,11 +655,12 @@ impl<S: StateStore> StateTable<S> {
     }
 
     fn serialize_value(&self, value: impl Row) -> Bytes {
-        if let Some(value_indices) = self.value_indices.as_ref() {
-            value.project(value_indices).value_serialize_bytes()
+        let row = if let Some(value_indices) = self.value_indices.as_ref() {
+            value.project(value_indices)
         } else {
-            value.value_serialize_bytes()
-        }
+            value
+        };
+        self.row_serializer.serialize(row).freeze()
     }
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
@@ -955,7 +997,12 @@ fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U
 }
 
 // Iterator functions
-impl<S: StateStore> StateTable<S> {
+impl<S, Se, De> StateTable<S, Se, De>
+where
+    S: StateStore,
+    Se: ValueRowSerializer,
+    De: ValueRowDeserializer,
+{
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(row::empty()).await
