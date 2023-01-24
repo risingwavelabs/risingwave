@@ -528,7 +528,9 @@ impl Binder {
             None => Err({
                 let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
 
-                let candidates = FUNCTIONS_BKTREE.find(function_name, allowed_distance).map(|(_idx, c)| c);
+                let candidates = FUNCTIONS_BKTREE
+                    .find(function_name, allowed_distance)
+                    .map(|(_idx, c)| c);
 
                 let mut candidates = candidates.peekable();
 
