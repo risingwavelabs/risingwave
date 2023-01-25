@@ -63,13 +63,15 @@ pub enum Backend {
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
+    /// The address for this service to listen to locally
     #[clap(long, default_value = "127.0.0.1:5690")]
-    listen_addr: String,
+    listen_address: String,
 
-    /// The endpoint for this meta node, which also serves as its unique identifier in cluster
-    /// membership and leader election.
-    #[clap(long)]
-    meta_endpoint: Option<String>,
+    /// The address for contacting this instance of the frontend service.
+    /// This also serves as its unique identifier in cluster
+    /// membership and leader election. Must be specified for etcd cluster
+    #[clap(long, required_if_eq("backend", "Backend::Etcd"))]
+    contact_address: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -132,13 +134,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
-        let listen_addr = opts.listen_addr.parse().unwrap();
+        let listen_addr = opts.listen_address.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let (meta_endpoint, backend) = match opts.backend {
+        let (contact_addr, backend) = match opts.backend {
             Backend::Etcd => (
-                opts.meta_endpoint
-                    .expect("meta_endpoint must be specified when using etcd"),
+                opts.contact_address
+                    .expect("contact_address must be specified when using etcd"),
                 MetaStoreBackend::Etcd {
                     endpoints: opts
                         .etcd_endpoints
@@ -152,8 +154,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 },
             ),
             Backend::Mem => (
-                opts.meta_endpoint
-                    .unwrap_or_else(|| opts.listen_addr.clone()),
+                opts.contact_address
+                    .unwrap_or_else(|| opts.listen_address.clone()),
                 MetaStoreBackend::Mem,
             ),
         };
@@ -167,7 +169,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            meta_endpoint,
+            contact_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,

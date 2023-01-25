@@ -75,7 +75,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         tracing::info!("meta address: {}", opts.meta_address.clone());
 
-        let listen_address = opts.host.parse().unwrap();
+        let listen_address = opts.listen_address.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
 
         let contact_address = opts
@@ -90,7 +90,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         tracing::info!(" address is {}", contact_address);
 
         let (join_handle, observer_join_handle, _shutdown_sender) =
-            compactor_serve(listen_address, client_address, opts).await;
+            compactor_serve(listen_address, contact_address, opts).await;
 
         join_handle.await.unwrap();
         observer_join_handle.await.unwrap();

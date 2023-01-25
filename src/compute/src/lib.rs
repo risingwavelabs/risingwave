@@ -138,22 +138,22 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("Compute node options: {:?}", opts);
         validate_opts(&opts);
 
-        let listen_address = opts.host.parse().unwrap();
+        let listen_address = opts.listen_address.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
 
-        let client_address = opts
-            .client_address
+        let contact_address = opts
+            .contact_address
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("Contact address is not specified, defaulting to listen_address");
+                &opts.listen_address
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", client_address);
+        tracing::info!("contact address is {}", contact_address);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_address, client_address, opts).await;
+            compute_node_serve(listen_address, contact_address, opts).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

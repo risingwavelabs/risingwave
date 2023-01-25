@@ -58,14 +58,14 @@ impl CompactorService {
                 "compactor cannot use in-memory hummock if remote object store is not provided"
             ));
         }
-        cmd.arg("--host")
+        cmd.arg("--listen-address")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
-            .arg("--client-address")
+            .arg("--contact-address")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")
