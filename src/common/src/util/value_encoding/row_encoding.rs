@@ -92,6 +92,7 @@ impl RowEncoding {
 
 /// Column-Aware `Serializer` holds schema related information, and shall be
 /// created again once the schema changes
+#[derive(Clone)]
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
     datum_num: usize,
@@ -138,6 +139,7 @@ impl ValueRowSerializer for Serializer {
 
 /// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
 /// Should non-null default values be specified, a new field could be added to Deserializer
+#[derive(Clone)]
 pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
     schema: Vec<DataType>,

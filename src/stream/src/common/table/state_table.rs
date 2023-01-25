@@ -61,7 +61,7 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S, Se, De>
+pub struct StateTable<S, Se = BasicSerializer, De = RowDeserializer>
 where
     S: StateStore,
     Se: ValueRowSerializer,
@@ -228,12 +228,12 @@ where
         let data_types = input_value_indices
             .iter()
             .map(|idx| table_columns[*idx].data_type.clone())
-            .collect();
+            .collect_vec();
 
         let column_ids = input_value_indices
             .iter()
             .map(|idx| table_columns[*idx].column_id.clone())
-            .collect();
+            .collect_vec();
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
@@ -250,8 +250,8 @@ where
             mem_table: MemTable::new(),
             local_store: local_state_store,
             pk_serde,
-            row_serializer: Se::new(column_ids),
-            row_deserializer: De::new(column_ids, data_types),
+            row_serializer: Se::new(&column_ids),
+            row_deserializer: De::new(&column_ids, &data_types),
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -423,16 +423,22 @@ where
             Some(value_indices) => value_indices
                 .iter()
                 .map(|idx| table_columns[*idx].data_type.clone())
-                .collect(),
-            None => table_columns.iter().map(|c| c.data_type.clone()).collect(),
+                .collect_vec(),
+            None => table_columns
+                .iter()
+                .map(|c| c.data_type.clone())
+                .collect_vec(),
         };
 
         let column_ids = match &value_indices {
             Some(value_indices) => value_indices
                 .iter()
                 .map(|idx| table_columns[*idx].column_id.clone())
-                .collect(),
-            None => table_columns.iter().map(|c| c.column_id.clone()).collect(),
+                .collect_vec(),
+            None => table_columns
+                .iter()
+                .map(|c| c.column_id.clone())
+                .collect_vec(),
         };
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
@@ -440,8 +446,8 @@ where
             mem_table: MemTable::new(),
             local_store: local_state_store,
             pk_serde,
-            row_serializer: Se::new(column_ids),
-            row_deserializer: De::new(column_ids, data_types),
+            row_serializer: Se::new(&column_ids),
+            row_deserializer: De::new(&column_ids, &data_types),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -549,7 +555,7 @@ where
                 let row = self
                     .row_deserializer
                     .deserialize(compacted_row.row.as_ref())?;
-                Ok(Some(row))
+                Ok(Some(OwnedRow::new(row)))
             }
             None => Ok(None),
         }
@@ -655,12 +661,13 @@ where
     }
 
     fn serialize_value(&self, value: impl Row) -> Bytes {
-        let row = if let Some(value_indices) = self.value_indices.as_ref() {
-            value.project(value_indices)
+        if let Some(value_indices) = self.value_indices.as_ref() {
+            self.row_serializer
+                .serialize(value.project(value_indices))
+                .into()
         } else {
-            value
-        };
-        self.row_serializer.serialize(row).freeze()
+            self.row_serializer.serialize(value).into()
+        }
     }
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
@@ -899,7 +906,7 @@ where
 
         if let Some(stored_value) = stored_value {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
-            let in_storage = self.row_deserializer.deserialize(stored_value).unwrap();
+            let in_storage = self.row_deserializer.deserialize(&stored_value).unwrap();
             let to_write = self.row_deserializer.deserialize(value).unwrap();
             panic!(
                 "overwrites an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
@@ -932,7 +939,7 @@ where
         if stored_value.is_none() || stored_value.as_ref().unwrap() != old_row {
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
             let stored_row =
-                stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
+                stored_value.map(|bytes| self.row_deserializer.deserialize(&bytes).unwrap());
             let to_delete = self.row_deserializer.deserialize(old_row).unwrap();
             panic!(
                 "inconsistent delete!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}",
@@ -967,7 +974,7 @@ where
             let (vnode, key) = deserialize_pk_with_vnode(key, &self.pk_serde).unwrap();
             let expected_row = self.row_deserializer.deserialize(old_row).unwrap();
             let stored_row =
-                stored_value.map(|bytes| self.row_deserializer.deserialize(bytes).unwrap());
+                stored_value.map(|bytes| self.row_deserializer.deserialize(&bytes).unwrap());
             let new_row = self.row_deserializer.deserialize(new_row).unwrap();
             panic!(
                 "inconsistent update!\ntable_id: {}, vnode: {}, key: {:?}\nstored value: {:?}\nexpected value: {:?}\nnew value: {:?}",
@@ -1177,19 +1184,23 @@ pub type RowStreamWithPk<'a, S: StateStore> =
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
-struct StateTableRowIter<'a, M, C> {
+struct StateTableRowIter<'a, M, C, De = RowDeserializer>
+where
+    De: ValueRowDeserializer,
+{
     mem_table_iter: M,
     storage_iter: C,
     _phantom: PhantomData<&'a ()>,
-    deserializer: RowDeserializer,
+    deserializer: De,
 }
 
-impl<'a, M, C> StateTableRowIter<'a, M, C>
+impl<'a, M, C, De> StateTableRowIter<'a, M, C, De>
 where
     M: Iterator<Item = (&'a Bytes, &'a KeyOp)>,
     C: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>>,
+    De: ValueRowDeserializer,
 {
-    fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
+    fn new(mem_table_iter: M, storage_iter: C, deserializer: De) -> Self {
         Self {
             mem_table_iter,
             storage_iter,
@@ -1287,20 +1298,28 @@ where
     }
 }
 
-struct StorageIterInner<S: LocalStateStore> {
+struct StorageIterInner<S, De = RowDeserializer>
+where
+    S: LocalStateStore,
+    De: ValueRowDeserializer,
+{
     /// An iterator that returns raw bytes from storage.
     iter: S::IterStream,
 
-    deserializer: RowDeserializer,
+    deserializer: De,
 }
 
-impl<S: LocalStateStore> StorageIterInner<S> {
+impl<S, De> StorageIterInner<S, De>
+where
+    S: LocalStateStore,
+    De: ValueRowDeserializer,
+{
     async fn new(
         store: &S,
         epoch: u64,
         raw_key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-        deserializer: RowDeserializer,
+        deserializer: De,
     ) -> StreamExecutorResult<Self> {
         let iter = store.iter(raw_key_range, epoch, read_options).await?;
         let iter = Self { iter, deserializer };
@@ -1321,7 +1340,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
             .await?
         {
             let row = self.deserializer.deserialize(value.as_ref())?;
-            yield (key, row);
+            yield (key, OwnedRow::new(row));
         }
     }
 }

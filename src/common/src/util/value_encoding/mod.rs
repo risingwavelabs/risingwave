@@ -241,16 +241,17 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     Ok(Decimal::unordered_deserialize(bytes))
 }
 
-pub trait ValueRowSerializer {
+pub trait ValueRowSerializer: Clone {
     fn new(column_ids: &[ColumnId]) -> Self;
     fn serialize(&self, row: impl Row) -> Vec<u8>;
 }
 
-pub trait ValueRowDeserializer {
+pub trait ValueRowDeserializer: Clone {
     fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self;
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
+#[derive(Clone)]
 pub struct BasicSerializer {}
 
 impl ValueRowSerializer for BasicSerializer {

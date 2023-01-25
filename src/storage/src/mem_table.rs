@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::row::RowDeserializer;
+use risingwave_common::util::value_encoding::{ValueRowDeserializer};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -164,19 +164,19 @@ impl KeyOp {
     /// # Panics
     ///
     /// The function will panic if it failed to decode the bytes with provided data types.
-    pub fn debug_fmt(&self, row_deserializer: &RowDeserializer) -> String {
+    pub fn debug_fmt(&self, row_deserializer: &impl ValueRowDeserializer) -> String {
         match self {
             Self::Insert(after) => {
-                let after = row_deserializer.deserialize(after.as_ref());
+                let after = row_deserializer.deserialize(after);
                 format!("Insert({:?})", &after)
             }
             Self::Delete(before) => {
-                let before = row_deserializer.deserialize(before.as_ref());
+                let before = row_deserializer.deserialize(before);
                 format!("Delete({:?})", &before)
             }
             Self::Update((before, after)) => {
-                let after = row_deserializer.deserialize(after.as_ref());
-                let before = row_deserializer.deserialize(before.as_ref());
+                let after = row_deserializer.deserialize(after);
+                let before = row_deserializer.deserialize(before);
                 format!("Update({:?}, {:?})", &before, &after)
             }
         }
