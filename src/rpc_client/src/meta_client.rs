@@ -1133,27 +1133,19 @@ impl GrpcMetaClient {
         }
     }
 
-    // Execute the failover if it is needed. If no failover is needed do nothing
-    // Returns true if failover was needed, else false
+    /// Execute the failover if it is needed. If no failover is needed do nothing
+    /// Returns true if failover was needed, else false
     pub async fn do_failover_if_needed(&self) -> bool {
-        tracing::info!("in GrpcMetaClient.do_failover_if_needed"); // TODO: Remove line
-
         let current_leader = self.try_get_leader_from_connected_node().await;
         let current_leader_clone = current_leader.clone();
-        {
-            let connected_node = self.leader_address.as_ref().lock().await.clone();
-            if current_leader.is_some() && current_leader.unwrap() == connected_node {
-                tracing::info!("failover is NOT needed");
-                return false;
-            }
-            tracing::info!(
-                "failover is NEEDED. Current connected node is {:?}. Leader is {:?}",
-                connected_node,
-                current_leader_clone
-            );
-            // release mutex guard after this scope
-            // TODO: Think I do not need extra scope if I clone. Try removing extra scope
+        let connected_node = self.leader_address.as_ref().lock().await.clone();
+        if current_leader.is_some() && current_leader.unwrap() == connected_node {
+            return false;
         }
+        tracing::warn!(
+            "failing over meta_client. Old meta node was {:?}",
+            connected_node,
+        );
         self.do_failover(current_leader_clone).await;
         true
     }
