@@ -24,12 +24,14 @@ use crate::server::compactor_serve;
 #[derive(Parser, Clone, Debug)]
 pub struct CompactorOpts {
     // TODO: rename to listen_address and separate out the port.
+    /// The address for this service to listen to locally
     #[clap(long, default_value = "127.0.0.1:6660")]
-    pub host: String,
+    pub listen_address: String,
 
-    // Optional, we will use listen_address if not specified.
+    /// The address for contacting this instance of the frontend service.
+    /// Optional, we will use listen_address if not specified.
     #[clap(long)]
-    pub client_address: Option<String>,
+    pub contact_address: Option<String>,
 
     // TODO: This is currently unused.
     #[clap(long)]
@@ -76,16 +78,16 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
 
-        let client_address = opts
-            .client_address
+        let contact_address = opts
+            .contact_address
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("Contact address is not specified, defaulting to listen address");
+                &opts.listen_address
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", client_address);
+        tracing::info!(" address is {}", contact_address);
 
         let (join_handle, observer_join_handle, _shutdown_sender) =
             compactor_serve(listen_address, client_address, opts).await;

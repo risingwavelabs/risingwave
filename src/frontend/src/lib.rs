@@ -68,17 +68,20 @@ use session::SessionManagerImpl;
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     // TODO: rename to listen_address and separate out the port.
+    /// The address for this service to listen to locally
     #[clap(long, default_value = "127.0.0.1:4566")]
-    pub host: String,
+    pub listen_address: String,
 
-    // Optional, we will use listen_address if not specified.
+    /// The address for contacting this instance of the frontend service.
+    /// Optional, we will use listen_address if not specified.
     #[clap(long)]
-    pub client_address: Option<String>,
+    pub contact_address: Option<String>,
 
     // TODO: This is currently unused.
     #[clap(long)]
     pub port: Option<u16>,
 
+    /// The address via which we will attempt to connect to a leader meta node.
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
@@ -121,7 +124,7 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-        pg_serve(&opts.host, session_mgr, Some(TlsConfig::new_default()))
+        pg_serve(&opts.listen_address, session_mgr, Some(TlsConfig::new_default()))
             .await
             .unwrap();
     })

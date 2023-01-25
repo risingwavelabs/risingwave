@@ -44,14 +44,14 @@ pub enum AsyncStackTraceOption {
 #[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
+    /// The address for this service to listen to locally
     #[clap(long, default_value = "127.0.0.1:5688")]
-    pub host: String,
+    pub listen_address: String,
 
-    /// The address of the compute node's meta client.
-    ///
+    /// The address for contacting this instance of the compute service.
     /// Optional, we will use listen_address if not specified.
     #[clap(long)]
-    pub client_address: Option<String>,
+    pub contact_address: Option<String>,
 
     #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
