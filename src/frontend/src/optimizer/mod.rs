@@ -48,7 +48,6 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::handler::create_table::DmlFlag;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
 };
@@ -615,9 +614,8 @@ impl PlanRoot {
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
         row_id_index: Option<usize>,
-        dml_flag: DmlFlag,
+        append_only: bool,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
@@ -625,7 +623,7 @@ impl PlanRoot {
         // Add DML node.
         stream_plan = StreamDml::new(
             stream_plan,
-            dml_flag == DmlFlag::AppendOnly,
+            append_only,
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )
         .into();
@@ -641,7 +639,7 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            handle_pk_conflict,
+            !append_only,
             row_id_index,
             version,
         )
