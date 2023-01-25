@@ -15,13 +15,14 @@
 use std::mem::swap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
+use risingwave_common::bail;
 
 use crate::source::base::{SourceMessage, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
@@ -40,21 +41,27 @@ impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
 
     async fn new(
-        properties: KafkaProperties,
+        mut properties: KafkaProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let bootstrap_servers = &properties.brokers;
+        properties.extract_common()?;
 
         let mut config = ClientConfig::new();
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
-        config.set("enable.auto.commit", "false");
-        config.set("auto.offset.reset", "smallest");
-        config.set("bootstrap.servers", bootstrap_servers);
+        if let Some(common_props) = properties.common.as_ref() {
+            let bootstrap_servers = &common_props.brokers;
 
-        properties.set_security_properties(&mut config);
+            // disable partition eof
+            config.set("enable.partition.eof", "false");
+            config.set("enable.auto.commit", "false");
+            config.set("auto.offset.reset", "smallest");
+            config.set("bootstrap.servers", bootstrap_servers);
+
+            common_props.set_security_properties(&mut config);
+        } else {
+            bail!("Kafka common properties are not successfully parsed");
+        }
 
         if config.get("group.id").is_none() {
             config.set(
@@ -73,7 +80,7 @@ impl SplitReader for KafkaSplitReader {
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
             .await
-            .context("failed to create kafka consumer")?;
+            .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 
         let mut start_offset = None;
         let mut stop_offset = None;
