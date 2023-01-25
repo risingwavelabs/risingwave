@@ -108,9 +108,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::listen_addr")]
     pub listen_addr: String,
 
-    pub host: Option<String>,
-
-    pub endpoint: Option<String>,
+    /// The endpoint for this meta node, which also serves as its unique identifier in cluster
+    /// membership and leader election.
+    pub meta_endpoint: Option<String>,
 
     pub dashboard_host: Option<String>,
 

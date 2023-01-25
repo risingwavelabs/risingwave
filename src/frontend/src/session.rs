@@ -24,6 +24,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use rand::RngCore;
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -35,14 +36,15 @@ use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -63,6 +65,7 @@ use crate::observer::FrontendObserverNode;
 use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
+use crate::scheduler::SchedulerError::QueryCancelError;
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
@@ -360,6 +363,11 @@ pub struct SessionImpl {
 
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
+
+    /// Query cancel flag.
+    /// This flag is set only when current query is executed in local mode, and used to cancel
+    /// local query.
+    current_query_cancel_flag: Mutex<Option<Trigger>>,
 }
 
 impl SessionImpl {
@@ -375,6 +383,7 @@ impl SessionImpl {
             user_authenticator,
             config_map: Default::default(),
             id,
+            current_query_cancel_flag: Mutex::new(None),
         }
     }
 
@@ -391,6 +400,7 @@ impl SessionImpl {
             config_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
+            current_query_cancel_flag: Mutex::new(None),
         }
     }
 
@@ -473,6 +483,31 @@ impl SessionImpl {
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
+    }
+
+    pub fn clear_cancel_query_flag(&self) {
+        let mut flag = self.current_query_cancel_flag.lock().unwrap();
+        *flag = None;
+    }
+
+    pub fn reset_cancel_query_flag(&self) -> Tripwire<std::result::Result<DataChunk, BoxedError>> {
+        let mut flag = self.current_query_cancel_flag.lock().unwrap();
+        let (trigger, tripwire) = stream_tripwire(|| Err(Box::new(QueryCancelError) as BoxedError));
+        *flag = Some(trigger);
+        tripwire
+    }
+
+    pub fn cancel_current_query(&self) {
+        let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
+        if let Some(trigger) = flag_guard.take() {
+            tracing::info!("Trying to cancel query in local mode.");
+            // Current running query is in local mode
+            trigger.abort();
+            tracing::info!("Cancel query request sent.");
+        } else {
+            tracing::info!("Trying to cancel query in distributed mode.");
+            self.env.query_manager().cancel_queries_in_session(self.id)
+        }
     }
 }
 
@@ -578,7 +613,12 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 
     /// Used when cancel request happened, returned corresponding session ref.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        self.env.query_manager.cancel_queries_in_session(session_id);
+        let guard = self.env.sessions_map.lock().unwrap();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_query()
+        } else {
+            tracing::info!("Current session finished, ignoring cancel query request")
+        }
     }
 
     fn end_session(&self, session: &Self::Session) {

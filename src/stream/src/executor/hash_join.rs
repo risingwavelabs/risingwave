@@ -475,11 +475,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_l = is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
-        let pk_contained_r = is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
+        let pk_contained_in_jk_l =
+            is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
+        let pk_contained_in_jk_r =
+            is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
-        let append_only_optimize = is_append_only && pk_contained_l && pk_contained_r;
+        let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
 
         let join_key_data_types_r = join_key_indices_l
             .iter()
@@ -518,8 +520,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             null_matched
         };
 
-        let need_degree_table_l = need_left_degree(T) && !pk_contained_r;
-        let need_degree_table_r = need_right_degree(T) && !pk_contained_l;
+        let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
+        let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
@@ -555,6 +557,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     degree_pk_indices_l,
                     null_matched.clone(),
                     need_degree_table_l,
+                    pk_contained_in_jk_l,
                     metrics.clone(),
                     ctx.id,
                     "left",
@@ -579,6 +582,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     degree_pk_indices_r,
                     null_matched,
                     need_degree_table_r,
+                    pk_contained_in_jk_r,
                     metrics.clone(),
                     ctx.id,
                     "right",
@@ -1122,7 +1126,7 @@ mod tests {
             params_r,
             vec![null_safe],
             vec![1],
-            (0..schema_len).into_iter().collect_vec(),
+            (0..schema_len).collect_vec(),
             1,
             cond,
             "HashJoinExecutor".to_string(),
@@ -1195,7 +1199,7 @@ mod tests {
             params_r,
             vec![false],
             vec![1],
-            (0..schema_len).into_iter().collect_vec(),
+            (0..schema_len).collect_vec(),
             1,
             cond,
             "HashJoinExecutor".to_string(),

@@ -16,7 +16,7 @@ use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -82,7 +82,7 @@ mod tests {
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
-    use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::parser::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     #[tokio::test]
     async fn test_json_parser() {

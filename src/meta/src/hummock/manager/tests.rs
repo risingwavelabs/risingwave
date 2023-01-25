@@ -1165,7 +1165,6 @@ async fn test_version_stats() {
             table_stats: table_ids
                 .iter()
                 .map(|table_id| (*table_id, table_stats_change.clone()))
-                .into_iter()
                 .collect(),
         })
         .collect_vec();

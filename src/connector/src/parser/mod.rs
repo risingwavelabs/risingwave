@@ -31,8 +31,11 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_pb::catalog::StreamSourceInfo;
 
+pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
-use crate::{SourceColumnDesc, SourceFormat};
+use crate::source::{
+    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceFormat, StreamChunkWithState,
+};
 
 mod avro;
 mod canal;
@@ -381,30 +384,19 @@ impl SourceParserImpl {
     }
 }
 
-// TODO: use `async_fn_in_traits` to implement it
-/// A parser trait that parse byte stream instead of one byte chunk
+/// `ByteStreamSourceParser` is a new message parser, the parser should consume
+/// the input data stream and return a stream of parsed msgs.
 pub trait ByteStreamSourceParser: Send + Debug + 'static {
-    type ParseResult<'a>: ParseFuture<'a, Result<Option<WriteGuard>>>;
-    /// Parse the payload and append the result to the [`StreamChunk`] directly.
-    /// If the payload is not enough to parse one record, the parser will cache
-    /// the payload and wait for more byte to be passed.
-    ///
+    /// Parse a data stream of one source split into a stream of [`StreamChunk`].
+
     /// # Arguments
-    ///
-    /// - `self`: A needs to be a member method because parser need to cache some payload
-    /// - writer: Write exactly one record during a `parse` call.
+    /// - `data_stream`: A data stream of one source split.
+    ///  To be able to split multiple messages from mq, so it is not a pure byte stream
     ///
     /// # Returns
     ///
-    /// An [`Option<WriteGuard>`], None if the payload is not enough to parse one record, else Some
-    fn parse<'a, 'b, 'c>(
-        &'a mut self,
-        payload: &'a mut &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a;
+    /// A [`BoxSourceWithStateStream`] which is a stream of parsed msgs.
+    fn into_stream(self, data_stream: BoxSourceStream) -> BoxSourceWithStateStream;
 }
 
 #[derive(Debug)]
@@ -412,46 +404,67 @@ pub enum ByteStreamSourceParserImpl {
     Csv(CsvParser),
 }
 
-#[derive(Debug, Clone, EnumAsInner)]
-pub enum ParserConfig {
-    Csv(u8, bool),
+#[derive(Debug, Clone)]
+pub struct ParserConfig {
+    pub common: CommonParserConfig,
+    pub specific: SpecificParserConfig,
 }
 
-impl ParserConfig {
+#[derive(Debug, Clone)]
+pub struct CommonParserConfig {
+    pub props: HashMap<String, String>,
+    pub rw_columns: Vec<SourceColumnDesc>,
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum SpecificParserConfig {
+    Csv(CsvParserConfig),
+}
+
+impl SpecificParserConfig {
     pub fn new(format: &SourceFormat, info: &StreamSourceInfo) -> Self {
         match format {
-            SourceFormat::Csv => Self::Csv(info.csv_delimiter as u8, info.csv_has_header),
+            SourceFormat::Csv => SpecificParserConfig::Csv(CsvParserConfig {
+                delimiter: info.csv_delimiter as u8,
+                has_header: info.csv_has_header,
+            }),
             _ => unreachable!(),
         }
     }
 }
 
+impl ParserConfig {
+    pub fn new(
+        format: &SourceFormat,
+        info: &StreamSourceInfo,
+        props: &HashMap<String, String>,
+        rw_columns: &Vec<SourceColumnDesc>,
+    ) -> Self {
+        let common = CommonParserConfig {
+            props: props.clone(),
+            rw_columns: rw_columns.to_owned(),
+        };
+        let specific = SpecificParserConfig::new(format, info);
+
+        Self { common, specific }
+    }
+}
+
 impl ByteStreamSourceParserImpl {
-    pub async fn parse(
-        &mut self,
-        payload: &mut &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<Option<WriteGuard>> {
+    pub fn into_stream(self, msg_stream: BoxSourceStream) -> BoxSourceWithStateStream {
         match self {
-            Self::Csv(csv_parser) => csv_parser.parse(payload, writer).await,
+            Self::Csv(parser) => parser.into_stream(msg_stream),
         }
     }
 
     // Keep this `async` in consideration of other parsers in the future.
     #[allow(clippy::unused_async)]
-    pub async fn create(
-        format: &SourceFormat,
-        _properties: &HashMap<String, String>,
-        parser_config: ParserConfig,
-    ) -> Result<Self> {
-        match format {
-            SourceFormat::Csv => {
-                let (delimiter, has_header) = parser_config.into_csv().unwrap();
-                CsvParser::new(delimiter, has_header).map(Self::Csv)
+    pub async fn create(parser_config: ParserConfig) -> Result<Self> {
+        let CommonParserConfig { rw_columns, .. } = parser_config.common;
+        match parser_config.specific {
+            SpecificParserConfig::Csv(csv_parser_config) => {
+                CsvParser::new(rw_columns, csv_parser_config).map(Self::Csv)
             }
-            _ => Err(RwError::from(ProtocolError(
-                "format not support".to_string(),
-            ))),
         }
     }
 }

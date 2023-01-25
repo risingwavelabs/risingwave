@@ -2,6 +2,8 @@ I hereby agree to the terms of the [Singularity Data, Inc. Contributor License A
 
 ## What's changed and what's your intention?
 
+<!--
+
 **This section will be used as the commit message. Please do not leave this empty!**
 
 Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
@@ -10,6 +12,8 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 - How does this PR work? Need a brief introduction for the changed logic (optional)
 - Describe clearly one logical change and avoid lazy messages (optional)
 - Describe any limitations of the current code (optional)
+
+-->
 
 ## Checklist
 
@@ -26,11 +30,11 @@ If your pull request contains user-facing changes, please specify the types of t
 
 Please keep the types that apply to your changes, and remove those that do not apply.
 
-* Installation and deployment 
-* Connector (sources & sinks)
-* SQL commands, functions, and operators
-* RisingWave cluster configuration changes
-* Other (please specify in the release note below)
+- Installation and deployment
+- Connector (sources & sinks)
+- SQL commands, functions, and operators
+- RisingWave cluster configuration changes
+- Other (please specify in the release note below)
 
 ### Release note
 

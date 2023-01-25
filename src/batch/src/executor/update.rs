@@ -260,12 +260,12 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
-        // to the `Weak` reference in `DmlManager`.
+        // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
+        // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
             .register_reader(table_id, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader_v2().into_stream_v2();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(
@@ -303,12 +303,12 @@ mod tests {
             let chunk = reader.next().await.unwrap()?;
 
             assert_eq!(
-                chunk.ops().chunks(2).collect_vec(),
+                chunk.chunk.ops().chunks(2).collect_vec(),
                 vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
             );
 
             assert_eq!(
-                chunk.columns()[0]
+                chunk.chunk.columns()[0]
                     .array()
                     .as_int32()
                     .iter()
@@ -321,7 +321,7 @@ mod tests {
             );
 
             assert_eq!(
-                chunk.columns()[1]
+                chunk.chunk.columns()[1]
                     .array()
                     .as_int32()
                     .iter()

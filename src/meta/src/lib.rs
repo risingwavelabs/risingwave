@@ -62,10 +62,7 @@ pub struct MetaNodeOpts {
     listen_addr: Option<String>,
 
     #[clap(long)]
-    host: Option<String>,
-
-    #[clap(long)]
-    endpoint: Option<String>,
+    meta_endpoint: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -113,11 +110,8 @@ impl OverwriteConfig for MetaNodeOpts {
         if let Some(v) = self.listen_addr {
             c.listen_addr = v;
         }
-        if self.host.is_some() {
-            c.host = self.host;
-        }
-        if self.endpoint.is_some() {
-            c.endpoint = self.endpoint;
+        if self.meta_endpoint.is_some() {
+            c.meta_endpoint = self.meta_endpoint;
         }
         if self.dashboard_host.is_some() {
             c.dashboard_host = self.dashboard_host;
@@ -164,31 +158,35 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let config = load_config(&opts.config_path.clone(), Some(opts));
         tracing::info!("Starting meta node with config {:?}", config);
-        let meta_addr = config
-            .meta
-            .host
-            .unwrap_or_else(|| config.meta.listen_addr.clone());
-        let endpoint = config
-            .meta
-            .endpoint
-            .unwrap_or_else(|| config.meta.listen_addr.clone());
         let listen_addr = config.meta.listen_addr.parse().unwrap();
         let dashboard_addr = config.meta.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = config.meta.prometheus_host.map(|x| x.parse().unwrap());
-        let backend = match config.meta.backend {
-            MetaBackend::Etcd => MetaStoreBackend::Etcd {
-                endpoints: config
+        let (meta_endpoint, backend) = match config.meta.backend {
+            MetaBackend::Etcd => (
+                config
                     .meta
-                    .etcd_endpoints
-                    .split(',')
-                    .map(|x| x.to_string())
-                    .collect(),
-                credentials: match config.meta.etcd_auth {
-                    true => Some((config.meta.etcd_username, config.meta.etcd_password)),
-                    false => None,
+                    .meta_endpoint
+                    .expect("meta_endpoint must be specified when using etcd"),
+                MetaStoreBackend::Etcd {
+                    endpoints: config
+                        .meta
+                        .etcd_endpoints
+                        .split(',')
+                        .map(|x| x.to_string())
+                        .collect(),
+                    credentials: match config.meta.etcd_auth {
+                        true => Some((config.meta.etcd_username, config.meta.etcd_password)),
+                        false => None,
+                    },
                 },
-            },
-            MetaBackend::Mem => MetaStoreBackend::Mem,
+            ),
+            MetaBackend::Mem => (
+                config
+                    .meta
+                    .meta_endpoint
+                    .unwrap_or_else(|| config.meta.listen_addr.clone()),
+                MetaStoreBackend::Mem,
+            ),
         };
 
         let max_heartbeat_interval =
@@ -200,8 +198,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            endpoint,
-            addr: meta_addr,
+            meta_endpoint,
             listen_addr,
             prometheus_addr,
             dashboard_addr,

@@ -2,7 +2,7 @@
 
 # invalid username
 statement error
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
@@ -24,7 +24,7 @@ create materialized source shipments (
 
 # invalid password
 statement error
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
@@ -45,7 +45,7 @@ create materialized source shipments (
 
 # invalid table name
 statement error
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
@@ -67,7 +67,7 @@ create materialized source shipments (
 
 # invalid primary key
 statement error
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
@@ -89,7 +89,7 @@ create materialized source shipments (
 
 # column name mismatch
 statement error
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   orderid INTEGER,
   origin STRING,
@@ -110,7 +110,7 @@ create materialized source shipments (
 
 # column data type mismatch
 statement error
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id real,
   origin STRING,

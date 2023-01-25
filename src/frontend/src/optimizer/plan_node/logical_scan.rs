@@ -116,7 +116,7 @@ impl LogicalScan {
         Self::new(
             table_name,
             is_sys_table,
-            (0..table_desc.columns.len()).into_iter().collect(),
+            (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
             ctx,

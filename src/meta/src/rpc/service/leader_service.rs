@@ -28,14 +28,17 @@ use crate::rpc::server::ElectionClientRef;
 #[derive(Clone)]
 pub struct LeaderServiceImpl {
     election_client: Option<ElectionClientRef>,
-    current_leader: MetaLeaderInfo,
+    default_self_as_leader: MetaLeaderInfo,
 }
 
 impl LeaderServiceImpl {
-    pub fn new(election_client: Option<ElectionClientRef>, current_leader: MetaLeaderInfo) -> Self {
+    pub fn new(
+        election_client: Option<ElectionClientRef>,
+        default_self_as_leader: MetaLeaderInfo,
+    ) -> Self {
         LeaderServiceImpl {
             election_client,
-            current_leader,
+            default_self_as_leader,
         }
     }
 }
@@ -48,7 +51,7 @@ impl LeaderService for LeaderServiceImpl {
         _request: Request<LeaderRequest>,
     ) -> Result<Response<LeaderResponse>, Status> {
         let leader = match self.election_client.borrow() {
-            None => Ok(Some(self.current_leader.clone())),
+            None => Ok(Some(self.default_self_as_leader.clone())),
             Some(client) => client.leader().await.map(|member| member.map(Into::into)),
         }?;
 
@@ -83,13 +86,16 @@ impl LeaderService for LeaderServiceImpl {
 
             members
         } else {
-            let host_addr = self.current_leader.node_address.parse::<HostAddr>()?;
+            let host_addr = self
+                .default_self_as_leader
+                .node_address
+                .parse::<HostAddr>()?;
             vec![Member {
                 member_addr: Some(HostAddress {
                     host: host_addr.host,
                     port: host_addr.port.into(),
                 }),
-                lease_id: self.current_leader.lease_id as i64,
+                lease_id: self.default_self_as_leader.lease_id as i64,
             }]
         };
 

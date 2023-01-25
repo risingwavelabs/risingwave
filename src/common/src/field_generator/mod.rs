@@ -61,15 +61,11 @@ pub trait NumericFieldSequenceGenerator {
 }
 
 /// the way that datagen create the field data. such as 'sequence' or 'random'.
+#[derive(Default)]
 pub enum FieldKind {
     Sequence,
+    #[default]
     Random,
-}
-
-impl Default for FieldKind {
-    fn default() -> Self {
-        FieldKind::Random
-    }
 }
 
 pub enum FieldGeneratorImpl {
