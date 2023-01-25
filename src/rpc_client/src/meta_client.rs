@@ -81,11 +81,13 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
-    // get request retry strategy
+    /// get request retry strategy
     pub fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
         GrpcMetaClient::retry_strategy_for_request()
     }
 
+    /// Execute the failover if it is needed. If no failover is needed do nothing
+    /// Returns true if failover was needed, else false
     pub async fn do_failover_if_needed(&self) -> bool {
         self.inner.do_failover_if_needed().await
     }
@@ -999,9 +1001,9 @@ impl GrpcMetaClient {
         lc.leader(LeaderRequest {}).await
     }
 
-    // None if leader is presumed failed
-    // HostAddress if connected against a working leader or follower node
-    // Node may return a stale leader
+    /// None if leader is presumed failed
+    /// HostAddress if connected against a working leader or follower node
+    /// Node may return a stale leader
     async fn try_get_leader_from_connected_node(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
             let response = self.make_leader_request().await;
@@ -1032,7 +1034,7 @@ impl GrpcMetaClient {
         None
     }
 
-    // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
+    /// Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
     async fn get_current_leader_from_service(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
             let service_addr = &self.leader_service_addr;
@@ -1067,25 +1069,29 @@ impl GrpcMetaClient {
         None
     }
 
-    async fn do_failover(&self, mut current_leader_init: Option<HostAddress>) {
+    /// Update all clients to connect against new meta leader. Function retries
+    ///
+    /// ## Arguments:
+    /// `new_leader`: Pass the address of the new leader if it is already known
+    async fn do_failover(&self, mut new_leader: Option<HostAddress>) {
         for retry in self.get_retry_strategy() {
-            let current_leader = if current_leader_init.is_some() {
-                current_leader_init.clone()
+            let nl = if new_leader.is_some() {
+                new_leader.clone()
             } else {
                 self.get_current_leader_from_service().await
             };
             // always use service for retries
-            current_leader_init = None;
-            if current_leader.is_none() {
+            new_leader = None;
+            if nl.is_none() {
                 // Prod: May happen if all meta nodes are down
                 // Risedev: May happen if there is a problem with Nginx routing the requests
                 tracing::warn!("Unable to retrieve leader address via service. Retrying...");
                 tokio::time::sleep(retry).await;
                 continue;
             }
-            let current_leader = current_leader.unwrap();
+            let current_leader = nl.unwrap();
 
-            // TODO: How do we know that it always is http?
+            // TODO: Are there any plans to change to https? Add a comment in PR
             let addr = format!(
                 "http://{}:{}",
                 current_leader.get_host(),
