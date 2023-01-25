@@ -51,8 +51,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             71..=80 => self.gen_exists(typ, context),
             81..=90 => self.gen_cast(typ, context),
             91..=99 => self.gen_agg(typ),
-            // TODO: There are more that are not in the functions table, e.g. CAST.
-            // We will separately generate them.
             _ => unreachable!(),
         }
     }
@@ -290,7 +288,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 }
             }
             A::ArrayAgg => Some(Expr::Function(make_agg_func(
-                "unnest",
+                "array_agg",
                 exprs,
                 false,
             ))),
