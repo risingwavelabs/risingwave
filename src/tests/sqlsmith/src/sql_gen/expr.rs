@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
-use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
-    TrimWhereField, UnaryOperator, Value,
-};
+use risingwave_sqlparser::ast::{BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr, TrimWhereField, UnaryOperator, Value};
 
 use crate::sql_gen::types::{data_type_to_ast_data_type, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
@@ -237,6 +235,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Exists(Box::new(subquery))
     }
 
+    pub(crate) fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
+        if self.bound_columns.is_empty() || !self.is_distinct_allowed {
+            return vec![];
+        }
+        let mut order_by = vec![];
+        while self.flip_coin() {
+            let column = self.bound_columns.choose(&mut self.rng).unwrap();
+            order_by.push(OrderByExpr {
+                expr: Expr::Identifier(Ident::new(&column.name)),
+                asc: Some(self.rng.gen_bool(0.5)),
+                nulls_first: None,
+            })
+        }
+        order_by
+    }
+
     fn gen_agg(&mut self, ret: &DataType) -> Expr {
         let funcs = match AGG_FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),
@@ -253,26 +267,35 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .collect();
 
         let distinct = self.flip_coin() && self.is_distinct_allowed;
-        self.make_agg_expr(func.func, &exprs, distinct)
+        let filter = if self.flip_coin() {
+            let context = SqlGeneratorContext::new_with_can_agg(false);
+            Some(Box::new(self.gen_expr(&DataType::Boolean, context)))
+        } else { None };
+        let order_by = if self.flip_coin() && !distinct  {
+            self.gen_order_by()
+        } else {
+            vec![]
+        };
+        self.make_agg_expr(func.func, &exprs, distinct, filter, order_by)
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
     /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
-    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool) -> Option<Expr> {
+    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool, filter: Option<Box<Expr>>, order_by: Vec<OrderByExpr>) -> Option<Expr> {
         use AggKind as A;
         match func {
-            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct))),
-            A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct))),
-            A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct))),
-            A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct))),
-            A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct))),
+            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct, filter, order_by))),
+            A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct, filter, order_by))),
+            A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct, filter, order_by))),
+            A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct, filter, order_by))),
+            A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct, filter, order_by))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
                 // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
                 if self.is_distinct_allowed && !distinct {
                     None
                 } else {
-                    Some(Expr::Function(make_agg_func("string_agg", exprs, distinct)))
+                    Some(Expr::Function(make_agg_func("string_agg", exprs, distinct, filter, order_by)))
                 }
             }
             A::FirstValue => None,
@@ -280,17 +303,21 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 if self.is_distinct_allowed {
                     None
                 } else {
+                    // It does not make sense to have `distinct`.
+                    // That requires precision, which `approx_count_distinct` does not provide.
                     Some(Expr::Function(make_agg_func(
                         "approx_count_distinct",
                         exprs,
                         false,
+                        filter, order_by
                     )))
                 }
             }
             A::ArrayAgg => Some(Expr::Function(make_agg_func(
                 "array_agg",
                 exprs,
-                false,
+                distinct,
+                filter, order_by
             ))),
         }
     }
@@ -397,9 +424,8 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 }
 
 /// This is the function that generate aggregate function.
-/// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
-/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/risingwavelabs/risingwave/issues/3933>
-fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
+/// DISTINCT, ORDER BY or FILTER is allowed in aggregation functions。
+fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool, filter: Option<Box<Expr>>, order_by: Vec<OrderByExpr>) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
@@ -410,8 +436,8 @@ fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
         args,
         over: None,
         distinct,
-        order_by: vec![],
-        filter: None,
+        order_by,
+        filter,
     }
 }
 

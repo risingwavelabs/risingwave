@@ -24,7 +24,7 @@ use rand::Rng;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
+    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins,
     With,
 };
 
@@ -143,22 +143,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             }
             _ => unreachable!(),
         }
-    }
-
-    fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
-        if self.bound_columns.is_empty() || !self.is_distinct_allowed {
-            return vec![];
-        }
-        let mut order_by = vec![];
-        while self.flip_coin() {
-            let column = self.bound_columns.choose(&mut self.rng).unwrap();
-            order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new(&column.name)),
-                asc: Some(self.rng.gen_bool(0.5)),
-                nulls_first: None,
-            })
-        }
-        order_by
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
