@@ -13,16 +13,23 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::sync::Arc;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::struct_type::StructType;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr, TrimWhereField, UnaryOperator, Value};
 
 use crate::sql_gen::types::{data_type_to_ast_data_type, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
+
+static STRUCT_FIELD_NAMES: [&str; 26] = [
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
+    "t", "u", "v", "w", "x", "y", "z",
+];
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// In generating expression, there are two execution modes:
@@ -42,8 +49,34 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
 
-        let range = if context.can_gen_agg() { 99 } else { 90 };
+        if *typ == DataType::Boolean && self.rng.gen_bool(0.1) {
+            return match self.rng.gen_bool(0.5) {
+                true => {
+                    let (ty, expr) = self.gen_arbitrary_expr(context);
+                    let n = self.rng.gen_range(1..=10);
+                  Expr::InList {
+                    expr: Box::new(expr),
+                    list: self.gen_n_exprs_with_type(n, &ty, context),
+                    negated: self.flip_coin(),
+                  }
+                },
+                false => {
+                    let (query, bound_columns) = self.gen_local_query();
+                    let ty = self.bound_columns.choose(&mut self.rng).unwrap().clone().data_type;
+                    let expr = match self.flip_coin() {
+                        true => self.gen_expr(&ty, context),
+                        false => self.gen_arbitrary_expr(context),
+                    };
+                    Expr::InSubquery {
+                        expr,
+                        subquery: Box::new(query),
+                        negated: self.flip_coin(),
+                    }
+                }
+            }
+        }
 
+        let range = if context.can_gen_agg() { 99 } else { 90 };
         match self.rng.gen_range(0..=range) {
             0..=70 => self.gen_func(typ, context),
             71..=80 => self.gen_exists(typ, context),
@@ -51,6 +84,85 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             91..=99 => self.gen_agg(typ),
             _ => unreachable!(),
         }
+    }
+
+
+    fn gen_data_type(&mut self) -> DataType {
+        // Depth of struct/list nesting
+        let depth = self.rng.gen_range(0..=1);
+        self.gen_data_type_inner(depth)
+    }
+
+    fn gen_data_type_inner(&mut self, depth: usize) -> DataType {
+        use {DataType as S, DataTypeName as T};
+        let mut candidate_ret_types = vec![
+            T::Boolean,
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+            T::Varchar,
+            T::Date,
+            T::Timestamp,
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
+            // T::Timestamptz,
+            T::Time,
+            T::Interval,
+        ];
+        if depth > 0 {
+            candidate_ret_types.push(T::Struct);
+            candidate_ret_types.push(T::List);
+        }
+
+        let ret_type = candidate_ret_types.choose(&mut self.rng).unwrap();
+
+        match ret_type {
+            T::Boolean => S::Boolean,
+            T::Int16 => S::Int16,
+            T::Int32 => S::Int32,
+            T::Int64 => S::Int64,
+            T::Decimal => S::Decimal,
+            T::Float32 => S::Float32,
+            T::Float64 => S::Float64,
+            T::Varchar => S::Varchar,
+            T::Date => S::Date,
+            T::Timestamp => S::Timestamp,
+            T::Timestamptz => S::Timestamptz,
+            T::Time => S::Time,
+            T::Interval => S::Interval,
+            T::Struct => self.gen_struct_data_type(depth - 1),
+            T::List => self.gen_list_data_type(depth - 1),
+            _ => unreachable!(),
+        }
+    }
+
+    fn gen_list_data_type(&mut self, depth: usize) -> DataType {
+        DataType::List {
+            datatype: Box::new(self.gen_data_type_inner(depth)),
+        }
+    }
+
+    fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
+        let num_fields = self.rng.gen_range(1..10);
+        let fields = (0..num_fields)
+            .map(|_| self.gen_data_type_inner(depth))
+            .collect();
+        let field_names = STRUCT_FIELD_NAMES[0..num_fields]
+            .iter()
+            .map(|s| (*s).into())
+            .collect();
+        DataType::Struct(Arc::new(StructType {
+            fields,
+            field_names,
+        }))
+    }
+
+    pub(crate) fn gen_arbitrary_expr(&mut self, context: SqlGeneratorContext) -> (DataType, Expr) {
+        let ret_type = self.gen_data_type();
+        let expr = self.gen_expr(&ret_type, context);
+        (ret_type, expr)
     }
 
     fn gen_col(&mut self, typ: &DataType, context: SqlGeneratorContext) -> Expr {
