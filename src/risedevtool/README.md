@@ -26,13 +26,13 @@ In root directory, simply run:
 The default scene contains a MinIO, compute-node, meta-node and a frontend. RiseDev will automatically download and configure those services for you.
 
 RiseDev also provides several other modes:
+
 - ci-3cn-1fe: 3 compute node + meta node + 1 frontend + MinIO
 - ci-3cn-3fe: 3 compute node + meta node + 3 frontend + MinIO
 - ci-1cn-1fe: 1 compute node + meta node + 1 frontend + MinIO
+- 3etcd-3meta-1cn-1fe: 3 ETCD nodes + 1 compute node + 3 meta nodes + 1 frontend
 - dev-compute-node: 1 compute-node (user managed) + MinIO + prometheus + meta + frontend
 
-TODO: Add other Meta HA setup here
-TODO: Also explain how nginx works as a LB here
 
 #### Debug compute node
 
@@ -90,6 +90,30 @@ profile:
 ```
 
 If you don't want to download some components, you may use the interactive configuration tool `./risedev configure` to disable some components.
+
+TODO: Add issue. RW cloud should have K8s service
+
+Be aware that a configuration which uses multiple meta nodes, like e.g. `3etcd-3meta-1cn-1fe`, requires an additional load-balancer. This is vital to route requests from a meta client to a meta node. A configuration that uses a LB could look like this: 
+
+```yaml 
+profile-name:
+  steps:
+    - use: load-balancer
+      port: 1234 # Has to be the same port
+      target-ports: # Has to list meta-node[i].port
+        - 1111
+        - 4444
+    - use: meta-node
+      port: 1111
+      dashboard-port: 2222
+      exporter-port: 3333
+      lb-port: 1234 # Has to be the same port
+    - use: meta-node
+      port: 4444
+      dashboard-port: 5555
+      exporter-port: 6666
+      lb-port: 1234 # Has to be the same port
+```
 
 That's all! RiseDev will generate all other configurations for you, and everything will be fine.
 
