@@ -624,7 +624,7 @@ mod test {
                 Some(Value::Duration(Duration::new(months, days, millis)))
             }
 
-            Schema::Union(union_schema) if union_schema.is_nullable() => {
+            Schema::Union(union_schema) => {
                 let inner_schema = union_schema
                     .variants()
                     .iter()
@@ -632,8 +632,15 @@ mod test {
                     .unwrap();
 
                 match build_field(inner_schema) {
-                    None => Some(Value::Union(0, Box::new(Value::Null))),
-                    Some(value) => Some(Value::Union(1, Box::new(value))),
+                    None => {
+                        let index_of_union =
+                            union_schema.find_schema(&Value::Null).unwrap().0 as u32;
+                        Some(Value::Union(index_of_union, Box::new(Value::Null)))
+                    }
+                    Some(value) => {
+                        let index_of_union = union_schema.find_schema(&value).unwrap().0 as u32;
+                        Some(Value::Union(index_of_union, Box::new(value)))
+                    }
                 }
             }
             _ => None,
@@ -647,7 +654,8 @@ mod test {
         } = schema.clone()
         {
             for field in &fields {
-                let value = build_field(&field.schema).expect("No value defined for field");
+                let value = build_field(&field.schema)
+                    .unwrap_or_else(|| panic!("No value defined for field, {}", field.name));
                 record.put(field.name.as_str(), value)
             }
         }
@@ -683,7 +691,7 @@ mod test {
         null_record.put("age", Value::Union(0, Box::new(Value::Null)));
         null_record.put("sequence_id", Value::Union(0, Box::new(Value::Null)));
         null_record.put("name", Value::Union(0, Box::new(Value::Null)));
-        null_record.put("score", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("score", Value::Union(1, Box::new(Value::Null)));
         null_record.put("avg_score", Value::Union(0, Box::new(Value::Null)));
         null_record.put("is_lasted", Value::Union(0, Box::new(Value::Null)));
         null_record.put("entrance_date", Value::Union(0, Box::new(Value::Null)));
@@ -701,6 +709,43 @@ mod test {
         let records = writer.into_inner().unwrap();
 
         let reader: Vec<_> = Reader::with_schema(schema, &records[..]).unwrap().collect();
-        assert_eq!(2, reader.len())
+        assert_eq!(2, reader.len());
+        let null_record_expected: Vec<(String, Value)> = vec![
+            ("id".to_string(), Value::Int(5)),
+            ("age".to_string(), Value::Union(0, Box::new(Value::Null))),
+            (
+                "sequence_id".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            ("name".to_string(), Value::Union(0, Box::new(Value::Null))),
+            ("score".to_string(), Value::Union(1, Box::new(Value::Null))),
+            (
+                "avg_score".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "is_lasted".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "entrance_date".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "birthday".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "anniversary".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+        ];
+        let null_record_value = reader.get(0).unwrap().as_ref().unwrap();
+        match null_record_value {
+            Value::Record(values) => {
+                assert_eq!(values, &null_record_expected)
+            }
+            _ => unreachable!(),
+        }
     }
 }

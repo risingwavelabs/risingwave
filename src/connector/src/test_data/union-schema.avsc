@@ -22,7 +22,8 @@
     },
     {
       "name": "score",
-      "type": ["null", "float"]
+      "type": [ "float", "null" ],
+      "default": 1.0
     },
     {
       "name": "avg_score",
