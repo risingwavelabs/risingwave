@@ -240,10 +240,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_agg(&mut self, ret: &DataType) -> Expr {
-        // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
-        if *ret == DataType::Interval {
-            return self.gen_simple_scalar(ret);
-        }
         let funcs = match AGG_FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -293,8 +289,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     )))
                 }
             }
-            // TODO(yuchao): `array_agg` support is still WIP, see #4657.
-            A::ArrayAgg => None,
+            A::ArrayAgg => Some(Expr::Function(make_agg_func(
+                "unnest",
+                exprs,
+                false,
+            ))),
         }
     }
 }
