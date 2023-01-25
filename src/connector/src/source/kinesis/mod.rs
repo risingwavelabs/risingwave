@@ -17,42 +17,18 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
-pub use config::build_client;
+use std::collections::HashMap;
+
+use anyhow::{anyhow, Result};
 use serde::Deserialize;
+use serde_json::Value;
+
+use crate::common::KinesisCommon;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KinesisProperties {
-    #[serde(rename = "stream", alias = "kinesis.stream.name")]
-    pub stream_name: String,
-    #[serde(rename = "aws.region", alias = "kinesis.stream.region")]
-    pub stream_region: String,
-    #[serde(rename = "endpoint", alias = "kinesis.endpoint")]
-    pub endpoint: Option<String>,
-    #[serde(
-        rename = "aws.credentials.access_key_id",
-        alias = "kinesis.credentials.access"
-    )]
-    pub credentials_access_key: Option<String>,
-    #[serde(
-        rename = "aws.credentials.secret_access_key",
-        alias = "kinesis.credentials.secret"
-    )]
-    pub credentials_secret_access_key: Option<String>,
-    #[serde(
-        rename = "aws.credentials.session_token",
-        alias = "kinesis.credentials.session_token"
-    )]
-    pub session_token: Option<String>,
-    #[serde(rename = "aws.credentials.role.arn", alias = "kinesis.assumerole.arn")]
-    pub assume_role_arn: Option<String>,
-    #[serde(
-        rename = "aws.credentials.role.external_id",
-        alias = "kinesis.assumerole.external_id"
-    )]
-    pub assume_role_external_id: Option<String>,
-
     #[serde(rename = "scan.startup.mode", alias = "kinesis.scan.startup.mode")]
     // accepted values: "latest", "earliest", "sequence_number"
     pub scan_startup_mode: Option<String>,
@@ -61,4 +37,20 @@ pub struct KinesisProperties {
         alias = "kinesis.scan.startup.sequence_number"
     )]
     pub seq_offset: Option<String>,
+
+    pub common: Option<KinesisCommon>,
+    #[serde(flatten)]
+    extra: Option<HashMap<String, Value>>,
+}
+
+impl KinesisProperties {
+    fn extract_common(&mut self) -> Result<()> {
+        self.common = Some(
+            serde_json::from_value::<KinesisCommon>(
+                serde_json::to_value(self.extra.take().unwrap()).map_err(|e| anyhow!(e))?,
+            )
+            .map_err(|e| anyhow!(e))?,
+        );
+        Ok(())
+    }
 }

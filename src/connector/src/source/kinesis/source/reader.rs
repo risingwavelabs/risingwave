@@ -26,7 +26,7 @@ use tokio_retry;
 
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
-use crate::source::kinesis::{build_client, KinesisProperties};
+use crate::source::kinesis::KinesisProperties;
 use crate::source::{
     BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader,
 };
@@ -47,10 +47,11 @@ impl SplitReader for KinesisSplitReader {
     type Properties = KinesisProperties;
 
     async fn new(
-        properties: KinesisProperties,
+        mut properties: KinesisProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        properties.extract_common()?;
         let split = match state.unwrap().into_iter().next().unwrap() {
             SplitImpl::Kinesis(ks) => ks,
             split => return Err(anyhow!("expect KinesisSplit, got {:?}", split)),
@@ -79,8 +80,11 @@ impl SplitReader for KinesisSplitReader {
             start_position => start_position.to_owned(),
         };
 
-        let stream_name = properties.stream_name.clone();
-        let client = build_client(properties).await?;
+        let common_props = properties.common.ok_or(anyhow!(
+            "Kinesis common properties are not successfully parsed"
+        ))?;
+        let stream_name = common_props.stream_name.clone();
+        let client = common_props.build_client().await?;
 
         Ok(Self {
             client,
@@ -248,22 +252,27 @@ mod tests {
     use futures::StreamExt;
 
     use super::*;
+    use crate::common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]
     #[ignore]
     async fn test_single_thread_kinesis_reader() -> Result<()> {
         let properties = KinesisProperties {
-            assume_role_arn: None,
-            credentials_access_key: None,
-            credentials_secret_access_key: None,
-            stream_name: "kinesis_debug".to_string(),
-            stream_region: "cn-northwest-1".to_string(),
-            endpoint: None,
-            session_token: None,
-            assume_role_external_id: None,
+            common: Some(KinesisCommon {
+                assume_role_arn: None,
+                credentials_access_key: None,
+                credentials_secret_access_key: None,
+                stream_name: "kinesis_debug".to_string(),
+                stream_region: "cn-northwest-1".to_string(),
+                endpoint: None,
+                session_token: None,
+                assume_role_external_id: None,
+            }),
+
             scan_startup_mode: None,
             seq_offset: None,
+            extra: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(

@@ -12,8 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use aws_sdk_kinesis::Client as KinesisClient;
+use http::Uri;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
+
+use crate::source::kinesis::config::AwsConfigInfo;
 
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
@@ -147,5 +151,51 @@ impl KafkaCommon {
         }
         // Currently, we only support unsecured OAUTH.
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct KinesisCommon {
+    #[serde(rename = "stream", alias = "kinesis.stream.name")]
+    pub stream_name: String,
+    #[serde(rename = "aws.region", alias = "kinesis.stream.region")]
+    pub stream_region: String,
+    #[serde(rename = "endpoint", alias = "kinesis.endpoint")]
+    pub endpoint: Option<String>,
+    #[serde(
+        rename = "aws.credentials.access_key_id",
+        alias = "kinesis.credentials.access"
+    )]
+    pub credentials_access_key: Option<String>,
+    #[serde(
+        rename = "aws.credentials.secret_access_key",
+        alias = "kinesis.credentials.secret"
+    )]
+    pub credentials_secret_access_key: Option<String>,
+    #[serde(
+        rename = "aws.credentials.session_token",
+        alias = "kinesis.credentials.session_token"
+    )]
+    pub session_token: Option<String>,
+    #[serde(rename = "aws.credentials.role.arn", alias = "kinesis.assumerole.arn")]
+    pub assume_role_arn: Option<String>,
+    #[serde(
+        rename = "aws.credentials.role.external_id",
+        alias = "kinesis.assumerole.external_id"
+    )]
+    pub assume_role_external_id: Option<String>,
+}
+
+impl KinesisCommon {
+    pub(crate) async fn build_client(&self) -> anyhow::Result<KinesisClient> {
+        let config = AwsConfigInfo::build(self.clone())?;
+        let aws_config = config.load().await?;
+        let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
+        if let Some(endpoint) = &config.endpoint {
+            let uri = endpoint.clone().parse::<Uri>().unwrap();
+            builder =
+                builder.endpoint_resolver(aws_smithy_http::endpoint::Endpoint::immutable(uri));
+        }
+        Ok(KinesisClient::from_conf(builder.build()))
     }
 }
