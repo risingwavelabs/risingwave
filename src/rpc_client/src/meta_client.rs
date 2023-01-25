@@ -1035,7 +1035,6 @@ impl GrpcMetaClient {
     // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
     async fn get_current_leader_from_service(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
-            tracing::info!("in get_current_leader_from_service");
             let service_addr = &self.leader_service_addr;
             let service_channel = get_channel_with_defaults(service_addr)
                 .await
@@ -1075,17 +1074,16 @@ impl GrpcMetaClient {
             } else {
                 self.get_current_leader_from_service().await
             };
+            // always use service for retries
+            current_leader_init = None;
             if current_leader.is_none() {
-                // May happen if all meta nodes are down OR if there is a problem with Nginx routing
-                // the request to the meta nodes
+                // Prod: May happen if all meta nodes are down
+                // Risedev: May happen if there is a problem with Nginx routing the requests
                 tracing::warn!("Unable to retrieve leader address via service. Retrying...");
                 tokio::time::sleep(retry).await;
                 continue;
             }
-            let current_leader = current_leader.expect("Should know current leader");
-
-            // always use service for retries
-            current_leader_init = None;
+            let current_leader = current_leader.unwrap();
 
             // TODO: How do we know that it always is http?
             let addr = format!(
@@ -1093,11 +1091,10 @@ impl GrpcMetaClient {
                 current_leader.get_host(),
                 current_leader.get_port()
             );
-            tracing::info!("Failing over to new meta leader {}", addr);
             let leader_channel = match get_channel_no_retry(addr.as_str()).await {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::warn!("Failed to establish connection to leader at {}. Err was {}. Assuming stale leader info. Retrying...", addr, e);
+                    tracing::info!("Failed to establish connection to leader at {}. Err was {}. Assuming stale leader info. Retrying...", addr, e);
                     tokio::time::sleep(retry).await;
                     continue;
                 }
