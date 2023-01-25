@@ -108,16 +108,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }
 
-    fn gen_int(&mut self, _min: isize, max: isize) -> String {
+    fn gen_int(&mut self, min: isize, max: isize) -> String {
         let n = match self.rng.gen_range(0..=4) {
             0 => 0,
             1 => 1,
             2 => max,
-            // TODO: Negative numbers have a few issues.
-            // - Parsing, tracked by: <https://github.com/risingwavelabs/risingwave/issues/4344>.
-            // - Neg op with Interval, tracked by: <https://github.com/risingwavelabs/risingwave/issues/112>
-            // 3 => i32::MIN as f64,
-            3..=4 => self.rng.gen_range(1..max),
+            3 => min,
+            4 => self.rng.gen_range(min..max),
             _ => unreachable!(),
         };
         n.to_string()
@@ -128,11 +125,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             0 => 0.0,
             1 => 1.0,
             2 => i32::MAX as f64,
-            // TODO: Negative numbers have a few issues.
-            // - Parsing, tracked by: <https://github.com/risingwavelabs/risingwave/issues/4344>.
-            // - Neg op with Interval, tracked by: <https://github.com/risingwavelabs/risingwave/issues/112>
-            // 3 => i32::MIN as f64,
-            3..=4 => self.rng.gen_range(1.0..i32::MAX as f64),
+            3 => i32::MIN as f64,
+            4 => self.rng.gen_range(i32::MIN..i32::MAX) as f64,
             _ => unreachable!(),
         };
         n.to_string()

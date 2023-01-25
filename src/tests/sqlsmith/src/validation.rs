@@ -56,6 +56,12 @@ fn is_subquery_unnesting_error(db_error: &str) -> bool {
     db_error.contains("Subquery can not be unnested")
 }
 
+/// Can't avoid numeric overflows, we do not eval const expr
+fn is_numeric_overflow_error(db_error: &str) -> bool {
+    db_error.contains("Number")
+    && db_error.contains("overflows")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -68,4 +74,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_hash_shuffle_error(db_error)
         || is_nested_loop_join_error(db_error)
         || is_subquery_unnesting_error(db_error)
+        || is_numeric_overflow_error(db_error)
 }
