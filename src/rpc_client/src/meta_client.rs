@@ -1070,8 +1070,6 @@ impl GrpcMetaClient {
 
     async fn do_failover(&self, mut current_leader_init: Option<HostAddress>) {
         for retry in self.get_retry_strategy() {
-            tracing::info!("in do_failover"); // TODO: Remove line
-
             let current_leader = if current_leader_init.is_some() {
                 current_leader_init.clone()
             } else {
