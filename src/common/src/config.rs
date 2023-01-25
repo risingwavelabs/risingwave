@@ -34,14 +34,15 @@ pub const NO_OVERWRITE: Option<NoOverwrite> = None;
 pub fn load_config(path: &str, cli_overwrite: Option<impl OverwriteConfig>) -> RwConfig
 where
 {
-    if path.is_empty() {
+    let mut config = if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return RwConfig::default();
-    }
-    let config_str = fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-    let mut config =
-        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e));
+        RwConfig::default()
+    } else {
+        let config_str = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
+        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+    };
+
     if let Some(cli_overwrite) = cli_overwrite {
         cli_overwrite.overwrite(&mut config);
     }
