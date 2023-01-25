@@ -15,17 +15,15 @@
 //! Interface for generating a query
 //! We construct Query based on the AST representation,
 //! as defined in the [`risingwave_sqlparser`] module.
-use std::sync::Arc;
+
 use std::vec;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins,
-    With,
+    Cte, Distinct, Expr, Ident, Query, Select, SelectItem, SetExpr, TableWithJoins, With,
 };
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
@@ -176,9 +174,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unzip()
     }
 
-
     fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
-
         let (ret_type, expr) = self.gen_arbitrary_expr(context);
 
         let alias = format!("col_{}", i);

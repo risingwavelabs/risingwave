@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::sync::Arc;
+
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::types::struct_type::StructType;
+use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
-use risingwave_sqlparser::ast::{BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr, TrimWhereField, UnaryOperator, Value};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
+    TrimWhereField, UnaryOperator, Value,
+};
 
 use crate::sql_gen::types::{data_type_to_ast_data_type, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
@@ -54,26 +57,31 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 true => {
                     let (ty, expr) = self.gen_arbitrary_expr(context);
                     let n = self.rng.gen_range(1..=10);
-                  Expr::InList {
-                    expr: Box::new(expr),
-                    list: self.gen_n_exprs_with_type(n, &ty, context),
-                    negated: self.flip_coin(),
-                  }
-                },
+                    Expr::InList {
+                        expr: Box::new(expr),
+                        list: self.gen_n_exprs_with_type(n, &ty, context),
+                        negated: self.flip_coin(),
+                    }
+                }
                 false => {
-                    let (query, bound_columns) = self.gen_local_query();
-                    let ty = self.bound_columns.choose(&mut self.rng).unwrap().clone().data_type;
+                    let (query, _bound_columns) = self.gen_local_query();
+                    let ty = self
+                        .bound_columns
+                        .choose(&mut self.rng)
+                        .unwrap()
+                        .clone()
+                        .data_type;
                     let expr = match self.flip_coin() {
                         true => self.gen_expr(&ty, context),
-                        false => self.gen_arbitrary_expr(context),
+                        false => self.gen_arbitrary_expr(context).1,
                     };
                     Expr::InSubquery {
-                        expr,
+                        expr: Box::new(expr),
                         subquery: Box::new(query),
                         negated: self.flip_coin(),
                     }
                 }
-            }
+            };
         }
 
         let range = if context.can_gen_agg() { 99 } else { 90 };
@@ -85,7 +93,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             _ => unreachable!(),
         }
     }
-
 
     fn gen_data_type(&mut self) -> DataType {
         // Depth of struct/list nesting
@@ -382,8 +389,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let filter = if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             Some(Box::new(self.gen_expr(&DataType::Boolean, context)))
-        } else { None };
-        let order_by = if self.flip_coin() && !distinct  {
+        } else {
+            None
+        };
+        let order_by = if self.flip_coin() && !distinct {
             self.gen_order_by()
         } else {
             vec![]
@@ -393,21 +402,44 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates aggregate expressions. For internal / unsupported aggregators, we return `None`.
-    fn make_agg_expr(&mut self, func: AggKind, exprs: &[Expr], distinct: bool, filter: Option<Box<Expr>>, order_by: Vec<OrderByExpr>) -> Option<Expr> {
+    fn make_agg_expr(
+        &mut self,
+        func: AggKind,
+        exprs: &[Expr],
+        distinct: bool,
+        filter: Option<Box<Expr>>,
+        order_by: Vec<OrderByExpr>,
+    ) -> Option<Expr> {
         use AggKind as A;
         match func {
-            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func("sum", exprs, distinct, filter, order_by))),
-            A::Min => Some(Expr::Function(make_agg_func("min", exprs, distinct, filter, order_by))),
-            A::Max => Some(Expr::Function(make_agg_func("max", exprs, distinct, filter, order_by))),
-            A::Count => Some(Expr::Function(make_agg_func("count", exprs, distinct, filter, order_by))),
-            A::Avg => Some(Expr::Function(make_agg_func("avg", exprs, distinct, filter, order_by))),
+            A::Sum | A::Sum0 => Some(Expr::Function(make_agg_func(
+                "sum", exprs, distinct, filter, order_by,
+            ))),
+            A::Min => Some(Expr::Function(make_agg_func(
+                "min", exprs, distinct, filter, order_by,
+            ))),
+            A::Max => Some(Expr::Function(make_agg_func(
+                "max", exprs, distinct, filter, order_by,
+            ))),
+            A::Count => Some(Expr::Function(make_agg_func(
+                "count", exprs, distinct, filter, order_by,
+            ))),
+            A::Avg => Some(Expr::Function(make_agg_func(
+                "avg", exprs, distinct, filter, order_by,
+            ))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
                 // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
                 if self.is_distinct_allowed && !distinct {
                     None
                 } else {
-                    Some(Expr::Function(make_agg_func("string_agg", exprs, distinct, filter, order_by)))
+                    Some(Expr::Function(make_agg_func(
+                        "string_agg",
+                        exprs,
+                        distinct,
+                        filter,
+                        order_by,
+                    )))
                 }
             }
             A::FirstValue => None,
@@ -421,7 +453,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                         "approx_count_distinct",
                         exprs,
                         false,
-                        filter, order_by
+                        filter,
+                        order_by,
                     )))
                 }
             }
@@ -429,7 +462,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 "array_agg",
                 exprs,
                 distinct,
-                filter, order_by
+                filter,
+                order_by,
             ))),
         }
     }
@@ -537,7 +571,13 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 
 /// This is the function that generate aggregate function.
 /// DISTINCT, ORDER BY or FILTER is allowed in aggregation functions。
-fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool, filter: Option<Box<Expr>>, order_by: Vec<OrderByExpr>) -> Function {
+fn make_agg_func(
+    func_name: &str,
+    exprs: &[Expr],
+    distinct: bool,
+    filter: Option<Box<Expr>>,
+    order_by: Vec<OrderByExpr>,
+) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))

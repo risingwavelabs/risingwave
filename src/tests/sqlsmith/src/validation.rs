@@ -58,8 +58,7 @@ fn is_subquery_unnesting_error(db_error: &str) -> bool {
 
 /// Can't avoid numeric overflows, we do not eval const expr
 fn is_numeric_overflow_error(db_error: &str) -> bool {
-    db_error.contains("Number")
-    && db_error.contains("overflows")
+    db_error.contains("Number") && db_error.contains("overflows")
 }
 
 /// Certain errors are permitted to occur. This is because:
