@@ -190,7 +190,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             election_client.leader().await.unwrap().unwrap().into()
         } else {
             MetaLeaderInfo {
-                node_address: address_info.meta_endpoint.clone().to_string(),
+                node_address: address_info.meta_endpoint.clone(),
                 lease_id: 0,
             }
         };
