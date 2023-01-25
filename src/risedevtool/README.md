@@ -31,6 +31,9 @@ RiseDev also provides several other modes:
 - ci-1cn-1fe: 1 compute node + meta node + 1 frontend + MinIO
 - dev-compute-node: 1 compute-node (user managed) + MinIO + prometheus + meta + frontend
 
+TODO: Add other Meta HA setup here
+TODO: Also explain how nginx works as a LB here
+
 #### Debug compute node
 
 Sometimes, you might want to debug a single component, but need to spawn all other components to make that component work. For example, debugging the compute node. In this case, simply run:

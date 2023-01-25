@@ -1083,7 +1083,7 @@ impl GrpcMetaClient {
                 tokio::time::sleep(retry).await;
                 continue;
             }
-            let current_leader = current_leader.unwrap();
+            let current_leader = current_leader.expect("Should know current leader");
 
             // always use service for retries
             current_leader_init = None;
@@ -1096,9 +1096,9 @@ impl GrpcMetaClient {
             );
             tracing::info!("Failing over to new meta leader {}", addr);
             let leader_channel = match get_channel_no_retry(addr.as_str()).await {
-                Ok(lc) => lc,
-                Err(_) => {
-                    tracing::warn!("Failed to establish connection leader {}. Seems to be stale leader info. Retrying...", addr);
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("Failed to establish connection to leader at {}. Err was {}. Assuming stale leader info. Retrying...", addr, e);
                     tokio::time::sleep(retry).await;
                     continue;
                 }
@@ -1146,9 +1146,14 @@ impl GrpcMetaClient {
                 tracing::info!("failover is NOT needed");
                 return false;
             }
+            tracing::info!(
+                "failover is NEEDED. Current connected node is {:?}. Leader is {:?}",
+                connected_node,
+                current_leader_clone
+            );
             // release mutex guard after this scope
+            // TODO: Think I do not need extra scope if I clone. Try removing extra scope
         }
-        tracing::info!("failover is NEEDED");
         self.do_failover(current_leader_clone).await;
         true
     }
