@@ -43,7 +43,7 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::*;
 use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
-use risingwave_pb::leader::LeaderRequest;
+use risingwave_pb::leader::{LeaderRequest, LeaderResponse};
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -62,7 +62,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
-use tonic::Streaming;
+use tonic::{Response, Status, Streaming};
 
 use crate::error::Result;
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -992,14 +992,19 @@ impl GrpcMetaClient {
         GrpcMetaClient::retry_strategy_for_request()
     }
 
+    /// Retrieve leader from currently connected meta node
+    /// Helper function used to scope `MutexGuard`
+    async fn make_leader_request(&self) -> std::result::Result<Response<LeaderResponse>, Status> {
+        let mut lc = self.leader_client.as_ref().lock().await;
+        lc.leader(LeaderRequest {}).await
+    }
+
     // None if leader is presumed failed
     // HostAddress if connected against a working leader or follower node
     // Node may return a stale leader
     async fn try_get_leader_from_connected_node(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
-            tracing::info!("in try_get_leader_from_connected_node"); // TODO: Remove line
-            let mut lc = self.leader_client.as_ref().lock().await;
-            let response = lc.leader(LeaderRequest {}).await;
+            let response = self.make_leader_request().await;
 
             // assume leader node crashed if err is unavailable, unimplemented or unknown
             // else repeat request
@@ -1009,22 +1014,20 @@ impl GrpcMetaClient {
                     || err_code == tonic::Code::Unimplemented
                     || err_code == tonic::Code::Unknown
                 {
-                    tracing::info!("try_get_leader_from_connected_node: None"); // TODO: Remove line
                     return None;
                 }
                 tokio::time::sleep(retry).await;
                 continue;
             }
+
+            // Meta node is up. May be follower or leader node
             let current_leader = response.unwrap().into_inner().leader_addr;
             if current_leader.is_none() {
                 tracing::warn!("Meta node did not know who leader is (current connected node). Trying again...");
                 tokio::time::sleep(retry).await;
                 continue;
             }
-            let current_leader = current_leader.unwrap();
-
-            tracing::info!("try_get_leader_from_connected_node: {:?}", current_leader); // TODO: Remove line
-            return Some(current_leader);
+            return Some(current_leader.unwrap());
         }
         None
     }
@@ -1060,8 +1063,6 @@ impl GrpcMetaClient {
             }
             let current_leader = current_leader.unwrap();
 
-            //     .expect("Meta node is supposed to know who the leader is (from service)");
-            tracing::info!("get_current_leader_from_service: {:?}", current_leader); // TODO: Remove line
             return Some(current_leader);
         }
         None
@@ -1129,7 +1130,7 @@ impl GrpcMetaClient {
                 *backup_c = BackupServiceClient::new(leader_channel);
             } // release MutexGuards on all clients
 
-            tracing::info!("Updated client to connect against new leader {}", addr);
+            tracing::info!("Successfully failed over meta_client to {}", addr);
         }
     }
 
