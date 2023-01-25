@@ -66,11 +66,10 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
+    /// The endpoint for this meta node, which also serves as its unique identifier in cluster
+    /// membership and leader election.
     #[clap(long)]
-    host: Option<String>,
-
-    #[clap(long)]
-    endpoint: Option<String>,
+    meta_endpoint: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -133,24 +132,30 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
-        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
-        let endpoint = opts.endpoint.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let backend = match opts.backend {
-            Backend::Etcd => MetaStoreBackend::Etcd {
-                endpoints: opts
-                    .etcd_endpoints
-                    .split(',')
-                    .map(|x| x.to_string())
-                    .collect(),
-                credentials: match opts.etcd_auth {
-                    true => Some((opts.etcd_username, opts.etcd_password)),
-                    false => None,
+        let (meta_endpoint, backend) = match opts.backend {
+            Backend::Etcd => (
+                opts.meta_endpoint
+                    .expect("meta_endpoint must be specified when using etcd"),
+                MetaStoreBackend::Etcd {
+                    endpoints: opts
+                        .etcd_endpoints
+                        .split(',')
+                        .map(|x| x.to_string())
+                        .collect(),
+                    credentials: match opts.etcd_auth {
+                        true => Some((opts.etcd_username, opts.etcd_password)),
+                        false => None,
+                    },
                 },
-            },
-            Backend::Mem => MetaStoreBackend::Mem,
+            ),
+            Backend::Mem => (
+                opts.meta_endpoint
+                    .unwrap_or_else(|| opts.listen_addr.clone()),
+                MetaStoreBackend::Mem,
+            ),
         };
 
         let max_heartbeat_interval =
@@ -162,8 +167,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            endpoint,
-            addr: meta_addr,
+            meta_endpoint,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
