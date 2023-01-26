@@ -23,13 +23,12 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
-mod rule;
 mod plan_expr_rewriter;
-use plan_expr_rewriter::ConstEvalRewriter;
-
+mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
+use plan_expr_rewriter::ConstEvalRewriter;
 use plan_rewriter::ShareSourceRewriter;
 use property::Order;
 use risingwave_common::catalog::{Field, Schema};
