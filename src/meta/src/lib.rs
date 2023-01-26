@@ -63,14 +63,17 @@ pub enum Backend {
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
-    /// The address for this service to listen to locally
+    /// The address that this service listens to.
+    /// Usually the localhost + desired port.
     #[clap(long, default_value = "127.0.0.1:5690")]
     listen_address: String,
 
-    /// The address for contacting this instance of the meta service.
-    /// This also serves as its unique identifier in cluster
-    /// membership and leader election. Must be specified for etcd cluster.
-    #[clap(long, required_if_eq("backend", "Backend::Etcd"))]
+    /// The address for contacting this instance of the service.
+    /// This would be synonymous with the service's "public address"
+    /// or "identifying address".
+    /// It will serve as a unique identifier in cluster
+    /// membership and leader election. Must be specified for etcd backend.
+    #[clap(long, required_if_eq("backend", "etcd"))]
     contact_address: Option<String>,
 
     #[clap(long)]

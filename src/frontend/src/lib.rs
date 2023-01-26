@@ -68,11 +68,14 @@ use session::SessionManagerImpl;
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     // TODO: rename to listen_address and separate out the port.
-    /// The address for this service to listen to locally
+    /// The address that this service listens to.
+    /// Usually the localhost + desired port.
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub listen_address: String,
 
-    /// The address for contacting this instance of the frontend service.
+    /// The address for contacting this instance of the service.
+    /// This would be synonymous with the service's "public address"
+    /// or "identifying address".
     /// Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub contact_address: Option<String>,
