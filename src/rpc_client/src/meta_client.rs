@@ -114,16 +114,12 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
-        let mut resp = self.inner.subscribe(request.clone()).await;
-        for retry in GrpcMetaClient::retry_strategy_for_request() {
-            if resp.is_ok() {
-                return resp;
-            }
-            tokio::time::sleep(retry).await;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        tokio_retry::Retry::spawn(retry_strategy, || async {
             let request = request.clone();
-            resp = self.inner.subscribe(request).await;
-        }
-        resp
+            self.inner.subscribe(request).await
+        })
+        .await
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
@@ -139,15 +135,12 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
-        for retry in GrpcMetaClient::retry_strategy_for_request() {
-            if resp.is_ok() {
-                break;
-            }
-            tokio::time::sleep(retry).await;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
             let request = request.clone();
-            resp = grpc_meta_client.add_worker_node(request).await;
-        }
+            grpc_meta_client.add_worker_node(request).await
+        })
+        .await;
 
         let worker_node = resp?.node.expect("AddWorkerNodeResponse::node is empty");
         Ok(Self {
@@ -164,17 +157,12 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
         };
 
-        let mut resp = self.inner.activate_worker_node(request.clone()).await;
-        for retry in GrpcMetaClient::retry_strategy_for_request() {
-            if resp.is_ok() {
-                break;
-            }
-            tokio::time::sleep(retry).await;
+        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+        tokio_retry::Retry::spawn(retry_strategy, || async {
             let request = request.clone();
-            resp = self.inner.activate_worker_node(request).await;
-        }
-        // return error if all retries failed
-        resp?;
+            self.inner.activate_worker_node(request).await
+        })
+        .await?;
 
         Ok(())
     }
@@ -1036,14 +1024,16 @@ impl GrpcMetaClient {
     async fn get_current_leader_from_service(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
             let service_addr = &self.leader_service_addr;
-            let service_channel = get_channel_with_defaults(service_addr)
-                .await
-                .unwrap_or_else(|_| {
-                    panic!(
+            let service_channel = match get_channel_with_defaults(service_addr).await {
+                Ok(c) => c,
+                Err(_) => {
+                    tracing::warn!(
                         "Unable to establish channel against Meta Service at {}",
                         service_addr
                     );
-                });
+                    return None;
+                }
+            };
             let mut lc = LeaderServiceClient::new(service_channel);
             let mut response = lc.leader(LeaderRequest {}).await;
             for retry in self.get_retry_strategy() {
@@ -1072,6 +1062,10 @@ impl GrpcMetaClient {
     /// ## Arguments:
     /// `new_leader`: Pass the address of the new leader if it is already known
     async fn do_failover(&self, mut new_leader: Option<HostAddress>) {
+        // TODO: this leads to a lot of spam. We should retry doing the connections and spam less
+        // 2023-01-26T12:07:17.245736Z  WARN risingwave_rpc_client::meta_client: Failed to connect to meta server http://127.0.0.1:5690: transport error
+        // 2023-01-26T12:07:17.245753Z  INFO risingwave_rpc_client::meta_client: Failed to establish connection to leader at http://127.0.0.1:5690. Err was transport error. Assuming stale leader info. Retrying...
+
         for retry in self.get_retry_strategy() {
             let nl = if new_leader.is_some() {
                 new_leader.clone()
@@ -1097,8 +1091,10 @@ impl GrpcMetaClient {
             );
             let leader_channel = match get_channel_no_retry(addr.as_str()).await {
                 Ok(c) => c,
-                Err(e) => {
-                    tracing::info!("Failed to establish connection to leader at {}. Err was {}. Assuming stale leader info. Retrying...", addr, e);
+                Err(_) => {
+                    tracing::info!(
+                        "Failed to establish connection. Assuming stale leader info. Retrying...",
+                    );
                     tokio::time::sleep(retry).await;
                     continue;
                 }
