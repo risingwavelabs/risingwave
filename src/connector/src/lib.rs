@@ -35,6 +35,8 @@ pub mod parser;
 pub mod sink;
 pub mod source;
 
+pub mod common;
+
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
     pub connector_rpc_endpoint: Option<String>,
