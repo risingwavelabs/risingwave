@@ -114,9 +114,8 @@ impl MetaClient {
             host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.subscribe(request.clone()).await;
-        for retry in retry_strategy {
+        for retry in GrpcMetaClient::retry_strategy_for_request() {
             if resp.is_ok() {
                 return resp;
             }
@@ -140,9 +139,8 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
-        for retry in retry_strategy {
+        for retry in GrpcMetaClient::retry_strategy_for_request() {
             if resp.is_ok() {
                 break;
             }
@@ -165,9 +163,9 @@ impl MetaClient {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+
         let mut resp = self.inner.activate_worker_node(request.clone()).await;
-        for retry in retry_strategy {
+        for retry in GrpcMetaClient::retry_strategy_for_request() {
             if resp.is_ok() {
                 break;
             }
