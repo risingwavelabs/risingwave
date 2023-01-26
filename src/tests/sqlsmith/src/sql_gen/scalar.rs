@@ -109,24 +109,30 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_int(&mut self, min: isize, max: isize) -> String {
-        let n = match self.rng.gen_range(0..=4) {
+        // NOTE: Reduced chance for extreme values,
+        // since these tend to generate invalid expressions.
+        let n = match self.rng.gen_range(0..=10) {
             0 => 0,
             1 => 1,
             2 => max,
             3 => min,
-            4 => self.rng.gen_range(min..max),
+            4 => self.rng.gen_range(min + 1..0),
+            5..=10 => self.rng.gen_range(2..max),
             _ => unreachable!(),
         };
         n.to_string()
     }
 
     fn gen_float(&mut self) -> String {
-        let n = match self.rng.gen_range(0..=4) {
+        // NOTE: Reduced chance for extreme values,
+        // since these tend to generate invalid expressions.
+        let n = match self.rng.gen_range(0..=10) {
             0 => 0.0,
             1 => 1.0,
             2 => i32::MAX as f64,
             3 => i32::MIN as f64,
-            4 => self.rng.gen_range(i32::MIN..i32::MAX) as f64,
+            4 => self.rng.gen_range(i32::MIN + 1..0) as f64,
+            5..=10 => self.rng.gen_range(2..i32::MAX) as f64,
             _ => unreachable!(),
         };
         n.to_string()

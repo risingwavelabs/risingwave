@@ -19,8 +19,14 @@ fn is_division_by_zero_err(db_error: &str) -> bool {
     db_error.contains(&ExprError::DivisionByZero.to_string())
 }
 
+/// `Casting to u32 out of range` occurs when we have functions
+/// which expect non-negative arguments,
+/// e.g. `select 222 << -1`
+// NOTE: If this error occurs too often, perhaps it is better to
+// wrap call sites with `abs(rhs)`, e.g. 222 << abs(-1);
 fn is_numeric_out_of_range_err(db_error: &str) -> bool {
     db_error.contains(&ExprError::NumericOutOfRange.to_string())
+        || db_error.contains("Casting to u32 out of range")
 }
 
 /// Skip queries with unimplemented features
