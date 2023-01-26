@@ -879,6 +879,7 @@ pub async fn get_channel_no_retry(
         GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
         GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
         false,
+        false,
     )
     .await
 }
@@ -893,6 +894,7 @@ pub async fn get_channel_with_defaults(
         GRPC_CONN_RETRY_BASE_INTERVAL_MS,
         GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
         GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+        true,
         true,
     )
     .await
@@ -910,6 +912,7 @@ async fn get_channel(
     keep_alive_interval: u64,
     keep_alive_timeout: u64,
     retry: bool,
+    verbose: bool,
 ) -> std::result::Result<Channel, tonic::transport::Error> {
     let endpoint = Endpoint::from_shared(addr.to_string())?
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
@@ -922,13 +925,15 @@ async fn get_channel(
             .connect()
             .await
             .inspect_err(|e| {
-                let wait_msg = if retry { ", wait for online" } else { "" };
-                tracing::warn!(
-                    "Failed to connect to meta server {}{}: {}",
-                    addr,
-                    wait_msg,
-                    e
-                );
+                if verbose {
+                    let wait_msg = if retry { ", wait for online" } else { "" };
+                    tracing::warn!(
+                        "Failed to connect to meta server {}{}: {}",
+                        addr,
+                        wait_msg,
+                        e
+                    );
+                }
             })
     };
 
@@ -1059,10 +1064,7 @@ impl GrpcMetaClient {
     /// ## Arguments:
     /// `new_leader`: Pass the address of the new leader if it is already known
     async fn do_failover(&self, mut new_leader: Option<HostAddress>) {
-        // TODO: this leads to a lot of spam. We should retry doing the connections and spam less
-        // 2023-01-26T12:07:17.245736Z  WARN risingwave_rpc_client::meta_client: Failed to connect to meta server http://127.0.0.1:5690: transport error
-        // 2023-01-26T12:07:17.245753Z  INFO risingwave_rpc_client::meta_client: Failed to establish connection to leader at http://127.0.0.1:5690. Err was transport error. Assuming stale leader info. Retrying...
-
+        let mut failure_msgs: Vec<String> = vec![];
         for retry in self.get_retry_strategy() {
             let nl = if new_leader.is_some() {
                 new_leader.clone()
@@ -1074,13 +1076,13 @@ impl GrpcMetaClient {
             if nl.is_none() {
                 // Prod: May happen if all meta nodes are down
                 // Risedev: May happen if there is a problem with Nginx routing the requests
-                tracing::warn!("Unable to retrieve leader address via service. Retrying...");
+                failure_msgs
+                    .push("Unable to retrieve leader address via service. Retrying...".to_owned());
                 tokio::time::sleep(retry).await;
                 continue;
             }
             let current_leader = nl.unwrap();
 
-            // TODO: Are there any plans to change to https? Add a comment in PR
             let addr = format!(
                 "http://{}:{}",
                 current_leader.get_host(),
@@ -1088,10 +1090,11 @@ impl GrpcMetaClient {
             );
             let leader_channel = match get_channel_no_retry(addr.as_str()).await {
                 Ok(c) => c,
-                Err(_) => {
-                    tracing::info!(
-                        "Failed to establish connection. Assuming stale leader info. Retrying...",
-                    );
+                Err(e) => {
+                    failure_msgs.push(format!( 
+                         "Failed to establish connection with {}. Err: {}. Assuming stale leader info. Retrying...",
+                        addr, e
+                    ));
                     tokio::time::sleep(retry).await;
                     continue;
                 }
@@ -1123,6 +1126,15 @@ impl GrpcMetaClient {
             } // release MutexGuards on all clients
 
             tracing::info!("Successfully failed over meta_client to {}", addr);
+            return;
+        }
+
+        // Only print failure messages if the entire failover failed
+        failure_msgs.sort_unstable();
+        failure_msgs.dedup();
+        tracing::error!("Failed to failover to new meta leader. Error messages were..."); 
+        for msg in failure_msgs {
+             tracing::error!(msg);
         }
     }
 
