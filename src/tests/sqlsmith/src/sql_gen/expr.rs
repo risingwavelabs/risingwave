@@ -23,11 +23,11 @@ use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
-    TrimWhereField, UnaryOperator, Value,
+    Query, TrimWhereField, UnaryOperator, Value,
 };
 
 use crate::sql_gen::types::{data_type_to_ast_data_type, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
-use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
+use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 
 static STRUCT_FIELD_NAMES: [&str; 26] = [
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
@@ -64,22 +64,21 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     }
                 }
                 false => {
-                    let (query, _bound_columns) = self.gen_local_query();
-                    let ty = self
-                        .bound_columns
-                        .choose(&mut self.rng)
-                        .unwrap()
-                        .clone()
-                        .data_type;
-                    let expr = match self.flip_coin() {
-                        true => self.gen_expr(&ty, context),
-                        false => self.gen_arbitrary_expr(context).1,
-                    };
-                    Expr::InSubquery {
+                    // TODO: InSubquery expression may not be always bound in all context.
+                    // Parts labelled workaround can be removed or
+                    // generalized if it is bound in all contexts.
+                    // https://github.com/risingwavelabs/risingwave/issues/1343
+                    let old_ctxt = self.new_local_context(); // WORKAROUND
+                    let (query, column) = self.gen_single_item_query();
+                    let ty = column.data_type;
+                    let expr = self.gen_simple_scalar(&ty); // WORKAROUND
+                    let in_subquery_expr = Expr::InSubquery {
                         expr: Box::new(expr),
                         subquery: Box::new(query),
                         negated: self.flip_coin(),
-                    }
+                    };
+                    self.restore_context(old_ctxt); // WORKAROUND
+                    in_subquery_expr
                 }
             };
         }

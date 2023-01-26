@@ -44,8 +44,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a complex query which may recurse.
     /// e.g. through `gen_with` or other generated parts of the query.
     fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
+        let num_select_items = self.rng.gen_range(1..=4);
         let (with, with_tables) = self.gen_with();
-        let (query, schema) = self.gen_set_expr(with_tables);
+        let (query, schema) = self.gen_set_expr(with_tables, num_select_items);
         let order_by = self.gen_order_by();
         let has_order_by = !order_by.is_empty();
         (
@@ -63,8 +64,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates a simple query which will not recurse.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
+        let num_select_items = self.rng.gen_range(1..=4);
         let with_tables = vec![];
-        let (query, schema) = self.gen_set_expr(with_tables);
+        let (query, schema) = self.gen_set_expr(with_tables, num_select_items);
         (
             Query {
                 with: None,
@@ -75,6 +77,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 fetch: None,
             },
             schema,
+        )
+    }
+
+    /// Generates a query with a single SELECT item. e.g. SELECT v from t;
+    /// Returns the query and the SELECT column alias.
+    pub(crate) fn gen_single_item_query(&mut self) -> (Query, Column) {
+        let with_tables = vec![];
+        let (query, schema) = self.gen_set_expr(with_tables, 1);
+        (
+            Query {
+                with: None,
+                body: query,
+                order_by: vec![],
+                limit: None,
+                offset: None,
+                fetch: None,
+            },
+            schema[0].clone(),
         )
     }
 
@@ -128,10 +148,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    fn gen_set_expr(&mut self, with_tables: Vec<Table>) -> (SetExpr, Vec<Column>) {
+    fn gen_set_expr(
+        &mut self,
+        with_tables: Vec<Table>,
+        num_select_items: usize,
+    ) -> (SetExpr, Vec<Column>) {
         match self.rng.gen_range(0..=9) {
+            // TODO: Generate other `SetExpr`
             0..=9 => {
-                let (select, schema) = self.gen_select_stmt(with_tables);
+                let (select, schema) = self.gen_select_stmt(with_tables, num_select_items);
                 (SetExpr::Select(Box::new(select)), schema)
             }
             _ => unreachable!(),
@@ -146,13 +171,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_select_stmt(&mut self, with_tables: Vec<Table>) -> (Select, Vec<Column>) {
+    fn gen_select_stmt(
+        &mut self,
+        with_tables: Vec<Table>,
+        num_select_items: usize,
+    ) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from(with_tables);
         let selection = self.gen_where();
         let group_by = self.gen_group_by();
         let having = self.gen_having(!group_by.is_empty());
-        let (select_list, schema) = self.gen_select_list();
+        let (select_list, schema) = self.gen_select_list(num_select_items);
         let select = Select {
             distinct: Distinct::All,
             projection: select_list,
@@ -165,16 +194,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (select, schema)
     }
 
-    fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
-        let items_num = self.rng.gen_range(1..=4);
+    fn gen_select_list(&mut self, num_select_items: usize) -> (Vec<SelectItem>, Vec<Column>) {
         let can_agg = self.flip_coin();
         let context = SqlGeneratorContext::new_with_can_agg(can_agg);
-        (0..items_num)
+        (0..num_select_items)
             .map(|i| self.gen_select_item(i, context))
             .unzip()
     }
 
-    fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
+    fn gen_select_item(&mut self, i: usize, context: SqlGeneratorContext) -> (SelectItem, Column) {
         let (ret_type, expr) = self.gen_arbitrary_expr(context);
 
         let alias = format!("col_{}", i);
