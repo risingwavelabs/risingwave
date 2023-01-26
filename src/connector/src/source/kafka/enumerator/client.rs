@@ -49,14 +49,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Properties = KafkaProperties;
     type Split = KafkaSplit;
 
-    async fn new(mut properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
-        properties.extract_common()?;
-
+    async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
         let mut config = rdkafka::ClientConfig::new();
-        let common_props = properties
-            .common
-            .as_ref()
-            .ok_or(anyhow!("Kafka properties should have common properties"))?;
+        let common_props = &properties.common;
 
         let broker_address = common_props.brokers.clone();
         let topic = common_props.topic.clone();

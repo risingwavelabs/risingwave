@@ -17,11 +17,7 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
-use std::collections::HashMap;
-
-use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use serde_json::Value;
 
 use crate::common::KinesisCommon;
 
@@ -38,19 +34,6 @@ pub struct KinesisProperties {
     )]
     pub seq_offset: Option<String>,
 
-    pub common: Option<KinesisCommon>,
     #[serde(flatten)]
-    extra: Option<HashMap<String, Value>>,
-}
-
-impl KinesisProperties {
-    fn extract_common(&mut self) -> Result<()> {
-        self.common = Some(
-            serde_json::from_value::<KinesisCommon>(
-                serde_json::to_value(self.extra.take().unwrap()).map_err(|e| anyhow!(e))?,
-            )
-            .map_err(|e| anyhow!(e))?,
-        );
-        Ok(())
-    }
+    pub common: KinesisCommon,
 }

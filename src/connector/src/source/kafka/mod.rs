@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
 use serde::Deserialize;
-use serde_json::Value;
 
 pub mod enumerator;
 pub mod source;
@@ -56,22 +53,8 @@ pub struct KafkaProperties {
     #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
     pub consumer_group: Option<String>,
 
-    pub common: Option<KafkaCommon>,
-
     #[serde(flatten)]
-    extra: Option<HashMap<String, Value>>,
-}
-
-impl KafkaProperties {
-    pub(crate) fn extract_common(&mut self) -> Result<()> {
-        self.common = Some(
-            serde_json::from_value::<KafkaCommon>(
-                serde_json::to_value(self.extra.take().unwrap()).map_err(|e| anyhow!(e))?,
-            )
-            .map_err(|e| anyhow!(e))?,
-        );
-        Ok(())
-    }
+    pub common: KafkaCommon,
 }
 
 const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);

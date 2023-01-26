@@ -33,13 +33,9 @@ impl SplitEnumerator for KinesisSplitEnumerator {
     type Properties = KinesisProperties;
     type Split = KinesisSplit;
 
-    async fn new(mut properties: KinesisProperties) -> Result<Self> {
-        properties.extract_common()?;
-        let common_props = properties.common.as_ref().ok_or(anyhow!(
-            "Kinesis common properties are not successfully parsed"
-        ))?;
-        let client = common_props.build_client().await?;
-        let stream_name = common_props.stream_name.clone();
+    async fn new(properties: KinesisProperties) -> Result<Self> {
+        let client = properties.common.build_client().await?;
+        let stream_name = properties.common.stream_name.clone();
         Ok(Self {
             stream_name,
             client,

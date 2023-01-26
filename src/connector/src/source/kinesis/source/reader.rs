@@ -47,11 +47,10 @@ impl SplitReader for KinesisSplitReader {
     type Properties = KinesisProperties;
 
     async fn new(
-        mut properties: KinesisProperties,
+        properties: KinesisProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        properties.extract_common()?;
         let split = match state.unwrap().into_iter().next().unwrap() {
             SplitImpl::Kinesis(ks) => ks,
             split => return Err(anyhow!("expect KinesisSplit, got {:?}", split)),
@@ -80,11 +79,8 @@ impl SplitReader for KinesisSplitReader {
             start_position => start_position.to_owned(),
         };
 
-        let common_props = properties.common.ok_or(anyhow!(
-            "Kinesis common properties are not successfully parsed"
-        ))?;
-        let stream_name = common_props.stream_name.clone();
-        let client = common_props.build_client().await?;
+        let stream_name = properties.common.stream_name.clone();
+        let client = properties.common.build_client().await?;
 
         Ok(Self {
             client,
@@ -259,7 +255,7 @@ mod tests {
     #[ignore]
     async fn test_single_thread_kinesis_reader() -> Result<()> {
         let properties = KinesisProperties {
-            common: Some(KinesisCommon {
+            common: KinesisCommon {
                 assume_role_arn: None,
                 credentials_access_key: None,
                 credentials_secret_access_key: None,
@@ -268,11 +264,10 @@ mod tests {
                 endpoint: None,
                 session_token: None,
                 assume_role_external_id: None,
-            }),
+            },
 
             scan_startup_mode: None,
             seq_offset: None,
-            extra: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(
