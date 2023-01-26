@@ -52,6 +52,10 @@ const fn _default_retry_backoff() -> Duration {
     Duration::from_millis(100)
 }
 
+const fn _default_use_transaction() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct KafkaConfig {
     #[serde(flatten)]
@@ -74,7 +78,10 @@ pub struct KafkaConfig {
     )]
     pub retry_interval: Duration,
 
-    #[serde(deserialize_with = "deserialize_bool_from_string")]
+    #[serde(
+        deserialize_with = "deserialize_bool_from_string",
+        default = "_default_use_transaction"
+    )]
     pub use_transaction: bool,
 }
 
