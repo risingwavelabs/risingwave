@@ -113,7 +113,7 @@ impl Serializer {
 }
 
 impl ValueRowSerializer for Serializer {
-    fn new(column_ids: &[ColumnId]) -> Self {
+    fn new(column_ids: &[ColumnId]) -> Serializer {
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
@@ -146,7 +146,7 @@ pub struct Deserializer {
 }
 
 impl ValueRowDeserializer for Deserializer {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Deserializer {
         assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids

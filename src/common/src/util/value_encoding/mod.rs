@@ -242,12 +242,12 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 }
 
 pub trait ValueRowSerializer: Clone {
-    fn new(column_ids: &[ColumnId]) -> Self;
+    fn new(column_ids: &[ColumnId]) -> impl ValueRowSerializer;
     fn serialize(&self, row: impl Row) -> Vec<u8>;
 }
 
 pub trait ValueRowDeserializer: Clone {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self;
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowDeserializer;
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
@@ -255,7 +255,7 @@ pub trait ValueRowDeserializer: Clone {
 pub struct BasicSerializer {}
 
 impl ValueRowSerializer for BasicSerializer {
-    fn new(_column_ids: &[ColumnId]) -> Self {
+    fn new(_column_ids: &[ColumnId]) -> BasicSerializer {
         BasicSerializer {}
     }
 
@@ -269,7 +269,7 @@ impl ValueRowSerializer for BasicSerializer {
 }
 
 impl ValueRowDeserializer for RowDeserializer {
-    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> Self {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> RowDeserializer {
         RowDeserializer::new(schema.to_vec())
     }
 
