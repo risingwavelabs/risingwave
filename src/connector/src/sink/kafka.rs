@@ -33,10 +33,9 @@ use serde_derive::Deserialize;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use crate::deserialize_bool_from_string;
-
 use super::{Sink, SinkError};
 use crate::common::KafkaCommon;
+use crate::deserialize_bool_from_string;
 use crate::sink::Result;
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -69,7 +68,10 @@ pub struct KafkaConfig {
     #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
     pub max_retry_num: u32,
 
-    #[serde(rename = "properties.retry.interval", default = "_default_retry_backoff")]
+    #[serde(
+        rename = "properties.retry.interval",
+        default = "_default_retry_backoff"
+    )]
     pub retry_interval: Duration,
 
     #[serde(deserialize_with = "deserialize_bool_from_string")]

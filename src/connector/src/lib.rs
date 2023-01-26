@@ -53,8 +53,8 @@ impl ConnectorParams {
 }
 
 pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
-    where
-        D: de::Deserializer<'de>,
+where
+    D: de::Deserializer<'de>,
 {
     let s: String = de::Deserialize::deserialize(deserializer)?;
     let s = s.to_ascii_lowercase();
@@ -67,4 +67,3 @@ pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bo
         )),
     }
 }
-
