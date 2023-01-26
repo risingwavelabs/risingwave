@@ -40,15 +40,15 @@ pub enum EngineType {
 
 impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
-    pub fn new_memory_engine() -> Self {
-        // Create fs backend builder.
+    pub fn new_memory_engine() -> ObjectResult<Self> {
+        // Create memory backend builder.
         let mut builder = memory::Builder::default();
 
-        let op: Operator = Operator::new(builder.build().unwrap());
-        Self {
+        let op: Operator = Operator::new(builder.build()?);
+        Ok(Self {
             op,
             engine_type: EngineType::Memory,
-        }
+        })
     }
 }
 
@@ -160,12 +160,14 @@ impl ObjectStore for OpendalObjectStore {
         while let Some(obj) = object_lister.next().await {
             let object = obj?;
             let key = prefix.to_string();
-            let last_modified = match object.metadata().await?.last_modified() {
+            let om = object.metadata().await?;
+
+            let last_modified = match om.last_modified() {
                 Some(t) => t.unix_timestamp() as f64,
                 None => 0_f64,
             };
 
-            let total_size = object.metadata().await?.content_length() as usize;
+            let total_size = om.content_length() as usize;
             let metadata = ObjectMetadata {
                 key,
                 last_modified,
@@ -233,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_upload() {
         let block = Bytes::from("123456");
-        let store = OpendalObjectStore::new_memory_engine();
+        let store = OpendalObjectStore::new_memory_engine().unwrap();
         store.upload("/abc", block).await.unwrap();
 
         // No such object.
@@ -273,7 +275,7 @@ mod tests {
     async fn test_memory_metadata() {
         let block = Bytes::from("123456");
         let path = "/abc".to_string();
-        let obj_store = OpendalObjectStore::new_memory_engine();
+        let obj_store = OpendalObjectStore::new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 
         let metadata = obj_store.metadata("/abc").await.unwrap();
@@ -286,7 +288,7 @@ mod tests {
     // async fn test_memory_delete_objects() {
     //     let block1 = Bytes::from("123456");
     //     let block2 = Bytes::from("987654");
-    //     let store = OpendalObjectStore::new_memory_engine();
+    //     let store = OpendalObjectStore::new_memory_engine().unwrap();
     //     store.upload("/abc", block1).await.unwrap();
     //     store.upload("/klm", block2).await.unwrap();
 
@@ -305,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_read_multi_block() {
-        let store = OpendalObjectStore::new_memory_engine();
+        let store = OpendalObjectStore::new_memory_engine().unwrap();
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -339,7 +341,7 @@ mod tests {
         let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
         let obj = Bytes::from("123456789");
 
-        let store = OpendalObjectStore::new_memory_engine();
+        let store = OpendalObjectStore::new_memory_engine().unwrap();
         let mut uploader = store.streaming_upload("/temp").unwrap();
 
         for block in blocks {

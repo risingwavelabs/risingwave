@@ -18,21 +18,19 @@ use opendal::Operator;
 use super::{EngineType, OpendalObjectStore};
 impl OpendalObjectStore {
     /// create opendal hdfs engine.
-    pub fn new_hdfs_engine(namenode: String, root: String) -> Self {
-        // Create fs backend builder.
+    pub fn new_hdfs_engine(namenode: String, root: String) -> ObjectResult<Self> {
+        // Create hdfs backend builder.
         let mut builder = hdfs::Builder::default();
         // Set the name node for hdfs.
         builder.name_node(&namenode);
         // Set the root for hdfs, all operations will happen under this root.
-        //
         // NOTE: the root must be absolute path.
         builder.root(&root);
 
-        // `Accessor` provides the low level APIs, we will use `Operator` normally.
-        let op: Operator = Operator::new(builder.build().unwrap());
-        Self {
+        let op: Operator = Operator::new(builder.build()?);
+        Ok(Self {
             op,
             engine_type: EngineType::Hdfs,
-        }
+        })
     }
 }
