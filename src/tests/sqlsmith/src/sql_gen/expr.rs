@@ -23,11 +23,11 @@ use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
-    Query, TrimWhereField, UnaryOperator, Value,
+    TrimWhereField, UnaryOperator, Value,
 };
 
 use crate::sql_gen::types::{data_type_to_ast_data_type, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
-use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
+use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 static STRUCT_FIELD_NAMES: [&str; 26] = [
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
