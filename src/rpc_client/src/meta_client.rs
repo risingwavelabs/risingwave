@@ -1035,13 +1035,10 @@ impl GrpcMetaClient {
                 }
             };
             let mut lc = LeaderServiceClient::new(service_channel);
-            let mut response = lc.leader(LeaderRequest {}).await;
-            for retry in self.get_retry_strategy() {
-                if response.is_ok() {
-                    break;
-                }
+            let response = lc.leader(LeaderRequest {}).await;
+            if response.is_err() {
                 tokio::time::sleep(retry).await;
-                response = lc.leader(LeaderRequest {}).await;
+                continue;
             }
 
             let current_leader = response.unwrap().into_inner().leader_addr;
