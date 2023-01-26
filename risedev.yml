@@ -160,6 +160,7 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      # No LB needed, since nobody is accessing the meta nodes
 
   3etcd-3meta-1cn-1fe:
     steps:

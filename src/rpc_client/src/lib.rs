@@ -190,6 +190,7 @@ macro_rules! meta_rpc_client_method_impl {
                         .into_inner());
                 }
 
+                // Will always return, because response is error
                 response?;
                 panic!("unreachable code reached");
             }
