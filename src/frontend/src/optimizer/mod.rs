@@ -23,12 +23,11 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
-mod plan_expr_rewriter;
 mod rule;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
-use plan_expr_rewriter::ConstEvalRewriter;
 use plan_rewriter::ShareSourceRewriter;
 use property::Order;
 use risingwave_common::catalog::{Field, Schema};
@@ -428,14 +427,6 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
-        if explain_trace {
-            ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -717,16 +708,6 @@ impl PlanRoot {
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
-}
-
-fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
-    let mut const_eval_rewriter = ConstEvalRewriter { error: None };
-
-    let plan = plan.rewrite_exprs(&mut const_eval_rewriter);
-    if let Some(error) = const_eval_rewriter.error {
-        return Err(error);
-    }
-    Ok(plan)
 }
 
 #[cfg(test)]
