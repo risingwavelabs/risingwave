@@ -99,24 +99,27 @@ impl<S: StateStore> NowExecutor<S> {
                 let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
                 let timestamp = Some(ScalarImpl::Int64((time_millis * 1000) as i64));
 
-                let data_chunk = DataChunk::from_rows(
-                    &if last_timestamp.is_some() {
-                        vec![
+                let stream_chunk = if last_timestamp.is_some() {
+                    let data_chunk = DataChunk::from_rows(
+                        &[
                             row::once(last_timestamp.to_datum_ref()),
                             row::once(timestamp.to_datum_ref()),
-                        ]
-                    } else {
-                        vec![row::once(timestamp.to_datum_ref())]
-                    },
-                    &schema.data_types(),
-                );
-                let mut ops = if last_timestamp.is_some() {
-                    vec![Op::Delete]
+                        ],
+                        &schema.data_types(),
+                    );
+                    let ops = vec![Op::Delete, Op::Insert];
+
+                    StreamChunk::from_parts(ops, data_chunk)
                 } else {
-                    vec![]
+                    let data_chunk = DataChunk::from_rows(
+                        &[row::once(timestamp.to_datum_ref())],
+                        &schema.data_types(),
+                    );
+                    let ops = vec![Op::Insert];
+
+                    StreamChunk::from_parts(ops, data_chunk)
                 };
-                ops.push(Op::Insert);
-                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+
                 yield Message::Chunk(stream_chunk);
 
                 // TODO: depends on "https://github.com/risingwavelabs/risingwave/issues/6042"
