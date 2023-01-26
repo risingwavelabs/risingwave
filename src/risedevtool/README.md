@@ -91,8 +91,6 @@ profile:
 
 If you don't want to download some components, you may use the interactive configuration tool `./risedev configure` to disable some components.
 
-TODO: Add issue. RW cloud should have K8s service
-
 Be aware that a configuration which uses multiple meta nodes, like e.g. `3etcd-3meta-1cn-1fe`, requires an additional load-balancer. This is vital to route requests from a meta client to a meta node. A configuration that uses a LB could look like this: 
 
 ```yaml 
