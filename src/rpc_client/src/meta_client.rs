@@ -1091,7 +1091,7 @@ impl GrpcMetaClient {
             let leader_channel = match get_channel_no_retry(addr.as_str()).await {
                 Ok(c) => c,
                 Err(e) => {
-                    failure_msgs.push(format!( 
+                    failure_msgs.push(format!(
                          "Failed to establish connection with {}. Err: {}. Assuming stale leader info. Retrying...",
                         addr, e
                     ));
@@ -1132,9 +1132,9 @@ impl GrpcMetaClient {
         // Only print failure messages if the entire failover failed
         failure_msgs.sort_unstable();
         failure_msgs.dedup();
-        tracing::error!("Failed to failover to new meta leader. Error messages were..."); 
+        tracing::error!("Failed to failover to new meta leader. Error messages were...");
         for msg in failure_msgs {
-             tracing::error!(msg);
+            tracing::error!(msg);
         }
     }
 
