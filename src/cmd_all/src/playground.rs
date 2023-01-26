@@ -67,7 +67,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
         "playground-3cn" => vec![
             RisingWaveService::Meta(osstrs([])),
             RisingWaveService::Compute(osstrs([
-                "--host",
+                "--listen-address",
                 "127.0.0.1:5687",
                 "--state-store",
                 "hummock+memory-shared",
@@ -75,7 +75,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "4",
             ])),
             RisingWaveService::Compute(osstrs([
-                "--host",
+                "--listen-address",
                 "127.0.0.1:5688",
                 "--state-store",
                 "hummock+memory-shared",
@@ -83,7 +83,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "4",
             ])),
             RisingWaveService::Compute(osstrs([
-                "--host",
+                "--listen-address",
                 "127.0.0.1:5689",
                 "--state-store",
                 "hummock+memory-shared",
@@ -95,23 +95,23 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
         "online-docker-playground" | "docker-playground" => {
             vec![
                 RisingWaveService::Meta(osstrs([
-                    "--listen-addr",
+                    "--listen-address",
                     "0.0.0.0:5690",
-                    "--host",
-                    "127.0.0.1",
+                    "--contact-address",
+                    "127.0.0.1:5690",
                     "--dashboard-host",
                     "0.0.0.0:5691",
                 ])),
                 RisingWaveService::Compute(osstrs([
-                    "--host",
+                    "--listen-address",
                     "0.0.0.0:5688",
-                    "--client-address",
+                    "--contact-address",
                     "127.0.0.1:5688",
                 ])),
                 RisingWaveService::Frontend(osstrs([
-                    "--host",
+                    "--listen-address",
                     "0.0.0.0:4566",
-                    "--client-address",
+                    "--contact-address",
                     "127.0.0.1:4566",
                 ])),
             ]
