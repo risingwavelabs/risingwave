@@ -41,8 +41,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
         // Scalars which may generate negative numbers are wrapped in
-        // `Nested` to avoid roundtrip unparsing errors.
-        // e.g. (- -1) when unparsed becomes (--1).
+        // `Nested` to ambiguity while parsing.
+        // e.g. -1 becomes -(1).
+        // See: https://github.com/risingwavelabs/risingwave/issues/4344
         match *typ {
             T::Int64 => Expr::Nested(Box::new(Expr::Value(Value::Number(
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
