@@ -1002,7 +1002,7 @@ impl GrpcMetaClient {
     }
 
     /// None if leader is presumed failed
-    /// HostAddress if connected against a working leader or follower node
+    /// `HostAddress` if connected against a working leader or follower node
     /// Node may return a stale leader
     async fn try_get_leader_from_connected_node(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
