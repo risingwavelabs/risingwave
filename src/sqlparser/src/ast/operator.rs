@@ -40,7 +40,7 @@ impl fmt::Display for UnaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             UnaryOperator::Plus => "+",
-            UnaryOperator::Minus => "- ", // avoid --x, - x and -x are the same.
+            UnaryOperator::Minus => "-",
             UnaryOperator::Not => "NOT",
             UnaryOperator::PGBitwiseNot => "~",
             UnaryOperator::PGSquareRoot => "|/",
