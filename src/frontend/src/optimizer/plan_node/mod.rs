@@ -60,6 +60,7 @@ pub trait PlanNode:
     + Display
     + Downcast
     + ColPrunable
+    + ExprRewritable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -407,6 +408,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod expr_rewritable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;

@@ -46,6 +46,14 @@ pub struct Agg<PlanRef> {
     pub input: PlanRef,
 }
 
+impl<PlanRef> Agg<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.agg_calls.iter_mut().for_each(|call| {
+            call.filter = call.filter.clone().rewrite_expr(r);
+        });
+    }
+}
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn schema(&self) -> Schema {
         let fields = self
@@ -120,6 +128,7 @@ impl AggCallState {
             }),
         }
     }
+
 }
 
 pub struct TableState {

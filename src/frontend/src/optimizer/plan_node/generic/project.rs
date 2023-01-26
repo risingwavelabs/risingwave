@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, InputRef};
+use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, InputRef, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -48,6 +48,12 @@ pub struct Project<PlanRef> {
     pub input: PlanRef,
     // we need some check when construct the `Project::new`
     _private: (),
+}
+
+impl<PlanRef> Project<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.exprs = self.exprs.iter().map(|e| r.rewrite_expr(e.clone())).collect();
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {

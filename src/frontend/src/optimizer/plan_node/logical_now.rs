@@ -23,8 +23,9 @@ use risingwave_common::types::DataType;
 use super::utils::IndicesDisplay;
 use super::{
     ColPrunable, ColumnPruningContext, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
+    RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext, ExprRewritable,
 };
+use crate::expr::ExprRewriter;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
@@ -68,6 +69,11 @@ impl fmt::Display for LogicalNow {
 }
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
+
+impl ExprRewritable for LogicalNow {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
+    }}
 
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(

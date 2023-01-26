@@ -21,8 +21,9 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream, ExprRewritable,
 };
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -154,6 +155,12 @@ impl fmt::Display for LogicalExpand {
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         todo!("prune_col of LogicalExpand is not implemented yet.");
+    }
+}
+
+impl ExprRewritable for LogicalExpand {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

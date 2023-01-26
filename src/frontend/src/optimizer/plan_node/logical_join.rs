@@ -25,7 +25,7 @@ use risingwave_pb::plan_common::JoinType;
 use super::generic::GenericPlanNode;
 use super::{
     generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream, ExprRewritable,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -781,6 +781,14 @@ impl ColPrunable for LogicalJoin {
             new_output_indices,
         )
         .into()
+    }
+}
+
+impl ExprRewritable for LogicalJoin {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.core.rewrite_exprs(r);
+        new.into()
     }
 }
 

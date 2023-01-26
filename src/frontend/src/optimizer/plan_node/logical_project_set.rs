@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 
 use super::{
     generic, BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream, ExprRewritable,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -254,6 +254,14 @@ impl ColPrunable for LogicalProjectSet {
         // TODO: column pruning for ProjectSet
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
+
+impl ExprRewritable for LogicalProjectSet {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.core.rewrite_exprs(r);
+        new.into()
     }
 }
 

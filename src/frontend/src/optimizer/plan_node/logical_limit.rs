@@ -18,8 +18,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
     gen_filter_and_pushdown, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    PredicatePushdown, ToBatch, ToStream, ExprRewritable,
 };
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -96,6 +97,12 @@ impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let new_input = self.input.prune_col(required_cols, ctx);
         self.clone_with_input(new_input).into()
+    }
+}
+
+impl ExprRewritable for LogicalLimit {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

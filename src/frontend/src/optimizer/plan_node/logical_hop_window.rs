@@ -23,9 +23,9 @@ use risingwave_common::types::{DataType, IntervalUnit};
 use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream, ExprRewritable,
 };
-use crate::expr::InputRef;
+use crate::expr::{InputRef, ExprRewriter};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -324,6 +324,12 @@ impl ColPrunable for LogicalHopWindow {
                 .collect_vec()
         };
         new_hop.clone_with_output_indices(output_cols).into()
+    }
+}
+
+impl ExprRewritable for LogicalHopWindow {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

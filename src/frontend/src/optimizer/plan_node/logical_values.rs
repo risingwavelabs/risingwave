@@ -20,9 +20,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
     BatchValues, ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream,
+    ToStream, ExprRewritable,
 };
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -76,6 +76,14 @@ impl fmt::Display for LogicalValues {
     }
 }
 
+impl ExprRewritable for LogicalValues {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.rows = new.rows.iter().map(|exprs| exprs.iter().map(|e| r.rewrite_expr(e.clone())).collect::<Vec<_>>()).collect::<Vec<_>>().into();
+        new.into()
+    }
+}
+
 impl ColPrunable for LogicalValues {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let rows = self
@@ -90,6 +98,8 @@ impl ColPrunable for LogicalValues {
         Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
     }
 }
+
+
 
 impl PredicatePushdown for LogicalValues {
     fn predicate_pushdown(

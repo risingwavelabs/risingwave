@@ -25,11 +25,11 @@ use risingwave_connector::source::DataType;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
     generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
+    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream, ExprRewritable,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprType, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -160,6 +160,11 @@ impl ColPrunable for LogicalSource {
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
+
+impl ExprRewritable for LogicalSource {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
+    }}
 
 /// A util function to extract kafka offset timestamp range.
 ///

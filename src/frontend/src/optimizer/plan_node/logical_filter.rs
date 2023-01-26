@@ -22,9 +22,9 @@ use risingwave_common::error::Result;
 use super::generic::{self, GenericPlanNode};
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    PredicatePushdown, ToBatch, ToStream, ExprRewritable,
 };
-use crate::expr::{assert_input_ref, ExprImpl};
+use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     StreamFilter, ToStreamContext,
@@ -172,6 +172,15 @@ impl ColPrunable for LogicalFilter {
             )
             .into()
         }
+    }
+}
+
+
+impl ExprRewritable for LogicalFilter {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.core.rewrite_exprs(r);
+        new.into()
     }
 }
 

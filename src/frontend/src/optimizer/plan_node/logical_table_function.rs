@@ -17,8 +17,8 @@ use std::fmt;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
-use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
-use crate::expr::{Expr, TableFunction};
+use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream, ExprRewritable};
+use crate::expr::{Expr, TableFunction, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchTableFunction, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
@@ -65,6 +65,14 @@ impl ColPrunable for LogicalTableFunction {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let _ = required_cols;
         self.clone().into()
+    }
+}
+
+impl ExprRewritable for LogicalTableFunction {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.table_function.args = new.table_function.args.into_iter().map(|e| r.rewrite_expr(e)).collect();
+        new.into()
     }
 }
 
