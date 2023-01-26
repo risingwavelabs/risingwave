@@ -24,7 +24,7 @@ use crate::server::compactor_serve;
 #[derive(Parser, Clone, Debug)]
 pub struct CompactorOpts {
     // TODO: rename to listen_address and separate out the port.
-    /// The address that this service listens to. 
+    /// The address that this service listens to.
     /// Usually the localhost + desired port.
     #[clap(long, default_value = "127.0.0.1:6660")]
     pub listen_address: String,
