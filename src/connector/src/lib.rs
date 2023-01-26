@@ -27,6 +27,8 @@
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 
+use serde::de;
+
 pub mod aws_utils;
 pub mod error;
 mod macros;
@@ -49,3 +51,20 @@ impl ConnectorParams {
         }
     }
 }
+
+pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
+    where
+        D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    let s = s.to_ascii_lowercase();
+    match s.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"true or false",
+        )),
+    }
+}
+
