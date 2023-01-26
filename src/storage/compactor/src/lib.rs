@@ -28,7 +28,7 @@ pub struct CompactorOpts {
     #[clap(long, default_value = "127.0.0.1:6660")]
     pub listen_address: String,
 
-    /// The address for contacting this instance of the frontend service.
+    /// The address for contacting this instance of the compactor service.
     /// Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub contact_address: Option<String>,

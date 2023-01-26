@@ -67,9 +67,9 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     listen_address: String,
 
-    /// The address for contacting this instance of the frontend service.
+    /// The address for contacting this instance of the meta service.
     /// This also serves as its unique identifier in cluster
-    /// membership and leader election. Must be specified for etcd cluster
+    /// membership and leader election. Must be specified for etcd cluster.
     #[clap(long, required_if_eq("backend", "Backend::Etcd"))]
     contact_address: Option<String>,
 
