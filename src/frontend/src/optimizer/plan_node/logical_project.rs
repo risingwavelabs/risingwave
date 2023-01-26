@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode, Project};
 use super::{
-    gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamProject, ToBatch, ToStream, ExprRewritable,
+    gen_filter_and_pushdown, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::{

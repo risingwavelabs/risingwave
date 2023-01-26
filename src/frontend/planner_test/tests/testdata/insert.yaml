@@ -93,7 +93,7 @@
   sql: |
     values (1), (null), (2.3);
   batch_plan: |
-    BatchValues { rows: [[1:Int32::Decimal], [null:Decimal], [2.3:Decimal]] }
+    BatchValues { rows: [[1:Decimal], [null:Decimal], [2.3:Decimal]] }
 - name: rows of different number of columns
   sql: |
     values (1), (2, 3);

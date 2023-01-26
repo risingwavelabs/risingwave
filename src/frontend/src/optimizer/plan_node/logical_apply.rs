@@ -24,9 +24,9 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{ExprRewritable,
-    ColumnPruningContext, LogicalFilter, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, ExprRewritable, LogicalFilter, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};

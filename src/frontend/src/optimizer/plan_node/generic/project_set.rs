@@ -36,7 +36,11 @@ pub struct ProjectSet<PlanRef> {
 
 impl<PlanRef> ProjectSet<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
-        self.select_list = self.select_list.iter().map(|e| r.rewrite_expr(e.clone())).collect();
+        self.select_list = self
+            .select_list
+            .iter()
+            .map(|e| r.rewrite_expr(e.clone()))
+            .collect();
     }
 }
 

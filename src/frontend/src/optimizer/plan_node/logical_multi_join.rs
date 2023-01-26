@@ -20,8 +20,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanNodeType, PlanRef,
-    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, ExprRewritable,
+    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
@@ -523,7 +524,7 @@ impl ColPrunable for LogicalMultiJoin {
 }
 
 impl ExprRewritable for LogicalMultiJoin {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

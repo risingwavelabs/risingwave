@@ -20,7 +20,8 @@ use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, ExprRewritable,
+    ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -120,7 +121,7 @@ impl ColPrunable for LogicalShare {
 }
 
 impl ExprRewritable for LogicalShare {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         unimplemented!(
             "call rewrite_exprs of the PlanRef instead of calling directly on LogicalShare"
         )

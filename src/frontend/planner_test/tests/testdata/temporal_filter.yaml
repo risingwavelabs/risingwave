@@ -40,7 +40,7 @@
   sql: |-
     create table t1 (ts timestamp with time zone);
     select * from t1 where now() - interval '15 minutes' > ts;
-  stream_error: 'internal error: All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound.'
+  stream_error: 'Expr error: Expected epoch timestamp bound into Now'
 - name: Temporal filter reorders now expressions correctly
   sql: |
     create table t1 (ts timestamp with time zone);

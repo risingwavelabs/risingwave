@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream, ExprRewritable,
+    gen_filter_and_pushdown, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::expr::ExprRewriter;
@@ -162,7 +162,7 @@ impl ColPrunable for LogicalInsert {
 }
 
 impl ExprRewritable for LogicalInsert {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         self.clone().into()
     }
 }

@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream, ExprRewritable,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
@@ -159,7 +159,7 @@ impl ColPrunable for LogicalExpand {
 }
 
 impl ExprRewritable for LogicalExpand {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         self.clone().into()
     }
 }

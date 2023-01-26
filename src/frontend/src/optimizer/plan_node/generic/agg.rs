@@ -128,7 +128,6 @@ impl AggCallState {
             }),
         }
     }
-
 }
 
 pub struct TableState {

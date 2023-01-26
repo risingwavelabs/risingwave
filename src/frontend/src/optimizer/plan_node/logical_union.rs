@@ -18,8 +18,8 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
-use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream, ExprRewritable};
-use crate::expr::{ExprImpl, InputRef, Literal, ExprRewriter};
+use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
@@ -110,9 +110,10 @@ impl ColPrunable for LogicalUnion {
 }
 
 impl ExprRewritable for LogicalUnion {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         self.clone().into()
-    }}
+    }
+}
 
 impl PredicatePushdown for LogicalUnion {
     fn predicate_pushdown(

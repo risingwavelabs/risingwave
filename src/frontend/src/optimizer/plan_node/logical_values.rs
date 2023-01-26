@@ -19,8 +19,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    BatchValues, ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream, ExprRewritable,
+    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -79,7 +79,17 @@ impl fmt::Display for LogicalValues {
 impl ExprRewritable for LogicalValues {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
-        new.rows = new.rows.iter().map(|exprs| exprs.iter().map(|e| r.rewrite_expr(e.clone())).collect::<Vec<_>>()).collect::<Vec<_>>().into();
+        new.rows = new
+            .rows
+            .iter()
+            .map(|exprs| {
+                exprs
+                    .iter()
+                    .map(|e| r.rewrite_expr(e.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+            .into();
         new.into()
     }
 }
@@ -98,8 +108,6 @@ impl ColPrunable for LogicalValues {
         Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
     }
 }
-
-
 
 impl PredicatePushdown for LogicalValues {
     fn predicate_pushdown(

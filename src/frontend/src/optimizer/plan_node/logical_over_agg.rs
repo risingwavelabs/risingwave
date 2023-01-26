@@ -22,10 +22,12 @@ use risingwave_common::types::DataType;
 
 use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream, ExprRewritable,
+    gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType, ExprRewriter};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType,
+};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -265,9 +267,10 @@ impl ColPrunable for LogicalOverAgg {
 }
 
 impl ExprRewritable for LogicalOverAgg {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         self.clone().into()
-    }}
+    }
+}
 
 impl PredicatePushdown for LogicalOverAgg {
     fn predicate_pushdown(

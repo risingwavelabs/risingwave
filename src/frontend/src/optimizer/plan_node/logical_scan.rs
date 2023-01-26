@@ -24,8 +24,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
-    StreamTableScan, ToBatch, ToStream, ExprRewritable,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
