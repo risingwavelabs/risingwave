@@ -36,11 +36,10 @@ then
     # configure and install
     cd nginx-1.23.3
     ./configure --without-http_rewrite_module --with-http_v2_module --prefix=${bin_dir} --sbin-path=${bin_dir}
-
     make
     make install
 
-    # get bin and cleanup
+    # cleanup
     popd 
     rm -rf ${tmpdir}
     exit 0
@@ -48,7 +47,7 @@ fi
 
 # Handle installation on mac here
 brew install nginx
-cp /opt/homebrew/bin/nginx "${PREFIX_BIN}/nginx"
+cp $(which nginx) "${PREFIX_BIN}/nginx"
 chmod +x "${PREFIX_BIN}/nginx"
 brew uninstall nginx
 

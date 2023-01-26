@@ -17,3 +17,6 @@ cargo run --bin risedev-config -- -f "${ENV_PATH}" "$@"
 
 [tasks.config]
 alias = "configure"
+
+[tasks.conf]
+alias = "configure"
