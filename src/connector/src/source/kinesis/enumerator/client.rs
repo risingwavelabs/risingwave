@@ -34,8 +34,8 @@ impl SplitEnumerator for KinesisSplitEnumerator {
     type Split = KinesisSplit;
 
     async fn new(properties: KinesisProperties) -> Result<Self> {
-        let client = build_client(properties.clone()).await?;
-        let stream_name = properties.stream_name.clone();
+        let client = properties.common.build_client().await?;
+        let stream_name = properties.common.stream_name.clone();
         Ok(Self {
             stream_name,
             client,
