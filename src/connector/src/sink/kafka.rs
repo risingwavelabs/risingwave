@@ -63,7 +63,6 @@ pub struct KafkaConfig {
 
     pub format: String, // accept "append_only" or "debezium"
 
-    #[serde(skip)]
     pub identifier: String,
 
     #[serde(rename = "properties.timeout", default = "_default_timeout")]
