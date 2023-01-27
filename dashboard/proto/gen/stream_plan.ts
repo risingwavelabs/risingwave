@@ -497,6 +497,10 @@ export interface HashJoinNode {
     | undefined;
   /** The output indices of current node */
   outputIndices: number[];
+  /** Left deduped input pk indices; */
+  leftDedupedInputPkIndices: number[];
+  /** Right deduped input pk indices; */
+  rightDedupedInputPkIndices: number[];
   nullSafe: boolean[];
   /**
    * Whether to optimize for append only stream.
@@ -2361,6 +2365,8 @@ function createBaseHashJoinNode(): HashJoinNode {
     leftDegreeTable: undefined,
     rightDegreeTable: undefined,
     outputIndices: [],
+    leftDedupedInputPkIndices: [],
+    rightDedupedInputPkIndices: [],
     nullSafe: [],
     isAppendOnly: false,
   };
@@ -2378,6 +2384,12 @@ export const HashJoinNode = {
       leftDegreeTable: isSet(object.leftDegreeTable) ? Table.fromJSON(object.leftDegreeTable) : undefined,
       rightDegreeTable: isSet(object.rightDegreeTable) ? Table.fromJSON(object.rightDegreeTable) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      leftDedupedInputPkIndices: Array.isArray(object?.leftDedupedInputPkIndices)
+        ? object.leftDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
+      rightDedupedInputPkIndices: Array.isArray(object?.rightDedupedInputPkIndices)
+        ? object.rightDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
       nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
     };
@@ -2411,6 +2423,16 @@ export const HashJoinNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.leftDedupedInputPkIndices) {
+      obj.leftDedupedInputPkIndices = message.leftDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.leftDedupedInputPkIndices = [];
+    }
+    if (message.rightDedupedInputPkIndices) {
+      obj.rightDedupedInputPkIndices = message.rightDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.rightDedupedInputPkIndices = [];
+    }
     if (message.nullSafe) {
       obj.nullSafe = message.nullSafe.map((e) => e);
     } else {
@@ -2441,6 +2463,8 @@ export const HashJoinNode = {
       ? Table.fromPartial(object.rightDegreeTable)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.leftDedupedInputPkIndices = object.leftDedupedInputPkIndices?.map((e) => e) || [];
+    message.rightDedupedInputPkIndices = object.rightDedupedInputPkIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
     message.isAppendOnly = object.isAppendOnly ?? false;
     return message;
