@@ -542,6 +542,7 @@ mod test {
             "sasl_mechanism".to_string() => "SASL".to_string(),
             "sasl_username".to_string() => "test".to_string(),
             "sasl_password".to_string() => "test".to_string(),
+            "identifier".to_string() => "test_sink_1".to_string(),
         };
 
         let config = KafkaConfig::from_hashmap(properties).unwrap();
