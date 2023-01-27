@@ -14,8 +14,8 @@ export const protobufPackage = "catalog";
 
 /**
  * The rust prost library always treats uint64 as required and message as
- * optional. In order to allow `row_id_index` as optional field in
- * `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
+ * optional. In order to allow `row_id_index` as an optional field, we wrap
+ * uint64 inside this message.
  */
 export interface ColumnIndex {
   index: number;

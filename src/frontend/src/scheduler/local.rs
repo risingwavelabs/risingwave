@@ -26,6 +26,7 @@ use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -56,6 +57,7 @@ pub struct LocalQueryExecution {
     // The snapshot will be released when LocalQueryExecution is dropped.
     snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
+    cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
 }
 
 impl LocalQueryExecution {
@@ -65,6 +67,7 @@ impl LocalQueryExecution {
         sql: S,
         snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
+        cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
     ) -> Self {
         Self {
             sql: sql.into(),
@@ -72,6 +75,7 @@ impl LocalQueryExecution {
             front_env,
             snapshot,
             auth_context,
+            cancel_flag: Some(cancel_flag),
         }
     }
 
@@ -111,9 +115,14 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub fn stream_rows(self) -> LocalQueryStream {
+    pub fn stream_rows(mut self) -> LocalQueryStream {
         let (sender, receiver) = mpsc::channel(10);
-        let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+        let tripwire = self.cancel_flag.take().unwrap();
+
+        let mut data_stream = {
+            let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            Box::pin(cancellable_stream(s, tripwire))
+        };
 
         let future = async move {
             while let Some(r) = data_stream.next().await {

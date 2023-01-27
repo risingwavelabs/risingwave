@@ -75,7 +75,7 @@ impl SplitReader for DatagenSplitReader {
 
         // parse field connector option to build FieldGeneratorImpl
         // for example:
-        // create materialized source s1  (
+        // create table t1  (
         //     f_sequence INT,
         //     f_random INT,
         //    ) with (

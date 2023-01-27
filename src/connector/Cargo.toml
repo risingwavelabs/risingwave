@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-stream = "0.3"
 async-trait = "0.1"
 aws-config = { workspace = true }
@@ -22,6 +23,7 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
+csv-core = "0.1.10"
 either = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
@@ -37,15 +39,21 @@ humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
+moka = { version = "0.9", features = ["future"] }
 mysql_async = "0.31"
 nexmark = { version = "0.2", features = ["serde"] }
 num-traits = "0.2"
 paste = "1"
-prost = "0.11"
+prometheus = { version = "0.13", features = ["process"] }
+prost = { version = "0.11.0", features = ["no-recursion-limit"] }
+prost-reflect = "0.9.2"
+protobuf-native = "0.2.1"
 pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime"] }
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.13-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
+reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
+risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
@@ -53,6 +61,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = "2"
+simd-json = { git = "https://github.com/tabVersion/simd-json.git", branch = "main", features = ["key-to-lowercase"] }
 smallvec = "1"
 static_assertions = "1"
 strum = { version = "0.24", features = ["derive"] }

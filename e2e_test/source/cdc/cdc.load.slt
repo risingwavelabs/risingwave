@@ -1,7 +1,7 @@
 # CDC source basic test
 
 statement ok
-create materialized source products ( id INT,
+create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
@@ -20,7 +20,7 @@ statement ok
 create materialized view products_cnt as select count(*) as cnt from products;
 
 statement ok
-create materialized source orders (
+create table orders (
    order_id int,
    order_date timestamp,
    customer_name string,
@@ -43,7 +43,7 @@ statement ok
 create materialized view orders_cnt as select count(*) as cnt from orders;
 
 statement ok
-create materialized source shipments (
+create table shipments (
   shipment_id INTEGER,
   order_id INTEGER,
   origin STRING,
@@ -73,7 +73,7 @@ create materialized view enriched_orders as SELECT o.*, p.name, p.description, s
  LEFT JOIN shipments AS s ON o.order_id = s.order_id;
 
 statement ok
-create materialized source mytable (
+create table mytable (
   v1 INTEGER,
   v2 INTEGER,
   v3 STRING,

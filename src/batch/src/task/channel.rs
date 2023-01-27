@@ -40,7 +40,7 @@ pub(super) trait ChanSender: Send {
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ChanSenderImpl {
     HashShuffle(HashShuffleSender),
     ConsistentHashShuffle(ConsistentHashShuffleSender),

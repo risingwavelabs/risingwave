@@ -252,7 +252,7 @@ pub mod verify {
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
-    use crate::error::StorageError;
+    use crate::error::{StorageError, StorageResult};
     use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
@@ -434,6 +434,10 @@ pub mod verify {
                     expected,
                 }
             }
+        }
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.actual.validate_read_epoch(epoch)
         }
     }
 
@@ -815,6 +819,8 @@ pub mod boxed_state_store {
         async fn clear_shared_buffer(&self) -> StorageResult<()>;
 
         async fn new_local(&self, table_id: TableId) -> BoxDynamicDispatchedLocalStateStore;
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -837,6 +843,10 @@ pub mod boxed_state_store {
 
         async fn new_local(&self, table_id: TableId) -> BoxDynamicDispatchedLocalStateStore {
             Box::new(self.new_local(table_id).await)
+        }
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.validate_read_epoch(epoch)
         }
     }
 
@@ -909,6 +919,10 @@ pub mod boxed_state_store {
 
         fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
             self.deref().new_local(table_id)
+        }
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.deref().validate_read_epoch(epoch)
         }
     }
 }

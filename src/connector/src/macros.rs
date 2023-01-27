@@ -108,7 +108,7 @@ macro_rules! impl_split_reader {
         impl SplitReaderImpl {
             pub fn into_stream(self) -> BoxSourceStream {
                 match self {
-                    $( Self::$variant_name(inner) => inner.into_stream(), )*
+                    $( Self::$variant_name(inner) => $crate::source::SplitReader::into_stream(*inner), )*
                 }
             }
 
@@ -122,7 +122,7 @@ macro_rules! impl_split_reader {
                 }
 
                 let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, state, columns).await?)), )*
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new(<$split_reader_name as $crate::source::SplitReader>::new(*props, state, columns).await?)), )*
                     _ => todo!()
                 };
 

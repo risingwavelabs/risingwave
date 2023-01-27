@@ -25,12 +25,17 @@
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
 #![feature(box_into_inner)]
+#![feature(type_alias_impl_trait)]
 
 pub mod aws_utils;
 pub mod error;
 mod macros;
+
+pub mod parser;
 pub mod sink;
 pub mod source;
+
+pub mod common;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {

@@ -40,6 +40,7 @@ pub struct DeleteExecutor {
     chunk_size: usize,
     schema: Schema,
     identity: String,
+    returning: bool,
 }
 
 impl DeleteExecutor {
@@ -49,17 +50,23 @@ impl DeleteExecutor {
         child: BoxedExecutor,
         chunk_size: usize,
         identity: String,
+        returning: bool,
     ) -> Self {
+        let table_schema = child.schema().clone();
         Self {
             table_id,
             dml_manager,
             child,
             chunk_size,
-            // TODO: support `RETURNING`
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
+            returning,
         }
     }
 }
@@ -100,6 +107,9 @@ impl DeleteExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
+            if self.returning {
+                yield data_chunk.clone();
+            }
             for chunk in builder.append_chunk(data_chunk) {
                 write_chunk(chunk)?;
             }
@@ -117,7 +127,7 @@ impl DeleteExecutor {
             .sum::<usize>();
 
         // create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_deleted as i64));
 
@@ -149,6 +159,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             child,
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
+            delete_node.returning,
         )))
     }
 }
@@ -196,12 +207,12 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
-        // to the `Weak` reference in `DmlManager`.
+        // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
+        // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
             .register_reader(table_id, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader_v2().into_stream_v2();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(
@@ -210,6 +221,7 @@ mod tests {
             Box::new(mock_executor),
             1024,
             "DeleteExecutor".to_string(),
+            false,
         ));
 
         let handle = tokio::spawn(async move {
@@ -233,10 +245,10 @@ mod tests {
         // Read
         let chunk = reader.next().await.unwrap()?;
 
-        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        assert_eq!(chunk.chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.chunk.columns()[0]
                 .array()
                 .as_int32()
                 .iter()
@@ -245,7 +257,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()

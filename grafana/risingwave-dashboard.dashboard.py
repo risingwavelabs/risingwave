@@ -957,6 +957,16 @@ def section_streaming(panels):
                 )
             ],
         ),
+        panels.timeseries_rowsps(
+            "Source Throughput(rows) per barrier",
+            "",
+            [
+                panels.target(
+                    f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
+                    "actor={{actor_id}} source={{source_id}} @ {{instance}}"
+                )
+            ]
+        ),
         panels.timeseries_count(
             "Barrier Number",
             "",
@@ -1309,7 +1319,7 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}} {{side}}",
+                            "cache miss when insert{{actor_id}} {{side}}",
                         ),
                     ],
                 ),
@@ -1595,11 +1605,11 @@ def section_hummock(panels):
                 ),
                 panels.target(
                     f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter true positive  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    "read_req bloom filter false positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req check bloom filter  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),

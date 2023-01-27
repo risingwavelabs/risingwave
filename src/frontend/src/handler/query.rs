@@ -164,10 +164,13 @@ pub async fn handle_query(
         }
     };
 
-    let rows_count = match stmt_type {
-        StatementType::SELECT => None,
+    let rows_count: Option<i32> = match stmt_type {
+        StatementType::SELECT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE_RETURNING => None,
+
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            // Get the row from the row_stream.
             let first_row_set = row_stream
                 .next()
                 .await
@@ -195,28 +198,34 @@ pub async fn handle_query(
         _ => unreachable!(),
     };
 
-    // Implicitly flush the writes.
-    if session.config().get_implicit_flush() {
-        flush_for_write(&session, stmt_type).await?;
-    }
+    // We need to do some post work after the query is finished and before the `Complete` response
+    // it sent. This is achieved by the `callback` in `PgResponse`.
+    let callback = async move {
+        // Implicitly flush the writes.
+        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+            do_flush(&session).await?;
+        }
 
-    // update some metrics
-    if query_mode == QueryMode::Local {
-        session
-            .env()
-            .frontend_metrics
-            .latency_local_execution
-            .observe(query_start_time.elapsed().as_secs_f64());
+        // update some metrics
+        if query_mode == QueryMode::Local {
+            session
+                .env()
+                .frontend_metrics
+                .latency_local_execution
+                .observe(query_start_time.elapsed().as_secs_f64());
 
-        session
-            .env()
-            .frontend_metrics
-            .query_counter_local_execution
-            .inc();
-    }
+            session
+                .env()
+                .frontend_metrics
+                .query_counter_local_execution
+                .inc();
+        }
 
-    Ok(PgResponse::new_for_stream_with_notice(
-        stmt_type, rows_count, row_stream, pg_descs, notice,
+        Ok(())
+    };
+
+    Ok(PgResponse::new_for_stream_extra(
+        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
     ))
 }
 
@@ -225,9 +234,27 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 
     match stmt {
         Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { .. } => Ok(INSERT),
-        Statement::Delete { .. } => Ok(DELETE),
-        Statement::Update { .. } => Ok(UPDATE),
+        Statement::Insert { returning, .. } => {
+            if returning.is_empty() {
+                Ok(INSERT)
+            } else {
+                Ok(INSERT_RETURNING)
+            }
+        }
+        Statement::Delete { returning, .. } => {
+            if returning.is_empty() {
+                Ok(DELETE)
+            } else {
+                Ok(DELETE_RETURNING)
+            }
+        }
+        Statement::Update { returning, .. } => {
+            if returning.is_empty() {
+                Ok(UPDATE)
+            } else {
+                Ok(UPDATE_RETURNING)
+            }
+        }
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),
@@ -262,17 +289,8 @@ pub async fn local_execute(
         "",
         pinned_snapshot,
         session.auth_context(),
+        session.reset_cancel_query_flag(),
     );
 
     Ok(execution.stream_rows())
-}
-
-pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    match stmt_type {
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            do_flush(session).await?;
-        }
-        _ => {}
-    }
-    Ok(())
 }
