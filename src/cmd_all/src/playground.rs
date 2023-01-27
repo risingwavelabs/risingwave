@@ -181,7 +181,7 @@ pub async fn playground() -> Result<()> {
             RisingWaveService::Frontend(mut opts) => {
                 opts.insert(0, "frontend-node".into());
                 tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
-                let opts = risingwave_frontend::FrontendOpts::parse_from(opts);
+                let opts = risingwave_common::config::FrontendConfig::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });

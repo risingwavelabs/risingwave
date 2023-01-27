@@ -130,18 +130,18 @@ pub struct MetaConfig {
     pub etcd_endpoints: String,
 
     /// Whether to enable authentication with etcd. By default disabled.
-    #[clap(long, default_value_t)]
+    #[clap(long)]
     #[serde(default)]
     pub etcd_auth: bool,
 
     /// Username of etcd, required when --etcd-auth is enabled.
-    #[clap(long, default_value_t = default::meta::etcd_username())]
+    #[clap(long, env = "ETCD_USERNAME", default_value_t = default::meta::etcd_username())]
     #[serde(default = "default::meta::etcd_username")]
     pub etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
     // TODO: it may be unsafe to put password in a file
-    #[clap(long, default_value_t = default::meta::etcd_password())]
+    #[clap(long, env = "ETCD_PASSWORD", default_value_t = default::meta::etcd_password())]
     #[serde(default = "default::meta::etcd_password")]
     pub etcd_password: String,
 
@@ -154,7 +154,7 @@ pub struct MetaConfig {
 
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment.
-    #[clap(long)]
+    #[clap(long, env = "META_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
     // Below configs are NOT CLI configurable.
@@ -246,34 +246,55 @@ pub enum AsyncStackTraceOption {
 
 /// The section `[frontend]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
 #[serde(deny_unknown_fields)]
 pub struct FrontendConfig {
-    // Below configs are CLI configurable.
+    #[clap(long = "host", default_value_t = default::frontend::listen_addr())]
     #[serde(default = "default::frontend::listen_addr")]
     pub listen_addr: String,
 
+    #[clap(long)]
     pub client_address: Option<String>,
 
+    #[clap(long, default_value_t = default::frontend::meta_addr())]
     #[serde(default = "default::frontend::meta_addr")]
     pub meta_addr: String,
 
+    #[clap(long, default_value_t = default::frontend::prometheus_listen_addr())]
     #[serde(default = "default::frontend::prometheus_listen_addr")]
     pub prometheus_listener_addr: String,
 
+    #[clap(long, default_value_t = default::frontend::health_check_listener_addr())]
     #[serde(default = "default::frontend::health_check_listener_addr")]
     pub health_check_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
+    #[clap(long, default_value_t = default::frontend::metrics_level())]
     #[serde(default = "default::frontend::metrics_level")]
     pub metrics_level: u32,
+
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    #[clap(long, default_value = "")]
+    #[serde(skip)]
+    pub config_path: String,
 }
 
 impl Default for FrontendConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl OverwriteConfig for FrontendConfig {
+    fn overwrite(self, config: &mut RwConfig) {
+        config.frontend = Builder::default()
+            .collect(from_self(self))
+            .build_with(config.frontend.clone())
+            .unwrap()
     }
 }
 

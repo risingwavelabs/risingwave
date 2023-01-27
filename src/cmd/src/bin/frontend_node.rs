@@ -22,7 +22,7 @@ enable_jemalloc_on_linux!();
 fn main() {
     use clap::StructOpt;
 
-    let opts = risingwave_frontend::FrontendOpts::parse();
+    let opts = risingwave_common::config::FrontendConfig::parse();
 
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 

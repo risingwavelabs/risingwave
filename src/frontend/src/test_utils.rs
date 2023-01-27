@@ -26,6 +26,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -51,11 +52,11 @@ use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::PgResponseStream;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
-    pub opts: FrontendOpts,
+    pub opts: FrontendConfig,
     env: FrontendEnv,
 }
 
@@ -81,7 +82,7 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
 
 impl LocalFrontend {
     #[expect(clippy::unused_async)]
-    pub async fn new(opts: FrontendOpts) -> Self {
+    pub async fn new(opts: FrontendConfig) -> Self {
         let env = FrontendEnv::mock();
         Self { opts, env }
     }

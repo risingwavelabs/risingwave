@@ -47,7 +47,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common::config::{load_config, OverwriteConfig, RwConfig};
+use risingwave_common::config::{load_config, FrontendConfig};
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -58,80 +58,16 @@ mod user;
 pub mod health_service;
 mod monitor;
 
-use std::ffi::OsString;
-use std::iter;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
-use clap::Parser;
+use pgwire::pg_protocol::TlsConfig;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
-/// CLI arguments received by meta node. Overwrites fields in
-/// [`risingwave_common::config::FrontendConfig`].
-#[derive(Parser, Clone, Debug)]
-pub struct FrontendOpts {
-    #[clap(long = "host")]
-    pub listen_addr: Option<String>,
-
-    #[clap(long)]
-    pub client_address: Option<String>,
-
-    #[clap(long)]
-    pub meta_addr: Option<String>,
-
-    #[clap(long)]
-    pub prometheus_listener_addr: Option<String>,
-
-    #[clap(long)]
-    pub health_check_listener_addr: Option<String>,
-
-    #[clap(long)]
-    pub metrics_level: Option<u32>,
-
-    /// The path of `risingwave.toml` configuration file.
-    ///
-    /// If empty, default configuration values will be used.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-}
-
-impl Default for FrontendOpts {
-    fn default() -> Self {
-        FrontendOpts::parse_from(iter::empty::<OsString>())
-    }
-}
-
-impl OverwriteConfig for FrontendOpts {
-    fn overwrite(self, config: &mut RwConfig) {
-        let mut c = &mut config.frontend;
-        if let Some(v) = self.listen_addr {
-            c.listen_addr = v;
-        }
-        if self.client_address.is_some() {
-            c.client_address = self.client_address;
-        }
-        if let Some(v) = self.meta_addr {
-            c.meta_addr = v;
-        }
-        if let Some(v) = self.prometheus_listener_addr {
-            c.prometheus_listener_addr = v;
-        }
-        if let Some(v) = self.health_check_listener_addr {
-            c.health_check_listener_addr = v;
-        }
-        if let Some(v) = self.metrics_level {
-            c.metrics_level = v;
-        }
-    }
-}
-
-use std::future::Future;
-use std::pin::Pin;
-
-use pgwire::pg_protocol::TlsConfig;
-
 /// Start frontend
-pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(opts: FrontendConfig) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {

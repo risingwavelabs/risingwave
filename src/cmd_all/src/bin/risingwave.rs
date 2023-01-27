@@ -74,7 +74,7 @@ fn main() -> Result<()> {
             Box::new(move |args: Vec<String>| {
                 eprintln!("launching frontend node");
 
-                let opts = risingwave_frontend::FrontendOpts::parse_from(args);
+                let opts = risingwave_common::config::FrontendConfig::parse_from(args);
 
                 risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 

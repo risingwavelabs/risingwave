@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
+use risingwave_common::config::FrontendConfig;
 use risingwave_frontend::handler::{
     create_index, create_mv, create_schema, create_source, create_table, drop_table, explain,
     variable, HandlerArgs,
@@ -32,8 +33,8 @@ use risingwave_frontend::handler::{
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
-    PlanRef, Planner,
+    build_graph, explain_stream_graph, Binder, OptimizerContext, OptimizerContextRef, PlanRef,
+    Planner,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -222,7 +223,7 @@ impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let session = {
-            let frontend = LocalFrontend::new(FrontendOpts::default()).await;
+            let frontend = LocalFrontend::new(FrontendConfig::default()).await;
             frontend.session_ref()
         };
 
