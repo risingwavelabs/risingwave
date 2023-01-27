@@ -1,0 +1,25 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 timestamp);
+
+# This statement should be correct for the next ~1000 years
+statement ok
+create materialized view mv1 as select v1 from t1 where v1 > now();
+
+statement ok
+insert into t1 values ('3031-01-01 19:00:00'), ('3031-01-01 20:00:00'), ('3031-01-01 21:00:00'), ('0001-01-01 21:00:00');
+
+query I
+select * from mv1 order by v1;
+----
+3031-01-01 19:00:00
+3031-01-01 20:00:00
+3031-01-01 21:00:00
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop table t1;
