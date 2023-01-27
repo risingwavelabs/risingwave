@@ -501,7 +501,7 @@ script = """
 
 set -e
 
-cargo install cargo-quickinstall
+cargo install cargo-quickinstall --locked
 cargo quickinstall cargo-binstall
 
 for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
@@ -516,7 +516,7 @@ done
 for tool in typos-cli sqllogictest-bin
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo install $tool
+  cargo install $tool --locked
   echo
 done
 

@@ -302,7 +302,7 @@ Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run R
 sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
 
 ```shell
-cargo install sqllogictest-bin
+cargo install sqllogictest-bin --locked
 ```
 
 Before running end-to-end tests, you will need to start a full cluster first:
