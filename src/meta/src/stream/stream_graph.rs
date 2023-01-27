@@ -343,7 +343,6 @@ impl StreamActorBuilder {
                         id: self
                             .upstreams
                             .values()
-                            .into_iter()
                             .exactly_one()
                             .unwrap()
                             .actors
@@ -358,7 +357,6 @@ impl StreamActorBuilder {
                     id: self
                         .upstreams
                         .values()
-                        .into_iter()
                         .filter(|x| x.same_worker_node)
                         .exactly_one()
                         .unwrap()
