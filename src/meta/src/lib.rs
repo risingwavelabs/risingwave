@@ -46,113 +46,18 @@ mod rpc;
 pub mod storage;
 mod stream;
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
-use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::config::{load_config, MetaBackend, MetaConfig};
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
-/// CLI arguments received by meta node. Overwrites fields in
-/// [`risingwave_common::config::MetaConfig`].
-#[derive(Debug, Clone, Parser)]
-pub struct MetaNodeOpts {
-    #[clap(long)]
-    listen_addr: Option<String>,
-
-    #[clap(long)]
-    meta_endpoint: Option<String>,
-
-    #[clap(long)]
-    dashboard_host: Option<String>,
-
-    #[clap(long)]
-    prometheus_host: Option<String>,
-
-    #[clap(long, arg_enum)]
-    backend: Option<MetaBackend>,
-
-    #[clap(long)]
-    etcd_endpoints: Option<String>,
-
-    #[clap(long)]
-    etcd_auth: Option<bool>,
-
-    /// Default value is read from the 'ETCD_USERNAME' environment variable.
-    #[clap(long, env = "ETCD_USERNAME")]
-    etcd_username: Option<String>,
-
-    /// Default value is read from the 'ETCD_PASSWORD' environment variable.
-    #[clap(long, env = "ETCD_PASSWORD")]
-    etcd_password: Option<String>,
-
-    #[clap(long)]
-    dashboard_ui_path: Option<String>,
-
-    #[clap(long)]
-    prometheus_endpoint: Option<String>,
-
-    /// Default value is read from the 'META_CONNECTOR_RPC_ENDPOINT' environment variable.
-    #[clap(long, env = "META_CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
-
-    /// The path of `risingwave.toml` configuration file.
-    ///
-    /// If empty, default configuration values will be used.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-}
-
-impl OverwriteConfig for MetaNodeOpts {
-    fn overwrite(self, config: &mut RwConfig) {
-        let mut c = &mut config.meta;
-        if let Some(v) = self.listen_addr {
-            c.listen_addr = v;
-        }
-        if self.meta_endpoint.is_some() {
-            c.meta_endpoint = self.meta_endpoint;
-        }
-        if self.dashboard_host.is_some() {
-            c.dashboard_host = self.dashboard_host;
-        }
-        if self.prometheus_host.is_some() {
-            c.prometheus_host = self.prometheus_host;
-        }
-        if let Some(v) = self.backend {
-            c.backend = v;
-        }
-        if let Some(v) = self.etcd_endpoints {
-            c.etcd_endpoints = v;
-        }
-        if let Some(v) = self.etcd_auth {
-            c.etcd_auth = v;
-        }
-        if let Some(v) = self.etcd_username {
-            c.etcd_username = v;
-        }
-        if let Some(v) = self.etcd_password {
-            c.etcd_password = v;
-        }
-        if self.dashboard_ui_path.is_some() {
-            c.dashboard_ui_path = self.dashboard_ui_path;
-        }
-        if self.prometheus_endpoint.is_some() {
-            c.prometheus_endpoint = self.prometheus_endpoint;
-        }
-        if self.connector_rpc_endpoint.is_some() {
-            c.connector_rpc_endpoint = self.connector_rpc_endpoint;
-        }
-    }
-}
-
-use std::future::Future;
-use std::pin::Pin;
-
-use risingwave_common::config::{load_config, MetaBackend, OverwriteConfig, RwConfig};
-
 /// Start meta node
-pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(opts: MetaConfig) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {

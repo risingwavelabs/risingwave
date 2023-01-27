@@ -152,7 +152,7 @@ pub async fn playground() -> Result<()> {
             RisingWaveService::Meta(mut opts) => {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
+                let opts = risingwave_common::config::MetaConfig::parse_from(opts);
 
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {

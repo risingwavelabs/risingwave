@@ -19,8 +19,10 @@
 
 use std::fs;
 
-use clap::ArgEnum;
+use clap::{ArgEnum, Parser};
 use serde::{Deserialize, Serialize};
+use serfig::collectors::from_self;
+use serfig::Builder;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -101,99 +103,137 @@ pub enum MetaBackend {
 
 /// The section `[meta]` in `risingwave.toml`. This section only applies to the meta node.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
-    // Below configs are CLI configurable.
+    #[clap(long, default_value_t = default::meta::listen_addr())]
     #[serde(default = "default::meta::listen_addr")]
     pub listen_addr: String,
 
     /// The endpoint for this meta node, which also serves as its unique identifier in cluster
     /// membership and leader election.
+    #[clap(long)]
     pub meta_endpoint: Option<String>,
 
+    #[clap(long)]
     pub dashboard_host: Option<String>,
 
+    #[clap(long)]
     pub prometheus_host: Option<String>,
 
+    #[clap(long, arg_enum, default_value_t = default::meta::backend())]
     #[serde(default = "default::meta::backend")]
     pub backend: MetaBackend,
 
+    #[clap(long, default_value_t = default::meta::etcd_endpoints())]
     #[serde(default = "default::meta::etcd_endpoints")]
     pub etcd_endpoints: String,
 
     /// Whether to enable authentication with etcd. By default disabled.
+    #[clap(long, default_value_t)]
     #[serde(default)]
     pub etcd_auth: bool,
 
     /// Username of etcd, required when --etcd-auth is enabled.
+    #[clap(long, default_value_t = default::meta::etcd_username())]
     #[serde(default = "default::meta::etcd_username")]
     pub etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
     // TODO: it may be unsafe to put password in a file
+    #[clap(long, default_value_t = default::meta::etcd_password())]
     #[serde(default = "default::meta::etcd_password")]
     pub etcd_password: String,
 
+    #[clap(long)]
     pub dashboard_ui_path: Option<String>,
 
     /// For dashboard service to fetch cluster info.
+    #[clap(long)]
     pub prometheus_endpoint: Option<String>,
 
     /// Endpoint of the connector node, there will be a sidecar connector node
-    /// colocated with Meta node in the cloud environment
+    /// colocated with Meta node in the cloud environment.
+    #[clap(long)]
     pub connector_rpc_endpoint: Option<String>,
 
     // Below configs are NOT CLI configurable.
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
+    #[clap(skip = default::meta::min_sst_retention_time_sec())]
     #[serde(default = "default::meta::min_sst_retention_time_sec")]
     pub min_sst_retention_time_sec: u64,
 
     /// The spin interval when collecting global GC watermark in hummock
+    #[clap(skip = default::meta::collect_gc_watermark_spin_interval_sec())]
     #[serde(default = "default::meta::collect_gc_watermark_spin_interval_sec")]
     pub collect_gc_watermark_spin_interval_sec: u64,
 
     /// Schedule compaction for all compaction groups with this interval.
+    #[clap(skip = default::meta::periodic_compaction_interval_sec())]
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
+    #[clap(skip = default::meta::vacuum_interval_sec())]
     #[serde(default = "default::meta::vacuum_interval_sec")]
     pub vacuum_interval_sec: u64,
 
     /// Maximum allowed heartbeat interval in seconds.
+    #[clap(skip = default::meta::max_heartbeat_interval_sec())]
     #[serde(default = "default::meta::max_heartbeat_interval_sec")]
     pub max_heartbeat_interval_secs: u32,
 
     /// Whether to enable fail-on-recovery. Should only be used in e2e tests.
+    #[clap(skip)]
     #[serde(default)]
     pub disable_recovery: bool,
 
+    #[clap(skip = default::meta::meta_leader_lease_secs())]
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// It is mainly useful for playgrounds.
+    #[clap(skip)]
     pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
     /// will disable all auto scheduling of compaction tasks.
     /// Should only be used in e2e tests.
+    #[clap(skip)]
     #[serde(default)]
     pub enable_compaction_deterministic: bool,
 
     /// Enable sanity check when SSTs are committed.
+    #[clap(skip)]
     #[serde(default)]
     pub enable_committed_sst_sanity_check: bool,
 
+    #[clap(skip = default::meta::node_num_monitor_interval_sec())]
     #[serde(default = "default::meta::node_num_monitor_interval_sec")]
     pub node_num_monitor_interval_sec: u64,
+
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    #[clap(long, default_value = "")]
+    #[serde(skip)]
+    pub config_path: String,
 }
 
 impl Default for MetaConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl OverwriteConfig for MetaConfig {
+    fn overwrite(self, config: &mut RwConfig) {
+        config.meta = Builder::default()
+            .collect(from_self(self))
+            .build_with(config.meta.clone())
+            .unwrap()
     }
 }
 

@@ -56,7 +56,7 @@ fn main() -> Result<()> {
             Box::new(move |args: Vec<String>| {
                 eprintln!("launching meta node");
 
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
+                let opts = risingwave_common::config::MetaConfig::parse_from(args);
 
                 risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 

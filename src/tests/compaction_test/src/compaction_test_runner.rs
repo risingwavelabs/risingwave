@@ -124,7 +124,7 @@ pub async fn compaction_test_main(
 }
 
 pub async fn start_meta_node(listen_addr: String, config_path: String) {
-    let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
+    let meta_opts = risingwave_common::config::MetaConfig::parse_from([
         "meta-node",
         "--listen-addr",
         &listen_addr,

@@ -5716,6 +5716,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serfig",
  "smallvec",
  "spin 0.9.4",
  "static_assertions",
@@ -6901,6 +6902,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-bridge"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f68e451f87e0f0a51c565c907017f033ecce23a1aef9eb3faee0dfd6e578d84"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "serde",
+]
+
+[[package]]
+name = "serde-env"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c68119a0846249fd6f4b38561b4b4727dbc4fd9fea074f1253bca7d50440ce58"
+dependencies = [
+ "anyhow",
+ "log",
+ "serde",
+]
+
+[[package]]
 name = "serde-value"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7003,6 +7026,21 @@ dependencies = [
  "ryu",
  "serde",
  "unsafe-libyaml",
+]
+
+[[package]]
+name = "serfig"
+version = "0.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e56ca578e3bed3843488231c20a76f4dc227a713942f1a74b23a499879e887fc"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "log",
+ "serde",
+ "serde-bridge",
+ "serde-env",
+ "toml",
 ]
 
 [[package]]
