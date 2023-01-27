@@ -501,16 +501,24 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-upgrades typos-cli
+cargo install cargo-quickinstall
+cargo quickinstall cargo-binstall
+
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo install $tool --locked
+  cargo binstall -y --no-symlinks $tool
   echo
 done
 
-echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
-echo
+# Tools that fallback to `cargo install` when using `cargo binstall`.
+# We directly use `cargo install` here to be faster.
+for tool in typos-cli sqllogictest-bin
+do
+  echo "install: $(tput setaf 4)$tool$(tput sgr0)"
+  cargo install $tool
+  echo
+done
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
 tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
