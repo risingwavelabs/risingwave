@@ -257,7 +257,7 @@
     select * from t1 join t2 where v1 = v2 and v1 > now() + '1 hr';
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    ├─LogicalFilter { predicate: (t1.v1 > '2021-04-01 01:00:00+00:00':Timestamptz) }
+    ├─LogicalFilter { predicate: (t1.v1 > (Now + '01:00:00':Interval)) }
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
@@ -343,7 +343,7 @@
     select * from t1 join t2 where v1 = v2 and v1 > now();
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    ├─LogicalFilter { predicate: (t1.v1 > '2021-04-01 00:00:00+00:00':Timestamptz) }
+    ├─LogicalFilter { predicate: (t1.v1 > Now) }
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |

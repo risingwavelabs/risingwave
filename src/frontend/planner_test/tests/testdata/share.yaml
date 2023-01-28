@@ -63,7 +63,7 @@
               | └─StreamProject { exprs: [id, _row_id] }
               |   └─StreamFilter { predicate: (initial_bid = 1:Int32) }
               |     └─StreamProject { exprs: [id, initial_bid, _row_id] }
-              |       └─StreamShare { id = 757 }
+              |       └─StreamShare { id = 727 }
               |         └─StreamProject { exprs: [id, initial_bid, _row_id] }
               |           └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
               |             └─StreamRowIdGen { row_id_index: 9 }
@@ -72,7 +72,7 @@
                 └─StreamProject { exprs: [id, _row_id] }
                   └─StreamFilter { predicate: (initial_bid = 2:Int32) }
                     └─StreamProject { exprs: [id, initial_bid, _row_id] }
-                      └─StreamShare { id = 757 }
+                      └─StreamShare { id = 727 }
                         └─StreamProject { exprs: [id, initial_bid, _row_id] }
                           └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
                             └─StreamRowIdGen { row_id_index: 9 }
@@ -140,7 +140,7 @@
           |     └─StreamExchange { dist: HashShard(auction, window_start) }
           |       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
           |         └─StreamProject { exprs: [auction, date_time, _row_id] }
-          |           └─StreamShare { id = 764 }
+          |           └─StreamShare { id = 744 }
           |             └─StreamProject { exprs: [auction, date_time, _row_id] }
           |               └─StreamRowIdGen { row_id_index: 4 }
           |                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "date_time", "_row_id"] }
@@ -152,7 +152,7 @@
                     └─StreamExchange { dist: HashShard(auction, window_start) }
                       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
                         └─StreamProject { exprs: [auction, date_time, _row_id] }
-                          └─StreamShare { id = 764 }
+                          └─StreamShare { id = 744 }
                             └─StreamProject { exprs: [auction, date_time, _row_id] }
                               └─StreamRowIdGen { row_id_index: 4 }
                                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "date_time", "_row_id"] }
@@ -325,8 +325,8 @@
 
     Project Remove:
 
-    apply ProjectMergeRule 3 time(s)
     apply ProjectEliminateRule 5 time(s)
+    apply ProjectMergeRule 3 time(s)
 
     LogicalProject { exprs: [(count = (1:Int32 + 2:Int32))] }
     └─LogicalAgg { aggs: [count] }
@@ -342,188 +342,5 @@
             └─LogicalShare { id = 91 }
               └─LogicalProject { exprs: [id, initial_bid] }
                 └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }
-                  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }
-
-    WTF2
-
-
-    Node: Ok("LogicalProject { exprs: [(count = (1:Int32 + 2:Int32))] }\n└─LogicalAgg { aggs: [count] }\n  └─LogicalJoin { type: Inner, on: (id = id) }\n    ├─LogicalProject { exprs: [id] }\n    | └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n    |   └─LogicalShare { id = 91 }\n    |     └─LogicalProject { exprs: [id, initial_bid] }\n    |       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n    └─LogicalProject { exprs: [id] }\n      └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n        └─LogicalShare { id = 91 }\n          └─LogicalProject { exprs: [id, initial_bid] }\n            └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n              └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalProject { exprs: [(count = 3:Int32)] }\n└─LogicalAgg { aggs: [count] }\n  └─LogicalJoin { type: Inner, on: (id = id) }\n    ├─LogicalProject { exprs: [id] }\n    | └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n    |   └─LogicalShare { id = 91 }\n    |     └─LogicalProject { exprs: [id, initial_bid] }\n    |       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n    └─LogicalProject { exprs: [id] }\n      └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n        └─LogicalShare { id = 91 }\n          └─LogicalProject { exprs: [id, initial_bid] }\n            └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n              └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalAgg { aggs: [count] }\n└─LogicalJoin { type: Inner, on: (id = id) }\n  ├─LogicalProject { exprs: [id] }\n  | └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n  |   └─LogicalShare { id = 91 }\n  |     └─LogicalProject { exprs: [id, initial_bid] }\n  |       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n  └─LogicalProject { exprs: [id] }\n    └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n      └─LogicalShare { id = 91 }\n        └─LogicalProject { exprs: [id, initial_bid] }\n          └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n            └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalAgg { aggs: [count] }\n└─LogicalJoin { type: Inner, on: (id = id) }\n  ├─LogicalProject { exprs: [id] }\n  | └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n  |   └─LogicalShare { id = 91 }\n  |     └─LogicalProject { exprs: [id, initial_bid] }\n  |       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n  └─LogicalProject { exprs: [id] }\n    └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n      └─LogicalShare { id = 91 }\n        └─LogicalProject { exprs: [id, initial_bid] }\n          └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n            └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalAgg { aggs: [count] }\n└─LogicalJoin { type: Inner, on: (id = id) }\n  ├─LogicalProject { exprs: [id] }\n  | └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n  |   └─LogicalShare { id = 91 }\n  |     └─LogicalProject { exprs: [id, initial_bid] }\n  |       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n  └─LogicalProject { exprs: [id] }\n    └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n      └─LogicalShare { id = 91 }\n        └─LogicalProject { exprs: [id, initial_bid] }\n          └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n            └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalJoin { type: Inner, on: (id = id) }\n├─LogicalProject { exprs: [id] }\n| └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n|   └─LogicalShare { id = 91 }\n|     └─LogicalProject { exprs: [id, initial_bid] }\n|       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n|         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n└─LogicalProject { exprs: [id] }\n  └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n    └─LogicalShare { id = 91 }\n      └─LogicalProject { exprs: [id, initial_bid] }\n        └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n          └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalJoin { type: Inner, on: (id = id) }\n├─LogicalProject { exprs: [id] }\n| └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n|   └─LogicalShare { id = 91 }\n|     └─LogicalProject { exprs: [id, initial_bid] }\n|       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n|         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n└─LogicalProject { exprs: [id] }\n  └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n    └─LogicalShare { id = 91 }\n      └─LogicalProject { exprs: [id, initial_bid] }\n        └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n          └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalJoin { type: Inner, on: (id = id) }\n├─LogicalProject { exprs: [id] }\n| └─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n|   └─LogicalShare { id = 91 }\n|     └─LogicalProject { exprs: [id, initial_bid] }\n|       └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n|         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n└─LogicalProject { exprs: [id] }\n  └─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n    └─LogicalShare { id = 91 }\n      └─LogicalProject { exprs: [id, initial_bid] }\n        └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n          └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n"), Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalFilter { predicate: (initial_bid = (2:Int32 - 1:Int32)) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalFilter { predicate: (initial_bid = 1:Int32) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: []
-
-    inputs after: []
-
-    inputs after: [Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalFilter { predicate: (initial_bid = 1:Int32) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalFilter { predicate: (initial_bid = (5:Int32 - 3:Int32)) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalFilter { predicate: (initial_bid = 2:Int32) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalFilter { predicate: ((initial_bid = (2:Int32 - 1:Int32)) OR (initial_bid = (5:Int32 - 3:Int32))) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: [Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    Rewritten Node: Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")
-
-    inputs before: []
-
-    inputs after: []
-
-    inputs after: [Ok("LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n└─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalProject { exprs: [id, initial_bid] }\n└─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n  └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalShare { id = 91 }\n└─LogicalProject { exprs: [id, initial_bid] }\n  └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n    └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalFilter { predicate: (initial_bid = 2:Int32) }\n└─LogicalShare { id = 91 }\n  └─LogicalProject { exprs: [id, initial_bid] }\n    └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n      └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = 1:Int32) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n"), Ok("LogicalProject { exprs: [id] }\n└─LogicalFilter { predicate: (initial_bid = 2:Int32) }\n  └─LogicalShare { id = 91 }\n    └─LogicalProject { exprs: [id, initial_bid] }\n      └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n        └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalJoin { type: Inner, on: (id = id) }\n├─LogicalProject { exprs: [id] }\n| └─LogicalFilter { predicate: (initial_bid = 1:Int32) }\n|   └─LogicalShare { id = 91 }\n|     └─LogicalProject { exprs: [id, initial_bid] }\n|       └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n|         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n└─LogicalProject { exprs: [id] }\n  └─LogicalFilter { predicate: (initial_bid = 2:Int32) }\n    └─LogicalShare { id = 91 }\n      └─LogicalProject { exprs: [id, initial_bid] }\n        └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n          └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    inputs after: [Ok("LogicalAgg { aggs: [count] }\n└─LogicalJoin { type: Inner, on: (id = id) }\n  ├─LogicalProject { exprs: [id] }\n  | └─LogicalFilter { predicate: (initial_bid = 1:Int32) }\n  |   └─LogicalShare { id = 91 }\n  |     └─LogicalProject { exprs: [id, initial_bid] }\n  |       └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n  |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n  └─LogicalProject { exprs: [id] }\n    └─LogicalFilter { predicate: (initial_bid = 2:Int32) }\n      └─LogicalShare { id = 91 }\n        └─LogicalProject { exprs: [id, initial_bid] }\n          └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }\n            └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }\n")]
-
-    Const eval exprs:
-
-    LogicalProject { exprs: [(count = 3:Int32)] }
-    └─LogicalAgg { aggs: [count] }
-      └─LogicalJoin { type: Inner, on: (id = id) }
-        ├─LogicalProject { exprs: [id] }
-        | └─LogicalFilter { predicate: (initial_bid = 1:Int32) }
-        |   └─LogicalShare { id = 91 }
-        |     └─LogicalProject { exprs: [id, initial_bid] }
-        |       └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
-        |         └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }
-        └─LogicalProject { exprs: [id] }
-          └─LogicalFilter { predicate: (initial_bid = 2:Int32) }
-            └─LogicalShare { id = 91 }
-              └─LogicalProject { exprs: [id, initial_bid] }
-                └─LogicalFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
                   └─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }
 
