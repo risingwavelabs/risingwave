@@ -83,6 +83,7 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
+rocksdb-util = { git = "https://github.com/rust-lib-project/rocksdb-util"}
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -103,32 +104,36 @@ test = []
 failpoints = ["fail/failpoints"]
 bpf = []
 
-[[bench]]
-name = "bench_block_iter"
-harness = false
+#[[bench]]
+#name = "bench_block_iter"
+#harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
 
-[[bench]]
-name = "bench_lru_cache"
-harness = false
+#[[bench]]
+#name = "bench_lru_cache"
+#harness = false
+#
+#[[bench]]
+#name = "bench_merge_iter"
+#harness = false
+#
+#[[bench]]
+#name = "bench_fs_operation"
+#harness = false
+#
+#[[bench]]
+#name = "bench_compression"
+#harness = false
+#
+#[[bench]]
+#name = "bench_compactor"
+#harness = false
+#
+#[[bench]]
+#name = "bench_multi_builder"
+#harness = false
 
 [[bench]]
-name = "bench_merge_iter"
-harness = false
-
-[[bench]]
-name = "bench_fs_operation"
-harness = false
-
-[[bench]]
-name = "bench_compression"
-harness = false
-
-[[bench]]
-name = "bench_compactor"
-harness = false
-
-[[bench]]
-name = "bench_multi_builder"
+name = "bench_bloom_filter"
 harness = false

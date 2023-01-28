@@ -23,7 +23,7 @@ pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
-use bloom::Bloom;
+pub use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
 pub mod writer;

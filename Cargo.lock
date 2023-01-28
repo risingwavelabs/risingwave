@@ -990,12 +990,12 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.59.2"
+version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+checksum = "fd4865004a46a0aafb2a0a5eb19d3c9fc46ee5f063a6cfc605c69ac9ecf5263d"
 dependencies = [
  "bitflags",
- "cexpr",
+ "cexpr 0.4.0",
  "clang-sys",
  "lazy_static",
  "lazycell",
@@ -1004,7 +1004,26 @@ dependencies = [
  "quote",
  "regex",
  "rustc-hash",
- "shlex",
+ "shlex 0.1.1",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+dependencies = [
+ "bitflags",
+ "cexpr 0.6.0",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex 1.1.0",
 ]
 
 [[package]]
@@ -1270,6 +1289,15 @@ name = "cesu8"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
+
+[[package]]
+name = "cexpr"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4aedb84272dbe89af497cf81375129abda4fc0a9e7c5d317498c15cc30c0d27"
+dependencies = [
+ "nom 5.1.2",
+]
 
 [[package]]
 name = "cexpr"
@@ -3914,7 +3942,7 @@ checksum = "9006c95034ccf7b903d955f210469119f6c3477fc9c9e7a7845ce38a3e665c2a"
 dependencies = [
  "base64 0.13.1",
  "bigdecimal",
- "bindgen",
+ "bindgen 0.59.2",
  "bitflags",
  "bitvec",
  "byteorder",
@@ -4008,6 +4036,16 @@ name = "nom"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf51a729ecf40266a2368ad335a5fdde43471f545a967109cd62146ecf8b66ff"
+
+[[package]]
+name = "nom"
+version = "5.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
+dependencies = [
+ "memchr",
+ "version_check",
+]
 
 [[package]]
 name = "nom"
@@ -6523,6 +6561,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_test_runner",
  "risingwave_tracing",
+ "rocksdb-util",
  "scopeguard",
  "serde",
  "sled",
@@ -6676,6 +6715,17 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "rocksdb-util"
+version = "0.1.0"
+source = "git+https://github.com/rust-lib-project/rocksdb-util#b9f02ff119aaa607942f5b4af294a384c411b9b5"
+dependencies = [
+ "bindgen 0.57.0",
+ "cc",
+ "cmake",
+ "libc",
+]
 
 [[package]]
 name = "rust_decimal"
@@ -7093,6 +7143,12 @@ name = "shell-words"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
+
+[[package]]
+name = "shlex"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
 
 [[package]]
 name = "shlex"
