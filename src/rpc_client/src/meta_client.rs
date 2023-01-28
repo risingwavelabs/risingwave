@@ -1035,9 +1035,9 @@ impl GrpcMetaClient {
                     }
                 }
 
-                return Err(RpcError::Internal(anyhow!(
+                Err(RpcError::Internal(anyhow!(
                     "could not ensure meta node leader"
-                )));
+                )))
             }
         }
 
