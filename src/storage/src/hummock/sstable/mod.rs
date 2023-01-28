@@ -157,7 +157,7 @@ impl Sstable {
     #[inline(always)]
     pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u32 {
         let dist_key_hash = xxh32::xxh32(dist_key, 0);
-        dist_key_hash.bitxor(table_id)
+        table_id.bitxor(dist_key_hash)
     }
 
     #[inline(always)]
