@@ -19,7 +19,6 @@ use crate::hash::HashCode;
 /// Parallel unit is the minimal scheduling unit.
 // TODO: make it a newtype
 pub type ParallelUnitId = u32;
-pub type VnodeMapping = Vec<ParallelUnitId>;
 
 /// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 /// consistent hashing.
@@ -49,7 +48,7 @@ impl VirtualNode {
 }
 
 /// An iterator over all virtual nodes.
-pub type AllVirtualNodeIter = impl Iterator<Item = VirtualNode>;
+pub type AllVirtualNodeIter = std::iter::Map<std::ops::Range<usize>, fn(usize) -> VirtualNode>;
 
 impl VirtualNode {
     /// The maximum value of the virtual node.

@@ -20,7 +20,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
-    HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
+    ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -50,7 +50,7 @@ use crate::task::{BatchTaskContext, TaskId};
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
-    vnode_mapping: VnodeMapping,
+    vnode_mapping: ExpandedParallelUnitMapping,
     outer_side_key_types: Vec<DataType>,
     inner_side_schema: Schema,
     inner_side_column_ids: Vec<i32>,
