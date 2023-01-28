@@ -299,6 +299,7 @@ impl ExprRewritable for LogicalApply {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
         new.on = new.on.rewrite_expr(r);
+        new.base = new.base.clone_with_new_plan_id();
         new.into()
     }
 }

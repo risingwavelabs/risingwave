@@ -90,6 +90,7 @@ impl ExprRewritable for LogicalValues {
             })
             .collect::<Vec<_>>()
             .into();
+        new.base = new.base.clone_with_new_plan_id();
         new.into()
     }
 }
