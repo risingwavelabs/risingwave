@@ -94,7 +94,7 @@
     SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
   batch_plan: |
     BatchProject { exprs: [b.b2] }
-    └─BatchFilter { predicate: (In(1:Int32::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (1:Int32 = min(min(t.v1)))) }
+    └─BatchFilter { predicate: (true:Boolean OR (1:Int32 = min(min(t.v1)))) }
       └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
         ├─BatchExchange { order: [], dist: Single }
         | └─BatchScan { table: b, columns: [b.b2], distribution: SomeShard }
@@ -424,7 +424,7 @@
     BatchProject { exprs: [Some((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
-      └─BatchProject { exprs: [Array(1:Int32)] }
+      └─BatchProject { exprs: [ARRAY[1]:List { datatype: Int32 }] }
         └─BatchValues { rows: [[]] }
 - sql: |
     select 1 < ALL(array[null]::integer[]);
@@ -448,7 +448,7 @@
     BatchProject { exprs: [All((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
-      └─BatchProject { exprs: [Array(1:Int32)] }
+      └─BatchProject { exprs: [ARRAY[1]:List { datatype: Int32 }] }
         └─BatchValues { rows: [[]] }
 - name: now expression
   sql: |

@@ -20,20 +20,16 @@ use super::*;
 use crate::expr::ExprRewriter;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
+/// Rewrites expressions in a `PlanRef`. Due to `Share` operator,
+/// the `ExprRewriter` needs to be idempotent i.e. applying it more than once
+/// to the same `ExprImpl` will be a noop on subsequent applications.
 pub trait ExprRewritable {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef;
 }
 
 impl ExprRewritable for PlanRef {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let inputs: Vec<PlanRef> = self
-            .inputs()
-            .iter()
-            .map(|plan_ref| plan_ref.rewrite_exprs(r))
-            .collect();
-        let new = self.clone_with_inputs(&inputs[..]);
-        let dyn_t = new.deref();
-        dyn_t.rewrite_exprs(r)
+        self.deref().rewrite_exprs(r)
     }
 }
 
