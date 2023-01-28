@@ -26,7 +26,6 @@ maplit = "1"
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
-prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }

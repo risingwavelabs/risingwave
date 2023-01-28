@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod executor_core;
+pub use executor_core::StreamSourceCore;
 mod fs_source_executor;
 pub use fs_source_executor::*;
 

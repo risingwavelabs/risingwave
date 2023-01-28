@@ -33,8 +33,9 @@ use risingwave_pb::catalog::StreamSourceInfo;
 
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
-use crate::source::BoxSourceStream;
-use crate::{BoxSourceWithStateStream, SourceColumnDesc, SourceFormat, StreamChunkWithState};
+use crate::source::{
+    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceFormat, StreamChunkWithState,
+};
 
 mod avro;
 mod canal;

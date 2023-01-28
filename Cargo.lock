@@ -1032,6 +1032,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bk-tree"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6121f6e107e94d717b5ca2631d56e7c2ed1542a21b2eb87b4bda1d6c1420ef3f"
+dependencies = [
+ "fnv",
+ "triple_accel",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5923,6 +5933,7 @@ dependencies = [
  "nexmark",
  "num-traits",
  "paste",
+ "prometheus",
  "prost 0.11.6",
  "prost-reflect",
  "protobuf-native",
@@ -6040,6 +6051,7 @@ dependencies = [
  "assert-impl",
  "assert_matches",
  "async-trait",
+ "bk-tree",
  "byteorder",
  "bytes",
  "clap 3.2.23",
@@ -6406,7 +6418,6 @@ dependencies = [
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
- "prometheus",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_connector",
@@ -8070,6 +8081,12 @@ dependencies = [
  "serde",
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "triple_accel"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622b09ce2fe2df4618636fb92176d205662f59803f39e70d1c333393082de96c"
 
 [[package]]
 name = "try-lock"
