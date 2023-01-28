@@ -1061,16 +1061,16 @@ mod tests {
     use clap::Parser;
     use serde::Deserialize;
 
-    use super::{MetaConfig, FrontendConfig, ComputeNodeConfig, CompactorConfig};
+    use super::{CompactorConfig, ComputeNodeConfig, FrontendConfig, MetaConfig};
 
-    fn cmp_default<'a, C: Parser + Deserialize<'a> + Default + Debug + PartialEq>() {
+    fn cmp_default<'a, C: Default + Deserialize<'a> + Debug + Parser + PartialEq>() {
         let from_cli = C::parse_from(vec![""]);
         let from_toml: C = toml::from_str("").unwrap();
         assert_eq!(from_cli, from_toml);
     }
 
-    // The defaut value of `XxxConfig` from CLI and config file must be identical for serfig to work
-    // properly.
+    // The default value of `XxxConfig` from CLI and config file must be identical for serfig to
+    // work properly.
     #[test]
     fn test_default() {
         cmp_default::<MetaConfig>();
