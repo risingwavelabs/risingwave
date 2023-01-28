@@ -192,7 +192,7 @@ impl Cluster {
 
         // compute node
         for i in 1..=conf.compute_nodes {
-            let opts = risingwave_compute::ComputeNodeOpts::parse_from([
+            let opts = risingwave_common::config::ComputeNodeConfig::parse_from([
                 "compute-node",
                 "--config-path",
                 &conf.config_path,

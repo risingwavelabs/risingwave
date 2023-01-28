@@ -300,57 +300,85 @@ impl OverwriteConfig for FrontendConfig {
 
 /// The section `[coompute_node]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
 #[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
+    #[clap(long = "host", default_value_t = default::compute_node::listen_addr())]
     #[serde(default = "default::compute_node::listen_addr")]
     pub listen_addr: String,
 
+    #[clap(long)]
     pub client_address: Option<String>,
 
+    #[clap(long, default_value_t = default::compute_node::state_store())]
     #[serde(default = "default::compute_node::state_store")]
     pub state_store: String,
 
+    #[clap(long, default_value_t = default::compute_node::prometheus_listener_addr())]
     #[serde(default = "default::compute_node::prometheus_listener_addr")]
     pub prometheus_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
+    #[clap(long, default_value_t = default::compute_node::metrics_level())]
     #[serde(default = "default::compute_node::metrics_level")]
     pub metrics_level: u32,
 
+    #[clap(long = "meta-address", default_value_t = default::compute_node::meta_addr())]
     #[serde(default = "default::compute_node::meta_addr")]
     pub meta_addr: String,
 
     /// Enable reporting tracing information to jaeger.
+    #[clap(long)] // If defaults to `false`, do not use default attribute.
     #[serde(default = "default::compute_node::enable_jaeger_tracing")]
     pub enable_jaeger_tracing: bool,
 
     /// Enable async stack tracing for risectl.
+    #[clap(long, arg_enum, default_value_t = default::compute_node::async_stack_trace())]
     #[serde(default = "default::compute_node::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.
+    #[clap(long, default_value_t = default::compute_node::file_cache_dir())]
     #[serde(default = "default::compute_node::file_cache_dir")]
     pub file_cache_dir: String,
 
     /// Endpoint of the connector node,
+    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
     /// Total available memory in bytes, used by LRU Manager
+    #[clap(long, default_value_t = default::compute_node::total_memory_bytes())]
     #[serde(default = "default::compute_node::total_memory_bytes")]
     pub total_memory_bytes: usize,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
+    #[clap(long, default_value_t = default::compute_node::parallelism() )]
     #[serde(default = "default::compute_node::parallelism")]
     pub parallelism: usize,
+
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    #[clap(long, default_value = "")]
+    #[serde(skip)]
+    pub config_path: String,
 }
 
 impl Default for ComputeNodeConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl OverwriteConfig for ComputeNodeConfig {
+    fn overwrite(self, config: &mut RwConfig) {
+        config.compute_node = Builder::default()
+            .collect(from_self(self))
+            .build_with(config.compute_node.clone())
+            .unwrap()
     }
 }
 

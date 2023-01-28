@@ -173,7 +173,7 @@ pub async fn playground() -> Result<()> {
             RisingWaveService::Compute(mut opts) => {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
-                let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
+                let opts = risingwave_common::config::ComputeNodeConfig::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
                 let _compute_handle =
                     tokio::spawn(async move { risingwave_compute::start(opts).await });

@@ -28,103 +28,14 @@ pub mod memory_management;
 pub mod rpc;
 pub mod server;
 
-use clap::Parser;
-use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, ComputeNodeConfig, OverwriteConfig, RwConfig,
-};
+use std::future::Future;
+use std::pin::Pin;
+
+use risingwave_common::config::{load_config, AsyncStackTraceOption, ComputeNodeConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
-/// CLI arguments received by compute node. Overwrites fields in
-/// [`risingwave_common::config::ComputeNodeConfig`].
-#[derive(Parser, Clone, Debug)]
-pub struct ComputeNodeOpts {
-    // TODO: rename to listen_address and separate out the port.
-    #[clap(long = "host")]
-    pub listen_addr: Option<String>,
-
-    #[clap(long)]
-    pub client_address: Option<String>,
-
-    #[clap(long)]
-    pub state_store: Option<String>,
-
-    #[clap(long)]
-    pub prometheus_listener_addr: Option<String>,
-
-    #[clap(long)]
-    pub metrics_level: Option<u32>,
-
-    #[clap(long)]
-    pub meta_address: Option<String>,
-
-    #[clap(long)]
-    pub enable_jaeger_tracing: Option<bool>,
-
-    #[clap(long, arg_enum)]
-    pub async_stack_trace: Option<AsyncStackTraceOption>,
-
-    #[clap(long)]
-    pub file_cache_dir: Option<String>,
-
-    /// Default value is read from the 'CONNECTOR_RPC_ENDPOINT' environment variable.
-    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
-    pub connector_rpc_endpoint: Option<String>,
-
-    #[clap(long)]
-    pub total_memory_bytes: Option<usize>,
-
-    #[clap(long)]
-    pub parallelism: Option<usize>,
-
-    /// The path of `risingwave.toml` configuration file.
-    ///
-    /// If empty, default configuration values will be used.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-}
-
-impl OverwriteConfig for ComputeNodeOpts {
-    fn overwrite(self, config: &mut RwConfig) {
-        let c = &mut config.compute_node;
-        if let Some(v) = self.listen_addr {
-            c.listen_addr = v;
-        }
-        if self.client_address.is_some() {
-            c.client_address = self.client_address;
-        }
-        if let Some(v) = self.state_store {
-            c.state_store = v;
-        }
-        if let Some(v) = self.prometheus_listener_addr {
-            c.prometheus_listener_addr = v;
-        }
-        if let Some(v) = self.metrics_level {
-            c.metrics_level = v;
-        }
-        if let Some(v) = self.meta_address {
-            c.meta_addr = v;
-        }
-        if let Some(v) = self.enable_jaeger_tracing {
-            c.enable_jaeger_tracing = v;
-        }
-        if let Some(v) = self.async_stack_trace {
-            c.async_stack_trace = v;
-        }
-        if let Some(v) = self.file_cache_dir {
-            c.file_cache_dir = v;
-        }
-        if self.connector_rpc_endpoint.is_some() {
-            c.connector_rpc_endpoint = self.connector_rpc_endpoint;
-        }
-        if let Some(v) = self.total_memory_bytes {
-            c.total_memory_bytes = v;
-        }
-        if let Some(v) = self.parallelism {
-            c.parallelism = v;
-        }
-    }
-}
+use crate::server::compute_node_serve;
 
 fn validate_config(config: &ComputeNodeConfig) {
     let total_memory_available_bytes = total_memory_available_bytes();
@@ -148,13 +59,8 @@ fn validate_config(config: &ComputeNodeConfig) {
     }
 }
 
-use std::future::Future;
-use std::pin::Pin;
-
-use crate::server::compute_node_serve;
-
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(opts: ComputeNodeConfig) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {

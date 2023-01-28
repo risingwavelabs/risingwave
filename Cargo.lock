@@ -5819,7 +5819,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "clap 3.2.23",
  "crc32fast",
  "dyn-clone",
  "either",

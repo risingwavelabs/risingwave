@@ -38,7 +38,7 @@ fn main() -> Result<()> {
             Box::new(|args: Vec<String>| {
                 eprintln!("launching compute node");
 
-                let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
+                let opts = risingwave_common::config::ComputeNodeConfig::parse_from(args);
 
                 risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false));
 
