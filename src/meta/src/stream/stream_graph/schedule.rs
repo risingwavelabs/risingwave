@@ -3,18 +3,18 @@ use std::rc::Rc;
 
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use super::{GlobalFragmentId as Id, StreamFragmentGraph};
 use crate::manager::FragmentManager;
 use crate::storage::MetaStore;
-use crate::stream::build_vnode_mapping;
+use crate::stream::CreateStreamingJobContext;
 use crate::MetaResult;
 
-pub type HashMapping = Rc<[ParallelUnitId]>;
 type HashMappingId = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,16 +70,15 @@ crepe::crepe! {
 
 #[derive(EnumAsInner)]
 pub(super) enum ExternalRequirement {
-    Hash(HashMapping),
+    Hash(ParallelUnitMapping),
     Singleton,
 }
 
-pub(super) struct ExternalRequirements(Vec<ExternalRequirement>);
+pub(super) struct ExternalRequirements(HashMap<Id, ExternalRequirement>);
 
 impl ExternalRequirements {
     pub async fn for_create_streaming_job<S: MetaStore>(
-        fragment_graph: &StreamFragmentGraph,
-        fragment_manager: &FragmentManager<S>,
+        ctx: &CreateStreamingJobContext,
     ) -> MetaResult<Self> {
         todo!()
     }
@@ -92,14 +91,14 @@ pub(super) struct Scheduler {
 
     default_parallelism: usize,
 
-    default_hash_mapping: HashMapping,
+    default_hash_mapping: ParallelUnitMapping,
 }
 
 impl Scheduler {
     pub fn new(
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
         default_parallelism: usize,
-    ) -> Self {
+    ) -> MetaResult<Self> {
         // Group parallel units with worker node.
         let mut parallel_units_map = BTreeMap::new();
         for p in parallel_units {
@@ -115,7 +114,7 @@ impl Scheduler {
 
         // Visit the parallel units in a round-robin manner on each worker.
         let mut round_robin = Vec::new();
-        while !parallel_units.is_empty() {
+        while !parallel_units.is_empty() && round_robin.len() < default_parallelism {
             parallel_units.drain_filter(|ps| {
                 if let Some(p) = ps.next() {
                     round_robin.push(p);
@@ -126,13 +125,20 @@ impl Scheduler {
             });
         }
 
-        let default_hash_mapping = build_vnode_mapping(&round_robin[..default_parallelism]).into();
+        if round_robin.len() < default_parallelism {
+            bail!(
+                "Not enough parallel units to schedule {} parallelism",
+                default_parallelism
+            );
+        }
 
-        Self {
+        let default_hash_mapping = ParallelUnitMapping::build(&round_robin);
+
+        Ok(Self {
             all_parallel_units: round_robin,
             default_parallelism,
             default_hash_mapping,
-        }
+        })
     }
 
     pub fn schedule(
