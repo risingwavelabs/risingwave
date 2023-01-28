@@ -497,9 +497,19 @@ export interface HashJoinNode {
     | undefined;
   /** The output indices of current node */
   outputIndices: number[];
-  /** Left deduped input pk indices; */
+  /**
+   * Left deduped input pk indices. The pk of the left_table and
+   * left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
   leftDedupedInputPkIndices: number[];
-  /** Right deduped input pk indices; */
+  /**
+   * Right deduped input pk indices. The pk of the right_table and
+   * right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
   rightDedupedInputPkIndices: number[];
   nullSafe: boolean[];
   /**
