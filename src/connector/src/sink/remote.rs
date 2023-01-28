@@ -48,8 +48,8 @@ use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
 
-pub fn is_valid_remote_sink(sink_type: String) -> bool {
-    return VALID_REMOTE_SINKS.contains(&sink_type.as_str());
+pub fn is_valid_remote_sink(sink_type: &str) -> bool {
+    VALID_REMOTE_SINKS.contains(&sink_type)
 }
 
 #[derive(Clone, Debug)]
@@ -65,7 +65,7 @@ impl RemoteConfig {
             .expect("sink type must be specified")
             .to_string();
 
-        if !is_valid_remote_sink(sink_type.clone()) {
+        if !is_valid_remote_sink(sink_type.as_str()) {
             return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
         }
 

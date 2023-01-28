@@ -53,6 +53,12 @@ pub struct ComputeNodeOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
+    /// One of:
+    /// 1. `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
+    /// 2. `in-memory`
+    /// 3. `sled://{path}`
     #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
 

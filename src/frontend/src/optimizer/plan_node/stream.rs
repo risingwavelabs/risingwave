@@ -220,7 +220,7 @@ impl HashJoin {
     pub fn infer_internal_and_degree_table_catalog(
         input: &impl StreamPlanRef,
         join_key_indices: Vec<usize>,
-    ) -> (TableCatalog, TableCatalog) {
+    ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
         let internal_table_dist_keys = input.distribution().dist_column_indices().to_vec();
@@ -242,8 +242,17 @@ impl HashJoin {
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
 
-        // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(input.logical_pk());
+        // dedup the pk in dist key..
+        let mut deduped_input_pk_indices = vec![];
+        for input_pk_idx in input.logical_pk() {
+            if !pk_indices.contains(input_pk_idx)
+                && !deduped_input_pk_indices.contains(input_pk_idx)
+            {
+                deduped_input_pk_indices.push(*input_pk_idx);
+            }
+        }
+
+        pk_indices.extend(deduped_input_pk_indices.clone());
 
         // Build internal table
         let mut internal_table_catalog_builder =
@@ -276,6 +285,7 @@ impl HashJoin {
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
+            deduped_input_pk_indices,
         )
     }
 }
@@ -597,15 +607,26 @@ pub fn to_stream_prost_body(
             let left_key_indices_prost = left_key_indices.iter().map(|&idx| idx as i32).collect();
             let right_key_indices_prost = right_key_indices.iter().map(|&idx| idx as i32).collect();
 
-            let (left_table, left_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
-                &me.core.left.0,
-                left_key_indices,
-            );
-            let (right_table, right_degree_table) =
+            let (left_table, left_degree_table, left_deduped_input_pk_indices) =
+                HashJoin::infer_internal_and_degree_table_catalog(
+                    &me.core.left.0,
+                    left_key_indices,
+                );
+            let (right_table, right_degree_table, right_deduped_input_pk_indices) =
                 HashJoin::infer_internal_and_degree_table_catalog(
                     &me.core.right.0,
                     right_key_indices,
                 );
+
+            let left_deduped_input_pk_indices = left_deduped_input_pk_indices
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect();
+
+            let right_deduped_input_pk_indices = right_deduped_input_pk_indices
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect();
 
             let (left_table, left_degree_table) = (
                 left_table.with_id(state.gen_table_id_wrapped()),
@@ -632,6 +653,8 @@ pub fn to_stream_prost_body(
                 right_table: Some(right_table.to_internal_table_prost()),
                 left_degree_table: Some(left_degree_table.to_internal_table_prost()),
                 right_degree_table: Some(right_degree_table.to_internal_table_prost()),
+                left_deduped_input_pk_indices,
+                right_deduped_input_pk_indices,
                 output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
                 is_append_only: me.is_append_only,
             })

@@ -501,16 +501,24 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-upgrades typos-cli
+cargo install cargo-quickinstall --locked
+cargo quickinstall cargo-binstall
+
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
+do
+  echo "install: $(tput setaf 4)$tool$(tput sgr0)"
+  cargo binstall -y --no-symlinks $tool
+  echo
+done
+
+# Tools that fallback to `cargo install` when using `cargo binstall`.
+# We directly use `cargo install` here to be faster.
+for tool in typos-cli sqllogictest-bin
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool --locked
   echo
 done
-
-echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
-echo
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
 tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
@@ -528,7 +536,7 @@ echo "check: $(tput setaf 4)protoc$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
 """
-description = "Install required tools to do pre-CI check and run e2e tests"
+description = "Install (or upgrade) required tools to do pre-CI check and run e2e tests"
 
 [tasks.warn-on-missing-tools]
 private = true
