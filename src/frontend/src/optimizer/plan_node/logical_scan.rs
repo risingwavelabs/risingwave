@@ -452,9 +452,13 @@ impl ColPrunable for LogicalScan {
 
 impl ExprRewritable for LogicalScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new = self.clone();
-        new.core.rewrite_exprs(r);
-        new.into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
     }
 }
 

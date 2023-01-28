@@ -80,6 +80,7 @@ impl ExprRewritable for LogicalTableFunction {
             .into_iter()
             .map(|e| r.rewrite_expr(e))
             .collect();
+        new.base = self.base.clone_with_new_plan_id();
         new.into()
     }
 }
