@@ -52,7 +52,7 @@ pub struct Args {
     compactor_nodes: usize,
 
     /// The number of meta nodes.
-    #[clap(long, default_value = "2")]
+    #[clap(long, default_value = "3")]
     meta_nodes: usize,
 
     /// The number of CPU cores for each compute node.
