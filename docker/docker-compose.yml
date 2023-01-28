@@ -181,8 +181,8 @@ services:
       - meta-node
       - "--listen-addr"
       - "0.0.0.0:5690"
-      - "--host"
-      - meta-node-0
+      - "--meta-endpoint"
+      - "meta-node-0:5690"
       - "--dashboard-host"
       - "0.0.0.0:5691"
       - "--prometheus-host"
