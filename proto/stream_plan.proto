@@ -251,9 +251,15 @@ message HashJoinNode {
   catalog.Table right_degree_table = 9;
   // The output indices of current node
   repeated uint32 output_indices = 10;
-  // Left deduped input pk indices;
+  // Left deduped input pk indices. The pk of the left_table and 
+  // left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
+  // and is expected to be the shortest key which starts with
+  // the join key and satisfies unique constrain.
   repeated uint32 left_deduped_input_pk_indices = 11;
-  // Right deduped input pk indices;
+  // Right deduped input pk indices. The pk of the right_table and 
+  // right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
+  // and is expected to be the shortest key which starts with
+  // the join key and satisfies unique constrain.
   repeated uint32 right_deduped_input_pk_indices = 12;
 
   repeated bool null_safe = 13;
