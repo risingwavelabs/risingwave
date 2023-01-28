@@ -51,8 +51,7 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
-# install mysql client
-apt-get -y install mysql-client
+
 # import data to mysql
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 

@@ -50,8 +50,13 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     type Split = KafkaSplit;
 
     async fn new(properties: KafkaProperties) -> anyhow::Result<KafkaSplitEnumerator> {
-        let broker_address = properties.brokers.clone();
-        let topic = properties.topic.clone();
+        let mut config = rdkafka::ClientConfig::new();
+        let common_props = &properties.common;
+
+        let broker_address = common_props.brokers.clone();
+        let topic = common_props.topic.clone();
+        config.set("bootstrap.servers", &broker_address);
+        common_props.set_security_properties(&mut config);
 
         let mut scan_start_offset = match properties
             .scan_startup_mode
@@ -74,9 +79,6 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let mut config = rdkafka::ClientConfig::new();
-        config.set("bootstrap.servers", &broker_address);
-        properties.set_security_properties(&mut config);
         let client: BaseConsumer = config.create_with_context(DefaultConsumerContext).await?;
 
         Ok(Self {

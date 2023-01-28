@@ -21,10 +21,8 @@ use super::{ColumnId, RelationCatalog, SourceId};
 use crate::user::UserId;
 use crate::WithOptions;
 
-/// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
-/// information which will be used during optimization.
-///
-/// It can be either a table source or a stream source. Use `self.kind()` to distinguish them.
+/// This struct `SourceCatalog` is used in frontend.
+/// Compared with `ProstSource`, it only maintains information used during optimization.
 #[derive(Clone, Debug)]
 pub struct SourceCatalog {
     pub id: SourceId,
