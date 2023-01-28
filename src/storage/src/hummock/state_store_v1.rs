@@ -136,10 +136,9 @@ impl HummockStorageV1 {
             table_counts += table_count;
         }
 
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+        });
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
@@ -336,7 +335,7 @@ impl HummockStorageV1 {
         let bloom_filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint));
+            .map(|hint| Sstable::hash_for_bloom_filter(hint, read_options.table_id.table_id()));
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -371,13 +370,8 @@ impl HummockStorageV1 {
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
-                        let table_id = read_options.table_id.table_id();
-                        if hit_sstable_bloom_filter(
-                            sstable.value(),
-                            *prefix_hash,
-                            &mut local_stats,
-                            table_id,
-                        ) {
+                        if hit_sstable_bloom_filter(sstable.value(), *prefix_hash, &mut local_stats)
+                        {
                             sstables.push((*sstable_info).clone());
                         }
                     } else {
@@ -401,13 +395,10 @@ impl HummockStorageV1 {
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                        let table_id = read_options.table_id.table_id();
-
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
                             *prefix_hash,
                             &mut local_stats,
-                            table_id,
                         ) {
                             continue;
                         }

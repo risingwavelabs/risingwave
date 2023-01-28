@@ -148,22 +148,22 @@ impl Sstable {
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
-            self.surely_not_have_hashvalue(hash, 0)
+            self.surely_not_have_hashvalue(hash)
         } else {
             false
         }
     }
 
     #[inline(always)]
-    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
-        xxh32::xxh32(dist_key, 0)
+    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u32 {
+        let dist_key_hash = xxh32::xxh32(dist_key, 0);
+        dist_key_hash.bitxor(table_id)
     }
 
     #[inline(always)]
-    pub fn surely_not_have_hashvalue(&self, hash: u32, table_id: u32) -> bool {
-        let hash_with_table_id = hash.bitxor(table_id);
+    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
         let bloom = Bloom::new(&self.meta.bloom_filter);
-        bloom.surely_not_have_hash(hash_with_table_id)
+        bloom.surely_not_have_hash(hash)
     }
 
     pub fn block_count(&self) -> usize {
