@@ -114,7 +114,7 @@ message StreamMessage {
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint64 original_indices = 1;
+  repeated uint32 original_indices = 1;
   repeated uint32 data = 2;
 }
 
