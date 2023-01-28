@@ -372,6 +372,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Execution failed [{:?}]: {}", &task_id, e);
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
+                    sender.send(None).await.unwrap();
                     if let Err(_e) = t_1
                         .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str), local_execution_failure_sender.as_mut())
                         .await
