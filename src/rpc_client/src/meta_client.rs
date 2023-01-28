@@ -121,7 +121,7 @@ impl MetaClient {
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
-        let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
+        let grpc_meta_client = GrpcMetaClient::new(meta_addr, true).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -904,7 +904,7 @@ impl GrpcMetaClientCore {
 /// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    force_refresh: tokio::sync::mpsc::Sender<oneshot::Sender<Result<()>>>,
+    force_refresh: Option<tokio::sync::mpsc::Sender<oneshot::Sender<Result<()>>>>,
     core: Arc<Mutex<GrpcMetaClientCore>>,
 }
 
@@ -1076,35 +1076,48 @@ impl GrpcMetaClient {
 
     async fn force_refresh_leader(&self) -> Result<()> {
         let (sender, receiver) = oneshot::channel();
-        self.force_refresh
-            .send(sender)
-            .await
-            .map_err(|e| anyhow!(e))?;
-        receiver.await.map_err(|e| anyhow!(e))?
+
+        if let Some(force_refresh_sender) = self.force_refresh.as_ref() {
+            force_refresh_sender
+                .send(sender)
+                .await
+                .map_err(|e| anyhow!(e))?;
+
+            receiver.await.map_err(|e| anyhow!(e))?
+        } else {
+            Ok(())
+        }
     }
 
     /// Connect to the meta server `addr`.
-    pub async fn new(addr: &str) -> Result<Self> {
+    pub async fn new(addr: &str, enable_tick_loop: bool) -> Result<Self> {
         let channel = Self::build_rpc_channel(addr).await?;
 
         let (force_refresh_sender, force_refresh_receiver) = tokio::sync::mpsc::channel(128);
 
-        let client = GrpcMetaClient {
-            force_refresh: force_refresh_sender,
-            core: Arc::new(Mutex::new(GrpcMetaClientCore::new(channel))),
-        };
+        if enable_tick_loop {
+            let client = GrpcMetaClient {
+                force_refresh: Some(force_refresh_sender),
+                core: Arc::new(Mutex::new(GrpcMetaClientCore::new(channel))),
+            };
 
-        client
-            .start_meta_election_monitor(addr, force_refresh_receiver)
-            .await?;
+            client
+                .start_meta_election_monitor(addr, force_refresh_receiver)
+                .await?;
 
-        tracing::info!("force refresh leader of meta-node");
+            tracing::info!("force refresh leader of meta-node");
 
-        if let Err(e) = client.force_refresh_leader().await {
-            tracing::warn!("force refresh leader failed {}, init leader may failed", e);
+            if let Err(e) = client.force_refresh_leader().await {
+                tracing::warn!("force refresh leader failed {}, init leader may failed", e);
+            }
+
+            Ok(client)
+        } else {
+            Ok(GrpcMetaClient {
+                force_refresh: None,
+                core: Arc::new(Mutex::new(GrpcMetaClientCore::new(channel))),
+            })
         }
-
-        Ok(client)
     }
 
     pub(crate) async fn build_rpc_channel(addr: &str) -> Result<Channel> {
