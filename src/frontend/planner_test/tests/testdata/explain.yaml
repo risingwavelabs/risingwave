@@ -36,28 +36,6 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    WTF2
-
-
-    Node: Ok("LogicalProject { exprs: [1:Int32] }\n└─LogicalValues { rows: [[]], schema: Schema { fields: [] } }\n")
-
-    Rewritten Node: Ok("LogicalProject { exprs: [1:Int32] }\n└─LogicalValues { rows: [[]], schema: Schema { fields: [] } }\n")
-
-    inputs before: [Ok("LogicalValues { rows: [[]], schema: Schema { fields: [] } }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalValues { rows: [[]], schema: Schema { fields: [] } }\n")
-
-    Rewritten Node: Ok("LogicalValues { rows: [[]], schema: Schema { fields: [] } }\n")
-
-    inputs before: []
-
-    inputs after: []
-
-    inputs after: [Ok("LogicalValues { rows: [[]], schema: Schema { fields: [] } }\n")]
-
     Const eval exprs:
 
     LogicalProject { exprs: [1:Int32] }
@@ -191,39 +169,6 @@
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
     ├─LogicalScan { table: t1, columns: [v1] }
     └─LogicalScan { table: t2, columns: [v2] }
-
-    WTF2
-
-
-    Node: Ok("LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }\n├─LogicalScan { table: t1, columns: [v1] }\n└─LogicalScan { table: t2, columns: [v2] }\n")
-
-    Rewritten Node: Ok("LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }\n├─LogicalScan { table: t1, columns: [v1] }\n└─LogicalScan { table: t2, columns: [v2] }\n")
-
-    inputs before: [Ok("LogicalScan { table: t1, columns: [v1] }\n"), Ok("LogicalScan { table: t2, columns: [v2] }\n")]
-
-    WTF2
-
-
-    Node: Ok("LogicalScan { table: t1, columns: [v1] }\n")
-
-    Rewritten Node: Ok("LogicalScan { table: t1, columns: [v1] }\n")
-
-    inputs before: []
-
-    inputs after: []
-
-    WTF2
-
-
-    Node: Ok("LogicalScan { table: t2, columns: [v2] }\n")
-
-    Rewritten Node: Ok("LogicalScan { table: t2, columns: [v2] }\n")
-
-    inputs before: []
-
-    inputs after: []
-
-    inputs after: [Ok("LogicalScan { table: t1, columns: [v1] }\n"), Ok("LogicalScan { table: t2, columns: [v2] }\n")]
 
     Const eval exprs:
 
