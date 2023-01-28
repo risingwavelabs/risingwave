@@ -16,10 +16,12 @@ use itertools::Itertools;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ParallelUnitMapping, WorkerNode, WorkerType};
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
-use risingwave_pb::meta::{MetaSnapshot, SubscribeRequest, SubscribeType};
+use risingwave_pb::meta::{
+    FragmentParallelUnitMapping, MetaSnapshot, SubscribeRequest, SubscribeType,
+};
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -82,7 +84,7 @@ where
 
     async fn get_parallel_unit_mapping_snapshot(
         &self,
-    ) -> (Vec<ParallelUnitMapping>, NotificationVersion) {
+    ) -> (Vec<FragmentParallelUnitMapping>, NotificationVersion) {
         let fragment_guard = self.fragment_manager.get_fragment_read_guard().await;
         let parallel_unit_mappings = fragment_guard.all_running_fragment_mappings().collect_vec();
         let notification_version = self.env.notification_manager().current_version().await;
