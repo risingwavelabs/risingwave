@@ -722,7 +722,7 @@ impl PlanRoot {
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     let mut const_eval_rewriter = ConstEvalRewriter { error: None };
 
-    let plan = plan.rewrite_exprs(&mut const_eval_rewriter);
+    let plan = plan.rewrite_exprs_recursive(&mut const_eval_rewriter);
     if let Some(error) = const_eval_rewriter.error {
         return Err(error);
     }

@@ -122,9 +122,7 @@ impl ColPrunable for LogicalShare {
 
 impl ExprRewritable for LogicalShare {
     fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        unimplemented!(
-            "call rewrite_exprs of the PlanRef instead of calling directly on LogicalShare"
-        )
+        self.clone().into()
     }
 }
 
