@@ -42,7 +42,7 @@ pub mod create_source;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
-mod create_view;
+pub mod create_view;
 mod describe;
 mod drop_database;
 pub mod drop_function;

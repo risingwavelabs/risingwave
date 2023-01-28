@@ -35,6 +35,9 @@ pub struct CompactorOpts {
     #[clap(long)]
     pub port: Option<u16>,
 
+    /// Of the form `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
     #[clap(long, default_value = "")]
     pub state_store: String,
 

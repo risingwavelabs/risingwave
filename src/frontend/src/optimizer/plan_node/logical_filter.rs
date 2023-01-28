@@ -207,7 +207,7 @@ impl ToStream for LogicalFilter {
             if predicate
                 .conjunctions
                 .iter()
-                .any(|expr| expr.as_now_comparison_cond().is_none())
+                .any(|expr| expr.count_nows() > 0 && expr.as_now_comparison_cond().is_none())
             {
                 bail!(
                     "Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or \
@@ -216,7 +216,7 @@ impl ToStream for LogicalFilter {
                 );
             }
             bail!(
-                "Valid now exprs should have been pushed down into left semi join a `Now` operator as the RHS input"
+                "All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound."
             );
         }
         let new_logical = self.clone_with_input(new_input);

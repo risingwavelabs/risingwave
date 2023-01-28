@@ -207,8 +207,8 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
-        // to the `Weak` reference in `DmlManager`.
+        // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
+        // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
             .register_reader(table_id, &column_descs)
             .unwrap();
