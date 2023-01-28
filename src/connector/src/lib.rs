@@ -27,6 +27,9 @@
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 
+use std::time::Duration;
+
+use duration_str::parse_std;
 use serde::de;
 
 pub mod aws_utils;
@@ -66,4 +69,17 @@ where
             &"true or false",
         )),
     }
+}
+
+pub(crate) fn deserialize_duration_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Duration, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    parse_std(&s).map_err(|_| de::Error::invalid_value(
+        de::Unexpected::Str(&s),
+        &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
+    ))
 }

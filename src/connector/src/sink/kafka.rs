@@ -35,8 +35,8 @@ use tracing::warn;
 
 use super::{Sink, SinkError};
 use crate::common::KafkaCommon;
-use crate::deserialize_bool_from_string;
 use crate::sink::Result;
+use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
 
 pub const KAFKA_SINK: &str = "kafka";
 
@@ -65,7 +65,11 @@ pub struct KafkaConfig {
 
     pub identifier: String,
 
-    #[serde(rename = "properties.timeout", default = "_default_timeout")]
+    #[serde(
+        rename = "properties.timeout",
+        default = "_default_timeout",
+        deserialize_with = "deserialize_duration_from_string"
+    )]
     pub timeout: Duration,
 
     #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
@@ -73,7 +77,8 @@ pub struct KafkaConfig {
 
     #[serde(
         rename = "properties.retry.interval",
-        default = "_default_retry_backoff"
+        default = "_default_retry_backoff",
+        deserialize_with = "deserialize_duration_from_string"
     )]
     pub retry_interval: Duration,
 
@@ -543,6 +548,7 @@ mod test {
             "sasl_username".to_string() => "test".to_string(),
             "sasl_password".to_string() => "test".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
+            "properties.timeout".to_string() => "5s".to_string(),
         };
 
         let config = KafkaConfig::from_hashmap(properties).unwrap();

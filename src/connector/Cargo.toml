@@ -24,6 +24,7 @@ bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
 csv-core = "0.1.10"
+duration-str = "0.5.0"
 either = "1"
 enum-as-inner = "0.5"
 farmhash = "1"
