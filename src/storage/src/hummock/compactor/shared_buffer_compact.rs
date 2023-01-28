@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::context::Context;
+use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -44,7 +44,7 @@ const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
-    context: Arc<Context>,
+    context: Arc<CompactorContext>,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
@@ -108,7 +108,7 @@ pub async fn compact(
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
-    context: Arc<Context>,
+    context: Arc<CompactorContext>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
@@ -145,9 +145,9 @@ async fn compact_shared_buffer(
         splits.last_mut().unwrap().right = key_before_last.clone();
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
-    let sstable_size = (context.options.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.storage_config.sstable_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
-        context.options.share_buffers_sync_parallelism as u64,
+        context.storage_config.share_buffers_sync_parallelism as u64,
         size_and_start_user_keys.len() as u64,
     );
     let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
@@ -293,10 +293,10 @@ impl SharedBufferCompactRunner {
     pub fn new(
         split_index: usize,
         key_range: KeyRange,
-        context: Arc<Context>,
+        context: Arc<CompactorContext>,
         sub_compaction_sstable_size: usize,
     ) -> Self {
-        let mut options: SstableBuilderOptions = context.options.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_config.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
         let compactor = Compactor::new(
             context,
