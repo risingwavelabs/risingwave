@@ -146,7 +146,7 @@ impl Cluster {
         std::env::set_var("RW_META_ADDR", "https://192.168.1.1:5690/");
 
         // meta node
-        let opts = risingwave_meta::MetaNodeOpts::parse_from([
+        let opts = risingwave_common::config::MetaConfig::parse_from([
             "meta-node",
             "--config-path",
             &conf.config_path,
@@ -171,7 +171,7 @@ impl Cluster {
 
         // frontend node
         for i in 1..=conf.frontend_nodes {
-            let opts = risingwave_frontend::FrontendOpts::parse_from([
+            let opts = risingwave_common::config::FrontendConfig::parse_from([
                 "frontend-node",
                 "--config-path",
                 &conf.config_path,
