@@ -218,7 +218,7 @@ impl Cluster {
 
         // compactor node
         for i in 1..=conf.compactor_nodes {
-            let opts = risingwave_compactor::CompactorOpts::parse_from([
+            let opts = risingwave_common::config::CompactorConfig::parse_from([
                 "compactor-node",
                 "--config-path",
                 &conf.config_path,

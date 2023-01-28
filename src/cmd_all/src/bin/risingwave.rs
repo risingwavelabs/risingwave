@@ -92,7 +92,7 @@ fn main() -> Result<()> {
             Box::new(move |args: Vec<String>| {
                 eprintln!("launching compactor node");
 
-                let opts = risingwave_compactor::CompactorOpts::parse_from(args);
+                let opts = risingwave_common::config::CompactorConfig::parse_from(args);
 
                 risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 

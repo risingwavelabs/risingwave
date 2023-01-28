@@ -5788,7 +5788,6 @@ name = "risingwave_compactor"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
- "clap 3.2.23",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",

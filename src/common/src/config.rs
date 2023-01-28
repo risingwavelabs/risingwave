@@ -260,8 +260,8 @@ pub struct FrontendConfig {
     #[serde(default = "default::frontend::meta_addr")]
     pub meta_addr: String,
 
-    #[clap(long, default_value_t = default::frontend::prometheus_listen_addr())]
-    #[serde(default = "default::frontend::prometheus_listen_addr")]
+    #[clap(long, default_value_t = default::frontend::prometheus_listener_addr())]
+    #[serde(default = "default::frontend::prometheus_listener_addr")]
     pub prometheus_listener_addr: String,
 
     #[clap(long, default_value_t = default::frontend::health_check_listener_addr())]
@@ -311,7 +311,7 @@ pub struct ComputeNodeConfig {
     #[serde(default = "default::compute_node::state_store")]
     pub state_store: String,
 
-    #[serde(default = "default::compute_node::prometheus_listen_addr")]
+    #[serde(default = "default::compute_node::prometheus_listener_addr")]
     pub prometheus_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
@@ -356,39 +356,63 @@ impl Default for ComputeNodeConfig {
 
 /// The section `[compactor]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
 #[serde(deny_unknown_fields)]
 pub struct CompactorConfig {
-    // Below configs are CLI configurable.
+    #[clap(long = "host", default_value_t = default::compactor::listen_addr())]
     #[serde(default = "default::compactor::listen_addr")]
     pub listen_addr: String,
 
+    #[clap(long)]
     pub client_address: Option<String>,
 
+    #[clap(long, default_value_t = default::compactor::state_store())]
     #[serde(default = "default::compactor::state_store")]
     pub state_store: String,
 
-    #[serde(default = "default::compactor::prometheus_listen_addr")]
+    #[clap(long, default_value_t = default::compactor::prometheus_listener_addr())]
+    #[serde(default = "default::compactor::prometheus_listener_addr")]
     pub prometheus_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
+    #[clap(long, default_value_t = default::compactor::metrics_level())]
     #[serde(default = "default::compactor::metrics_level")]
     pub metrics_level: u32,
 
+    #[clap(long, default_value_t = default::compactor::meta_address())]
     #[serde(default = "default::compactor::meta_address")]
     pub meta_address: String,
 
+    /// The number of compaction tasks that can be accepted at the same time.
+    #[clap(long, default_value_t = default::compactor::max_concurrent_task_number())]
     #[serde(default = "default::compactor::max_concurrent_task_number")]
     pub max_concurrent_task_number: u64,
 
+    #[clap(long)]
     pub compaction_worker_threads_number: Option<usize>,
+
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    #[clap(long, default_value = "")]
+    #[serde(skip)]
+    pub config_path: String,
 }
 
 impl Default for CompactorConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl OverwriteConfig for CompactorConfig {
+    fn overwrite(self, config: &mut RwConfig) {
+        config.compactor = Builder::default()
+            .collect(from_self(self))
+            .build_with(config.compactor.clone())
+            .unwrap()
     }
 }
 
@@ -716,7 +740,7 @@ mod default {
             "http://127.0.0.1:5690".to_string()
         }
 
-        pub fn prometheus_listen_addr() -> String {
+        pub fn prometheus_listener_addr() -> String {
             "127.0.0.1:2222".to_string()
         }
 
@@ -742,7 +766,7 @@ mod default {
             "hummock+memory".to_string()
         }
 
-        pub fn prometheus_listen_addr() -> String {
+        pub fn prometheus_listener_addr() -> String {
             "127.0.0.1:1222".to_string()
         }
 
@@ -785,7 +809,7 @@ mod default {
             "".to_string()
         }
 
-        pub fn prometheus_listen_addr() -> String {
+        pub fn prometheus_listener_addr() -> String {
             "127.0.0.1:1260".to_string()
         }
 

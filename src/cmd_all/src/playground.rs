@@ -189,7 +189,7 @@ pub async fn playground() -> Result<()> {
             RisingWaveService::Compactor(mut opts) => {
                 opts.insert(0, "compactor".into());
                 tracing::info!("starting compactor thread with cli args: {:?}", opts);
-                let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
+                let opts = risingwave_common::config::CompactorConfig::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
                 let _compactor_handle =
                     tokio::spawn(async move { risingwave_compactor::start(opts).await });

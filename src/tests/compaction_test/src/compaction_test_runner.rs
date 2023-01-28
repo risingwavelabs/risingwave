@@ -154,7 +154,7 @@ async fn start_compactor_node(
     state_store: String,
     config_path: String,
 ) {
-    let opts = risingwave_compactor::CompactorOpts::parse_from([
+    let opts = risingwave_common::config::CompactorConfig::parse_from([
         "compactor-node",
         "--host",
         "127.0.0.1:5550",
