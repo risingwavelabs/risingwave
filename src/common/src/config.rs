@@ -33,6 +33,9 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not overwrite the config file.
 pub const NO_OVERWRITE: Option<NoOverwrite> = None;
 
+/// Load the toml file from `path` and overwrite it with `cli_overwrite`.
+/// Do NOT clone `cli_overwrite` and use it after the invocation of `load_config` as it might not
+/// contain the complete values.
 pub fn load_config(path: &str, cli_overwrite: Option<impl OverwriteConfig>) -> RwConfig
 where
 {
@@ -95,7 +98,7 @@ impl OverwriteConfig for NoOverwrite {
     fn overwrite(self, _config: &mut RwConfig) {}
 }
 
-#[derive(Copy, Clone, Debug, ArgEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, ArgEnum, Serialize, Deserialize, PartialEq)]
 pub enum MetaBackend {
     Mem,
     Etcd,
@@ -103,7 +106,7 @@ pub enum MetaBackend {
 
 /// The section `[meta]` in `risingwave.toml`. This section only applies to the meta node.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     #[clap(long, default_value_t = default::meta::listen_addr())]
@@ -237,7 +240,7 @@ impl OverwriteConfig for MetaConfig {
     }
 }
 
-#[derive(Copy, Clone, Debug, ArgEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, ArgEnum, Serialize, Deserialize, PartialEq)]
 pub enum AsyncStackTraceOption {
     Off,
     On,
@@ -246,7 +249,7 @@ pub enum AsyncStackTraceOption {
 
 /// The section `[frontend]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrontendConfig {
     #[clap(long = "host", default_value_t = default::frontend::listen_addr())]
@@ -302,7 +305,7 @@ impl OverwriteConfig for FrontendConfig {
 
 /// The section `[coompute_node]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
     #[clap(long = "host", default_value_t = default::compute_node::listen_addr())]
@@ -394,7 +397,7 @@ impl OverwriteConfig for ComputeNodeConfig {
 
 /// The section `[compactor]` in `risingwave.toml`. This section only applies to the compactor.
 /// A subset of the configs can be overwritten by CLI arguments.
-#[derive(Clone, Debug, Serialize, Deserialize, Parser)]
+#[derive(Clone, Debug, Serialize, Deserialize, Parser, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CompactorConfig {
     #[clap(long = "host", default_value_t = default::compactor::listen_addr())]
@@ -1048,5 +1051,31 @@ mod default {
         pub fn storage_directory() -> String {
             "backup".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Debug;
+
+    use clap::Parser;
+    use serde::Deserialize;
+
+    use super::{MetaConfig, FrontendConfig, ComputeNodeConfig, CompactorConfig};
+
+    fn cmp_default<'a, C: Parser + Deserialize<'a> + Default + Debug + PartialEq>() {
+        let from_cli = C::parse_from(vec![""]);
+        let from_toml: C = toml::from_str("").unwrap();
+        assert_eq!(from_cli, from_toml);
+    }
+
+    // The defaut value of `XxxConfig` from CLI and config file must be identical for serfig to work
+    // properly.
+    #[test]
+    fn test_default() {
+        cmp_default::<MetaConfig>();
+        cmp_default::<FrontendConfig>();
+        cmp_default::<ComputeNodeConfig>();
+        cmp_default::<CompactorConfig>();
     }
 }
