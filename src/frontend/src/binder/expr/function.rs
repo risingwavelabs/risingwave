@@ -301,7 +301,7 @@ impl Binder {
                 ),
                 (
                     "boolne",
-                    rewrite(ExprType::Equal, Binder::rewrite_two_bool_inputs),
+                    rewrite(ExprType::NotEqual, Binder::rewrite_two_bool_inputs),
                 ),
                 ("coalesce", raw_call(ExprType::Coalesce)),
                 (
