@@ -535,10 +535,10 @@ impl Binder {
                 let mut candidates = candidates.peekable();
 
                 let err_msg = if candidates.peek().is_none() {
-                    format!("unsupported function: {}", function_name)
+                    format!("unsupported function: \"{}\"", function_name)
                 } else {
                     format!(
-                        "unsupported function {}, do you mean {}?",
+                        "unsupported function \"{}\", do you mean \"{}\"?",
                         function_name,
                         candidates.join(" or ")
                     )
