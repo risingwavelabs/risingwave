@@ -8632,7 +8632,6 @@ dependencies = [
  "log",
  "madsim-tokio",
  "memchr",
- "minimal-lexical",
  "miniz_oxide",
  "multimap",
  "nom 7.1.3",
