@@ -253,7 +253,10 @@ fn build_fragment(
             current_fragment.is_singleton = node.is_singleton;
         }
 
-        NodeBody::Now(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32,
+        NodeBody::Now(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
+            current_fragment.is_singleton = true;
+        }
 
         _ => {}
     };
