@@ -253,6 +253,8 @@ pub struct FrontendConfig {
     #[serde(default = "default::frontend::listen_addr")]
     pub listen_addr: String,
 
+    /// The address of the frontend node's meta client.
+    /// Default to listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
@@ -307,9 +309,17 @@ pub struct ComputeNodeConfig {
     #[serde(default = "default::compute_node::listen_addr")]
     pub listen_addr: String,
 
+    /// The address of the compute node's meta client.
+    /// Default to listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
+    /// One of:
+    /// 1. `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
+    /// 2. `in-memory`
+    /// 3. `sled://{path}`
     #[clap(long, default_value_t = default::compute_node::state_store())]
     #[serde(default = "default::compute_node::state_store")]
     pub state_store: String,
@@ -391,9 +401,14 @@ pub struct CompactorConfig {
     #[serde(default = "default::compactor::listen_addr")]
     pub listen_addr: String,
 
+    /// The address of the compactor node's meta client.
+    /// Default to listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
+    /// Of the form `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
     #[clap(long, default_value_t = default::compactor::state_store())]
     #[serde(default = "default::compactor::state_store")]
     pub state_store: String,
