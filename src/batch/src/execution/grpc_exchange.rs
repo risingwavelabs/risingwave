@@ -81,7 +81,7 @@ impl ExchangeSource for GrpcExchangeSource {
                 None => {
                     println!("return early!");
                     return Ok(None);
-                },
+                }
                 Some(r) => r,
             };
             println!("Should return error here: {}", res.is_err());

@@ -313,7 +313,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>, local_execution_failure_sender: Option<tokio::sync::mpsc::Sender<GetDataResponseResult>>) -> Result<()> {
+    pub async fn async_execute(
+        self: Arc<Self>,
+        local_execution_failure_sender: Option<tokio::sync::mpsc::Sender<GetDataResponseResult>>,
+    ) -> Result<()> {
         let mut local_execution_failure_sender = local_execution_failure_sender;
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -374,7 +377,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     *failure.lock() = Some(e);
                     sender.send(None).await.unwrap();
                     if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str), local_execution_failure_sender.as_mut())
+                        .change_state_notify(
+                            TaskStatus::Failed,
+                            &mut state_tx,
+                            Some(err_str),
+                            local_execution_failure_sender.as_mut(),
+                        )
                         .await
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
@@ -446,13 +454,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         task_status: TaskStatus,
         state_tx: &mut tokio::sync::mpsc::Sender<TaskInfoResponseResult>,
         err_str: Option<String>,
-        local_exec_failur_tx: Option<&mut tokio::sync::mpsc::Sender<GetDataResponseResult>>
+        local_exec_failur_tx: Option<&mut tokio::sync::mpsc::Sender<GetDataResponseResult>>,
     ) -> BatchResult<()> {
         self.change_state(task_status);
         if let Some(err_str) = err_str {
             // This is a hack for local execution mode failure propagate
             if let Some(l) = local_exec_failur_tx {
-
                 l.send(Err(Status::internal(err_str.clone())))
                     .await
                     .map_err(|_| SenderError)?;
