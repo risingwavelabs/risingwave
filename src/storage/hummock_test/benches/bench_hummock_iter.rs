@@ -18,7 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
-use risingwave_hummock_test::get_test_notification_client;
+use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_hummock_test::test_utils::TestIngestBatch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -64,7 +64,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             hummock_options,
             sstable_store,
             meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref, worker_node),
+            get_notification_client_for_test(env, hummock_manager_ref, worker_node),
         )
         .await
         .unwrap()

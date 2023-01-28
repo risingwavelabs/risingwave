@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::NowNode;
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use super::{PlanBase, StreamNode};
+use super::{LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::OptimizerContextRef;
@@ -35,7 +35,7 @@ pub struct StreamNow {
 }
 
 impl StreamNow {
-    pub fn new(ctx: OptimizerContextRef) -> Self {
+    pub fn new(_logical: LogicalNow, ctx: OptimizerContextRef) -> Self {
         let schema = Schema::new(vec![Field {
             data_type: DataType::Timestamptz,
             name: String::from("now"),

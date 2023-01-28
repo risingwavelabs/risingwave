@@ -13,11 +13,9 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
-#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
-#![feature(fn_traits)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
 #![feature(trusted_len)]
@@ -61,3 +59,5 @@ pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;
 }
+
+pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");

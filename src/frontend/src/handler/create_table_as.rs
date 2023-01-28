@@ -119,9 +119,6 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.env().catalog_writer();
-
-    // TODO(Yuanxin): `source` will contain either an external source or nothing. Rewrite
-    // `create_table` accordingly.
     catalog_writer.create_table(source, table, graph).await?;
 
     // Generate insert
@@ -129,6 +126,7 @@ pub async fn handle_create_as(
         table_name,
         columns: vec![],
         source: query,
+        returning: vec![],
     };
 
     handle_query(handler_args, insert, false).await

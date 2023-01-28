@@ -531,6 +531,10 @@ pub mod verify {
                 }
             }
         }
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.actual.validate_read_epoch(epoch)
+        }
     }
 
     impl<A, E> Deref for VerifyStateStore<A, E> {
@@ -962,6 +966,8 @@ pub mod boxed_state_store {
         async fn clear_shared_buffer(&self) -> StorageResult<()>;
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -984,6 +990,10 @@ pub mod boxed_state_store {
 
         async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
             Box::new(self.new_local(option).await)
+        }
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.validate_read_epoch(epoch)
         }
     }
 
@@ -1078,6 +1088,10 @@ pub mod boxed_state_store {
 
         fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
             self.deref().new_local(option)
+        }
+
+        fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+            self.deref().validate_read_epoch(epoch)
         }
     }
 }

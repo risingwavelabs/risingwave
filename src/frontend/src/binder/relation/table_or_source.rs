@@ -22,6 +22,7 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 
+use super::BoundShare;
 use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
@@ -231,8 +232,17 @@ impl Binder {
             ))
         })?;
         let columns = view_catalog.columns.clone();
+        let share_id = match self.shared_views.get(&view_catalog.id) {
+            Some(share_id) => *share_id,
+            None => {
+                let share_id = self.next_share_id();
+                self.shared_views.insert(view_catalog.id, share_id);
+                share_id
+            }
+        };
+        let input = Relation::Subquery(Box::new(BoundSubquery { query }));
         Ok((
-            Relation::Subquery(Box::new(BoundSubquery { query })),
+            Relation::Share(Box::new(BoundShare { share_id, input })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }
@@ -301,15 +311,7 @@ impl Binder {
                 .get_table_by_name(db_name, schema_path, table_name)?;
 
         match table.table_type() {
-            TableType::Table => {
-                // TODO(Yuanxin): Remove this after supporting `CREATE TABLE WITH connector`.
-                if table.associated_source_id().is_some() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "cannot change materialized source \"{table_name}\""
-                    ))
-                    .into());
-                }
-            }
+            TableType::Table => {}
             TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{table_name}\""

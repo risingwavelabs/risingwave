@@ -116,7 +116,7 @@ impl LogicalScan {
         Self::new(
             table_name,
             is_sys_table,
-            (0..table_desc.columns.len()).into_iter().collect(),
+            (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
             ctx,
@@ -580,7 +580,6 @@ impl ToBatch for LogicalScan {
                 .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
                 .collect(),
         };
-        tracing::info!("NEW PREDICATE: {:?}", new_predicate);
         let new = self.clone_with_predicate(new_predicate);
 
         if !new.indexes().is_empty() {

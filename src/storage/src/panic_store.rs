@@ -170,6 +170,10 @@ impl StateStore for PanicStateStore {
             panic!("should not call new local from the panic state store");
         }
     }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        panic!("should not call validate_read_epoch from the panic state store");
+    }
 }
 
 pub struct PanicStateStoreStream {}

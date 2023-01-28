@@ -31,7 +31,7 @@ use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 
-use crate::get_test_notification_client;
+use crate::get_notification_client_for_test;
 use crate::test_utils::{
     with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch,
 };
@@ -567,7 +567,7 @@ async fn test_reload_storage() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        get_test_notification_client(
+        get_notification_client_for_test(
             env.clone(),
             hummock_manager_ref.clone(),
             worker_node.clone(),
@@ -620,7 +620,7 @@ async fn test_reload_storage() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref, worker_node),
     )
     .await
     .unwrap();

@@ -36,7 +36,7 @@ use crate::array::{
     StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
-use crate::hash::vnode::VirtualNode;
+use crate::hash::VirtualNode;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,

@@ -38,9 +38,8 @@ use crate::session_config::VISIBILITY_MODE;
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum VisibilityMode {
     #[default]
-    Checkpoint,
-
     All,
+    Checkpoint,
 }
 
 impl ConfigEntry for VisibilityMode {

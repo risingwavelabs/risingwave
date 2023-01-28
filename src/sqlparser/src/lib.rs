@@ -33,7 +33,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![feature(lint_reasons)]
 #![feature(let_chains)]
-#![expect(clippy::derive_partial_eq_without_eq)]
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
 

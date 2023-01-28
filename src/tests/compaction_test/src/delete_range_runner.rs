@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_test::get_test_notification_client;
+use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -192,7 +192,7 @@ async fn compaction_test(
         sstable_store.clone(),
         BackupReader::unused(),
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),

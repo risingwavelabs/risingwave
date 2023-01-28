@@ -723,7 +723,6 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
-    MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
 
@@ -753,9 +752,6 @@ impl fmt::Display for ShowObject {
                 write!(f, "MATERIALIZED VIEWS{}", fmt_schema(schema))
             }
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
-            ShowObject::MaterializedSource { schema } => {
-                write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
-            }
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
@@ -881,6 +877,8 @@ pub enum Statement {
         columns: Vec<Ident>,
         /// A SQL query that specifies what to insert
         source: Box<Query>,
+        /// Define output of this insert statement
+        returning: Vec<SelectItem>,
     },
     Copy {
         /// TABLE
@@ -898,6 +896,8 @@ pub enum Statement {
         assignments: Vec<Assignment>,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// DELETE
     Delete {
@@ -905,6 +905,8 @@ pub enum Statement {
         table_name: ObjectName,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// CREATE VIEW
     CreateView {
@@ -944,10 +946,7 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource {
-        is_materialized: bool,
-        stmt: CreateSourceStatement,
-    },
+    CreateSource { stmt: CreateSourceStatement },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
     /// CREATE FUNCTION
@@ -1137,14 +1136,18 @@ impl fmt::Display for Statement {
                 table_name,
                 columns,
                 source,
+                returning,
             } => {
                 write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
-                write!(f, "{}", source)
+                write!(f, "{}", source)?;
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
+                Ok(())
             }
-
             Statement::Copy {
                 table_name,
                 columns,
@@ -1174,6 +1177,7 @@ impl fmt::Display for Statement {
                 table_name,
                 assignments,
                 selection,
+                returning,
             } => {
                 write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
@@ -1182,15 +1186,22 @@ impl fmt::Display for Statement {
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
                 }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
                 Ok(())
             }
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => {
                 write!(f, "DELETE FROM {}", table_name)?;
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
+                }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
                 Ok(())
             }
@@ -1326,17 +1337,11 @@ impl fmt::Display for Statement {
                 }
             ),
             Statement::CreateSource {
-                is_materialized,
                 stmt,
             } => write!(
                 f,
-                "CREATE {materialized}SOURCE {}",
+                "CREATE SOURCE {}",
                 stmt,
-                materialized = if *is_materialized {
-                    "MATERIALIZED "
-                } else {
-                    ""
-                }
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
@@ -1849,7 +1854,6 @@ pub enum ObjectType {
     Index,
     Schema,
     Source,
-    MaterializedSource,
     Sink,
     Database,
     User,
@@ -1864,7 +1868,6 @@ impl fmt::Display for ObjectType {
             ObjectType::Index => "INDEX",
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
-            ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
@@ -1880,8 +1883,6 @@ impl ParseTo for ObjectType {
             ObjectType::View
         } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             ObjectType::MaterializedView
-        } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
-            ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
         } else if parser.parse_keyword(Keyword::SINK) {
@@ -1896,7 +1897,7 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };

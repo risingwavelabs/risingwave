@@ -55,8 +55,8 @@ pub(crate) mod tests {
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::*;
 
-    use crate::get_test_notification_client;
-    use crate::test_utils::{register_test_tables, TestIngestBatch};
+    use crate::get_notification_client_for_test;
+    use crate::test_utils::{register_tables_with_id_for_test, TestIngestBatch};
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -84,7 +84,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        register_test_tables(
+        register_tables_with_id_for_test(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
             &[table_id.table_id()],
@@ -209,7 +209,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             Default::default(),
         )
@@ -225,7 +225,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 10,
-            (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
+            (1..129).map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
 
@@ -334,7 +334,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             Default::default(),
         )
@@ -354,7 +354,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 20,
-            (1..129).into_iter().collect_vec(),
+            (1..129).collect_vec(),
         )
         .await;
 
@@ -537,7 +537,7 @@ pub(crate) mod tests {
         let existing_table_id: u32 = 1;
         let storage_existing_table_id = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
@@ -628,7 +628,7 @@ pub(crate) mod tests {
 
         let global_storage = get_global_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         )
         .await;
 
@@ -822,7 +822,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(2),
         )
@@ -1009,7 +1009,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
@@ -1187,7 +1187,7 @@ pub(crate) mod tests {
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )

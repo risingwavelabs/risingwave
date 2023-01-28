@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::Binder;
@@ -46,9 +47,17 @@ pub struct BoundInsert {
 
     pub source: BoundQuery,
 
-    /// Used as part of an extra `Project` when the column types of `source` query does not match
-    /// `table_source`. This does not include a simple `VALUE`. See comments in code for details.
+    /// Used as part of an extra `Project` when the column types of the query does not match
+    /// those of the table. This does not include a simple `VALUE`. See comments in code for
+    /// details.
     pub cast_exprs: Vec<ExprImpl>,
+
+    // used for the 'RETURNING" keyword to indicate the returning items and schema
+    // if the list is empty and the schema is None, the output schema will be a INT64 as the
+    // affected row cnt
+    pub returning_list: Vec<ExprImpl>,
+
+    pub returning_schema: Option<Schema>,
 }
 
 impl Binder {
@@ -57,8 +66,10 @@ impl Binder {
         name: ObjectName,
         columns: Vec<Ident>,
         source: Query,
+        returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
         let table_id = table_catalog.id;
@@ -155,6 +166,8 @@ impl Binder {
             ))));
         }
 
+        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
@@ -187,6 +200,12 @@ impl Binder {
             column_indices: target_table_col_indices,
             source,
             cast_exprs,
+            returning_list,
+            returning_schema: if returning {
+                Some(Schema { fields })
+            } else {
+                None
+            },
         };
 
         Ok(insert)
