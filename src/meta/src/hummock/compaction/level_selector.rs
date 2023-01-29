@@ -23,12 +23,13 @@ use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::CompactionConfig;
 
+use super::create_compaction_task;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionInput, CompactionPicker, CompactionTask,
-    LevelCompactionPicker, LocalPickerStatistic, LocalSelectorStatistic, TierCompactionPicker,
+    create_overlap_strategy, CompactionPicker, CompactionTask, LevelCompactionPicker,
+    LocalPickerStatistic, LocalSelectorStatistic, TierCompactionPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
 use crate::rpc::metrics::MetaMetrics;
@@ -252,31 +253,6 @@ impl LevelSelectorCore {
         ctx.score_levels.sort_by(|a, b| b.0.cmp(&a.0));
         ctx
     }
-
-    pub fn create_compaction_task(
-        &self,
-        input: CompactionInput,
-        base_level: usize,
-    ) -> CompactionTask {
-        let target_file_size = if input.target_level == 0 {
-            self.config.target_file_size_base
-        } else {
-            assert!(input.target_level >= base_level);
-            let step = (input.target_level - base_level) / 2;
-            self.config.target_file_size_base << step
-        };
-        let compression_algorithm = if input.target_level == 0 {
-            self.config.compression_algorithm[0].clone()
-        } else {
-            let idx = input.target_level - base_level + 1;
-            self.config.compression_algorithm[idx].clone()
-        };
-        CompactionTask {
-            input,
-            compression_algorithm,
-            target_file_size,
-        }
-    }
 }
 
 impl LevelSelector for DynamicLevelSelector {
@@ -306,7 +282,11 @@ impl LevelSelector for DynamicLevelSelector {
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
-                return Some(self.inner.create_compaction_task(ret, ctx.base_level));
+                return Some(create_compaction_task(
+                    self.inner.get_config(),
+                    ret,
+                    ctx.base_level,
+                ));
             }
             selector_stats
                 .skip_picker

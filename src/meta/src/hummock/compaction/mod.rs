@@ -85,6 +85,16 @@ impl CompactionInput {
             );
         }
     }
+
+    pub fn add_preemptive_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
+        for level in &self.input_levels {
+            level_handlers[level.level_idx as usize].add_preemptive_task(
+                task_id,
+                self.target_level,
+                &level.table_infos,
+            );
+        }
+    }
 }
 
 pub struct CompactionTask {
@@ -268,6 +278,10 @@ pub struct ManualCompactionOption {
     pub internal_table_id: HashSet<u32>,
     /// Input level.
     pub level: usize,
+
+    /// space reclaim compaction
+    pub is_space_reclaim_compaction: bool,
+    pub max_space_reclaim_file_count: usize,
 }
 
 impl Default for ManualCompactionOption {
@@ -281,6 +295,8 @@ impl Default for ManualCompactionOption {
             },
             internal_table_id: HashSet::default(),
             level: 1,
+            is_space_reclaim_compaction: false,
+            max_space_reclaim_file_count: 5,
         }
     }
 }
@@ -341,4 +357,29 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
+}
+
+pub fn create_compaction_task(
+    storage_config: &CompactionConfig,
+    input: CompactionInput,
+    base_level: usize,
+) -> CompactionTask {
+    let target_file_size = if input.target_level == 0 {
+        storage_config.target_file_size_base
+    } else {
+        assert!(input.target_level >= base_level);
+        let step = (input.target_level - base_level) / 2;
+        storage_config.target_file_size_base << step
+    };
+    let compression_algorithm = if input.target_level == 0 {
+        storage_config.compression_algorithm[0].clone()
+    } else {
+        let idx = input.target_level - base_level + 1;
+        storage_config.compression_algorithm[idx].clone()
+    };
+    CompactionTask {
+        input,
+        compression_algorithm,
+        target_file_size,
+    }
 }
