@@ -497,6 +497,20 @@ export interface HashJoinNode {
     | undefined;
   /** The output indices of current node */
   outputIndices: number[];
+  /**
+   * Left deduped input pk indices. The pk of the left_table and
+   * left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
+  leftDedupedInputPkIndices: number[];
+  /**
+   * Right deduped input pk indices. The pk of the right_table and
+   * right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
+  rightDedupedInputPkIndices: number[];
   nullSafe: boolean[];
   /**
    * Whether to optimize for append only stream.
@@ -848,7 +862,11 @@ export interface StreamFragmentGraph {
   edges: StreamFragmentGraph_StreamFragmentEdge[];
   dependentTableIds: number[];
   tableIdsCnt: number;
-  env: StreamEnvironment | undefined;
+  env:
+    | StreamEnvironment
+    | undefined;
+  /** If none, default parallelism will be applied. */
+  parallelism: StreamFragmentGraph_Parallelism | undefined;
 }
 
 export interface StreamFragmentGraph_StreamFragment {
@@ -883,6 +901,10 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   linkId: number;
   upstreamId: number;
   downstreamId: number;
+}
+
+export interface StreamFragmentGraph_Parallelism {
+  parallelism: number;
 }
 
 export interface StreamFragmentGraph_FragmentsEntry {
@@ -2353,6 +2375,8 @@ function createBaseHashJoinNode(): HashJoinNode {
     leftDegreeTable: undefined,
     rightDegreeTable: undefined,
     outputIndices: [],
+    leftDedupedInputPkIndices: [],
+    rightDedupedInputPkIndices: [],
     nullSafe: [],
     isAppendOnly: false,
   };
@@ -2370,6 +2394,12 @@ export const HashJoinNode = {
       leftDegreeTable: isSet(object.leftDegreeTable) ? Table.fromJSON(object.leftDegreeTable) : undefined,
       rightDegreeTable: isSet(object.rightDegreeTable) ? Table.fromJSON(object.rightDegreeTable) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      leftDedupedInputPkIndices: Array.isArray(object?.leftDedupedInputPkIndices)
+        ? object.leftDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
+      rightDedupedInputPkIndices: Array.isArray(object?.rightDedupedInputPkIndices)
+        ? object.rightDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
       nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
     };
@@ -2403,6 +2433,16 @@ export const HashJoinNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.leftDedupedInputPkIndices) {
+      obj.leftDedupedInputPkIndices = message.leftDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.leftDedupedInputPkIndices = [];
+    }
+    if (message.rightDedupedInputPkIndices) {
+      obj.rightDedupedInputPkIndices = message.rightDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.rightDedupedInputPkIndices = [];
+    }
     if (message.nullSafe) {
       obj.nullSafe = message.nullSafe.map((e) => e);
     } else {
@@ -2433,6 +2473,8 @@ export const HashJoinNode = {
       ? Table.fromPartial(object.rightDegreeTable)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.leftDedupedInputPkIndices = object.leftDedupedInputPkIndices?.map((e) => e) || [];
+    message.rightDedupedInputPkIndices = object.rightDedupedInputPkIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
     message.isAppendOnly = object.isAppendOnly ?? false;
     return message;
@@ -3774,7 +3816,7 @@ export const StreamEnvironment = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined };
+  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3797,6 +3839,7 @@ export const StreamFragmentGraph = {
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
+      parallelism: isSet(object.parallelism) ? StreamFragmentGraph_Parallelism.fromJSON(object.parallelism) : undefined,
     };
   },
 
@@ -3820,6 +3863,8 @@ export const StreamFragmentGraph = {
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
+    message.parallelism !== undefined &&
+      (obj.parallelism = message.parallelism ? StreamFragmentGraph_Parallelism.toJSON(message.parallelism) : undefined);
     return obj;
   },
 
@@ -3838,6 +3883,9 @@ export const StreamFragmentGraph = {
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.env = (object.env !== undefined && object.env !== null)
       ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
+    message.parallelism = (object.parallelism !== undefined && object.parallelism !== null)
+      ? StreamFragmentGraph_Parallelism.fromPartial(object.parallelism)
       : undefined;
     return message;
   },
@@ -3936,6 +3984,30 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;
+    return message;
+  },
+};
+
+function createBaseStreamFragmentGraph_Parallelism(): StreamFragmentGraph_Parallelism {
+  return { parallelism: 0 };
+}
+
+export const StreamFragmentGraph_Parallelism = {
+  fromJSON(object: any): StreamFragmentGraph_Parallelism {
+    return { parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0 };
+  },
+
+  toJSON(message: StreamFragmentGraph_Parallelism): unknown {
+    const obj: any = {};
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamFragmentGraph_Parallelism>, I>>(
+    object: I,
+  ): StreamFragmentGraph_Parallelism {
+    const message = createBaseStreamFragmentGraph_Parallelism();
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };

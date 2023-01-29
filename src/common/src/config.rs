@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -175,11 +175,6 @@ pub struct StreamingConfig {
     /// There will be a checkpoint for every n barriers
     #[serde(default = "default::streaming::checkpoint_frequency")]
     pub checkpoint_frequency: usize,
-
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    #[serde(default)]
-    pub minimal_scheduling: bool,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.

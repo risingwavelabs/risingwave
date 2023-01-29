@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,12 +42,14 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
+    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
@@ -94,6 +96,14 @@ impl StreamingMetrics {
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
             &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+
+        let source_row_per_barrier = register_int_counter_vec_with_registry!(
+            "stream_source_rows_per_barrier_counts",
+            "Total number of rows that have been output from source per barrier",
+            &["actor_id", "executor_id"],
             registry
         )
         .unwrap();
@@ -266,6 +276,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_join_insert_cache_miss_count",
+            "Join executor cache miss when insert operation",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
         let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
             "stream_join_actor_input_waiting_duration_ns",
             "Total waiting duration (ns) of input buffer of join actor",
@@ -432,10 +450,12 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
+            source_row_per_barrier,
             exchange_recv_size,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
+            join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,

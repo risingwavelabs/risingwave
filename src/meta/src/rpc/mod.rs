@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod elections;
+mod election_client;
 mod follower_svc;
 mod intercept;
 mod leader_svc;
@@ -26,7 +26,3 @@ pub use service::heartbeat_service::HeartbeatServiceImpl;
 pub use service::hummock_service::HummockServiceImpl;
 pub use service::notification_service::NotificationServiceImpl;
 pub use service::stream_service::StreamServiceImpl;
-
-pub const META_CF_NAME: &str = "cf/meta";
-pub const META_LEADER_KEY: &str = "leader";
-pub const META_LEASE_KEY: &str = "lease";

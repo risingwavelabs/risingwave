@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSende
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
-#[derive(Clone)]
 pub struct BroadcastSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     broadcast_info: BroadcastInfo,

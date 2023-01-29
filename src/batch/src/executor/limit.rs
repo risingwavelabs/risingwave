@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -166,7 +166,6 @@ mod tests {
     ) {
         let col = create_column(
             (0..row_num)
-                .into_iter()
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
@@ -281,7 +280,6 @@ mod tests {
         assert_eq!(visible.len(), row_num);
         let col0 = create_column(
             (0..row_num)
-                .into_iter()
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),

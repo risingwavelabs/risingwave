@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -342,12 +342,18 @@ where
                 }
             }
 
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
                     rows_cnt,
                 }))?;
         } else {
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
@@ -370,6 +376,7 @@ where
         tracing::trace!("(extended query)parse query: {}", sql);
 
         // Flag indicate whether statement is a query statement.
+        // TODO: regard DML with RETURNING as a query
         let is_query_sql = {
             let lower_sql = sql.to_ascii_lowercase();
             lower_sql.starts_with("select")

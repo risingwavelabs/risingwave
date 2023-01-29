@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper};
-use risingwave_source::parser::JsonParser;
-use risingwave_source::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+use risingwave_connector::parser::{JsonParser, SourceParser, SourceStreamChunkBuilder};
+use risingwave_connector::source::SourceColumnDesc;
 
 const NUM_RECORDS: usize = 1 << 18; // ~ 250,000
 

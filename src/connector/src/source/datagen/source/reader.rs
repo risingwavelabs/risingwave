@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,7 +75,7 @@ impl SplitReader for DatagenSplitReader {
 
         // parse field connector option to build FieldGeneratorImpl
         // for example:
-        // create materialized source s1  (
+        // create table t1  (
         //     f_sequence INT,
         //     f_random INT,
         //    ) with (

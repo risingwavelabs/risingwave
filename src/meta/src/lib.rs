@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,8 +66,10 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
+    /// The endpoint for this meta node, which also serves as its unique identifier in cluster
+    /// membership and leader election.
     #[clap(long)]
-    host: Option<String>,
+    meta_endpoint: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -130,23 +132,30 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
-        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let backend = match opts.backend {
-            Backend::Etcd => MetaStoreBackend::Etcd {
-                endpoints: opts
-                    .etcd_endpoints
-                    .split(',')
-                    .map(|x| x.to_string())
-                    .collect(),
-                credentials: match opts.etcd_auth {
-                    true => Some((opts.etcd_username, opts.etcd_password)),
-                    false => None,
+        let (meta_endpoint, backend) = match opts.backend {
+            Backend::Etcd => (
+                opts.meta_endpoint
+                    .expect("meta_endpoint must be specified when using etcd"),
+                MetaStoreBackend::Etcd {
+                    endpoints: opts
+                        .etcd_endpoints
+                        .split(',')
+                        .map(|x| x.to_string())
+                        .collect(),
+                    credentials: match opts.etcd_auth {
+                        true => Some((opts.etcd_username, opts.etcd_password)),
+                        false => None,
+                    },
                 },
-            },
-            Backend::Mem => MetaStoreBackend::Mem,
+            ),
+            Backend::Mem => (
+                opts.meta_endpoint
+                    .unwrap_or_else(|| opts.listen_addr.clone()),
+                MetaStoreBackend::Mem,
+            ),
         };
 
         let max_heartbeat_interval =
@@ -158,13 +167,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            addr: meta_addr,
+            meta_endpoint,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, _shutdown_send) = rpc_serve(
+        let (join_handle, leader_lost_handle, _shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -173,7 +182,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_recovery: !config.meta.disable_recovery,
                 barrier_interval,
                 in_flight_barrier_nums,
-                minimal_scheduling: config.streaming.minimal_scheduling,
                 max_idle_ms,
                 checkpoint_frequency,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
@@ -193,6 +201,14 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         )
         .await
         .unwrap();
-        join_handle.await.unwrap();
+
+        if let Some(leader_lost_handle) = leader_lost_handle {
+            tokio::select! {
+                _ = join_handle => {},
+                _ = leader_lost_handle => {},
+            }
+        } else {
+            join_handle.await.unwrap();
+        }
     })
 }

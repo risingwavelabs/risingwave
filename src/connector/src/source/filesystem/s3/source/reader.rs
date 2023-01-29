@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,34 +13,32 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_smithy_http::byte_stream::ByteStream;
-use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use io::StreamReader;
+use risingwave_common::error::RwError;
 use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
-use crate::source::base::MAX_CHUNK_SIZE;
-use crate::source::filesystem::file_common::{FsSplit, FsSplitReader};
+use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::source::base::{SplitMetaData, SplitReaderV2, MAX_CHUNK_SIZE};
+use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{BoxFsSourceStream, FsSourceMessage};
+use crate::source::monitor::SourceMetrics;
+use crate::source::{
+    BoxSourceWithStateStream, SourceInfo, SourceMessage, SourceMeta, SplitImpl,
+    StreamChunkWithState,
+};
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
-
-#[derive(Debug, Clone)]
-struct S3InnerMessage {
-    obj_name: String,
-    payload: Bytes,
-    offset: usize,
-    size: usize,
-}
 
 #[derive(Debug)]
 pub struct S3FileReader {
@@ -48,42 +46,69 @@ pub struct S3FileReader {
     bucket_name: String,
     s3_client: s3_client::Client,
     splits: Vec<FsSplit>,
+    parser_config: ParserConfig,
+    // for stats
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = S3InnerMessage, error = anyhow::Error)]
-    async fn stream_read(
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn stream_read_object(
         client_for_s3: s3_client::Client,
         bucket_name: String,
-        splits: Vec<FsSplit>,
+        split: FsSplit,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
     ) {
-        for split in splits {
-            let object_name = split.name;
-            let byte_stream =
-                S3FileReader::get_object(&client_for_s3, &bucket_name, &object_name, split.offset)
-                    .await?;
-            let stream_reader = StreamReader::new(
-                byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-            );
+        let actor_id = source_info.actor_id.to_string();
+        let source_id = source_info.source_id.to_string();
+        let split_id = split.id();
 
-            let reader = Box::pin(BufReader::new(stream_reader));
+        let object_name = split.name.clone();
+        let byte_stream =
+            S3FileReader::get_object(&client_for_s3, &bucket_name, &object_name, split.offset)
+                .await?;
+        let stream_reader = StreamReader::new(
+            byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+        );
 
-            let stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
+        let reader = Box::pin(BufReader::new(stream_reader));
 
-            let mut offset: usize = split.offset;
-            #[for_await]
-            for read in stream {
-                let bytes = read?;
-                let len = bytes.len();
-                let msg = S3InnerMessage {
-                    obj_name: object_name.clone(),
-                    payload: bytes,
-                    offset,
-                    size: split.size,
-                };
-                offset += len;
-                yield msg;
+        let stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
+
+        let mut offset: usize = split.offset;
+        let mut batch_size: usize = 0;
+        let mut batch = Vec::new();
+        #[for_await]
+        for read in stream {
+            let bytes = read?;
+            let len = bytes.len();
+            let msg = SourceMessage {
+                payload: Some(bytes),
+                offset: offset.to_string(),
+                split_id: split.id(),
+                meta: SourceMeta::Empty,
+            };
+            offset += len;
+            batch_size += len;
+            batch.push(msg);
+            if batch.len() >= MAX_CHUNK_SIZE {
+                metrics
+                    .partition_input_bytes
+                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .inc_by(batch_size as u64);
+                batch_size = 0;
+                yield batch.clone();
+                batch.clear();
             }
+        }
+        if !batch.is_empty() {
+            metrics
+                .partition_input_bytes
+                .with_label_values(&[&actor_id, &source_id, &split_id])
+                .inc_by(batch_size as u64);
+            yield batch;
         }
     }
 
@@ -119,61 +144,88 @@ impl S3FileReader {
 }
 
 #[async_trait]
-impl FsSplitReader for S3FileReader {
+impl SplitReaderV2 for S3FileReader {
     type Properties = S3Properties;
 
-    async fn new(props: S3Properties, splits: Vec<FsSplit>) -> Result<Self> {
+    async fn new(
+        props: S3Properties,
+        state: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
+    ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
         let sdk_config = config.load_config(None).await;
 
         let bucket_name = props.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
+        let splits = state
+            .into_iter()
+            .map(|split| split.into_fs().expect("not a fs split"))
+            .collect();
         let s3_file_reader = S3FileReader {
             split_offset: HashMap::new(),
             bucket_name,
             s3_client,
             splits,
+            parser_config,
+            metrics,
+            source_info,
         };
 
         Ok(s3_file_reader)
     }
 
-    fn into_stream(self) -> BoxFsSourceStream {
+    fn into_stream(self) -> BoxSourceWithStateStream {
         self.into_stream()
     }
 }
 
 impl S3FileReader {
-    #[try_stream(boxed, ok = Vec<FsSourceMessage>, error = anyhow::Error)]
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     pub async fn into_stream(self) {
-        let reader_stream = Self::stream_read(self.s3_client, self.bucket_name, self.splits);
-        #[for_await]
-        for msgs in reader_stream.ready_chunks(MAX_CHUNK_SIZE) {
-            let mut res = Vec::with_capacity(msgs.len());
-            for msg in msgs {
+        for split in self.splits {
+            let actor_id = self.source_info.actor_id.to_string();
+            let source_id = self.source_info.source_id.to_string();
+            let split_id = split.id();
+
+            let data_stream = Self::stream_read_object(
+                self.s3_client.clone(),
+                self.bucket_name.clone(),
+                split,
+                self.metrics.clone(),
+                self.source_info,
+            );
+
+            let parser = ByteStreamSourceParserImpl::create(self.parser_config.clone()).await?;
+            let msg_stream = parser.into_stream(Box::pin(data_stream));
+            #[for_await]
+            for msg in msg_stream {
                 let msg = msg?;
-                res.push(FsSourceMessage {
-                    payload: Some(msg.payload),
-                    offset: msg.offset,
-                    split_size: msg.size,
-                    split_id: msg.obj_name.into(),
-                })
+                self.metrics
+                    .partition_input_count
+                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .inc_by(msg.chunk.cardinality() as u64);
+                yield msg;
             }
-            yield res
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use futures_async_stream::for_await;
+    use risingwave_common::types::DataType;
+
     use super::*;
+    use crate::parser::{CommonParserConfig, CsvParserConfig, SpecificParserConfig};
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
-    use crate::source::SplitEnumerator;
+    use crate::source::{SourceColumnDesc, SplitEnumerator};
 
     #[tokio::test]
     #[ignore]
-    async fn test_read_obj() {
+    async fn test_s3_split_reader() {
         let props = S3Properties {
             region_name: "ap-southeast-1".to_owned(),
             bucket_name: "mingchao-s3-source".to_owned(),
@@ -184,14 +236,42 @@ mod tests {
         let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         println!("splits {:?}", splits);
-        let reader = S3FileReader::new(props, splits).await.unwrap();
 
-        let mut chunk_stream = reader.into_stream();
-        while let Some(msgs) = chunk_stream.next().await {
-            for msg in msgs.unwrap() {
-                println!("obj_name {}, offset {}", msg.split_id, msg.offset);
-            }
+        let splits = splits.into_iter().map(SplitImpl::S3).collect();
+
+        let descs = vec![
+            SourceColumnDesc::simple("id", DataType::Int64, 1.into()),
+            SourceColumnDesc::simple("name", DataType::Varchar, 2.into()),
+            SourceColumnDesc::simple("age", DataType::Int32, 3.into()),
+        ];
+
+        let csv_config = CsvParserConfig {
+            delimiter: b',',
+            has_header: true,
+        };
+
+        let config = ParserConfig {
+            common: CommonParserConfig {
+                props: HashMap::new(),
+                rw_columns: descs,
+            },
+            specific: SpecificParserConfig::Csv(csv_config),
+        };
+
+        let reader = S3FileReader::new(
+            props,
+            splits,
+            config,
+            Arc::new(SourceMetrics::default()),
+            SourceInfo::default(),
+        )
+        .await
+        .unwrap();
+
+        let msg_stream = reader.into_stream();
+        #[for_await]
+        for msg in msg_stream {
+            println!("msg {:?}", msg);
         }
-        // let reader = S3FileReader::new(props, None, None).await.unwrap();
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,6 +46,14 @@ pub struct Agg<PlanRef> {
     pub input: PlanRef,
 }
 
+impl<PlanRef> Agg<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.agg_calls.iter_mut().for_each(|call| {
+            call.filter = call.filter.clone().rewrite_expr(r);
+        });
+    }
+}
+
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     fn schema(&self) -> Schema {
         let fields = self
@@ -66,7 +74,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.len()).into_iter().collect_vec())
+        Some((0..self.group_key.len()).collect_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

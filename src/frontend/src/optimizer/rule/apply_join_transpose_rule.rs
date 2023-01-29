@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,7 @@ use crate::expr::{
     CollectInputRef, CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType,
     ExprVisitor, FunctionCall, InputRef,
 };
-use crate::optimizer::plan_node::{
-    LogicalApply, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNodeBinary,
-};
+use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
@@ -157,36 +155,38 @@ impl Rule for ApplyJoinTransposeRule {
             JoinType::Unspecified => unreachable!(),
         };
 
-        if push_left && push_right {
-            Some(self.push_apply_both_side(
+        let out = if push_left && push_right {
+            self.push_apply_both_side(
                 apply_left,
                 join,
                 apply_on,
                 apply_join_type,
                 correlated_id,
                 correlated_indices,
-            ))
+            )
         } else if push_left {
-            Some(self.push_apply_left_side(
+            self.push_apply_left_side(
                 apply_left,
                 join,
                 apply_on,
                 apply_join_type,
                 correlated_id,
                 correlated_indices,
-            ))
+            )
         } else if push_right {
-            Some(self.push_apply_right_side(
+            self.push_apply_right_side(
                 apply_left,
                 join,
                 apply_on,
                 apply_join_type,
                 correlated_id,
                 correlated_indices,
-            ))
+            )
         } else {
             unreachable!();
-        }
+        };
+        assert_eq!(out.schema(), plan.schema());
+        Some(out)
     }
 }
 
@@ -365,19 +365,41 @@ impl ApplyJoinTransposeRule {
             correlated_indices,
             false,
         );
+        let output_indices: Vec<_> = {
+            let (apply_left_len, join_right_len) = match apply_join_type {
+                JoinType::LeftSemi | JoinType::LeftAnti => (apply_left_len, 0),
+                JoinType::RightSemi | JoinType::RightAnti => (0, join.right().schema().len()),
+                _ => (apply_left_len, join.right().schema().len()),
+            };
+
+            let left_iter = join_left_len..join_left_len + apply_left_len;
+            let right_iter = (0..join_left_len).chain(
+                join_left_len + apply_left_len..join_left_len + apply_left_len + join_right_len,
+            );
+
+            match join.join_type() {
+                JoinType::LeftSemi | JoinType::LeftAnti => left_iter.collect(),
+                JoinType::RightSemi | JoinType::RightAnti => right_iter.collect(),
+                _ => left_iter.chain(right_iter).collect(),
+            }
+        };
+        let mut output_indices_mapping =
+            ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
         let new_join = LogicalJoin::new(
             join.left().clone(),
             new_join_right.clone(),
             join.join_type(),
             new_join_condition,
-        );
+        )
+        .clone_with_output_indices(output_indices);
 
         // Leave other condition for predicate push down to deal with
         LogicalFilter::create(
             new_join.into(),
             Condition {
                 conjunctions: other_condition,
-            },
+            }
+            .rewrite_expr(&mut output_indices_mapping),
         )
     }
 
@@ -511,78 +533,46 @@ impl ApplyJoinTransposeRule {
             correlated_indices,
             false,
         );
+
+        let output_indices: Vec<_> = {
+            let (apply_left_len, join_right_len) = match apply_join_type {
+                JoinType::LeftSemi | JoinType::LeftAnti => (apply_left_len, 0),
+                JoinType::RightSemi | JoinType::RightAnti => (0, join.right().schema().len()),
+                _ => (apply_left_len, join.right().schema().len()),
+            };
+
+            let left_iter = 0..join_left_len + apply_left_len;
+            let right_iter = join_left_len + apply_left_len * 2
+                ..join_left_len + apply_left_len * 2 + join_right_len;
+
+            match join.join_type() {
+                JoinType::LeftSemi | JoinType::LeftAnti => left_iter.collect(),
+                JoinType::RightSemi | JoinType::RightAnti => right_iter.collect(),
+                _ => left_iter.chain(right_iter).collect(),
+            }
+        };
         let new_join = LogicalJoin::new(
             new_join_left.clone(),
             new_join_right.clone(),
             join.join_type(),
             new_join_condition,
-        );
+        )
+        .clone_with_output_indices(output_indices.clone());
 
         match join.join_type() {
             JoinType::LeftSemi | JoinType::LeftAnti | JoinType::RightSemi | JoinType::RightAnti => {
                 new_join.into()
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                // Use project to provide a natural join
-                let mut project_exprs: Vec<ExprImpl> = vec![];
-
-                let d_offset = if join.join_type() == JoinType::RightOuter {
-                    new_join_left.schema().len()
-                } else {
-                    0
-                };
-
-                project_exprs.extend(
-                    apply_left
-                        .schema()
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .map(|(i, field)| {
-                            ExprImpl::InputRef(Box::new(InputRef::new(
-                                i + d_offset,
-                                field.data_type.clone(),
-                            )))
-                        })
-                        .collect_vec(),
-                );
-
-                project_exprs.extend(
-                    new_join_left
-                        .schema()
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .skip(apply_left_len)
-                        .map(|(i, field)| {
-                            ExprImpl::InputRef(Box::new(InputRef::new(i, field.data_type.clone())))
-                        })
-                        .collect_vec(),
-                );
-                project_exprs.extend(
-                    new_join_right
-                        .schema()
-                        .fields
-                        .iter()
-                        .enumerate()
-                        .skip(apply_left_len)
-                        .map(|(i, field)| {
-                            ExprImpl::InputRef(Box::new(InputRef::new(
-                                i + new_join_left.schema().len(),
-                                field.data_type.clone(),
-                            )))
-                        })
-                        .collect_vec(),
-                );
-
-                let new_project = LogicalProject::create(new_join.into(), project_exprs);
-
+                let mut output_indices_mapping =
+                    ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
                 // Leave other condition for predicate push down to deal with
                 LogicalFilter::create(
-                    new_project,
+                    new_join.into(),
                     Condition {
                         conjunctions: other_condition,
-                    },
+                    }
+                    .rewrite_expr(&mut output_indices_mapping),
                 )
             }
             JoinType::Unspecified => unreachable!(),
