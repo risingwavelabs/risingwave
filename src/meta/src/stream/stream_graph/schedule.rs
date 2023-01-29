@@ -145,7 +145,10 @@ impl Scheduler {
         })
     }
 
-    pub fn schedule(&self, graph: &CompleteStreamFragmentGraph) -> MetaResult<HashMap<Id, usize>> {
+    pub fn schedule(
+        &self,
+        graph: &CompleteStreamFragmentGraph,
+    ) -> MetaResult<HashMap<Id, Distribution>> {
         let existing_distribution = graph.existing_distribution();
 
         let all_hash_mappings = existing_distribution
@@ -199,18 +202,17 @@ impl Scheduler {
         }
         assert_eq!(success.len(), graph.graph.fragments.len());
 
-        // TODO
-        let parallelisms = success
+        let distributions = success
             .into_iter()
             .map(|Success(id, distribution)| {
-                let parallelism = match distribution {
-                    DistId::Hash(mapping) => all_hash_mappings[mapping].iter().unique().count(),
-                    DistId::Singleton => 1,
+                let distribution = match distribution {
+                    DistId::Hash(mapping) => Distribution::Hash(all_hash_mappings[mapping].clone()),
+                    DistId::Singleton => Distribution::Singleton,
                 };
-                (id, parallelism)
+                (id, distribution)
             })
             .collect();
 
-        Ok(parallelisms)
+        Ok(distributions)
     }
 }

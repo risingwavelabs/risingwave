@@ -651,7 +651,8 @@ impl BuildActorGraphState {
 
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
-    parallelisms: HashMap<GlobalFragmentId, usize>,
+    // TODO: also use the physical distribution itself
+    distributions: HashMap<GlobalFragmentId, Distribution>,
 
     fragment_graph: StreamFragmentGraph,
 }
@@ -662,7 +663,7 @@ impl ActorGraphBuilder {
             id,
             worker_node_id: 0,
         });
-        let parallelisms =
+        let distributions =
             schedule::Scheduler::new(fake_parallel_units, default_parallelism as usize)
                 .unwrap()
                 .schedule(&complete_graph)
@@ -671,16 +672,13 @@ impl ActorGraphBuilder {
         let fragment_graph = complete_graph.into_inner();
 
         Self {
-            parallelisms,
+            distributions,
             fragment_graph,
         }
     }
 
     pub fn new(fragment_graph: StreamFragmentGraph, default_parallelism: u32) -> Self {
-        Self {
-            parallelisms: todo!(),
-            fragment_graph,
-        }
+        todo!()
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
@@ -767,7 +765,7 @@ impl ActorGraphBuilder {
                 .insert(fragment_id.as_global_id(), upstream_table_id);
         }
 
-        let parallel_degree = self.parallelisms[&fragment_id] as u32;
+        let parallel_degree = self.distributions[&fragment_id].parallelism() as u32;
 
         let node = Arc::new(current_fragment.node.unwrap());
         let actor_ids = state
@@ -1165,6 +1163,15 @@ static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
 enum Distribution {
     Singleton,
     Hash(ParallelUnitMapping),
+}
+
+impl Distribution {
+    fn parallelism(&self) -> usize {
+        match self {
+            Distribution::Singleton => 1,
+            Distribution::Hash(mapping) => mapping.iter_unique().count(),
+        }
+    }
 }
 
 pub struct CompleteStreamFragmentGraph {
