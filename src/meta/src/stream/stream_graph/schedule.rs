@@ -39,7 +39,11 @@ enum Fact {
         to: Id,
         dt: DispatcherType,
     },
-    Existing {
+    Internal {
+        id: Id,
+        dist: DistId,
+    },
+    External {
         id: Id,
         dist: DistId,
     },
@@ -51,7 +55,8 @@ crepe::crepe! {
     struct Input(Fact);
 
     struct Edge(Id, Id, DispatcherType);
-    struct Existing(Id, DistId);
+    struct Internal(Id, DistId);
+    struct External(Id, DistId);
     struct Default(DistId);
     struct Fragment(Id);
 
@@ -64,13 +69,15 @@ crepe::crepe! {
     struct Failed(Id);
 
     Edge(from, to, dt) <- Input(f), let Fact::Edge { from, to, dt } = f;
-    Existing(id, dist) <- Input(f), let Fact::Existing { id, dist } = f;
+    Internal(id, dist) <- Input(f), let Fact::Internal { id, dist } = f;
+    External(id, dist) <- Input(f), let Fact::External { id, dist } = f;
     Default(dist) <- Input(f), let Fact::Default(dist) = f;
 
-    Fragment(x) <- Edge(x, _, _), !Existing(x, _);
-    Fragment(y) <- Edge(_, y, _), !Existing(y, _);
+    Fragment(x) <- Edge(x, _, _), !External(x, _);
+    Fragment(y) <- Edge(_, y, _), !External(y, _);
 
-    Requirement(x, d) <- Existing(x, d);
+    Requirement(x, d) <- Internal(x, d);
+    Requirement(x, d) <- External(x, d);
 
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
@@ -157,20 +164,30 @@ impl Scheduler {
 
         let mut facts = Vec::new();
 
+        // Default
         facts.push(Fact::Default(DistId::Hash(
             hash_mapping_id[&self.default_hash_mapping],
         )));
-
-        for (from, to, dt) in graph.dispatch_edges() {
-            facts.push(Fact::Edge { from, to, dt });
+        // Internal
+        for (&id, fragment) in &graph.graph.fragments {
+            if fragment.is_singleton {
+                facts.push(Fact::Internal {
+                    id,
+                    dist: DistId::Singleton,
+                });
+            }
         }
-
+        // External
         for (id, req) in existing_distribution {
             let dist = match req {
                 Distribution::Singleton => DistId::Singleton,
                 Distribution::Hash(mapping) => DistId::Hash(hash_mapping_id[&mapping]),
             };
-            facts.push(Fact::Existing { id, dist });
+            facts.push(Fact::External { id, dist });
+        }
+        // Edges
+        for (from, to, dt) in graph.dispatch_edges() {
+            facts.push(Fact::Edge { from, to, dt });
         }
 
         let mut crepe = Crepe::new();
