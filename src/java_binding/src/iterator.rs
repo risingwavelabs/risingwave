@@ -68,10 +68,10 @@ impl KeyedRow {
 }
 
 impl Iterator {
-    pub async fn new(object_store_url: &str, read_plan: ReadPlan) -> StorageResult<Self> {
+    pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
         let object_store = Arc::new(
             parse_remote_object_store(
-                object_store_url,
+                &read_plan.object_store_url,
                 Arc::new(ObjectStoreMetrics::unused()),
                 true,
                 "Hummock",

@@ -211,12 +211,10 @@ where
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
-    object_store: JString<'a>,
 ) -> Pointer<'static, Iterator> {
     execute_and_catch(env, move || {
         let read_plan = Message::decode(read_plan.to_guarded_slice(*env)?.deref())?;
-        let object_store: String = env.get_string(object_store)?.into();
-        let iter = RUNTIME.block_on(Iterator::new(&object_store, read_plan))?;
+        let iter = RUNTIME.block_on(Iterator::new(read_plan))?;
         Ok(iter.into())
     })
 }

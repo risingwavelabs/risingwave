@@ -1,35 +1,13 @@
 package com.risingwave.java.binding;
 
-import com.risingwave.java.binding.rpc.MetaClient;
-import com.risingwave.proto.Catalog.Table;
-import com.risingwave.proto.Hummock.HummockVersion;
-import com.risingwave.proto.JavaBinding.KeyRange;
 import com.risingwave.proto.JavaBinding.ReadPlan;
 
 public class Iterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public Iterator(
-            MetaClient metaClient,
-            String objectStore,
-            String dbName,
-            String tableName,
-            long epoch,
-            KeyRange keyRange) {
-        // Reply on context invalidation to unpin the version.
-        HummockVersion version = metaClient.pinVersion();
-        Table tableCatalog = metaClient.getTable(dbName, tableName);
-        ReadPlan readPlan =
-                ReadPlan.newBuilder()
-                        .setTableId(tableCatalog.getId())
-                        .setEpoch(epoch)
-                        .setKeyRange(keyRange)
-                        .setVersion(version)
-                        .setTableCatalog(tableCatalog)
-                        .build();
-
-        this.pointer = Binding.iteratorNew(readPlan.toByteArray(), objectStore);
+    public Iterator(ReadPlan readPlan) {
+        this.pointer = Binding.iteratorNew(readPlan.toByteArray());
         this.isClosed = false;
     }
 
