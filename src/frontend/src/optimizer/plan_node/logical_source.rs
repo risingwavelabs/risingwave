@@ -24,12 +24,12 @@ use risingwave_connector::source::DataType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
-    generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -158,6 +158,12 @@ impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
+
+impl ExprRewritable for LogicalSource {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

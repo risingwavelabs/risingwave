@@ -20,8 +20,10 @@ use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
@@ -115,6 +117,12 @@ impl fmt::Display for LogicalShare {
 impl ColPrunable for LogicalShare {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         unimplemented!("call prune_col of the PlanRef instead of calling directly on LogicalShare")
+    }
+}
+
+impl ExprRewritable for LogicalShare {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

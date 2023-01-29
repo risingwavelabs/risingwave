@@ -77,10 +77,6 @@ impl StreamDynamicFilter {
     pub fn left_index(&self) -> usize {
         self.core.left_index
     }
-
-    pub fn comparator(&self) -> &ExprType {
-        &self.core.comparator
-    }
 }
 
 impl fmt::Display for StreamDynamicFilter {
@@ -136,12 +132,11 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
-        let condition = self.core.predicate().as_expr_unless_true().map(|x| {
-            self.base
-                .ctx()
-                .expr_with_session_timezone(x)
-                .to_expr_proto()
-        });
+        let condition = self
+            .core
+            .predicate()
+            .as_expr_unless_true()
+            .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index;
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
             .with_id(state.gen_table_id_wrapped());

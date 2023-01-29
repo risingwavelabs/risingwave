@@ -25,8 +25,8 @@ use super::{
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalFilter, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, ExprRewritable, LogicalFilter, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
@@ -292,6 +292,15 @@ impl_plan_tree_node_for_binary! { LogicalApply }
 impl ColPrunable for LogicalApply {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         panic!("LogicalApply should be unnested")
+    }
+}
+
+impl ExprRewritable for LogicalApply {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.on = new.on.rewrite_expr(r);
+        new.base = new.base.clone_with_new_plan_id();
+        new.into()
     }
 }
 
