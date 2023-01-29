@@ -1,8 +1,7 @@
+# This is a test on error propagation of local mode. If we can not correctly handle the error report, it will hang up (#7324).
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
-
-#statement ok
-#SET QUERY_MODE TO distributed;
 
 statement ok
 SET CREATE_COMPACTION_GROUP_FOR_MV TO true;

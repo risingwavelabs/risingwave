@@ -187,7 +187,6 @@ impl TaskOutput {
                 }
                 // Reached EOF
                 Ok(None) => {
-                    println!("end?");
                     break;
                 }
                 // Error happened
@@ -204,7 +203,6 @@ impl TaskOutput {
             }
             cnt += 1;
         }
-        println!("back");
         Ok(true)
     }
 
@@ -375,6 +373,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Execution failed [{:?}]: {}", &task_id, e);
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
+                    // There will be no more chunks, so send None.
                     sender.send(None).await.unwrap();
                     if let Err(_e) = t_1
                         .change_state_notify(
@@ -463,7 +462,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 l.send(Err(Status::internal(err_str.clone())))
                     .await
                     .map_err(|_| SenderError)?;
-                println!("send failure success");
             }
             state_tx
                 .send(Err(Status::internal(err_str)))
