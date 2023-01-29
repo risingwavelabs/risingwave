@@ -35,6 +35,7 @@ use crate::store::*;
 pub enum KeyOp {
     Insert(Bytes),
     Delete(Bytes),
+    /// (old_value, new_value)
     Update((Bytes, Bytes)),
 }
 
@@ -42,42 +43,27 @@ pub enum KeyOp {
 #[derive(Clone)]
 pub struct MemTable {
     buffer: BTreeMap<Bytes, KeyOp>,
-    disable_sanity_check: bool,
+    is_consistent_op: bool,
 }
 
 #[derive(Error, Debug)]
 pub enum MemTableError {
-    #[error("conflicted row operations on same key")]
-    Conflict { key: Bytes, prev: KeyOp, new: KeyOp },
-
-    #[error("update on different old value")]
-    Update {
-        key: Bytes,
-        value: Bytes,
-        old_value: Bytes,
-        stored_value: Bytes,
-    },
-
-    #[error("delete on different old value")]
-    Delete {
-        key: Bytes,
-        old_value: Bytes,
-        stored_value: Bytes,
-    },
+    #[error("Inconsistent operation")]
+    InconsistentOperation { key: Bytes, prev: KeyOp, new: KeyOp },
 }
 
 type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
 impl MemTable {
-    pub fn new(disable_sanity_check: bool) -> Self {
+    pub fn new(is_consistent_op: bool) -> Self {
         Self {
             buffer: BTreeMap::new(),
-            disable_sanity_check,
+            is_consistent_op,
         }
     }
 
     pub fn drain(&mut self) -> Self {
-        let mut temp = Self::new(self.disable_sanity_check);
+        let mut temp = Self::new(self.is_consistent_op);
         swap(&mut temp, self);
         temp
     }
@@ -93,7 +79,7 @@ impl MemTable {
 
     /// write methods
     pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
-        if !ENABLE_SANITY_CHECK || self.disable_sanity_check {
+        if !self.is_consistent_op {
             self.buffer.insert(pk, KeyOp::Insert(value));
             return Ok(());
         }
@@ -109,7 +95,7 @@ impl MemTable {
                     e.insert(KeyOp::Update((old_val, value)));
                     Ok(())
                 }
-                _ => Err(MemTableError::Conflict {
+                KeyOp::Insert(_) | KeyOp::Update(_) => Err(MemTableError::InconsistentOperation {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: KeyOp::Insert(value),
@@ -120,7 +106,7 @@ impl MemTable {
     }
 
     pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
-        if !ENABLE_SANITY_CHECK || self.disable_sanity_check {
+        if !self.is_consistent_op {
             self.buffer.insert(pk, KeyOp::Delete(old_value));
             return Ok(());
         }
@@ -132,17 +118,17 @@ impl MemTable {
             }
             Entry::Occupied(mut e) => match e.get_mut() {
                 KeyOp::Insert(original_value) => {
-                    if original_value != &old_value {
-                        return Err(Box::new(MemTableError::Delete {
+                    if ENABLE_SANITY_CHECK && original_value != &old_value {
+                        return Err(Box::new(MemTableError::InconsistentOperation {
                             key: pk,
-                            stored_value: original_value.clone(),
-                            old_value,
+                            prev: e.get().clone(),
+                            new: KeyOp::Delete(old_value),
                         }));
                     }
                     e.remove();
                     Ok(())
                 }
-                KeyOp::Delete(_) => Err(MemTableError::Conflict {
+                KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: KeyOp::Delete(old_value),
@@ -150,11 +136,11 @@ impl MemTable {
                 .into()),
                 KeyOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
-                    if original_new_value != old_value {
-                        return Err(Box::new(MemTableError::Delete {
+                    if ENABLE_SANITY_CHECK && original_new_value != old_value {
+                        return Err(Box::new(MemTableError::InconsistentOperation {
                             key: pk,
-                            stored_value: original_new_value,
-                            old_value,
+                            prev: e.get().clone(),
+                            new: KeyOp::Delete(old_value),
                         }));
                     }
                     e.insert(KeyOp::Delete(original_old_value));
@@ -165,7 +151,7 @@ impl MemTable {
     }
 
     pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
-        if !ENABLE_SANITY_CHECK || self.disable_sanity_check {
+        if !self.is_consistent_op {
             self.buffer
                 .insert(pk, KeyOp::Update((old_value, new_value)));
             return Ok(());
@@ -177,37 +163,24 @@ impl MemTable {
                 Ok(())
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                KeyOp::Insert(original_value) => {
-                    if original_value != &old_value {
-                        return Err(Box::new(MemTableError::Update {
+                KeyOp::Insert(ref mut original_new_value)
+                | KeyOp::Update((_, ref mut original_new_value)) => {
+                    if ENABLE_SANITY_CHECK && original_new_value != &old_value {
+                        return Err(Box::new(MemTableError::InconsistentOperation {
                             key: pk,
-                            value: new_value,
-                            stored_value: original_value.clone(),
-                            old_value,
+                            prev: e.get().clone(),
+                            new: KeyOp::Update((old_value, new_value)),
                         }));
                     }
-                    e.insert(KeyOp::Insert(new_value));
+                    *original_new_value = new_value;
                     Ok(())
                 }
-                KeyOp::Delete(_) => Err(MemTableError::Conflict {
+                KeyOp::Delete(_) => Err(MemTableError::InconsistentOperation {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: KeyOp::Update((old_value, new_value)),
                 }
                 .into()),
-                KeyOp::Update(value) => {
-                    let (original_old_value, original_new_value) = std::mem::take(value);
-                    if original_new_value != old_value {
-                        return Err(Box::new(MemTableError::Update {
-                            key: pk,
-                            value: new_value,
-                            stored_value: original_old_value,
-                            old_value,
-                        }));
-                    }
-                    e.insert(KeyOp::Update((original_old_value, new_value)));
-                    Ok(())
-                }
             },
         }
     }
@@ -342,7 +315,7 @@ pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     epoch: Option<u64>,
 
     table_id: TableId,
-    disable_sanity_check: bool,
+    is_consistent_op: bool,
     table_option: TableOption,
 }
 
@@ -350,10 +323,10 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     pub fn new(inner: S, option: NewLocalOptions) -> Self {
         Self {
             inner,
-            mem_table: MemTable::new(option.disable_sanity_check),
+            mem_table: MemTable::new(option.is_consistent_op),
             epoch: None,
             table_id: option.table_id,
-            disable_sanity_check: option.disable_sanity_check,
+            is_consistent_op: option.is_consistent_op,
             table_option: option.table_option,
         }
     }
@@ -374,7 +347,7 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
         let stored_value = self.inner.get(key, self.epoch(), read_options).await?;
 
         if let Some(stored_value) = stored_value {
-            return Err(Box::new(MemTableError::Conflict {
+            return Err(Box::new(MemTableError::InconsistentOperation {
                 key: Bytes::copy_from_slice(key),
                 prev: KeyOp::Insert(stored_value),
                 new: KeyOp::Insert(Bytes::copy_from_slice(value)),
@@ -393,17 +366,26 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             ignore_range_tombstone: false,
             read_version_from_backup: false,
         };
-        let stored_value = self.inner.get(key, self.epoch(), read_options).await?;
-
-        if stored_value.is_none() || stored_value.as_ref().unwrap() != old_value {
-            return Err(Box::new(MemTableError::Delete {
+        match self.inner.get(key, self.epoch(), read_options).await? {
+            None => Err(Box::new(MemTableError::InconsistentOperation {
                 key: Bytes::copy_from_slice(key),
-                old_value: Bytes::copy_from_slice(old_value),
-                stored_value: stored_value.unwrap(),
+                prev: KeyOp::Delete(Bytes::default()),
+                new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
             })
-            .into());
+            .into()),
+            Some(stored_value) => {
+                if stored_value != old_value {
+                    Err(Box::new(MemTableError::InconsistentOperation {
+                        key: Bytes::copy_from_slice(key),
+                        prev: KeyOp::Insert(stored_value),
+                        new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+                    })
+                    .into())
+                } else {
+                    Ok(())
+                }
+            }
         }
-        Ok(())
     }
 
     /// Make sure that the key to update should exist in storage and the value should be matched
@@ -420,19 +402,33 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
             table_id: self.table_id,
             read_version_from_backup: false,
         };
-        let stored_value = self.inner.get(key, self.epoch(), read_options).await?;
 
-        if stored_value.is_none() || stored_value.as_ref().unwrap() != old_value {
-            return Err(Box::new(MemTableError::Update {
+        match self.inner.get(key, self.epoch(), read_options).await? {
+            None => Err(Box::new(MemTableError::InconsistentOperation {
                 key: Bytes::copy_from_slice(key),
-                value: Bytes::copy_from_slice(new_value),
-                old_value: Bytes::copy_from_slice(old_value),
-                stored_value: stored_value.unwrap(),
+                prev: KeyOp::Delete(Bytes::default()),
+                new: KeyOp::Update((
+                    Bytes::copy_from_slice(old_value),
+                    Bytes::copy_from_slice(new_value),
+                )),
             })
-            .into());
+            .into()),
+            Some(stored_value) => {
+                if stored_value != old_value {
+                    Err(Box::new(MemTableError::InconsistentOperation {
+                        key: Bytes::copy_from_slice(key),
+                        prev: KeyOp::Insert(stored_value),
+                        new: KeyOp::Update((
+                            Bytes::copy_from_slice(old_value),
+                            Bytes::copy_from_slice(new_value),
+                        )),
+                    })
+                    .into())
+                } else {
+                    Ok(())
+                }
+            }
         }
-
-        Ok(())
     }
 }
 
@@ -552,21 +548,21 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                 match key_op {
                     // Currently, some executors do not strictly comply with these semantics. As
                     // a workaround you may call disable the check by initializing the
-                    // state store with `disable_sanity_check=true`.
+                    // state store with `is_consistent_op=false`.
                     KeyOp::Insert(value) => {
-                        if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             self.do_insert_sanity_check(&key, &value).await?;
                         }
                         kv_pairs.push((key, StorageValue::new_put(value)));
                     }
                     KeyOp::Delete(old_value) => {
-                        if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             self.do_delete_sanity_check(&key, &old_value).await?;
                         }
                         kv_pairs.push((key, StorageValue::new_delete()));
                     }
                     KeyOp::Update((old_value, new_value)) => {
-                        if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             self.do_update_sanity_check(&key, &old_value, &new_value)
                                 .await?;
                         }
