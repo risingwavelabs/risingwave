@@ -166,7 +166,14 @@ profile:
   java-binding-demo:
     steps:
       - use: minio
+        address: "127.0.0.1"
+        port: 9301
+        root-user: hummockadmin
+        root-password: hummockadmin
+        hummock-bucket: hummock001
       - use: meta-node
+        address: "127.0.0.1"
+        port: 5690
       - use: compute-node
       - use: frontend
       - use: compactor
