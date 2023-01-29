@@ -152,7 +152,7 @@ pub struct Serde {
 }
 
 impl ValueRowSerde for Serde {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowSerde {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self {
         let serializer = Serializer::new(column_ids);
         let deserializer = Deserializer::new(column_ids, schema);
         Serde {

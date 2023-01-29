@@ -252,7 +252,7 @@ pub trait ValueRowDeserializer: Clone {
 }
 
 pub trait ValueRowSerde: Clone {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowSerde;
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self;
     fn serialize(&self, row: impl Row) -> Vec<u8>;
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
@@ -290,7 +290,7 @@ pub struct BasicSerde {
 }
 
 impl ValueRowSerde for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowSerde {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> Self {
         BasicSerde {
             deserializer: RowDeserializer::new(schema.to_vec()),
         }
