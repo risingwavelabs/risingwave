@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::hummock::compactor::Context;
+use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion, SyncUncommittedDataStage};
@@ -57,7 +57,7 @@ pub struct LocalVersionManager {
 impl LocalVersionManager {
     pub fn new(
         pinned_version: PinnedVersion,
-        compactor_context: Arc<Context>,
+        compactor_context: Arc<CompactorContext>,
         buffer_tracker: BufferTracker,
     ) -> Arc<Self> {
         assert!(pinned_version.is_valid());

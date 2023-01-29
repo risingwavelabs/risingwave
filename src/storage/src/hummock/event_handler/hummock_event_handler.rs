@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
-use crate::hummock::compactor::{compact, Context};
+use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
@@ -112,7 +112,7 @@ pub struct HummockEventHandler {
 async fn flush_imms(
     payload: UploadTaskPayload,
     task_info: UploadTaskInfo,
-    compactor_context: Arc<crate::hummock::compactor::Context>,
+    compactor_context: Arc<crate::hummock::compactor::CompactorContext>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
         let _ = compactor_context
@@ -139,14 +139,15 @@ impl HummockEventHandler {
         hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
-        compactor_context: Arc<Context>,
+        compactor_context: Arc<CompactorContext>,
     ) -> Self {
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
-        let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
-        let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
+        let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.storage_config);
+        let write_conflict_detector =
+            ConflictDetector::new_from_config(&compactor_context.storage_config);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),

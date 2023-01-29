@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::iter::once;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
+use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
@@ -114,255 +117,7 @@ impl Binder {
             return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
         }
 
-        // normal function
-        let mut inputs = inputs;
-        let function_type = match function_name.as_str() {
-            // comparison
-            "booleq" => {
-                inputs = Self::rewrite_two_bool_inputs(inputs)?;
-                ExprType::Equal
-            }
-            "boolne" => {
-                inputs = Self::rewrite_two_bool_inputs(inputs)?;
-                ExprType::NotEqual
-            }
-            // conditional
-            "coalesce" => ExprType::Coalesce,
-            "nullif" => {
-                inputs = Self::rewrite_nullif_to_case_when(inputs)?;
-                ExprType::Case
-            }
-            // mathematical
-            "round" => {
-                if inputs.len() >= 2 {
-                    ExprType::RoundDigit
-                } else {
-                    ExprType::Round
-                }
-            }
-            "ceil" => ExprType::Ceil,
-            "floor" => ExprType::Floor,
-            "abs" => ExprType::Abs,
-            "mod" => ExprType::Modulus,
-            // temporal/chrono
-            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
-            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
-            "date_trunc" => ExprType::DateTrunc,
-            // string
-            "substr" => ExprType::Substr,
-            "length" => ExprType::Length,
-            "upper" => ExprType::Upper,
-            "lower" => ExprType::Lower,
-            "trim" => ExprType::Trim,
-            "replace" => ExprType::Replace,
-            "overlay" => ExprType::Overlay,
-            "position" => ExprType::Position,
-            "ltrim" => ExprType::Ltrim,
-            "rtrim" => ExprType::Rtrim,
-            "md5" => ExprType::Md5,
-            "to_char" => ExprType::ToChar,
-            "concat" => {
-                inputs = Self::rewrite_concat_to_concat_ws(inputs)?;
-                ExprType::ConcatWs
-            }
-            "concat_ws" => ExprType::ConcatWs,
-            "split_part" => ExprType::SplitPart,
-            "char_length" => ExprType::CharLength,
-            "character_length" => ExprType::CharLength,
-            "repeat" => ExprType::Repeat,
-            "ascii" => ExprType::Ascii,
-            "octet_length" => ExprType::OctetLength,
-            "bit_length" => ExprType::BitLength,
-            "regexp_match" => ExprType::RegexpMatch,
-            // array
-            "array_cat" => ExprType::ArrayCat,
-            "array_append" => ExprType::ArrayAppend,
-            "array_prepend" => ExprType::ArrayPrepend,
-            // System information operations.
-            "pg_typeof" if inputs.len() == 1 => {
-                let input = &inputs[0];
-                let v = match input.is_unknown() {
-                    true => "unknown".into(),
-                    false => input.return_type().to_string(),
-                };
-                return Ok(ExprImpl::literal_varchar(v));
-            }
-            "current_database" if inputs.is_empty() => {
-                return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
-            }
-            "current_schema" if inputs.is_empty() => {
-                return Ok(self
-                    .catalog
-                    .first_valid_schema(
-                        &self.db_name,
-                        &self.search_path,
-                        &self.auth_context.user_name,
-                    )
-                    .map(|schema| ExprImpl::literal_varchar(schema.name()))
-                    .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
-            }
-            "current_schemas" => {
-                let no_match_err = ErrorCode::ExprError(
-                        "No function matches the given name and argument types. You might need to add explicit type casts.".into()
-                    );
-                if inputs.len() != 1 {
-                    return Err(no_match_err.into());
-                }
-                let input = inputs
-                    .pop()
-                    .unwrap()
-                    .enforce_bool_clause("current_schemas")
-                    .map_err(|_| no_match_err)?;
-
-                let ExprImpl::Literal(literal) = &input else {
-                    return Err(ErrorCode::NotImplemented(
-                        "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
-                    )
-                    .into());
-                };
-
-                let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                    return Ok(ExprImpl::literal_null(DataType::List {
-                        datatype: Box::new(DataType::Varchar),
-                    }));
-                };
-
-                let paths = if bool {
-                    self.search_path.path()
-                } else {
-                    self.search_path.real_path()
-                };
-
-                let mut schema_names = vec![];
-                for path in paths {
-                    let mut schema_name = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = &self.auth_context.user_name;
-                    }
-
-                    if self
-                        .catalog
-                        .get_schema_by_name(&self.db_name, schema_name)
-                        .is_ok()
-                    {
-                        schema_names.push(Some(schema_name.into()));
-                    }
-                }
-
-                return Ok(ExprImpl::literal_list(
-                    ListValue::new(schema_names),
-                    DataType::Varchar,
-                ));
-            }
-            "session_user" if inputs.is_empty() => {
-                return Ok(ExprImpl::literal_varchar(
-                    self.auth_context.user_name.clone(),
-                ));
-            }
-            "pg_get_userbyid" => {
-                return if inputs.len() == 1 {
-                    let input = &inputs[0];
-                    let bound_query = self.bind_get_user_by_id_select(input)?;
-                    Ok(ExprImpl::Subquery(Box::new(Subquery::new(
-                        BoundQuery {
-                            body: BoundSetExpr::Select(Box::new(bound_query)),
-                            order: vec![],
-                            limit: None,
-                            offset: None,
-                            with_ties: false,
-                            extra_order_exprs: vec![],
-                        },
-                        SubqueryKind::Scalar,
-                    ))))
-                } else {
-                    Err(ErrorCode::ExprError(
-                        "Too many/few arguments for pg_catalog.pg_get_userbyid()".into(),
-                    )
-                    .into())
-                };
-            }
-            "pg_get_expr" => {
-                return if inputs.len() == 2 || inputs.len() == 3 {
-                    // TODO: implement pg_get_expr rather than just return empty as an workaround.
-                    Ok(ExprImpl::literal_varchar("".into()))
-                } else {
-                    Err(ErrorCode::ExprError(
-                        "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
-                    )
-                    .into())
-                };
-            }
-            "format_type" => {
-                return if inputs.len() == 2 {
-                    // TODO
-                    // return null as an workaround for now
-                    Ok(ExprImpl::literal_null(DataType::Varchar))
-                } else {
-                    Err(
-                        ErrorCode::ExprError("Too many/few arguments for format_type()".into())
-                            .into(),
-                    )
-                };
-            }
-            "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
-            "pg_encoding_to_char" => return Ok(ExprImpl::literal_varchar("UTF8".into())),
-            "has_database_privilege" => return Ok(ExprImpl::literal_bool(true)),
-            "pg_backend_pid" if inputs.is_empty() => {
-                // FIXME: the session id is not global unique in multi-frontend env.
-                return Ok(ExprImpl::literal_int(self.session_id.0));
-            }
-            "pg_cancel_backend" => {
-                return if inputs.len() == 1 {
-                    // TODO: implement real cancel rather than just return false as an workaround.
-                    Ok(ExprImpl::literal_bool(false))
-                } else {
-                    Err(ErrorCode::ExprError(
-                        "Too many/few arguments for pg_cancel_backend()".into(),
-                    )
-                    .into())
-                };
-            }
-            "pg_terminate_backend" => {
-                return if inputs.len() == 1 {
-                    // TODO: implement real terminate rather than just return false as an
-                    // workaround.
-                    Ok(ExprImpl::literal_bool(false))
-                } else {
-                    Err(ErrorCode::ExprError(
-                        "Too many/few arguments for pg_terminate_backend()".into(),
-                    )
-                    .into())
-                };
-            }
-            // internal
-            "rw_vnode" => ExprType::Vnode,
-            // TODO: choose which pg version we should return.
-            "version" => {
-                return Ok(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RW-{}",
-                    RW_VERSION
-                )))
-            }
-            // non-deterministic
-            "now" => {
-                self.ensure_now_function_allowed()?;
-                if !self.in_create_mv {
-                    inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::Int64((self.bind_timestamp_ms * 1000) as i64)),
-                        DataType::Timestamptz,
-                    )));
-                }
-                ExprType::Now
-            }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("unsupported function: {:?}", function_name),
-                    112.into(),
-                )
-                .into());
-            }
-        };
-        Ok(FunctionCall::new(function_type, inputs)?.into())
+        self.bind_builtin_scalar_function(function_name.as_str(), inputs)
     }
 
     pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
@@ -485,6 +240,313 @@ impl Binder {
                 .collect::<Result<_>>()?,
         );
         Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
+    }
+
+    fn bind_builtin_scalar_function(
+        &mut self,
+        function_name: &str,
+        inputs: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        type Inputs = Vec<ExprImpl>;
+
+        type Handle = Box<dyn Fn(&mut Binder, Inputs) -> Result<ExprImpl> + Sync + Send>;
+
+        fn rewrite(r#type: ExprType, rewriter: fn(Inputs) -> Result<Inputs>) -> Handle {
+            Box::new(move |_binder, mut inputs| {
+                inputs = (rewriter)(inputs)?;
+                Ok(FunctionCall::new(r#type, inputs)?.into())
+            })
+        }
+
+        fn raw_call(r#type: ExprType) -> Handle {
+            rewrite(r#type, Ok)
+        }
+
+        fn guard_by_len(expected_len: usize, handle: Handle) -> Handle {
+            Box::new(move |binder, inputs| {
+                if inputs.len() == expected_len {
+                    handle(binder, inputs)
+                } else {
+                    Err(ErrorCode::ExprError("unexpected arguments number".into()).into())
+                }
+            })
+        }
+
+        fn raw<F: Fn(&mut Binder, Inputs) -> Result<ExprImpl> + Sync + Send + 'static>(
+            f: F,
+        ) -> Handle {
+            Box::new(f)
+        }
+
+        fn dispatch_by_len(mapping: Vec<(usize, Handle)>) -> Handle {
+            Box::new(move |binder, inputs| {
+                for (len, handle) in &mapping {
+                    if inputs.len() == *len {
+                        return handle(binder, inputs);
+                    }
+                }
+                Err(ErrorCode::ExprError("unexpected arguments number".into()).into())
+            })
+        }
+
+        fn raw_literal(literal: ExprImpl) -> Handle {
+            Box::new(move |_binder, _inputs| Ok(literal.clone()))
+        }
+
+        static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
+            [
+                (
+                    "booleq",
+                    rewrite(ExprType::Equal, Binder::rewrite_two_bool_inputs),
+                ),
+                (
+                    "boolne",
+                    rewrite(ExprType::NotEqual, Binder::rewrite_two_bool_inputs),
+                ),
+                ("coalesce", raw_call(ExprType::Coalesce)),
+                (
+                    "nullif",
+                    rewrite(ExprType::Case, Binder::rewrite_nullif_to_case_when),
+                ),
+                (
+                    "round",
+                    dispatch_by_len(vec![
+                        (2, raw_call(ExprType::RoundDigit)),
+                        (1, raw_call(ExprType::Round)),
+                    ]),
+                ),
+                ("ceil", raw_call(ExprType::Ceil)),
+                ("floor", raw_call(ExprType::Floor)),
+                ("abs", raw_call(ExprType::Abs)),
+                ("mod", raw_call(ExprType::Modulus)),
+                (
+                    "to_timestamp",
+                    dispatch_by_len(vec![
+                        (1, raw_call(ExprType::ToTimestamp)),
+                        (2, raw_call(ExprType::ToTimestamp1)),
+                    ]),
+                ),
+                ("date_trunc", raw_call(ExprType::DateTrunc)),
+                // string
+                ("substr", raw_call(ExprType::Substr)),
+                ("length", raw_call(ExprType::Length)),
+                ("upper", raw_call(ExprType::Upper)),
+                ("lower", raw_call(ExprType::Lower)),
+                ("trim", raw_call(ExprType::Trim)),
+                ("replace", raw_call(ExprType::Replace)),
+                ("overlay", raw_call(ExprType::Overlay)),
+                ("position", raw_call(ExprType::Position)),
+                ("ltrim", raw_call(ExprType::Ltrim)),
+                ("rtrim", raw_call(ExprType::Rtrim)),
+                ("md5", raw_call(ExprType::Md5)),
+                ("to_char", raw_call(ExprType::ToChar)),
+                (
+                    "concat",
+                    rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
+                ),
+                ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("split_part", raw_call(ExprType::SplitPart)),
+                ("char_length", raw_call(ExprType::CharLength)),
+                ("character_length", raw_call(ExprType::CharLength)),
+                ("repeat", raw_call(ExprType::Repeat)),
+                ("ascii", raw_call(ExprType::Ascii)),
+                ("octet_length", raw_call(ExprType::OctetLength)),
+                ("bit_length", raw_call(ExprType::BitLength)),
+                ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                // array
+                ("array_cat", raw_call(ExprType::ArrayCat)),
+                ("array_append", raw_call(ExprType::ArrayAppend)),
+                ("array_prepend", raw_call(ExprType::ArrayPrepend)),
+                // System information operations.
+                (
+                    "pg_typeof",
+                    raw(|_binder, inputs| {
+                        let input = &inputs[0];
+                        let v = match input.is_unknown() {
+                            true => "unknown".into(),
+                            false => input.return_type().to_string(),
+                        };
+                        Ok(ExprImpl::literal_varchar(v))
+                    }),
+                ),
+                ("current_database", guard_by_len(0, raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
+                }))),
+                ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
+                    return Ok(binder
+                        .catalog
+                        .first_valid_schema(
+                            &binder.db_name,
+                            &binder.search_path,
+                            &binder.auth_context.user_name,
+                        )
+                        .map(|schema| ExprImpl::literal_varchar(schema.name()))
+                        .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
+                }))),
+                ("current_schemas", raw(|binder, mut inputs| {
+                    let no_match_err = ErrorCode::ExprError(
+                            "No function matches the given name and argument types. You might need to add explicit type casts.".into()
+                        );
+                    if inputs.len() != 1 {
+                        return Err(no_match_err.into());
+                    }
+                    let input = inputs
+                        .pop()
+                        .unwrap()
+                        .enforce_bool_clause("current_schemas")
+                        .map_err(|_| no_match_err)?;
+
+                    let ExprImpl::Literal(literal) = &input else {
+                        return Err(ErrorCode::NotImplemented(
+                            "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
+                        )
+                        .into());
+                    };
+
+                    let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
+                        return Ok(ExprImpl::literal_null(DataType::List {
+                            datatype: Box::new(DataType::Varchar),
+                        }));
+                    };
+
+                    let paths = if bool {
+                        binder.search_path.path()
+                    } else {
+                        binder.search_path.real_path()
+                    };
+
+                    let mut schema_names = vec![];
+                    for path in paths {
+                        let mut schema_name = path;
+                        if schema_name == USER_NAME_WILD_CARD {
+                            schema_name = &binder.auth_context.user_name;
+                        }
+
+                        if binder
+                            .catalog
+                            .get_schema_by_name(&binder.db_name, schema_name)
+                            .is_ok()
+                        {
+                            schema_names.push(Some(schema_name.into()));
+                        }
+                    }
+
+                    Ok(ExprImpl::literal_list(
+                        ListValue::new(schema_names),
+                        DataType::Varchar,
+                    ))
+                })),
+                ("session_user", guard_by_len(0, raw(|binder, _inputs| {
+                    Ok(ExprImpl::literal_varchar(
+                        binder.auth_context.user_name.clone(),
+                    ))
+                }))),
+                ("pg_get_userbyid", guard_by_len(1, raw(|binder, inputs|{
+                        let input = &inputs[0];
+                        let bound_query = binder.bind_get_user_by_id_select(input)?;
+                        Ok(ExprImpl::Subquery(Box::new(Subquery::new(
+                            BoundQuery {
+                                body: BoundSetExpr::Select(Box::new(bound_query)),
+                                order: vec![],
+                                limit: None,
+                                offset: None,
+                                with_ties: false,
+                                extra_order_exprs: vec![],
+                            },
+                            SubqueryKind::Scalar,
+                        ))))
+                    }
+                ))),
+                ("pg_get_expr", raw(|_binder, inputs|{
+                    if inputs.len() == 2 || inputs.len() == 3 {
+                        // TODO: implement pg_get_expr rather than just return empty as an workaround.
+                        Ok(ExprImpl::literal_varchar("".into()))
+                    } else {
+                        Err(ErrorCode::ExprError(
+                            "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
+                        )
+                        .into())
+                    }
+                })),
+                ("format_type", guard_by_len(2, raw(|_binder, _inputs| {
+                        // TODO
+                        // return null as an workaround for now
+                        Ok(ExprImpl::literal_null(DataType::Varchar))
+                }))),
+                ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
+                ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_backend_pid", raw(|binder, _inputs| {
+                    // FIXME: the session id is not global unique in multi-frontend env.
+                    Ok(ExprImpl::literal_int(binder.session_id.0))
+                })),
+                ("pg_cancel_backend", guard_by_len(1, raw(|_binder, _inputs| {
+                        // TODO: implement real cancel rather than just return false as an workaround.
+                        Ok(ExprImpl::literal_bool(false))
+                }))),
+                ("pg_terminate_backend", guard_by_len(1, raw(|_binder, _inputs|{
+                        // TODO: implement real terminate rather than just return false as an
+                        // workaround.
+                        Ok(ExprImpl::literal_bool(false))
+                }))),
+                // internal
+                ("rw_vnode", raw_call(ExprType::Vnode)),
+                // TODO: choose which pg version we should return.
+                ("version", raw_literal(ExprImpl::literal_varchar(format!(
+                    "PostgreSQL 13.9-RW-{}",
+                    RW_VERSION
+                )))),
+                // non-deterministic
+                ("now", raw(|binder, mut inputs|{
+                binder.ensure_now_function_allowed()?;
+                    if !binder.in_create_mv {
+                        inputs.push(ExprImpl::from(Literal::new(
+                            Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
+                            DataType::Timestamptz,
+                        )));
+                    }
+                    raw_call(ExprType::Now)(binder, inputs)
+                }))
+            ]
+            .into_iter()
+            .collect()
+        });
+
+        static FUNCTIONS_BKTREE: LazyLock<BKTree<&str>> = LazyLock::new(|| {
+            let mut tree = BKTree::new(metrics::Levenshtein);
+
+            // TODO: Also hint other functinos, e,g, Agg or UDF.
+            for k in HANDLES.keys() {
+                tree.add(*k);
+            }
+
+            tree
+        });
+
+        match HANDLES.get(function_name) {
+            Some(handle) => handle(self, inputs),
+            None => Err({
+                let allowed_distance = if function_name.len() > 3 { 2 } else { 1 };
+
+                let candidates = FUNCTIONS_BKTREE
+                    .find(function_name, allowed_distance)
+                    .map(|(_idx, c)| c);
+
+                let mut candidates = candidates.peekable();
+
+                let err_msg = if candidates.peek().is_none() {
+                    format!("unsupported function: \"{}\"", function_name)
+                } else {
+                    format!(
+                        "unsupported function \"{}\", do you mean \"{}\"?",
+                        function_name,
+                        candidates.join(" or ")
+                    )
+                };
+
+                ErrorCode::NotImplemented(err_msg, 112.into()).into()
+            }),
+        }
     }
 
     fn rewrite_concat_to_concat_ws(inputs: Vec<ExprImpl>) -> Result<Vec<ExprImpl>> {

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use crate::error::BoxedError;
 mod native_type;
 mod ops;
 mod scalar_impl;
+mod successor;
 
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -37,6 +38,7 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
+pub use successor::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;

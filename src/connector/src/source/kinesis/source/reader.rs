@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ use tokio_retry;
 
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
-use crate::source::kinesis::{build_client, KinesisProperties};
+use crate::source::kinesis::KinesisProperties;
 use crate::source::{
     BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader,
 };
@@ -79,8 +79,8 @@ impl SplitReader for KinesisSplitReader {
             start_position => start_position.to_owned(),
         };
 
-        let stream_name = properties.stream_name.clone();
-        let client = build_client(properties).await?;
+        let stream_name = properties.common.stream_name.clone();
+        let client = properties.common.build_client().await?;
 
         Ok(Self {
             client,
@@ -248,20 +248,24 @@ mod tests {
     use futures::StreamExt;
 
     use super::*;
+    use crate::common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]
     #[ignore]
     async fn test_single_thread_kinesis_reader() -> Result<()> {
         let properties = KinesisProperties {
-            assume_role_arn: None,
-            credentials_access_key: None,
-            credentials_secret_access_key: None,
-            stream_name: "kinesis_debug".to_string(),
-            stream_region: "cn-northwest-1".to_string(),
-            endpoint: None,
-            session_token: None,
-            assume_role_external_id: None,
+            common: KinesisCommon {
+                assume_role_arn: None,
+                credentials_access_key: None,
+                credentials_secret_access_key: None,
+                stream_name: "kinesis_debug".to_string(),
+                stream_region: "cn-northwest-1".to_string(),
+                endpoint: None,
+                session_token: None,
+                assume_role_external_id: None,
+            },
+
             scan_startup_mode: None,
             seq_offset: None,
         };

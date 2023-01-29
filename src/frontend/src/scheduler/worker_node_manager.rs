@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::hash::{ParallelUnitId, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
@@ -33,7 +33,7 @@ pub struct WorkerNodeManager {
 struct WorkerNodeManagerInner {
     worker_nodes: Vec<WorkerNode>,
     /// fragment vnode mapping info.
-    fragment_vnode_mapping: HashMap<FragmentId, VnodeMapping>,
+    fragment_vnode_mapping: HashMap<FragmentId, ParallelUnitMapping>,
 }
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
@@ -76,7 +76,11 @@ impl WorkerNodeManager {
             .retain(|x| *x != node);
     }
 
-    pub fn refresh(&self, nodes: Vec<WorkerNode>, mapping: HashMap<FragmentId, VnodeMapping>) {
+    pub fn refresh(
+        &self,
+        nodes: Vec<WorkerNode>,
+        mapping: HashMap<FragmentId, ParallelUnitMapping>,
+    ) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes = nodes;
         write_guard.fragment_vnode_mapping = mapping;
@@ -126,7 +130,7 @@ impl WorkerNodeManager {
         Ok(workers)
     }
 
-    pub fn get_fragment_mapping(&self, fragment_id: &FragmentId) -> Option<VnodeMapping> {
+    pub fn get_fragment_mapping(&self, fragment_id: &FragmentId) -> Option<ParallelUnitMapping> {
         self.inner
             .read()
             .unwrap()
@@ -135,7 +139,11 @@ impl WorkerNodeManager {
             .cloned()
     }
 
-    pub fn insert_fragment_mapping(&self, fragment_id: FragmentId, vnode_mapping: VnodeMapping) {
+    pub fn insert_fragment_mapping(
+        &self,
+        fragment_id: FragmentId,
+        vnode_mapping: ParallelUnitMapping,
+    ) {
         self.inner
             .write()
             .unwrap()
@@ -144,7 +152,11 @@ impl WorkerNodeManager {
             .unwrap();
     }
 
-    pub fn update_fragment_mapping(&self, fragment_id: FragmentId, vnode_mapping: VnodeMapping) {
+    pub fn update_fragment_mapping(
+        &self,
+        fragment_id: FragmentId,
+        vnode_mapping: ParallelUnitMapping,
+    ) {
         self.inner
             .write()
             .unwrap()

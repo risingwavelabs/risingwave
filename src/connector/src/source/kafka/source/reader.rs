@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::mem::swap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -44,9 +44,9 @@ impl SplitReader for KafkaSplitReader {
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let bootstrap_servers = &properties.brokers;
-
         let mut config = ClientConfig::new();
+
+        let bootstrap_servers = &properties.common.brokers;
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
@@ -54,7 +54,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("auto.offset.reset", "smallest");
         config.set("bootstrap.servers", bootstrap_servers);
 
-        properties.set_security_properties(&mut config);
+        properties.common.set_security_properties(&mut config);
 
         if config.get("group.id").is_none() {
             config.set(
@@ -73,7 +73,7 @@ impl SplitReader for KafkaSplitReader {
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(DefaultConsumerContext)
             .await
-            .context("failed to create kafka consumer")?;
+            .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 
         let mut start_offset = None;
         let mut stop_offset = None;
