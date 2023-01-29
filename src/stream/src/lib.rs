@@ -25,6 +25,7 @@
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
 #![feature(generators)]
+#![feature(iter_from_generator)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(allocator_api)]
