@@ -24,8 +24,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
-    StreamTableScan, ToBatch, ToStream,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
@@ -447,6 +447,18 @@ impl ColPrunable for LogicalScan {
             .all(|i| self.output_col_idx().contains(i)));
 
         self.clone_with_output_indices(output_col_idx).into()
+    }
+}
+
+impl ExprRewritable for LogicalScan {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
     }
 }
 

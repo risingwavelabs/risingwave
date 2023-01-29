@@ -19,10 +19,11 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -157,6 +158,12 @@ impl ColPrunable for LogicalInsert {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
         self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
+    }
+}
+
+impl ExprRewritable for LogicalInsert {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

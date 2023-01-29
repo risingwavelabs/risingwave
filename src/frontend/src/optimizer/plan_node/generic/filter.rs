@@ -15,6 +15,7 @@
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::Condition;
 
@@ -39,5 +40,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Filter<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+}
+
+impl<PlanRef> Filter<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.predicate = self.predicate.clone().rewrite_expr(r);
     }
 }

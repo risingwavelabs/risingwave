@@ -25,9 +25,9 @@ use super::generic::{
     ProjectBuilder,
 };
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
-    ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
+    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -785,6 +785,18 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalAgg")
+    }
+}
+
+impl ExprRewritable for LogicalAgg {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
     }
 }
 

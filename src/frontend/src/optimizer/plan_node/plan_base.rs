@@ -149,6 +149,12 @@ impl PlanBase {
             plan_node.watermark_columns().clone(),
         )
     }
+
+    pub fn clone_with_new_plan_id(&self) -> Self {
+        let mut new = self.clone();
+        new.id = self.ctx.next_plan_node_id();
+        new
+    }
 }
 
 macro_rules! impl_base_delegate {
