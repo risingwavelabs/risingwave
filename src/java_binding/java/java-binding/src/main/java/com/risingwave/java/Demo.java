@@ -1,6 +1,5 @@
 package com.risingwave.java;
 
-import com.risingwave.java.binding.Constants;
 import com.risingwave.java.binding.Iterator;
 import com.risingwave.java.binding.KeyedRow;
 import com.risingwave.java.binding.rpc.MetaClient;
@@ -38,7 +37,7 @@ public class Demo {
                     ReadPlan.newBuilder()
                             .setObjectStoreUrl(objectStore)
                             .setTableId(tableCatalog.getId())
-                            .setEpoch(Constants.MAX_EPOCH)
+                            .setEpoch(version.getMaxCommittedEpoch())
                             .setKeyRange(keyRange)
                             .setVersion(version)
                             .setTableCatalog(tableCatalog)
