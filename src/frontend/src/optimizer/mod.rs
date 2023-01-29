@@ -51,6 +51,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
+    RewriteExprsRecursive,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;

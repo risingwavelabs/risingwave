@@ -24,23 +24,33 @@ use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 /// the `ExprRewriter` needs to be idempotent i.e. applying it more than once
 /// to the same `ExprImpl` will be a noop on subsequent applications.
 pub trait ExprRewritable {
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef;
+    fn has_rewritable_expr(&self) -> bool {
+        false
+    }
+
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        unimplemented!("{}", self.has_rewritable_expr())
+    }
 }
 
 impl ExprRewritable for PlanRef {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        self.deref().rewrite_exprs(r)
+        if self.deref().has_rewritable_expr() {
+            self.deref().rewrite_exprs(r)
+        } else {
+            self.clone()
+        }
     }
 }
 
 macro_rules! ban_expr_rewritable {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl ExprRewritable for [<$convention $name>] {
-                fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-                    unimplemented!()
-                }
-            })*
+            $(impl ExprRewritable for [<$convention $name>] {} )*
         }
     }
 }
