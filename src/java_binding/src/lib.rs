@@ -30,7 +30,6 @@ use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jint, jlong};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
-use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -50,13 +49,6 @@ enum BindingError {
     Storage {
         #[from]
         error: StorageError,
-        backtrace: Backtrace,
-    },
-
-    #[error("RpcError {error}")]
-    Rpc {
-        #[from]
-        error: RpcError,
         backtrace: Backtrace,
     },
 
@@ -219,12 +211,13 @@ where
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
-    state_store: JString<'a>,
+    object_store: JString<'a>,
 ) -> Pointer<'static, Iterator> {
     execute_and_catch(env, move || {
         let read_plan = Message::decode(read_plan.to_guarded_slice(*env)?.deref())?;
-        let state_store: String = env.get_string(state_store)?.into();
-        RUNTIME.block_on(async { Ok(Iterator::new(&state_store, read_plan).await?.into()) })
+        let object_store: String = env.get_string(object_store)?.into();
+        let iter = RUNTIME.block_on(Iterator::new(&object_store, read_plan))?;
+        Ok(iter.into())
     })
 }
 
@@ -234,12 +227,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
     mut pointer: Pointer<'a, Iterator>,
 ) -> Pointer<'static, KeyedRow> {
     execute_and_catch(env, move || {
-        RUNTIME.block_on(async {
-            match pointer.as_mut().next().await? {
-                None => Ok(Pointer::null()),
-                Some(row) => Ok(row.into()),
-            }
-        })
+        match RUNTIME.block_on(pointer.as_mut().next())? {
+            None => Ok(Pointer::null()),
+            Some(row) => Ok(row.into()),
+        }
     })
 }
 

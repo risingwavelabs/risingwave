@@ -14,7 +14,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 /** Hello world! */
 public class Demo {
     public static void main(String[] args) {
-        String stateStore = System.getenv("STATE_STORE");
+        String objectStore = System.getenv("OBJECT_STORE");
         String dbName = System.getenv("DB_NAME");
         String tableName = System.getenv("TABLE_NAME");
         String metaAddr = System.getenv("META_ADDR");
@@ -30,7 +30,7 @@ public class Demo {
                 Iterator iter =
                         new Iterator(
                                 metaClient,
-                                stateStore,
+                                objectStore,
                                 dbName,
                                 tableName,
                                 Constants.MAX_EPOCH,

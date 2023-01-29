@@ -6,8 +6,8 @@ set -e
 
 TABLE_NAME=java_binding_demo
 DB_NAME=dev
-# State store URL and meta node address is determined by risedev.
-STATE_STORE=hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+# Object store URL and meta node address is determined by risedev.
+OBJECT_STORE=minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
 META_ADDR=127.0.0.1:5690
 
 ${RISINGWAVE_ROOT}/risedev d java-binding-demo
@@ -23,7 +23,7 @@ cd ${JAVA_BINDING_ROOT}/java
 
 TABLE_NAME=${TABLE_NAME} \
 DB_NAME=${DB_NAME} \
-STATE_STORE=${STATE_STORE} \
+OBJECT_STORE=${OBJECT_STORE} \
 META_ADDR=${META_ADDR} \
 mvn exec:exec \
     -pl java-binding \

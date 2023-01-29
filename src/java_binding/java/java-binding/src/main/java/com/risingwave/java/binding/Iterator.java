@@ -12,7 +12,7 @@ public class Iterator implements AutoCloseable {
 
     public Iterator(
             MetaClient metaClient,
-            String stateStore,
+            String objectStore,
             String dbName,
             String tableName,
             long epoch,
@@ -29,7 +29,7 @@ public class Iterator implements AutoCloseable {
                         .setTableCatalog(tableCatalog)
                         .build();
 
-        this.pointer = Binding.iteratorNew(readPlan.toByteArray(), stateStore);
+        this.pointer = Binding.iteratorNew(readPlan.toByteArray(), objectStore);
         this.isClosed = false;
     }
 

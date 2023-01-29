@@ -5980,7 +5980,6 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_object_store",
  "risingwave_pb",
- "risingwave_rpc_client",
  "risingwave_storage",
  "thiserror",
  "tracing",
