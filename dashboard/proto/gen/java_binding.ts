@@ -60,9 +60,11 @@ export function keyRange_BoundToJSON(object: KeyRange_Bound): string {
 }
 
 export interface ReadPlan {
+  objectStoreUrl: string;
+  dataDir: string;
+  keyRange: KeyRange | undefined;
   tableId: number;
   epoch: number;
-  keyRange: KeyRange | undefined;
   version: HummockVersion | undefined;
   tableCatalog: Table | undefined;
 }
@@ -108,15 +110,25 @@ export const KeyRange = {
 };
 
 function createBaseReadPlan(): ReadPlan {
-  return { tableId: 0, epoch: 0, keyRange: undefined, version: undefined, tableCatalog: undefined };
+  return {
+    objectStoreUrl: "",
+    dataDir: "",
+    keyRange: undefined,
+    tableId: 0,
+    epoch: 0,
+    version: undefined,
+    tableCatalog: undefined,
+  };
 }
 
 export const ReadPlan = {
   fromJSON(object: any): ReadPlan {
     return {
+      objectStoreUrl: isSet(object.objectStoreUrl) ? String(object.objectStoreUrl) : "",
+      dataDir: isSet(object.dataDir) ? String(object.dataDir) : "",
+      keyRange: isSet(object.keyRange) ? KeyRange.fromJSON(object.keyRange) : undefined,
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
-      keyRange: isSet(object.keyRange) ? KeyRange.fromJSON(object.keyRange) : undefined,
       version: isSet(object.version) ? HummockVersion.fromJSON(object.version) : undefined,
       tableCatalog: isSet(object.tableCatalog) ? Table.fromJSON(object.tableCatalog) : undefined,
     };
@@ -124,9 +136,11 @@ export const ReadPlan = {
 
   toJSON(message: ReadPlan): unknown {
     const obj: any = {};
+    message.objectStoreUrl !== undefined && (obj.objectStoreUrl = message.objectStoreUrl);
+    message.dataDir !== undefined && (obj.dataDir = message.dataDir);
+    message.keyRange !== undefined && (obj.keyRange = message.keyRange ? KeyRange.toJSON(message.keyRange) : undefined);
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
-    message.keyRange !== undefined && (obj.keyRange = message.keyRange ? KeyRange.toJSON(message.keyRange) : undefined);
     message.version !== undefined &&
       (obj.version = message.version ? HummockVersion.toJSON(message.version) : undefined);
     message.tableCatalog !== undefined &&
@@ -136,11 +150,13 @@ export const ReadPlan = {
 
   fromPartial<I extends Exact<DeepPartial<ReadPlan>, I>>(object: I): ReadPlan {
     const message = createBaseReadPlan();
-    message.tableId = object.tableId ?? 0;
-    message.epoch = object.epoch ?? 0;
+    message.objectStoreUrl = object.objectStoreUrl ?? "";
+    message.dataDir = object.dataDir ?? "";
     message.keyRange = (object.keyRange !== undefined && object.keyRange !== null)
       ? KeyRange.fromPartial(object.keyRange)
       : undefined;
+    message.tableId = object.tableId ?? 0;
+    message.epoch = object.epoch ?? 0;
     message.version = (object.version !== undefined && object.version !== null)
       ? HummockVersion.fromPartial(object.version)
       : undefined;

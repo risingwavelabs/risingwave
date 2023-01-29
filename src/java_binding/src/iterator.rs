@@ -80,7 +80,7 @@ impl Iterator {
         );
         let sstable_store = Arc::new(SstableStore::new(
             object_store,
-            "hummock_001".to_string(),
+            read_plan.data_dir,
             1 << 10,
             1 << 10,
             TieredCache::none(),

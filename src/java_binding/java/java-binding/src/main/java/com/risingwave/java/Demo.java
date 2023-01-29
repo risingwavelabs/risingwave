@@ -20,6 +20,7 @@ public class Demo {
         String dbName = System.getenv("DB_NAME");
         String tableName = System.getenv("TABLE_NAME");
         String metaAddr = System.getenv("META_ADDR");
+        String dataDir = System.getenv("DATA_DIR");
 
         ScheduledThreadPoolExecutor scheduledThreadPool = new ScheduledThreadPoolExecutor(2);
 
@@ -35,10 +36,11 @@ public class Demo {
             Table tableCatalog = metaClient.getTable(dbName, tableName);
             ReadPlan readPlan =
                     ReadPlan.newBuilder()
+                            .setDataDir(dataDir)
                             .setObjectStoreUrl(objectStore)
+                            .setKeyRange(keyRange)
                             .setTableId(tableCatalog.getId())
                             .setEpoch(version.getMaxCommittedEpoch())
-                            .setKeyRange(keyRange)
                             .setVersion(version)
                             .setTableCatalog(tableCatalog)
                             .build();

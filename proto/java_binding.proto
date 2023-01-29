@@ -24,9 +24,12 @@ message KeyRange {
 
 message ReadPlan {
   string object_store_url = 1;
-  uint32 table_id = 2;
-  uint64 epoch = 3;
-  KeyRange key_range = 4;
-  hummock.HummockVersion version = 5;
-  catalog.Table table_catalog = 6;
+  string data_dir = 2;
+
+  KeyRange key_range = 3;
+  uint32 table_id = 4;
+  uint64 epoch = 5;
+
+  hummock.HummockVersion version = 6;
+  catalog.Table table_catalog = 7;
 }
