@@ -251,6 +251,12 @@ pub trait ValueRowDeserializer: Clone {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
+pub trait ValueRowSerde: Clone {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowSerde;
+    fn serialize(&self, row: impl Row) -> Vec<u8>;
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
+}
+
 #[derive(Clone)]
 pub struct BasicSerializer {}
 
@@ -275,6 +281,31 @@ impl ValueRowDeserializer for RowDeserializer {
 
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         Ok(self.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
+#[derive(Clone)]
+pub struct BasicSerde {
+    deserializer: RowDeserializer,
+}
+
+impl ValueRowSerde for BasicSerde {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowSerde {
+        BasicSerde {
+            deserializer: RowDeserializer::new(schema.to_vec()),
+        }
+    }
+
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        let mut buf = vec![];
+        for datum in row.iter() {
+            serialize_datum_into(datum, &mut buf);
+        }
+        buf
+    }
+
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
     }
 }
 

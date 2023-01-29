@@ -100,7 +100,7 @@ pub struct Serializer {
 }
 
 impl Serializer {
-    fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
+    fn encode(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = vec![];
         row_bytes.put_u8(encoding.flag);
         row_bytes.extend(self.encoded_datum_num.iter());
@@ -133,7 +133,7 @@ impl ValueRowSerializer for Serializer {
         assert_eq!(row.len(), self.datum_num);
         let mut encoding = RowEncoding::new();
         encoding.encode(row.iter());
-        self.serialize(encoding)
+        self.encode(encoding)
     }
 }
 
@@ -143,6 +143,29 @@ impl ValueRowSerializer for Serializer {
 pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
     schema: Vec<DataType>,
+}
+
+#[derive(Clone)]
+pub struct Serde {
+    serializer: Serializer,
+    deserializer: Deserializer,
+}
+
+impl ValueRowSerde for Serde {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowSerde {
+        let serializer = Serializer::new(column_ids);
+        let deserializer = Deserializer::new(column_ids, schema);
+        Serde {
+            serializer,
+            deserializer,
+        }
+    }
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        self.serializer.serialize(row)
+    }
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        self.deserializer.deserialize(encoded_bytes)
+    }
 }
 
 impl ValueRowDeserializer for Deserializer {
