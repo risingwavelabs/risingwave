@@ -55,8 +55,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
-            table_l
-                .distribution_key
+            node.get_left_deduped_input_pk_indices()
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
@@ -66,8 +65,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
-            table_r
-                .distribution_key
+            node.get_right_deduped_input_pk_indices()
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),

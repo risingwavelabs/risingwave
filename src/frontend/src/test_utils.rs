@@ -227,8 +227,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, _view: ProstView) -> Result<()> {
-        todo!()
+    async fn create_view(&self, mut view: ProstView) -> Result<()> {
+        view.id = self.gen_id();
+        self.catalog.write().create_view(&view);
+        self.add_table_or_source_id(view.id, view.schema_id, view.database_id);
+        Ok(())
     }
 
     async fn create_table(

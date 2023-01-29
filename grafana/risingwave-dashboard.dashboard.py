@@ -1319,7 +1319,7 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "total lookups {{actor_id}} {{side}}",
+                            "cache miss when insert{{actor_id}} {{side}}",
                         ),
                     ],
                 ),

@@ -27,7 +27,7 @@ use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::VnodeMapping;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
@@ -526,7 +526,7 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<VnodeMapping> {
+    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         self.catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
@@ -563,11 +563,8 @@ impl StageRunner {
                                 .unwrap()
                                 .table_id,
                         ))
-                        .unwrap_or_default()
-                        .iter()
-                        .copied()
-                        .sorted()
-                        .dedup()
+                        .unwrap()
+                        .iter_unique()
                         .collect_vec();
 
                     let pu = id2pu_vec[task_id as usize];
@@ -582,9 +579,8 @@ impl StageRunner {
         };
 
         let worker_node = match vnode_mapping {
-            Some(parallel_unit_ids) => {
-                let parallel_unit_ids =
-                    parallel_unit_ids.into_iter().sorted().dedup().collect_vec();
+            Some(mapping) => {
+                let parallel_unit_ids = mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
