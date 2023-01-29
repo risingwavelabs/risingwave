@@ -58,9 +58,9 @@ drop table t;
 
 # Issue #7566
 # timestamp_interval_sub
-statement err out of range
+statement error out of range
 select TIMESTAMP '2022-08-09 00:00:00' - (INTERVAL '-2147483648 days');
 
 # timestamp_interval_add
-statement err out of range
+statement error out of range
 select TIMESTAMP '2022-08-09 00:00:00' + (INTERVAL '-2147483648 days');
