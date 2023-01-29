@@ -18,7 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
@@ -505,14 +505,14 @@ where
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
     }
 
-    async fn java_pin_version(
+    async fn pin_version(
         &self,
-        request: Request<JavaPinVersionRequest>,
-    ) -> Result<Response<JavaPinVersionResponse>, Status> {
+        request: Request<PinVersionRequest>,
+    ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
         let payload = self.hummock_manager.pin_version(req.context_id).await?;
         match payload {
-            Payload::PinnedVersion(version) => Ok(Response::new(JavaPinVersionResponse {
+            Payload::PinnedVersion(version) => Ok(Response::new(PinVersionResponse {
                 pinned_version: Some(version),
             })),
             Payload::VersionDeltas(_) => {

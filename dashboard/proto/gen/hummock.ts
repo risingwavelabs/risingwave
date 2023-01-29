@@ -166,8 +166,7 @@ export interface HummockSnapshot {
   currentEpoch: number;
 }
 
-export interface PinVersionResponse {
-  status: Status | undefined;
+export interface VersionUpdatePayload {
   payload?: { $case: "versionDeltas"; versionDeltas: HummockVersionDeltas } | {
     $case: "pinnedVersion";
     pinnedVersion: HummockVersion;
@@ -689,11 +688,11 @@ export interface SetCompactorRuntimeConfigRequest {
 export interface SetCompactorRuntimeConfigResponse {
 }
 
-export interface JavaPinVersionRequest {
+export interface PinVersionRequest {
   contextId: number;
 }
 
-export interface JavaPinVersionResponse {
+export interface PinVersionResponse {
   pinnedVersion: HummockVersion | undefined;
 }
 
@@ -1422,14 +1421,13 @@ export const HummockSnapshot = {
   },
 };
 
-function createBasePinVersionResponse(): PinVersionResponse {
-  return { status: undefined, payload: undefined };
+function createBaseVersionUpdatePayload(): VersionUpdatePayload {
+  return { payload: undefined };
 }
 
-export const PinVersionResponse = {
-  fromJSON(object: any): PinVersionResponse {
+export const VersionUpdatePayload = {
+  fromJSON(object: any): VersionUpdatePayload {
     return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       payload: isSet(object.versionDeltas)
         ? { $case: "versionDeltas", versionDeltas: HummockVersionDeltas.fromJSON(object.versionDeltas) }
         : isSet(object.pinnedVersion)
@@ -1438,9 +1436,8 @@ export const PinVersionResponse = {
     };
   },
 
-  toJSON(message: PinVersionResponse): unknown {
+  toJSON(message: VersionUpdatePayload): unknown {
     const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.payload?.$case === "versionDeltas" && (obj.versionDeltas = message.payload?.versionDeltas
       ? HummockVersionDeltas.toJSON(message.payload?.versionDeltas)
       : undefined);
@@ -1450,11 +1447,8 @@ export const PinVersionResponse = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
-    const message = createBasePinVersionResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
+  fromPartial<I extends Exact<DeepPartial<VersionUpdatePayload>, I>>(object: I): VersionUpdatePayload {
+    const message = createBaseVersionUpdatePayload();
     if (
       object.payload?.$case === "versionDeltas" &&
       object.payload?.versionDeltas !== undefined &&
@@ -4099,46 +4093,46 @@ export const SetCompactorRuntimeConfigResponse = {
   },
 };
 
-function createBaseJavaPinVersionRequest(): JavaPinVersionRequest {
+function createBasePinVersionRequest(): PinVersionRequest {
   return { contextId: 0 };
 }
 
-export const JavaPinVersionRequest = {
-  fromJSON(object: any): JavaPinVersionRequest {
+export const PinVersionRequest = {
+  fromJSON(object: any): PinVersionRequest {
     return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
   },
 
-  toJSON(message: JavaPinVersionRequest): unknown {
+  toJSON(message: PinVersionRequest): unknown {
     const obj: any = {};
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<JavaPinVersionRequest>, I>>(object: I): JavaPinVersionRequest {
-    const message = createBaseJavaPinVersionRequest();
+  fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
+    const message = createBasePinVersionRequest();
     message.contextId = object.contextId ?? 0;
     return message;
   },
 };
 
-function createBaseJavaPinVersionResponse(): JavaPinVersionResponse {
+function createBasePinVersionResponse(): PinVersionResponse {
   return { pinnedVersion: undefined };
 }
 
-export const JavaPinVersionResponse = {
-  fromJSON(object: any): JavaPinVersionResponse {
+export const PinVersionResponse = {
+  fromJSON(object: any): PinVersionResponse {
     return { pinnedVersion: isSet(object.pinnedVersion) ? HummockVersion.fromJSON(object.pinnedVersion) : undefined };
   },
 
-  toJSON(message: JavaPinVersionResponse): unknown {
+  toJSON(message: PinVersionResponse): unknown {
     const obj: any = {};
     message.pinnedVersion !== undefined &&
       (obj.pinnedVersion = message.pinnedVersion ? HummockVersion.toJSON(message.pinnedVersion) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<JavaPinVersionResponse>, I>>(object: I): JavaPinVersionResponse {
-    const message = createBaseJavaPinVersionResponse();
+  fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
+    const message = createBasePinVersionResponse();
     message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
       ? HummockVersion.fromPartial(object.pinnedVersion)
       : undefined;

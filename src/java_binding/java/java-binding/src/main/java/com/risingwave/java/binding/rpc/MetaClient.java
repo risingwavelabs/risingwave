@@ -12,8 +12,8 @@ import com.risingwave.proto.DdlServiceOuterClass.JavaGetTableResponse;
 import com.risingwave.proto.HeartbeatServiceGrpc;
 import com.risingwave.proto.HeartbeatServiceGrpc.HeartbeatServiceBlockingStub;
 import com.risingwave.proto.Hummock.HummockVersion;
-import com.risingwave.proto.Hummock.JavaPinVersionRequest;
-import com.risingwave.proto.Hummock.JavaPinVersionResponse;
+import com.risingwave.proto.Hummock.PinVersionRequest;
+import com.risingwave.proto.Hummock.PinVersionResponse;
 import com.risingwave.proto.HummockManagerServiceGrpc;
 import com.risingwave.proto.HummockManagerServiceGrpc.HummockManagerServiceBlockingStub;
 import com.risingwave.proto.Meta.AddWorkerNodeRequest;
@@ -101,9 +101,8 @@ public class MetaClient implements AutoCloseable {
     }
 
     public HummockVersion pinVersion() {
-        JavaPinVersionRequest req =
-                JavaPinVersionRequest.newBuilder().setContextId(workerId).build();
-        JavaPinVersionResponse resp = hummockStub.javaPinVersion(req);
+        PinVersionRequest req = PinVersionRequest.newBuilder().setContextId(workerId).build();
+        PinVersionResponse resp = hummockStub.pinVersion(req);
         return resp.getPinnedVersion();
     }
 
