@@ -22,6 +22,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -84,7 +85,7 @@ pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
-use crate::hummock::compactor::Context;
+use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::iterator::{
@@ -119,7 +120,7 @@ impl Drop for HummockStorageShutdownGuard {
 pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
 
-    context: Arc<Context>,
+    context: Arc<CompactorContext>,
 
     buffer_tracker: BufferTracker,
 
@@ -187,13 +188,14 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         ));
 
-        let compactor_context = Arc::new(Context::new_local_compact_context(
+        let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            CompactorRuntimeConfig::default(),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -334,8 +336,8 @@ impl HummockStorage {
         .await
     }
 
-    pub fn options(&self) -> &Arc<StorageConfig> {
-        &self.context.options
+    pub fn storage_config(&self) -> &Arc<StorageConfig> {
+        &self.context.storage_config
     }
 
     pub fn version_reader(&self) -> &HummockVersionReader {
@@ -563,13 +565,14 @@ impl HummockStorageV1 {
             hummock_meta_client.clone(),
         ));
 
-        let compactor_context = Arc::new(Context::new_local_compact_context(
+        let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            CompactorRuntimeConfig::default(),
         ));
 
         let buffer_tracker = BufferTracker::from_storage_config(&options);
