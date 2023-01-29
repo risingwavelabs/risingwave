@@ -31,8 +31,8 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
-    SourceManagerRef, StreamFragmentGraph,
+    visit_fragment, ActorGraphBuilder, CompleteStreamFragmentGraph, CreateStreamingJobContext,
+    GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -588,8 +588,15 @@ where
             ..Default::default()
         };
 
+        let upstream_mview_fragments = self
+            .fragment_manager
+            .get_upstream_mview_fragments(dependent_relations)
+            .await?;
+        let complete_graph =
+            CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
+
         // TODO(bugen): we should merge this step with the `Scheduler`.
-        let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, default_parallelism);
+        let actor_graph_builder = ActorGraphBuilder::new_new(complete_graph, default_parallelism);
 
         let graph = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::HashMap;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet};
 use std::ops::{Deref, Range};
 use std::sync::{Arc, LazyLock};
 
@@ -25,6 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
@@ -36,8 +37,7 @@ use risingwave_pb::stream_plan::{
 
 use super::CreateStreamingJobContext;
 use crate::manager::{
-    BuildGraphInfo, FragmentManager, IdCategory, IdCategoryType, IdGeneratorManager,
-    IdGeneratorManagerRef, StreamingJob,
+    IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingJob,
 };
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
@@ -651,16 +651,34 @@ impl BuildActorGraphState {
 
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
-    /// Default parallelism.
-    default_parallelism: u32,
+    parallelisms: HashMap<GlobalFragmentId, usize>,
 
     fragment_graph: StreamFragmentGraph,
 }
 
 impl ActorGraphBuilder {
+    pub fn new_new(complete_graph: CompleteStreamFragmentGraph, default_parallelism: u32) -> Self {
+        let fake_parallel_units = (0..default_parallelism).map(|id| ParallelUnit {
+            id,
+            worker_node_id: 0,
+        });
+        let parallelisms =
+            schedule::Scheduler::new(fake_parallel_units, default_parallelism as usize)
+                .unwrap()
+                .schedule(&complete_graph)
+                .unwrap();
+
+        let fragment_graph = complete_graph.into_inner();
+
+        Self {
+            parallelisms,
+            fragment_graph,
+        }
+    }
+
     pub fn new(fragment_graph: StreamFragmentGraph, default_parallelism: u32) -> Self {
         Self {
-            default_parallelism,
+            parallelisms: todo!(),
             fragment_graph,
         }
     }
@@ -749,18 +767,7 @@ impl ActorGraphBuilder {
                 .insert(fragment_id.as_global_id(), upstream_table_id);
         }
 
-        let parallel_degree = if current_fragment.is_singleton {
-            1
-        } else if let Some(upstream_table_id) = upstream_table_id {
-            // set fragment parallelism to the parallelism of its dependent table.
-            let upstream_actors = ctx
-                .table_mview_map
-                .get(&upstream_table_id)
-                .expect("upstream actor should exist");
-            upstream_actors.len() as u32
-        } else {
-            self.default_parallelism
-        };
+        let parallel_degree = self.parallelisms[&fragment_id] as u32;
 
         let node = Arc::new(current_fragment.node.unwrap());
         let actor_ids = state
@@ -1160,7 +1167,7 @@ enum Distribution {
     Hash(ParallelUnitMapping),
 }
 
-struct CompleteStreamFragmentGraph {
+pub struct CompleteStreamFragmentGraph {
     graph: StreamFragmentGraph,
 
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
@@ -1173,7 +1180,7 @@ struct CompleteStreamFragmentGraph {
 }
 
 impl CompleteStreamFragmentGraph {
-    fn new<S: MetaStore>(
+    pub fn new(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
     ) -> MetaResult<Self> {
@@ -1253,7 +1260,7 @@ impl CompleteStreamFragmentGraph {
             .collect()
     }
 
-    fn into_inner(self) -> StreamFragmentGraph {
+    pub fn into_inner(self) -> StreamFragmentGraph {
         self.graph
     }
 }

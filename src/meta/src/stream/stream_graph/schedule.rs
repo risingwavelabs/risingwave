@@ -13,21 +13,15 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, LinkedList};
-use std::rc::Rc;
 
-use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
-use super::{CompleteStreamFragmentGraph, GlobalFragmentId as Id, StreamFragmentGraph};
-use crate::manager::FragmentManager;
-use crate::storage::MetaStore;
+use super::{CompleteStreamFragmentGraph, GlobalFragmentId as Id};
 use crate::stream::stream_graph::Distribution;
-use crate::stream::CreateStreamingJobContext;
 use crate::MetaResult;
 
 type HashMappingId = usize;
@@ -90,11 +84,10 @@ crepe::crepe! {
 
 /// [`Scheduler`] defines schedule logic for mv actors.
 pub(super) struct Scheduler {
-    /// The parallel units of the cluster in a round-robin manner on each worker.
-    all_parallel_units: Vec<ParallelUnit>,
+    // /// The parallel units of the cluster in a round-robin manner on each worker.
+    // all_parallel_units: Vec<ParallelUnit>,
 
-    default_parallelism: usize,
-
+    // default_parallelism: usize,
     default_hash_mapping: ParallelUnitMapping,
 }
 
@@ -139,8 +132,8 @@ impl Scheduler {
         let default_hash_mapping = ParallelUnitMapping::build(&round_robin);
 
         Ok(Self {
-            all_parallel_units: round_robin,
-            default_parallelism,
+            // all_parallel_units: round_robin,
+            // default_parallelism,
             default_hash_mapping,
         })
     }
