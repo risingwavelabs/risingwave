@@ -150,7 +150,7 @@ impl<S: StateStore> SortBuffer<S> {
     /// The output stream will not output the same record except during failover and recovery.
     /// However, if you want to delete one record permanently, you should call
     /// [`SortBuffer::delete`] manually.
-    pub fn consume<'a>(&'a mut self) -> impl Iterator<Item = DataChunk> + 'a {
+    pub fn consume(&mut self) -> impl Iterator<Item = DataChunk> + '_ {
         if let Some(watermark) = self.watermark.clone() {
             let last_output = self.last_output.replace(watermark);
             let g = move || {
