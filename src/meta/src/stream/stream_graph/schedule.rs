@@ -23,16 +23,17 @@ use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
-use super::{GlobalFragmentId as Id, StreamFragmentGraph};
+use super::{CompleteStreamFragmentGraph, GlobalFragmentId as Id, StreamFragmentGraph};
 use crate::manager::FragmentManager;
 use crate::storage::MetaStore;
+use crate::stream::stream_graph::Distribution;
 use crate::stream::CreateStreamingJobContext;
 use crate::MetaResult;
 
 type HashMappingId = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Distribution {
+enum DistId {
     Hash(HashMappingId),
     Singleton,
 }
@@ -44,11 +45,11 @@ enum Fact {
         to: Id,
         dt: DispatcherType,
     },
-    Distribution {
+    Existing {
         id: Id,
-        dist: Distribution,
+        dist: DistId,
     },
-    Default(Distribution),
+    Default(DistId),
 }
 
 crepe::crepe! {
@@ -56,46 +57,35 @@ crepe::crepe! {
     struct Input(Fact);
 
     struct Edge(Id, Id, DispatcherType);
+    struct Existing(Id, DistId);
+    struct Default(DistId);
     struct Fragment(Id);
-    struct Default(Distribution);
 
-    struct Requirement(Id, Distribution);
+    struct Requirement(Id, DistId);
 
     @output
-    struct Success(Id, Distribution);
+    struct Success(Id, DistId);
     @output
+    #[derive(Debug)]
     struct Failed(Id);
 
     Edge(from, to, dt) <- Input(f), let Fact::Edge { from, to, dt } = f;
-    Requirement(id, dist) <- Input(f), let Fact::Distribution { id, dist } = f;
+    Existing(id, dist) <- Input(f), let Fact::Existing { id, dist } = f;
     Default(dist) <- Input(f), let Fact::Default(dist) = f;
-    Fragment(x) <- Edge(x, _, _);
-    Fragment(y) <- Edge(_, y, _);
+
+    Fragment(x) <- Edge(x, _, _), !Existing(x, _);
+    Fragment(y) <- Edge(_, y, _), !Existing(y, _);
+
+    Requirement(x, d) <- Existing(x, d);
 
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
 
-    Requirement(y, Distribution::Singleton) <- Edge(_, y, Simple);
+    Requirement(y, DistId::Singleton) <- Edge(_, y, Simple);
 
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
-    Success(x, d) <- Requirement(x, d), !Failed(x);
+    Success(x, d) <- Fragment(x), Requirement(x, d), !Failed(x);
     Success(x, d) <- Fragment(x), Default(d), !Requirement(x, _);
-}
-
-#[derive(EnumAsInner)]
-pub(super) enum ExternalRequirement {
-    Hash(ParallelUnitMapping),
-    Singleton,
-}
-
-pub(super) struct ExternalRequirements(HashMap<Id, ExternalRequirement>);
-
-impl ExternalRequirements {
-    pub async fn for_create_streaming_job<S: MetaStore>(
-        ctx: &CreateStreamingJobContext,
-    ) -> MetaResult<Self> {
-        todo!()
-    }
 }
 
 /// [`Scheduler`] defines schedule logic for mv actors.
@@ -155,14 +145,12 @@ impl Scheduler {
         })
     }
 
-    pub fn schedule(
-        &self,
-        graph: &StreamFragmentGraph,
-        external_requirements: &[(Id, ExternalRequirement)],
-    ) -> HashMap<Id, usize> {
-        let all_hash_mappings = external_requirements
-            .iter()
-            .flat_map(|(_, req)| req.as_hash())
+    pub fn schedule(&self, graph: &CompleteStreamFragmentGraph) -> MetaResult<HashMap<Id, usize>> {
+        let existing_distribution = graph.existing_distribution();
+
+        let all_hash_mappings = existing_distribution
+            .values()
+            .flat_map(|dist| dist.as_hash())
             .chain(std::iter::once(&self.default_hash_mapping))
             .cloned()
             .unique()
@@ -176,41 +164,43 @@ impl Scheduler {
 
         let mut facts = Vec::new();
 
-        facts.push(Fact::Default(Distribution::Hash(
+        facts.push(Fact::Default(DistId::Hash(
             hash_mapping_id[&self.default_hash_mapping],
         )));
 
-        for (from, to, edge) in graph.edges() {
-            let dt = edge.get_dispatch_strategy().unwrap().get_type().unwrap();
+        for (from, to, dt) in graph.dispatch_edges() {
             facts.push(Fact::Edge { from, to, dt });
         }
 
-        for (id, req) in external_requirements {
+        for (id, req) in existing_distribution {
             let dist = match req {
-                ExternalRequirement::Hash(mapping) => Distribution::Hash(hash_mapping_id[mapping]),
-                ExternalRequirement::Singleton => Distribution::Singleton,
+                Distribution::Singleton => DistId::Singleton,
+                Distribution::Hash(mapping) => DistId::Hash(hash_mapping_id[&mapping]),
             };
-            facts.push(Fact::Distribution { id: *id, dist });
+            facts.push(Fact::Existing { id, dist });
         }
 
         let mut crepe = Crepe::new();
         crepe.extend(facts.into_iter().map(Input));
 
         let (success, failed) = crepe.run();
-        assert!(failed.is_empty());
+        if !failed.is_empty() {
+            bail!("Failed to schedule: {:?}", failed);
+        }
+        assert_eq!(success.len(), graph.graph.fragments.len());
 
         // TODO
-        success
+        let parallelisms = success
             .into_iter()
             .map(|Success(id, distribution)| {
                 let parallelism = match distribution {
-                    Distribution::Hash(mapping) => {
-                        all_hash_mappings[mapping].iter().unique().count()
-                    }
-                    Distribution::Singleton => 1,
+                    DistId::Hash(mapping) => all_hash_mappings[mapping].iter().unique().count(),
+                    DistId::Singleton => 1,
                 };
                 (id, parallelism)
             })
-            .collect()
+            .collect();
+
+        Ok(parallelisms)
     }
 }

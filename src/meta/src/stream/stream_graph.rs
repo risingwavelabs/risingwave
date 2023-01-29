@@ -17,10 +17,13 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ops::{Deref, Range};
 use std::sync::{Arc, LazyLock};
 
+use anyhow::Context;
 use assert_matches::assert_matches;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -33,7 +36,8 @@ use risingwave_pb::stream_plan::{
 
 use super::CreateStreamingJobContext;
 use crate::manager::{
-    IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingJob,
+    BuildGraphInfo, FragmentManager, IdCategory, IdCategoryType, IdGeneratorManager,
+    IdGeneratorManagerRef, StreamingJob,
 };
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
@@ -81,6 +85,10 @@ impl LocalActorId {
 struct GlobalId<const TYPE: IdCategoryType>(u32);
 
 impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+
     pub fn as_global_id(&self) -> u32 {
         self.0
     }
@@ -1146,7 +1154,109 @@ impl StreamFragmentGraph {
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
     LazyLock::new(HashMap::new);
 
-// struct CompleteStreamFragmentGraph {}
+#[derive(EnumAsInner)]
+enum Distribution {
+    Singleton,
+    Hash(ParallelUnitMapping),
+}
+
+struct CompleteStreamFragmentGraph {
+    graph: StreamFragmentGraph,
+
+    existing_fragments: HashMap<GlobalFragmentId, Fragment>,
+
+    /// stores edges between fragments: upstream => downstream.
+    downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
+
+    /// stores edges between fragments: downstream -> upstream.
+    upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
+}
+
+impl CompleteStreamFragmentGraph {
+    fn new<S: MetaStore>(
+        graph: StreamFragmentGraph,
+        upstream_mview_fragments: HashMap<TableId, Fragment>,
+    ) -> MetaResult<Self> {
+        // Create edges.
+        let mut downstreams = HashMap::new();
+        let mut upstreams = HashMap::new();
+
+        for (&id, fragment) in &graph.fragments {
+            for &upstream_table_id in &fragment.upstream_table_ids {
+                let mview_fragment = upstream_mview_fragments
+                    .get(&TableId::new(upstream_table_id))
+                    .context("upstream materialized view fragment not found")?;
+                let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
+
+                downstreams
+                    .entry(mview_id)
+                    .or_insert_with(HashMap::new)
+                    .insert(id, DispatcherType::NoShuffle);
+
+                upstreams
+                    .entry(id)
+                    .or_insert_with(HashMap::new)
+                    .insert(mview_id, DispatcherType::NoShuffle);
+            }
+        }
+
+        let existing_fragments = upstream_mview_fragments
+            .into_values()
+            .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
+            .collect();
+
+        Ok(Self {
+            graph,
+            existing_fragments,
+            downstreams,
+            upstreams,
+        })
+    }
+
+    fn dispatch_edges(
+        &self,
+    ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, DispatcherType)> + '_ {
+        self.graph
+            .downstreams
+            .iter()
+            .flat_map(|(&from, tos)| {
+                tos.iter().map(move |(&to, edge)| {
+                    (
+                        from,
+                        to,
+                        edge.get_dispatch_strategy().unwrap().get_type().unwrap(),
+                    )
+                })
+            })
+            .chain(
+                self.downstreams
+                    .iter()
+                    .flat_map(|(&from, tos)| tos.iter().map(move |(&to, &dt)| (from, to, dt))),
+            )
+    }
+
+    fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
+        self.existing_fragments
+            .iter()
+            .map(|(&id, f)| {
+                let dist = match f.get_distribution_type().unwrap() {
+                    FragmentDistributionType::Unspecified => unreachable!(),
+                    FragmentDistributionType::Single => Distribution::Singleton,
+                    FragmentDistributionType::Hash => {
+                        let mapping =
+                            ParallelUnitMapping::from_protobuf(f.get_vnode_mapping().unwrap());
+                        Distribution::Hash(mapping)
+                    }
+                };
+                (id, dist)
+            })
+            .collect()
+    }
+
+    fn into_inner(self) -> StreamFragmentGraph {
+        self.graph
+    }
+}
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
