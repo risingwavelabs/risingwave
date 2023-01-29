@@ -374,7 +374,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
                     // There will be no more chunks, so send None.
-                    sender.send(None).await.unwrap();
+                    if let Err(_e) = sender.send(None).await {
+                        warn!("failed to send None to annotate end");
+                    }
                     if let Err(_e) = t_1
                         .change_state_notify(
                             TaskStatus::Failed,
