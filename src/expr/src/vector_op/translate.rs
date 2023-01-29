@@ -65,9 +65,9 @@ mod tests {
             ),
             (
                 "奇点无限 RisingWave Labs",
-                "Data ",
+                "Labs ",
                 "1234",
-                "奇点无限Singul2ri3y1232",
+                "奇点无限Ri4ingW2ve1234",
             ),
         ];
 
