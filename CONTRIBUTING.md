@@ -53,5 +53,5 @@ You may also check out previous PRs in the [PR list](https://github.com/risingwa
 
 ### Sign the CLA
 
-Contributors will need to sign Singularity Data's CLA.
+Contributors will need to sign RisingWave Labs's CLA.
 
