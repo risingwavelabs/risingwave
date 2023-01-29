@@ -40,12 +40,12 @@
                 <version>${grpc.version}</version>
             </dependency>
             <dependency>
-                <groupId>${project.groupId}</groupId>
+                <groupId>com.risingwave.java</groupId>
                 <artifactId>java-binding</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
-                <groupId>${project.groupId}</groupId>
+                <groupId>com.risingwave.java</groupId>
                 <artifactId>proto</artifactId>
                 <version>${module.version}</version>
             </dependency>
