@@ -50,7 +50,7 @@ async fn test_state_table_update_insert() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -228,7 +228,7 @@ async fn test_state_table_iter_with_prefix() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -353,7 +353,7 @@ async fn test_state_table_iter_with_pk_range() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -487,8 +487,7 @@ async fn test_mem_table_assertion() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
-            .await;
+        StateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -530,7 +529,7 @@ async fn test_state_table_iter_with_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -691,7 +690,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -926,7 +925,7 @@ async fn test_state_table_write_chunk() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let epoch = EpochPair::new_test_epoch(1);
@@ -1055,7 +1054,7 @@ async fn test_state_table_write_chunk_visibility() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let epoch = EpochPair::new_test_epoch(1);
@@ -1182,7 +1181,7 @@ async fn test_state_table_write_chunk_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let epoch = EpochPair::new_test_epoch(1);
