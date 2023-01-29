@@ -11,6 +11,8 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 ## Table of contents
 
+- [Contribution guidelines](#contribution-guidelines)
+  - [Table of contents](#table-of-contents)
   - [Tests and miscellaneous checks](#tests-and-miscellaneous-checks)
   - [Submit a PR](#submit-a-pr)
     - [Pull Request title](#pull-request-title)
@@ -53,5 +55,4 @@ You may also check out previous PRs in the [PR list](https://github.com/risingwa
 
 ### Sign the CLA
 
-Contributors will need to sign Singularity Data's CLA.
-
+Contributors will need to sign RisingWave Labs' CLA.
