@@ -73,24 +73,15 @@ pub fn validate_table_key_range(version: &LocalHummockVersion) {
             .unwrap()
             .sub_levels
             .iter()
-            .for_each(|level| {
-                for t in &level.table_infos {
-                    assert!(
-                        t.key_range.is_some(),
-                        "key_range in table [{}] is none",
-                        t.id
-                    );
-                }
-            });
-        group.raw_group_meta.levels.iter().for_each(|level| {
-            for t in &level.table_infos {
+            .chain(group.raw_group_meta.levels.iter())
+            .flat_map(|level| level.table_infos.iter())
+            .for_each(|sst| {
                 assert!(
-                    t.key_range.is_some(),
+                    sst.key_range.is_some(),
                     "key_range in table [{}] is none",
-                    t.id
+                    sst.id
                 );
-            }
-        });
+            });
     });
 }
 

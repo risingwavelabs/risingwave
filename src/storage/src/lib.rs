@@ -42,7 +42,6 @@
 #![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
-#![feature(map_many_mut)]
 
 pub mod hummock;
 pub mod memory;
