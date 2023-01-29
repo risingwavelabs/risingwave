@@ -929,7 +929,7 @@ impl GrpcMetaClient {
         addr: &str,
         force_refresh_receiver: Receiver<Sender<Result<()>>>,
     ) -> Result<()> {
-        tracing::info!("using {} as initial leader", addr);
+        tracing::info!("using {} as initial leader and members", addr);
         let core_ref = self.core.clone();
         let current_leader = addr.to_string();
         let mut members = HashMap::new();
@@ -959,10 +959,11 @@ impl GrpcMetaClient {
             async fn refresh(&mut self) -> Result<()> {
                 self.refresh_members()
                     .await
-                    .context("error happened when refresh election members")?;
+                    .map_err(|e| anyhow!("error happened when refresh election members {}", e))?;
+
                 self.refresh_leader()
                     .await
-                    .context("error happened when refresh election leader")?;
+                    .map_err(|e| anyhow!("error happened when refresh leader members {}", e))?;
                 Ok(())
             }
 
@@ -972,7 +973,7 @@ impl GrpcMetaClient {
                     let members_resp = match client.to_owned().members(MembersRequest {}).await {
                         Ok(resp) => resp.into_inner(),
                         Err(e) => {
-                            tracing::debug!("failed to fetch members from {}, {}", addr, e);
+                            tracing::warn!("failed to fetch members from {}, {}", addr, e);
                             continue;
                         }
                     };
@@ -1012,7 +1013,7 @@ impl GrpcMetaClient {
                     let leader_resp = match client.to_owned().leader(LeaderRequest {}).await {
                         Ok(resp) => resp.into_inner(),
                         Err(e) => {
-                            tracing::debug!("failed to fetch leader from {}, {}", addr, e);
+                            tracing::warn!("failed to fetch leader from {}, {}", addr, e);
                             continue;
                         }
                     };
@@ -1225,6 +1226,7 @@ impl GrpcMetaClient {
             code,
             Code::Unknown | Code::Unimplemented | Code::Unavailable
         ) {
+            tracing::info!("matching tonic code {}", code);
             let (result_sender, result_receiver) = oneshot::channel();
             if self.force_refresh_sender.try_send(result_sender).is_ok() {
                 if let Ok(Err(e)) = result_receiver.await {
