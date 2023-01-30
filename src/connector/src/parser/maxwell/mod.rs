@@ -25,16 +25,17 @@ mod test {
     use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
-    use crate::parser::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
     #[tokio::test]
     async fn test_json_parser() {
-        let parser = MaxwellParser;
         let descs = vec![
             SourceColumnDesc::simple("ID", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("NAME", DataType::Varchar, 1.into()),
             SourceColumnDesc::simple("is_adult", DataType::Int16, 2.into()),
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
+
+        let parser = MaxwellParser::new(descs.clone()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         let payloads = vec![
@@ -45,7 +46,7 @@ mod test {
 
         for payload in payloads {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
