@@ -197,9 +197,7 @@ impl ElectionClient for EtcdElectionClient {
 
         let _guard = scopeguard::guard(handle, |handle| handle.abort());
 
-        if restored_leader {
-            self.is_leader_sender.send_replace(true);
-        } else {
+        if !restored_leader {
             self.is_leader_sender.send_replace(false);
             tracing::info!("no restored leader, campaigning");
             tokio::select! {
@@ -216,6 +214,8 @@ impl ElectionClient for EtcdElectionClient {
                 }
             };
         }
+
+        self.is_leader_sender.send_replace(true);
 
         let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
 
