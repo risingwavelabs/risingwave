@@ -459,10 +459,11 @@ where
                                 .get(downstream_fragment_id)
                                 .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
                             if (downstream_fragment.get_fragment_type_mask()
-                                & FragmentTypeFlag::ChainNode as u32)
+                                & (FragmentTypeFlag::ChainNode as u32
+                                    | FragmentTypeFlag::Mview as u32))
                                 == 0
                             {
-                                bail!("Rescheduling NoShuffle edge only supports ChainNode. Other usage for e.g. delta join is forbidden currently.");
+                                bail!("Rescheduling NoShuffle edge only supports ChainNode and Mview. Other usage for e.g. delta join is forbidden currently.");
                             }
                         }
 
