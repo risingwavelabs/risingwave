@@ -85,16 +85,6 @@ impl CompactionInput {
             );
         }
     }
-
-    pub fn add_preemptive_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
-        for level in &self.input_levels {
-            level_handlers[level.level_idx as usize].add_preemptive_task(
-                task_id,
-                self.target_level,
-                &level.table_infos,
-            );
-        }
-    }
 }
 
 pub struct CompactionTask {
@@ -135,6 +125,7 @@ impl CompactStatus {
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
+        let max_level_idx = (compaction_config.max_level - 1) as u32;
         let ret = if let Some(manual_compaction_option) = manual_compaction_option {
             self.manual_pick_compaction(
                 levels,
@@ -155,6 +146,10 @@ impl CompactStatus {
             _ => 0,
         };
 
+        let is_space_reclaim = ret.input.input_levels[0].level_idx == max_level_idx
+            && ret.input.input_levels[1].level_idx == max_level_idx
+            && ret.input.input_levels[1].table_infos.is_empty();
+
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
             splits: vec![KeyRange::inf()],
@@ -174,6 +169,7 @@ impl CompactStatus {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
+            is_space_reclaim,
         };
         Some(compact_task)
     }
@@ -360,23 +356,24 @@ pub trait CompactionPicker {
 }
 
 pub fn create_compaction_task(
-    storage_config: &CompactionConfig,
+    compaction_config: &CompactionConfig,
     input: CompactionInput,
     base_level: usize,
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
-        storage_config.target_file_size_base
+        compaction_config.target_file_size_base
     } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;
-        storage_config.target_file_size_base << step
+        compaction_config.target_file_size_base << step
     };
     let compression_algorithm = if input.target_level == 0 {
-        storage_config.compression_algorithm[0].clone()
+        compaction_config.compression_algorithm[0].clone()
     } else {
         let idx = input.target_level - base_level + 1;
-        storage_config.compression_algorithm[idx].clone()
+        compaction_config.compression_algorithm[idx].clone()
     };
+
     CompactionTask {
         input,
         compression_algorithm,

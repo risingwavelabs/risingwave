@@ -1171,13 +1171,15 @@ where
                 }
             } else {
                 // The compaction task is cancelled or failed.
-                commit_multi_var!(
-                    self,
-                    context_id,
-                    Transaction::default(),
-                    compact_statuses,
-                    compact_task_assignment
-                )?;
+                if !CompactStatus::is_trivial_move_task(compact_task) {
+                    commit_multi_var!(
+                        self,
+                        context_id,
+                        Transaction::default(),
+                        compact_statuses,
+                        compact_task_assignment
+                    )?;
+                }
             }
         }
 

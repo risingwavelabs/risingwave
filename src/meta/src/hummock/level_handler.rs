@@ -16,16 +16,13 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
-use risingwave_pb::hummock::level_handler::{RunningCompactTask, TaskPendingType};
+use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
-
-    // Can be preemptive by exclusive tasks, but tasks of the same type are mutually exclusive
-    preemptive_compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
-    exclusive_compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
+    compacting_files: HashMap<HummockSstableId, HummockCompactionTaskId>,
     pending_tasks: Vec<RunningCompactTask>,
 }
 
@@ -33,8 +30,7 @@ impl LevelHandler {
     pub fn new(level: u32) -> Self {
         Self {
             level,
-            preemptive_compacting_files: HashMap::default(),
-            exclusive_compacting_files: HashMap::default(),
+            compacting_files: HashMap::default(),
             pending_tasks: vec![],
         }
     }
@@ -44,17 +40,10 @@ impl LevelHandler {
     }
 
     pub fn remove_task(&mut self, target_task_id: u64) {
-        for task in &mut self.pending_tasks {
+        for task in &self.pending_tasks {
             if task.task_id == target_task_id {
-                // let compaction_files_ref =
-                // self.get_compaction_file_ref(task.task_pending_type());
                 for sst in &task.ssts {
-                    // compaction_files_ref.remove(sst);
-                    match task.task_pending_type() {
-                        TaskPendingType::Exclusive => self.exclusive_compacting_files.remove(sst),
-
-                        TaskPendingType::Preemptive => self.preemptive_compacting_files.remove(sst),
-                    };
+                    self.compacting_files.remove(sst);
                 }
             }
         }
@@ -63,37 +52,43 @@ impl LevelHandler {
     }
 
     pub fn is_pending_compact(&self, sst_id: &HummockSstableId) -> bool {
-        self.exclusive_compacting_files.contains_key(sst_id)
-    }
-
-    pub fn is_preemptive_compact(&self, sst_id: &HummockSstableId) -> bool {
-        self.preemptive_compacting_files.contains_key(sst_id)
+        self.compacting_files.contains_key(sst_id)
     }
 
     pub fn pending_task_id_by_sst(
         &self,
         sst_id: &HummockSstableId,
     ) -> Option<HummockCompactionTaskId> {
-        self.exclusive_compacting_files.get(sst_id).cloned()
+        self.compacting_files.get(sst_id).cloned()
     }
 
     pub fn is_level_pending_compact(&self, level: &Level) -> bool {
         level
             .table_infos
             .iter()
-            .any(|table| self.exclusive_compacting_files.contains_key(&table.id))
+            .any(|table| self.compacting_files.contains_key(&table.id))
     }
 
     pub fn add_pending_task(&mut self, task_id: u64, target_level: usize, ssts: &[SstableInfo]) {
-        self.add_pending_task_impl(task_id, target_level, ssts, TaskPendingType::Exclusive);
-    }
+        let target_level = target_level as u32;
+        let mut table_ids = vec![];
+        let mut total_file_size = 0;
+        for sst in ssts {
+            self.compacting_files.insert(sst.id, task_id);
+            total_file_size += sst.file_size;
+            table_ids.push(sst.id);
+        }
 
-    pub fn add_preemptive_task(&mut self, task_id: u64, target_level: usize, ssts: &[SstableInfo]) {
-        self.add_pending_task_impl(task_id, target_level, ssts, TaskPendingType::Preemptive);
+        self.pending_tasks.push(RunningCompactTask {
+            task_id,
+            target_level,
+            total_file_size,
+            ssts: table_ids,
+        });
     }
 
     pub fn get_pending_file_count(&self) -> usize {
-        self.exclusive_compacting_files.len()
+        self.compacting_files.len()
     }
 
     pub fn get_pending_file_size(&self) -> u64 {
@@ -119,46 +114,6 @@ impl LevelHandler {
     }
 }
 
-impl LevelHandler {
-    fn get_compaction_file_ref(
-        &mut self,
-        task_pending_type: TaskPendingType,
-    ) -> &mut HashMap<HummockSstableId, HummockCompactionTaskId> {
-        match task_pending_type {
-            TaskPendingType::Exclusive => &mut self.exclusive_compacting_files,
-            TaskPendingType::Preemptive => &mut self.preemptive_compacting_files,
-        }
-    }
-
-    fn add_pending_task_impl(
-        &mut self,
-        task_id: u64,
-        target_level: usize,
-        ssts: &[SstableInfo],
-        task_pending_type: TaskPendingType,
-    ) {
-        let target_level = target_level as u32;
-        let mut table_ids = vec![];
-        let mut total_file_size = 0;
-
-        let compaction_files_ref = self.get_compaction_file_ref(task_pending_type);
-
-        for sst in ssts {
-            compaction_files_ref.insert(sst.id, task_id);
-            total_file_size += sst.file_size;
-            table_ids.push(sst.id);
-        }
-
-        self.pending_tasks.push(RunningCompactTask {
-            task_id,
-            target_level,
-            total_file_size,
-            ssts: table_ids,
-            task_pending_type: task_pending_type as i32,
-        });
-    }
-}
-
 impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
     fn from(lh: &LevelHandler) -> Self {
         risingwave_pb::hummock::LevelHandler {
@@ -171,26 +126,16 @@ impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
 impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
     fn from(lh: &risingwave_pb::hummock::LevelHandler) -> Self {
         let mut pending_tasks = vec![];
-        let mut preemptive_compacting_files = HashMap::new();
-        let mut exclusive_compacting_files = HashMap::new();
+        let mut compacting_files = HashMap::new();
         for task in &lh.tasks {
             pending_tasks.push(task.clone());
-
-            let compacting_file_ref = if task.task_pending_type == TaskPendingType::Exclusive as i32
-            {
-                &mut exclusive_compacting_files
-            } else {
-                &mut preemptive_compacting_files
-            };
-
             for s in &task.ssts {
-                compacting_file_ref.insert(*s, task.task_id);
+                compacting_files.insert(*s, task.task_id);
             }
         }
         Self {
             pending_tasks,
-            preemptive_compacting_files,
-            exclusive_compacting_files,
+            compacting_files,
             level: lh.level,
         }
     }

@@ -244,20 +244,16 @@ message CompactTask {
   map<uint32, TableOption> table_options = 17;
   uint64 current_epoch_time = 18;
   uint64 target_sub_level_id = 19;
+  // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
+  bool is_space_reclaim = 20;
 }
 
 message LevelHandler {
-  enum TaskPendingType {
-    EXCLUSIVE = 0;
-    PREEMPTIVE = 1;
-  }
-
   message RunningCompactTask {
     uint64 task_id = 1;
     repeated uint64 ssts = 2;
     uint64 total_file_size = 3;
     uint32 target_level = 4;
-    TaskPendingType task_pending_type = 5;
   }
   uint32 level = 1;
   repeated RunningCompactTask tasks = 3;

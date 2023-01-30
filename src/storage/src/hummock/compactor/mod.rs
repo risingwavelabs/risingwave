@@ -39,7 +39,6 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -63,7 +62,7 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, CachePolicy, DeleteRangeAggregator, HummockError,
+    validate_ssts, BatchSstableWriterFactory, DeleteRangeAggregator, HummockError,
     RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -246,6 +245,13 @@ impl Compactor {
 
         // Sort by split/key range index.
         output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+
+        {
+            // cancel space_reclaim_compaction when delete ratio too low
+            if output_ssts.is_empty() && compact_task.is_space_reclaim {
+                task_status = TaskStatus::ManualCanceled;
+            }
+        }
 
         sync_point::sync_point!("BEFORE_COMPACT_REPORT");
         // After a compaction is done, mutate the compaction task.
@@ -602,22 +608,12 @@ impl Compactor {
     pub fn new(
         context: Arc<CompactorContext>,
         options: SstableBuilderOptions,
-        key_range: KeyRange,
-        cache_policy: CachePolicy,
-        gc_delete_keys: bool,
-        watermark: u64,
-        stats_target_table_ids: Option<HashSet<u32>>,
+        task_config: TaskConfig,
     ) -> Self {
         Self {
             context,
             options,
-            task_config: TaskConfig {
-                key_range,
-                cache_policy,
-                gc_delete_keys,
-                watermark,
-                stats_target_table_ids,
-            },
+            task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -759,7 +755,18 @@ impl Compactor {
         )
         .await?;
 
-        let ssts = sst_builder.finish().await?;
+        let ssts = {
+            if self.task_config.is_space_reclaim_compaction {
+                if let Some(delete_ratio) = compaction_statstics.delete_ratio() && delete_ratio < 15 {
+                    // not need to rewrite sst-files 
+                    vec![]
+                } else {
+                    sst_builder.finish().await?
+                }
+            } else {
+                sst_builder.finish().await?
+            }
+        };
 
         Ok((ssts, compaction_statstics.delta_drop_stat))
     }

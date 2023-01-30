@@ -222,9 +222,7 @@ impl ManualCompactionPicker {
         let level_handler = &level_handlers[reclaimed_level_idx];
 
         for sst in &reclaimed_level.table_infos {
-            if level_handler.is_pending_compact(&sst.id)
-                || level_handler.is_preemptive_compact(&sst.id)
-            {
+            if level_handler.is_pending_compact(&sst.id) {
                 continue;
             }
 
@@ -438,12 +436,7 @@ impl LevelSelector for ManualCompactionSelector {
         let ret =
             picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
 
-        // space reclaim need pending ?
-        if self.option.is_space_reclaim_compaction {
-            ret.add_preemptive_task(task_id, level_handlers);
-        } else {
-            ret.add_pending_task(task_id, level_handlers);
-        }
+        ret.add_pending_task(task_id, level_handlers);
         Some(create_compaction_task(
             self.inner.get_config(),
             ret,

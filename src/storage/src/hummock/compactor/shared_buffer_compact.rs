@@ -301,11 +301,14 @@ impl SharedBufferCompactRunner {
         let compactor = Compactor::new(
             context,
             options,
-            key_range,
-            CachePolicy::Fill,
-            GC_DELETE_KEYS_FOR_FLUSH,
-            GC_WATERMARK_FOR_FLUSH,
-            None,
+            super::TaskConfig {
+                key_range,
+                cache_policy: CachePolicy::Fill,
+                gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
+                watermark: GC_WATERMARK_FOR_FLUSH,
+                stats_target_table_ids: None,
+                is_space_reclaim_compaction: false,
+            },
         );
         Self {
             compactor,

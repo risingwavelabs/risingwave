@@ -108,6 +108,7 @@ pub struct TaskConfig {
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
+    pub is_space_reclaim_compaction: bool,
 }
 
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
