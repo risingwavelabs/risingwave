@@ -759,6 +759,7 @@ impl Compactor {
             if self.task_config.is_space_reclaim_compaction {
                 if let Some(delete_ratio) = compaction_statstics.delete_ratio() && delete_ratio < 15 {
                     // not need to rewrite sst-files 
+                    tracing::debug!("delete_ratio {} too low", delete_ratio);
                     vec![]
                 } else {
                     sst_builder.finish().await?

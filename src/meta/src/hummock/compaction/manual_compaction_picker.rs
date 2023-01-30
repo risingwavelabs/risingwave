@@ -215,11 +215,11 @@ impl ManualCompactionPicker {
         levels: &Levels,
         level_handlers: &[LevelHandler],
     ) -> Option<CompactionInput> {
-        let reclaimed_level_idx = level_handlers.len() - 1;
-        let reclaimed_level = &levels.get_level(reclaimed_level_idx);
+        assert!(!levels.levels.is_empty());
+        let reclaimed_level = levels.levels.last().unwrap();
         let max_reclain_count = self.option.max_space_reclaim_file_count; // todo use config
         let mut select_input_ssts = vec![];
-        let level_handler = &level_handlers[reclaimed_level_idx];
+        let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
         for sst in &reclaimed_level.table_infos {
             if level_handler.is_pending_compact(&sst.id) {
@@ -227,7 +227,7 @@ impl ManualCompactionPicker {
             }
 
             select_input_ssts.push(sst.clone());
-            if select_input_ssts.len() > max_reclain_count {
+            if select_input_ssts.len() == max_reclain_count {
                 break;
             }
         }
@@ -239,17 +239,17 @@ impl ManualCompactionPicker {
         Some(CompactionInput {
             input_levels: vec![
                 InputLevel {
-                    level_idx: reclaimed_level_idx as u32,
-                    level_type: levels.levels[reclaimed_level_idx].level_type,
+                    level_idx: reclaimed_level.level_idx,
+                    level_type: reclaimed_level.level_type,
                     table_infos: select_input_ssts,
                 },
                 InputLevel {
-                    level_idx: reclaimed_level_idx as u32,
-                    level_type: levels.levels[reclaimed_level_idx].level_type,
+                    level_idx: reclaimed_level.level_idx,
+                    level_type: reclaimed_level.level_type,
                     table_infos: vec![],
                 },
             ],
-            target_level: reclaimed_level_idx,
+            target_level: reclaimed_level.level_idx as usize,
             target_sub_level_id: 0,
         })
     }
@@ -389,6 +389,7 @@ impl ManualCompactionSelector {
 
 impl LevelSelector for ManualCompactionSelector {
     fn need_compaction(&self, levels: &Levels, _: &[LevelHandler]) -> bool {
+        // TODO: consider about space reclaim
         let ctx = self.inner.calculate_level_base_size(levels);
         if self.option.level > 0 && self.option.level < ctx.base_level {
             return false;
@@ -403,8 +404,8 @@ impl LevelSelector for ManualCompactionSelector {
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask> {
+        let ctx = self.inner.calculate_level_base_size(levels);
         let (picker, base_level) = if !self.option.is_space_reclaim_compaction {
-            let ctx = self.inner.calculate_level_base_size(levels);
             let target_level = if self.option.level == 0 {
                 ctx.base_level
             } else if self.option.level == self.inner.get_config().max_level as usize {
@@ -430,17 +431,19 @@ impl LevelSelector for ManualCompactionSelector {
                     self.option.clone(),
                     level_handlers.len(),
                 ),
-                level_handlers.len(),
+                ctx.base_level,
             )
         };
-        let ret =
-            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
 
-        ret.add_pending_task(task_id, level_handlers);
+        let compaction_input =
+            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
+        compaction_input.add_pending_task(task_id, level_handlers);
+
         Some(create_compaction_task(
             self.inner.get_config(),
-            ret,
+            compaction_input,
             base_level,
+            self.option.is_space_reclaim_compaction,
         ))
     }
 
@@ -1415,6 +1418,9 @@ pub mod tests {
                     generate_table(2, 1, 0, 100, 1),
                     generate_table(3, 1, 101, 200, 1),
                     generate_table(4, 1, 222, 300, 1),
+                    generate_table(5, 1, 333, 400, 1),
+                    generate_table(6, 1, 444, 500, 1),
+                    generate_table(7, 1, 555, 600, 1),
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
@@ -1480,6 +1486,41 @@ pub mod tests {
                 max_space_reclaim_file_count: 5,
             };
             let selector = ManualCompactionSelector::new(
+                config.clone(),
+                Arc::new(RangeOverlapStrategy::default()),
+                option,
+            );
+
+            let task = selector
+                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 6);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
+            assert!(!task.is_space_reclaim);
+        }
+
+        {
+            // pick space reclaim
+            levels_handler[4].remove_task(1);
+            let max_space_reclaim_file_count = 5;
+            let option = ManualCompactionOption {
+                sst_ids: vec![],
+                key_range: KeyRange {
+                    left: vec![],
+                    right: vec![],
+                    right_exclusive: false,
+                },
+                internal_table_id: HashSet::default(),
+                level: 4,
+                is_space_reclaim_compaction: true,
+                max_space_reclaim_file_count,
+            };
+            let selector = ManualCompactionSelector::new(
                 config,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
@@ -1491,10 +1532,14 @@ pub mod tests {
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
-            assert_eq!(task.input.input_levels[0].table_infos.len(), 3);
+            assert_eq!(
+                task.input.input_levels[0].table_infos.len(),
+                max_space_reclaim_file_count
+            );
             assert_eq!(task.input.input_levels[1].level_idx, 4);
             assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
             assert_eq!(task.input.target_level, 4);
+            assert!(task.is_space_reclaim);
         }
     }
 }

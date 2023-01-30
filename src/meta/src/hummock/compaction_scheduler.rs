@@ -28,6 +28,7 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 
 use super::Compactor;
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
@@ -126,6 +127,12 @@ where
             self.env.opts.periodic_compaction_interval_sec,
         ));
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
+            self.env.opts.periodic_compaction_interval_sec,
+        ));
+        min_space_reclaim_trigger_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let compaction_group: CompactionGroupId = tokio::select! {
                 compaction_group = sched_rx.recv() => {
@@ -151,6 +158,38 @@ where
                     }
                     continue;
                 },
+
+                _ = min_space_reclaim_trigger_interval.tick() => {
+                     // Disable periodic trigger for compaction_deterministic_test.
+                     if self.env.opts.compaction_deterministic_test {
+                        continue;
+                    }
+
+                    let manual_compaction_option = ManualCompactionOption {
+                        is_space_reclaim_compaction: true,
+                        max_space_reclaim_file_count: 5,
+                        ..Default::default()
+                    };
+                    // Periodically trigger compaction for all compaction groups.
+                    for cg_id in self.hummock_manager.compaction_group_ids().await {
+                        // if let Err(e) = sched_channel.try_sched_compaction(cg_id) {
+                        //     tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
+                        // }
+                        match self.hummock_manager.trigger_manual_compaction(cg_id, manual_compaction_option.clone()).await {
+                            Ok(_) => {
+                                println!("cg_id {} trigger space_reclaim_compactio success", cg_id);
+
+                            },
+
+                            Err(msg) => {
+                                println!("cg_id {} trigger space_reclaim_compaction fail {}", cg_id, msg);
+
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 // Shutdown compactor scheduler
                 _ = &mut shutdown_rx => {
                     break;

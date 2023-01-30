@@ -91,6 +91,7 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub compression_algorithm: String,
     pub target_file_size: u64,
+    pub is_space_reclaim: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -125,7 +126,6 @@ impl CompactStatus {
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
 
-        let max_level_idx = (compaction_config.max_level - 1) as u32;
         let ret = if let Some(manual_compaction_option) = manual_compaction_option {
             self.manual_pick_compaction(
                 levels,
@@ -146,10 +146,6 @@ impl CompactStatus {
             _ => 0,
         };
 
-        let is_space_reclaim = ret.input.input_levels[0].level_idx == max_level_idx
-            && ret.input.input_levels[1].level_idx == max_level_idx
-            && ret.input.input_levels[1].table_infos.is_empty();
-
         let compact_task = CompactTask {
             input_ssts: ret.input.input_levels,
             splits: vec![KeyRange::inf()],
@@ -169,7 +165,7 @@ impl CompactStatus {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
-            is_space_reclaim,
+            is_space_reclaim: ret.is_space_reclaim,
         };
         Some(compact_task)
     }
@@ -359,6 +355,7 @@ pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
     base_level: usize,
+    is_space_reclaim: bool,
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
@@ -378,5 +375,6 @@ pub fn create_compaction_task(
         input,
         compression_algorithm,
         target_file_size,
+        is_space_reclaim,
     }
 }

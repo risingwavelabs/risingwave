@@ -286,6 +286,7 @@ impl LevelSelector for DynamicLevelSelector {
                     self.inner.get_config(),
                     ret,
                     ctx.base_level,
+                    false,
                 ));
             }
             selector_stats
