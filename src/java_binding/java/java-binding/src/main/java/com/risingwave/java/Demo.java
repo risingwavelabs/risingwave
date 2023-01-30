@@ -31,7 +31,7 @@ public class Demo {
                         .build();
         try (MetaClient metaClient = new MetaClient(metaAddr, scheduledThreadPool)) {
             ScheduledFuture<?> heartbeatFuture =
-                    metaClient.startHeartbeatLoop(Duration.ofMillis(1000), Duration.ofSeconds(600));
+                    metaClient.startHeartbeatLoop(Duration.ofMillis(1000));
             HummockVersion version = metaClient.pinVersion();
             Table tableCatalog = metaClient.getTable(dbName, tableName);
             ReadPlan readPlan =

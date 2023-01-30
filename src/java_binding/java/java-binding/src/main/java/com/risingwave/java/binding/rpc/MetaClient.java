@@ -23,7 +23,6 @@ import io.grpc.Grpc;
 import io.grpc.InsecureChannelCredentials;
 import io.grpc.ManagedChannel;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -47,11 +46,9 @@ public class MetaClient implements AutoCloseable {
 
     // A heart beat task that sends a heartbeat to the meta service when run.
     private class HeartbeatTask implements Runnable {
-        Instant lastHeartbeatSent;
         Duration timeout;
 
         HeartbeatTask(Duration timeout) {
-            this.lastHeartbeatSent = Instant.now();
             this.timeout = timeout;
         }
 
@@ -66,13 +63,6 @@ public class MetaClient implements AutoCloseable {
             } catch (Exception e) {
                 Logger.getGlobal().warning(String.format("Failed to send heartbeat: %s", e));
             }
-
-            Instant now = Instant.now();
-            if (Duration.between(lastHeartbeatSent, Instant.now()).compareTo(timeout) > 0) {
-                Logger.getGlobal().warning("Heartbeat timeout, exiting...");
-                System.exit(1);
-            }
-            lastHeartbeatSent = now;
         }
     }
 
@@ -116,13 +106,10 @@ public class MetaClient implements AutoCloseable {
         return resp.getTable();
     }
 
-    public ScheduledFuture<?> startHeartbeatLoop(Duration minInterval, Duration maxInterval) {
-        Runnable heartbeatTask = new HeartbeatTask(maxInterval);
+    public ScheduledFuture<?> startHeartbeatLoop(Duration interval) {
+        Runnable heartbeatTask = new HeartbeatTask(interval.multipliedBy(3));
         return scheduler.scheduleWithFixedDelay(
-                heartbeatTask,
-                minInterval.toMillis(),
-                minInterval.toMillis(),
-                TimeUnit.MILLISECONDS);
+                heartbeatTask, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     @Override
