@@ -251,7 +251,7 @@ mod tests {
             let res: Vec<Option<Bytes>> = vec![Some(Bytes::new())];
             Ok(PgResponse::new_for_stream(
                 StatementType::SELECT,
-                Some(1),
+                None,
                 futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
                 vec![
                     // 1043 is the oid of varchar type.
