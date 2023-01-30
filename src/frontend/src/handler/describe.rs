@@ -86,7 +86,6 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 .collect(),
             pk_column_catalogs
                 .iter()
-                // .filter(|c| !c.is_hidden)
                 .map(|c| c.column_desc.clone())
                 .collect(),
             indices,
