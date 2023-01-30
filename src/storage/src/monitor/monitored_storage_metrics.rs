@@ -14,7 +14,7 @@
 
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
+    exponential_buckets, histogram_opts, linear_buckets, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry, Histogram,
     HistogramVec, Registry,
 };
@@ -58,10 +58,12 @@ impl MonitoredStorageMetrics {
         let get_value_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
+        let mut buckets = exponential_buckets(0.000004, 2.0, 8).unwrap(); // max 512us
+        buckets.extend(exponential_buckets(0.001, 4.0, 10).unwrap()); // max 262s.
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
             "Total latency of get that have been issued to state store",
-            exponential_buckets(0.00001, 2.0, 21).unwrap() // max 10s
+            buckets.clone(),
         );
         let get_duration =
             register_histogram_vec_with_registry!(get_duration_opts, &["table_id"], registry)
@@ -86,7 +88,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_duration",
             "Histogram of iterator scan and initialization time that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+            buckets.clone(),
         );
         let iter_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -94,7 +96,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
             "Histogram of iterator scan time that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+            buckets,
         );
         let iter_scan_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
