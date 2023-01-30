@@ -161,7 +161,7 @@ impl CsvParser {
     }
 
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    pub async fn into_stream(mut self, data_stream: BoxSourceStream) {
+    async fn into_stream(mut self, data_stream: BoxSourceStream) {
         // the remain length of the last seen message
         let mut remain_len = 0;
         // current offset
