@@ -297,7 +297,7 @@ impl Ord for ListValue {
 
 // Used to display ListValue in explain for better readibilty.
 pub fn display_for_explain(list: &ListValue) -> String {
-    // Example of ListValue display: ARRAY[1, 2]
+    // Example of ListValue display: ARRAY[1, 2, null]
     format!(
         "ARRAY[{}]",
         list.values
