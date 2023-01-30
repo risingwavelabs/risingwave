@@ -14,7 +14,7 @@
 
 //! Value encoding is an encoding format which converts row into a binary form that remains
 //! explanable after schema changes
-//! Current design of flag just contains 1 meaningful information: the 2 LSBs represents 
+//! Current design of flag just contains 1 meaningful information: the 2 LSBs represents
 //! the size of offsets: `u8`/`u16`/`u32`
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
