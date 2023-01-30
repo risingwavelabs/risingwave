@@ -20,7 +20,7 @@ statement ok
 create index i_b1 on b(b1);
 
 statement ok
-set streaming_parallelism = 4;
+set streaming_parallelism = 0;
 
 statement ok
 create materialized view v as select * from a join b on a.a1 = b.b1 ;
