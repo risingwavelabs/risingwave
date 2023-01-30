@@ -79,4 +79,5 @@ enum RowFormatType {
   MAXWELL = 5;
   CANAL_JSON = 6;
   CSV = 7;
+  Native = 8;
 }

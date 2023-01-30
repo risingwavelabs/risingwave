@@ -501,10 +501,7 @@ mod tests {
     async fn test_source_executor() {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::with_name(DataType::Int32, "sequence_int"),
-            ],
+            fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
         let row_id_index = Some(0);
         let pk_column_ids = vec![0];
@@ -583,10 +580,10 @@ mod tests {
         assert_eq!(
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I i
-                + . 11
-                + . 12
-                + . 13"
+                " i
+                + 11
+                + 12
+                + 13"
             )
         );
     }
