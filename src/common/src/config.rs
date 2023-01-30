@@ -154,6 +154,10 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::backend")]
     pub backend: MetaBackend,
+
+    /// Schedule compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -515,6 +519,10 @@ mod default {
 
         pub fn backend() -> MetaBackend {
             MetaBackend::Mem
+        }
+
+        pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
+            1800
         }
     }
 

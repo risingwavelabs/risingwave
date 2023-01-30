@@ -80,7 +80,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CompactionStatistics {
     pub delta_drop_stat: TableStatsMap,
 

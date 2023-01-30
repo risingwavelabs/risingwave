@@ -94,6 +94,9 @@ pub struct MetaOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+
+    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -116,6 +119,7 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
+            periodic_space_reclaim_compaction_interval_sec: 1800,
         }
     }
 }

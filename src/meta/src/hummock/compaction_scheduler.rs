@@ -129,7 +129,7 @@ where
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
-            self.env.opts.periodic_compaction_interval_sec,
+            self.env.opts.periodic_space_reclaim_compaction_interval_sec,
         ));
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -172,17 +172,14 @@ where
                     };
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
-                        // if let Err(e) = sched_channel.try_sched_compaction(cg_id) {
-                        //     tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
-                        // }
                         match self.hummock_manager.trigger_manual_compaction(cg_id, manual_compaction_option.clone()).await {
                             Ok(_) => {
-                                println!("cg_id {} trigger space_reclaim_compactio success", cg_id);
+                                tracing::info!("cg_id {} trigger space_reclaim_compactio success", cg_id);
 
                             },
 
                             Err(msg) => {
-                                println!("cg_id {} trigger space_reclaim_compaction fail {}", cg_id, msg);
+                                tracing::error!("cg_id {} trigger space_reclaim_compaction fail {}", cg_id, msg);
 
                             }
                         }
