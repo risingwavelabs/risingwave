@@ -14,6 +14,10 @@
 
 //! Value encoding is an encoding format which converts row into a binary form that remains
 //! explanable after schema changes
+//! Current design of flag just contains 1 meaningful information: the 2 LSBs represents 
+//! the size of offsets: `u8`/`u16`/`u32`
+//! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
+//! until schema changes
 
 use std::collections::BTreeMap;
 
@@ -23,8 +27,8 @@ use super::*;
 use crate::catalog::ColumnId;
 use crate::row::Row;
 
-/// deprecated design of have a Width to represent number of datum
-/// may be considered should `ColumnId` representation be optimized
+// deprecated design of have a Width to represent number of datum
+// may be considered should `ColumnId` representation be optimized
 // #[derive(Clone, Copy)]
 // enum Width {
 //     Mid(u8),
@@ -34,10 +38,10 @@ use crate::row::Row;
 
 bitflags! {
     struct Flag: u8 {
-        const Empty = 0b_1000_0000;
-        const Offset8 = 0b01;
-        const Offset16 = 0b10;
-        const Offset32 = 0b11;
+        const EMPTY = 0b_1000_0000;
+        const OFFSET8 = 0b01;
+        const OFFSET16 = 0b10;
+        const OFFSET32 = 0b11;
     }
 }
 
@@ -51,30 +55,30 @@ struct RowEncoding {
 impl RowEncoding {
     fn new() -> Self {
         RowEncoding {
-            flag: Flag::Empty,
+            flag: Flag::EMPTY,
             offsets: vec![],
             buf: vec![],
         }
     }
 
-    fn set_big(&mut self, maybe_offset: &[usize], max_offset: usize) {
+    fn set_offsets(&mut self, usize_offsets: &[usize], max_offset: usize) {
         assert!(self.offsets.is_empty());
         match max_offset {
             _n @ ..=const { u8::MAX as usize } => {
-                self.flag |= Flag::Offset8;
-                maybe_offset
+                self.flag |= Flag::OFFSET8;
+                usize_offsets
                     .iter()
                     .for_each(|m| self.offsets.put_u8(*m as u8));
             }
             _n @ ..=const { u16::MAX as usize } => {
-                self.flag |= Flag::Offset16;
-                maybe_offset
+                self.flag |= Flag::OFFSET16;
+                usize_offsets
                     .iter()
                     .for_each(|m| self.offsets.put_u16(*m as u16));
             }
             _n @ ..=const { u32::MAX as usize } => {
-                self.flag |= Flag::Offset32;
-                maybe_offset
+                self.flag |= Flag::OFFSET32;
+                usize_offsets
                     .iter()
                     .for_each(|m| self.offsets.put_u32(*m as u32));
             }
@@ -97,7 +101,7 @@ impl RowEncoding {
         let max_offset = *offset_usize
             .last()
             .expect("should encode at least one column");
-        self.set_big(&offset_usize, max_offset);
+        self.set_offsets(&offset_usize, max_offset);
     }
 }
 
@@ -105,8 +109,7 @@ impl RowEncoding {
 /// created again once the schema changes
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
-    datum_num: usize,
-    encoded_datum_num: Vec<u8>,
+    datum_num: u32,
 }
 
 impl Serializer {
@@ -116,18 +119,15 @@ impl Serializer {
         for id in column_ids {
             encoded_column_ids.put_i32_le(id.get_id());
         }
-        let datum_num = column_ids.len();
-        let mut encoded_datum_num = vec![];
-        encoded_datum_num.put_u32_le(datum_num as u32);
+        let datum_num = column_ids.len() as u32;
         Self {
             encoded_column_ids,
             datum_num,
-            encoded_datum_num,
         }
     }
 
     pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
-        assert_eq!(row.len(), self.datum_num);
+        assert_eq!(row.len(), self.datum_num as usize);
         let mut encoding = RowEncoding::new();
         encoding.encode(row.iter());
         self.serialize(encoding)
@@ -136,7 +136,7 @@ impl Serializer {
     fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = vec![];
         row_bytes.put_u8(encoding.flag.bits);
-        row_bytes.extend(self.encoded_datum_num.iter());
+        row_bytes.put_u32_le(self.datum_num);
         row_bytes.extend(self.encoded_column_ids.iter());
         row_bytes.extend(encoding.offsets.iter());
         row_bytes.extend(encoding.buf.iter());
@@ -166,12 +166,12 @@ impl<'a> Deserializer<'a> {
     }
 
     pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        let flag = encoded_bytes.get_u8();
-        let offset_bytes = match flag & 0b11 {
-            0b01 => 1,
-            0b10 => 2,
-            0b11 => 4,
-            _ => return Err(ValueEncodingError::InvalidFlag(flag)),
+        let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
+        let offset_bytes = match flag - Flag::EMPTY {
+            Flag::OFFSET8 => 1,
+            Flag::OFFSET16 => 2,
+            Flag::OFFSET32 => 4,
+            _ => return Err(ValueEncodingError::InvalidFlag(flag.bits)),
         };
         let datum_num = encoded_bytes.get_u32_le() as usize;
         let offsets_start_idx = 4 * datum_num;
