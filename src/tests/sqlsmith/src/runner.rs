@@ -13,6 +13,7 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
+use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
@@ -82,10 +83,19 @@ async fn test_batch_queries<R: Rng>(
         .await
         .unwrap();
     let mut skipped = 0;
-    for _ in 0..sample_size {
-        let sql = sql_gen(rng, tables.clone());
-        tracing::debug!("Executing: {}", sql);
-        let response = client.query(sql.as_str(), &[]).await;
+    let tasks = (0..sample_size)
+        .map(|_| {
+            let sql = sql_gen(rng, tables.clone());
+            tracing::debug!("Executing: {}", sql);
+            async {
+                let response = client.query(sql.as_str(), &[]).await;
+                (sql, response)
+            }
+        })
+        .collect_vec();
+
+    let responses = join_all(tasks).await;
+    for (sql, response) in responses {
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
     }
     skipped as f64 / sample_size as f64
@@ -100,10 +110,18 @@ async fn test_stream_queries<R: Rng>(
     sample_size: usize,
 ) -> f64 {
     let mut skipped = 0;
-    for _ in 0..sample_size {
-        let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
+    let tasks = (0..sample_size).map(|i| {
+        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("stream_query_{}", i));
         tracing::debug!("Executing: {}", sql);
-        let response = client.execute(&sql, &[]).await;
+        async {
+            let response = client.execute(&sql, &[]).await;
+            (table, sql, response)
+        }
+    });
+
+    let responses = join_all(tasks).await;
+
+    for (table, sql, response) in responses {
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
     }
