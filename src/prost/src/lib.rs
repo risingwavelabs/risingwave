@@ -143,6 +143,9 @@ pub mod backup_service_serde;
 #[rustfmt::skip]
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
+#[rustfmt::skip]
+#[path = "leader.serde.rs"]
+pub mod leader_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);

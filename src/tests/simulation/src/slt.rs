@@ -161,7 +161,14 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         break
                     }
                     // allow 'not found' error when retry DROP statement
-                    Err(e) if is_drop && i != 0 && e.to_string().contains("not found") => break,
+                    Err(e)
+                        if is_drop
+                            && i != 0
+                            && e.to_string().contains("not found")
+                            && e.to_string().contains("Catalog error") =>
+                    {
+                        break
+                    }
                     Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
                     Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
                 }
