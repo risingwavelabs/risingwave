@@ -140,7 +140,6 @@ impl ExchangeServiceImpl {
     ) {
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         let up_actor_id = up_down_actor_ids.0.to_string();
-        let down_actor_id = up_down_actor_ids.1.to_string();
         let up_fragment_id = up_down_fragment_ids.0.to_string();
         let down_fragment_id = up_down_fragment_ids.1.to_string();
 
@@ -189,10 +188,6 @@ impl ExchangeServiceImpl {
 
                     yield response;
 
-                    metrics
-                        .stream_exchange_bytes
-                        .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
                     metrics
                         .stream_fragment_exchange_bytes
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])

@@ -50,6 +50,9 @@ pub struct Configuration {
     /// The number of compute nodes.
     pub compute_nodes: usize,
 
+    /// The number of meta nodes.
+    pub meta_nodes: usize,
+
     /// The number of compactor nodes.
     pub compactor_nodes: usize,
 
@@ -72,6 +75,7 @@ impl Configuration {
             config_path: CONFIG_PATH.as_os_str().to_string_lossy().into(),
             frontend_nodes: 2,
             compute_nodes: 3,
+            meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
@@ -146,25 +150,27 @@ impl Cluster {
         std::env::set_var("RW_META_ADDR", "https://192.168.1.1:5690/");
 
         // meta node
-        let opts = risingwave_meta::MetaNodeOpts::parse_from([
-            "meta-node",
-            "--config-path",
-            &conf.config_path,
-            "--listen-addr",
-            "0.0.0.0:5690",
-            "--meta-endpoint",
-            "192.168.1.1:5690",
-            "--backend",
-            "etcd",
-            "--etcd-endpoints",
-            "192.168.10.1:2388",
-        ]);
-        handle
-            .create_node()
-            .name("meta")
-            .ip([192, 168, 1, 1].into())
-            .init(move || risingwave_meta::start(opts.clone()))
-            .build();
+        for i in 1..=conf.meta_nodes {
+            let opts = risingwave_meta::MetaNodeOpts::parse_from([
+                "meta-node",
+                "--config-path",
+                &conf.config_path,
+                "--listen-addr",
+                "0.0.0.0:5690",
+                "--meta-endpoint",
+                &format!("192.168.1.{i}:5690"),
+                "--backend",
+                "etcd",
+                "--etcd-endpoints",
+                "192.168.10.1:2388",
+            ]);
+            handle
+                .create_node()
+                .name(format!("meta-{i}"))
+                .ip([192, 168, 1, i as u8].into())
+                .init(move || risingwave_meta::start(opts.clone()))
+                .build();
+        }
 
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(15)).await;
@@ -345,8 +351,15 @@ impl Cluster {
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
-            if rand::thread_rng().gen_bool(0.5) {
-                nodes.push("meta".to_string());
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.meta_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("meta-{}", i));
             }
         }
         if opts.kill_frontend {
