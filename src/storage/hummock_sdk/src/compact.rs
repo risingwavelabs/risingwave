@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -95,7 +95,7 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
 }
 
 /// Config that is updatable when compactor is running.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CompactorRuntimeConfig {
     pub max_concurrent_task_number: u64,
 }

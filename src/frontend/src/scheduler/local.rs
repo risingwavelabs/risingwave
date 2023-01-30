@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::Context;
 use futures::executor::block_on;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -404,19 +405,20 @@ impl LocalQueryExecution {
                             .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.inner_side_vnode_mapping = self
+                        let table = self
                             .front_env
                             .catalog_reader()
                             .read_guard()
                             .get_table_by_id(&side_table_desc.table_id.into())
-                            .map(|table| {
-                                self.front_env
-                                    .worker_node_manager()
-                                    .get_fragment_mapping(&table.fragment_id)
-                            })
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
+                            .context("side table not found")?;
+                        let mapping = self
+                            .front_env
+                            .worker_node_manager()
+                            .get_fragment_mapping(&table.fragment_id)
+                            .context("fragment mapping not found")?;
+
+                        // TODO: should we use `pb::ParallelUnitMapping` here?
+                        node.inner_side_vnode_mapping = mapping.to_expanded();
                         node.worker_nodes =
                             self.front_env.worker_node_manager().list_worker_nodes();
                     }

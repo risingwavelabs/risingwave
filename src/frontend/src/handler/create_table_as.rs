@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::binder::{BoundSetExpr, BoundStatement};
+use crate::binder::BoundStatement;
 use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
@@ -55,16 +55,6 @@ pub async fn handle_create_as(
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
-            // Check if all expressions have an alias
-            if let BoundSetExpr::Select(select) = &query.body {
-                if select.aliases.iter().any(Option::is_none) {
-                    return Err(ErrorCode::BindError(
-                        "An alias must be specified for an expression".to_string(),
-                    )
-                    .into());
-                }
-            }
-
             let mut col_id_gen = ColumnIdGenerator::new_initial();
 
             // Create ColumnCatelog by Field
@@ -89,6 +79,7 @@ pub async fn handle_create_as(
         .into());
     }
 
+    // Override column name if it specified in creaet statement.
     columns.iter().enumerate().for_each(|(idx, column)| {
         column_descs[idx].name = column.name.real_value();
     });

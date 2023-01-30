@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    ColPrunable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase, PlanNodeType, PlanRef,
-    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
@@ -515,6 +516,15 @@ impl ToBatch for LogicalMultiJoin {
 
 impl ColPrunable for LogicalMultiJoin {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        panic!(
+            "Method not available for `LogicalMultiJoin` which is a placeholder node with \
+             a temporary lifetime. It only facilitates join reordering during logical planning."
+        )
+    }
+}
+
+impl ExprRewritable for LogicalMultiJoin {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

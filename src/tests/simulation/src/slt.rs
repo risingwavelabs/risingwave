@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ fn is_create_table_as(sql: &str) -> bool {
         .map(|s| s.to_lowercase())
         .collect();
 
-    println!("{:?}", parts);
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
@@ -64,7 +63,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }
-            let (is_create_table_as, is_create, is_drop, is_write) =
+            let (is_create_table_as, is_create, is_drop, is_dml, is_flush) =
                 if let sqllogictest::Record::Statement { sql, .. } = &record {
                     let is_create_table_as = is_create_table_as(sql);
                     let sql =
@@ -73,14 +72,32 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         is_create_table_as,
                         !is_create_table_as && sql == "create",
                         sql == "drop",
-                        sql == "insert" || sql == "update" || sql == "delete" || sql == "flush",
+                        sql == "insert" || sql == "update" || sql == "delete",
+                        sql == "flush",
+                    )
+                } else if let sqllogictest::Record::Query { sql, .. } = &record {
+                    let sql =
+                        (sql.trim_start().split_once(' ').unwrap_or_default().0).to_lowercase();
+                    (
+                        false,
+                        false,
+                        false,
+                        sql == "insert" || sql == "update" || sql == "delete",
+                        false,
                     )
                 } else {
-                    (false, false, false, false)
+                    (false, false, false, false, false)
                 };
-            // we won't kill during create/insert/update/delete/flush since the atomicity is not
+
+            // Since we've configured the session to always enable implicit flush, we don't need to
+            // execute `FLUSH` statements.
+            if is_flush {
+                continue;
+            }
+
+            // We won't kill during create/insert/update/delete since the atomicity is not
             // guaranteed. Notice that `create table as` is also not atomic in our system.
-            if is_write || is_create_table_as {
+            if is_dml || is_create_table_as {
                 if !kill {
                     if let Err(e) = tester.run_async(record).await {
                         panic!("{}", e);
@@ -107,7 +124,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 }
                 continue;
             }
-            if !kill || is_write || is_create_table_as {
+
+            // For normal records.
+            if !kill {
                 match tester.run_async(record).await {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
@@ -142,7 +161,14 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         break
                     }
                     // allow 'not found' error when retry DROP statement
-                    Err(e) if is_drop && i != 0 && e.to_string().contains("not found") => break,
+                    Err(e)
+                        if is_drop
+                            && i != 0
+                            && e.to_string().contains("not found")
+                            && e.to_string().contains("Catalog error") =>
+                    {
+                        break
+                    }
                     Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
                     Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
                 }

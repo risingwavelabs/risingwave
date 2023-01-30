@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -220,14 +220,26 @@ impl StreamNode for StreamHashJoin {
             .collect_vec();
 
         use super::stream::HashJoin;
-        let (left_table, left_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
-            self.left().plan_base(),
-            left_key_indices,
-        );
-        let (right_table, right_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
-            self.right().plan_base(),
-            right_key_indices,
-        );
+        let (left_table, left_degree_table, left_deduped_input_pk_indices) =
+            HashJoin::infer_internal_and_degree_table_catalog(
+                self.left().plan_base(),
+                left_key_indices,
+            );
+        let (right_table, right_degree_table, right_deduped_input_pk_indices) =
+            HashJoin::infer_internal_and_degree_table_catalog(
+                self.right().plan_base(),
+                right_key_indices,
+            );
+
+        let left_deduped_input_pk_indices = left_deduped_input_pk_indices
+            .iter()
+            .map(|idx| *idx as u32)
+            .collect_vec();
+
+        let right_deduped_input_pk_indices = right_deduped_input_pk_indices
+            .iter()
+            .map(|idx| *idx as u32)
+            .collect_vec();
 
         let (left_table, left_degree_table) = (
             left_table.with_id(state.gen_table_id_wrapped()),
@@ -259,6 +271,8 @@ impl StreamNode for StreamHashJoin {
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),
             right_degree_table: Some(right_degree_table.to_internal_table_prost()),
+            left_deduped_input_pk_indices,
+            right_deduped_input_pk_indices,
             output_indices: self
                 .logical
                 .output_indices()
