@@ -206,6 +206,27 @@ impl Scheduler {
                     fragment.actors.len(),
                     self.all_parallel_units.len(),
                 );
+            } else if fragment
+                .actors
+                .iter()
+                .any(|actor| actor.colocated_upstream_actor_id.is_some())
+            {
+                // This is a `NoShuffle` connected fragment. We need to follow the `parallel_units`
+                // of its corresponding upstream fragment.
+                let mut parallel_units = vec![];
+                for actor in &fragment.actors {
+                    if let Some(colocated_actor_id) = &actor.colocated_upstream_actor_id {
+                        let location = locations
+                            .actor_locations
+                            .get(&colocated_actor_id.id)
+                            .ok_or_else(|| {
+                                anyhow!("actor location not found: {}", colocated_actor_id.id)
+                            })?;
+                        parallel_units.push(location.clone());
+                    }
+                }
+                parallel_units.sort_unstable_by_key(|p| p.id);
+                parallel_units
             } else {
                 // By taking a prefix of all parallel units, we schedule the actors round-robin-ly.
                 // Then sort them by parallel unit id to make the actor ids continuous against the
