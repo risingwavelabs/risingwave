@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -137,9 +137,9 @@ impl Serializer {
         let mut row_bytes = vec![];
         row_bytes.put_u8(encoding.flag.bits);
         row_bytes.put_u32_le(self.datum_num);
-        row_bytes.extend(self.encoded_column_ids.iter());
-        row_bytes.extend(encoding.offsets.iter());
-        row_bytes.extend(encoding.buf.iter());
+        row_bytes.extend(&self.encoded_column_ids);
+        row_bytes.extend(&encoding.offsets);
+        row_bytes.extend(&encoding.buf);
 
         row_bytes
     }
