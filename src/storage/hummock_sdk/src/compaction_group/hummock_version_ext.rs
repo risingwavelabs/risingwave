@@ -541,41 +541,6 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     debug_assert!(can_concat(&operand.table_infos));
 }
 
-pub trait HummockVersionDeltaExt {
-    fn get_removed_sst_ids(&self) -> Vec<HummockSstableId>;
-    fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId>;
-}
-
-impl HummockVersionDeltaExt for HummockVersionDelta {
-    fn get_removed_sst_ids(&self) -> Vec<HummockSstableId> {
-        let mut ret = vec![];
-        for group_deltas in self.group_deltas.values() {
-            for group_delta in &group_deltas.group_deltas {
-                if let DeltaType::IntraLevel(intra_level) = group_delta.get_delta_type().unwrap() {
-                    for sst_id in &intra_level.removed_table_ids {
-                        ret.push(*sst_id);
-                    }
-                }
-            }
-        }
-        ret
-    }
-
-    fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId> {
-        let mut ret = vec![];
-        for group_deltas in self.group_deltas.values() {
-            for group_delta in &group_deltas.group_deltas {
-                if let DeltaType::IntraLevel(intra_level) = group_delta.get_delta_type().unwrap() {
-                    for sst in &intra_level.inserted_table_infos {
-                        ret.push(sst.id);
-                    }
-                }
-            }
-        }
-        ret
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

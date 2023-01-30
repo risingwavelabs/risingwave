@@ -2085,6 +2085,14 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Stale SST Total Number",
+                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    [
+                        panels.target(f"{metric('storage_stale_ssts_count')}",
+                                      "stale SST total number"),
+                    ],
+                ),
             ],
         )
     ]

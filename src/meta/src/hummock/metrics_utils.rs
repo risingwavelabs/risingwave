@@ -217,3 +217,7 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
             .set(HummockVersionId::MAX as _);
     }
 }
+
+pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
+    metrics.stale_ssts_count.set(total_number as _);
+}

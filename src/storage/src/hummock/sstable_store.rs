@@ -375,7 +375,7 @@ impl SstableStore {
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
         self.store
-            .list(&self.path)
+            .list(&format!("{}/", self.path))
             .await
             .map_err(HummockError::object_io_error)
     }

@@ -66,6 +66,9 @@ pub struct MetaMetrics {
     pub min_safepoint_version_id: IntGauge,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
+    /// Total number of SSTs that is no longer referenced by versions but is not yet deleted from
+    /// storage.
+    pub stale_ssts_count: IntGauge,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -223,6 +226,12 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let stale_ssts_count = register_int_gauge_with_registry!(
+            "storage_stale_ssts_count",
+            "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+            registry
+        ).unwrap();
+
         let hummock_manager_lock_time = register_histogram_vec_with_registry!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
@@ -267,6 +276,7 @@ impl MetaMetrics {
             level_file_size,
             version_size,
             version_stats,
+            stale_ssts_count,
             current_version_id,
             checkpoint_version_id,
             min_pinned_version_id,
