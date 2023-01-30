@@ -4603,6 +4603,7 @@ dependencies = [
  "postgres-types",
  "regex",
  "risingwave_common",
+ "risingwave_sqlparser",
  "rust_decimal",
  "thiserror",
  "tokio-openssl",

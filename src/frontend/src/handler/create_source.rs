@@ -20,7 +20,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::parser::{AvroParser, ProtobufParser};
+use risingwave_connector::parser::{AvroParserConfig, ProtobufParserConfig};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
@@ -44,10 +44,10 @@ async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser = AvroParser::new(
+    let parser = AvroParserConfig::new(
+        &with_properties,
         schema.row_schema_location.0.as_str(),
         schema.use_schema_registry,
-        with_properties,
     )
     .await?;
     let vec_column_desc = parser.map_to_columns()?;
@@ -65,11 +65,11 @@ async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser = ProtobufParser::new(
+    let parser = ProtobufParserConfig::new(
+        &with_properties,
         &schema.row_schema_location.0,
         &schema.message_name.0,
         schema.use_schema_registry,
-        with_properties,
     )
     .await?;
     let column_descs = parser.map_to_columns()?;
