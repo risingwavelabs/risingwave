@@ -66,6 +66,10 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
+    // Currently does nothing
+    #[clap(long)]
+    host: Option<String>,
+
     /// The endpoint for this meta node, which also serves as its unique identifier in cluster
     /// membership and leader election.
     #[clap(long)]
