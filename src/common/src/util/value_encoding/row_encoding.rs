@@ -17,6 +17,8 @@
 
 use std::collections::BTreeMap;
 
+use bitflags::bitflags;
+
 use super::*;
 use crate::catalog::ColumnId;
 use crate::row::Row;
@@ -30,9 +32,18 @@ use crate::row::Row;
 //     Extra(u32),
 // }
 
+bitflags! {
+    struct Flag: u8 {
+        const Empty = 0b_1000_0000;
+        const Offset8 = 0b01;
+        const Offset16 = 0b10;
+        const Offset32 = 0b11;
+    }
+}
+
 /// `RowEncoding` holds row-specific information for Column-Aware Encoding
 struct RowEncoding {
-    flag: u8,
+    flag: Flag,
     offsets: Vec<u8>,
     buf: Vec<u8>,
 }
@@ -40,7 +51,7 @@ struct RowEncoding {
 impl RowEncoding {
     fn new() -> Self {
         RowEncoding {
-            flag: 0b_1000_0000,
+            flag: Flag::Empty,
             offsets: vec![],
             buf: vec![],
         }
@@ -50,19 +61,19 @@ impl RowEncoding {
         assert!(self.offsets.is_empty());
         match max_offset {
             _n @ ..=const { u8::MAX as usize } => {
-                self.flag |= 0b01;
+                self.flag |= Flag::Offset8;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u8(*m as u8));
             }
             _n @ ..=const { u16::MAX as usize } => {
-                self.flag |= 0b10;
+                self.flag |= Flag::Offset16;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u16(*m as u16));
             }
             _n @ ..=const { u32::MAX as usize } => {
-                self.flag |= 0b11;
+                self.flag |= Flag::Offset32;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u32(*m as u32));
@@ -124,7 +135,7 @@ impl Serializer {
 
     fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = vec![];
-        row_bytes.put_u8(encoding.flag);
+        row_bytes.put_u8(encoding.flag.bits);
         row_bytes.extend(self.encoded_datum_num.iter());
         row_bytes.extend(self.encoded_column_ids.iter());
         row_bytes.extend(encoding.offsets.iter());
