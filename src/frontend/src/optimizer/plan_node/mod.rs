@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,6 +60,7 @@ pub trait PlanNode:
     + Display
     + Downcast
     + ColPrunable
+    + ExprRewritable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -377,6 +378,16 @@ impl dyn PlanNode {
         }
     }
 
+    pub fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         self.to_batch_prost_identity(true)
@@ -412,6 +423,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod expr_rewritable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -571,7 +584,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
-use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};

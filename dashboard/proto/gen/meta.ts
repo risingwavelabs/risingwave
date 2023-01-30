@@ -279,6 +279,12 @@ export interface TableFragments_ActorSplitsEntry {
   value: ConnectorSplits | undefined;
 }
 
+/** / Parallel unit mapping with fragment id, used for notification. */
+export interface FragmentParallelUnitMapping {
+  fragmentId: number;
+  mapping: ParallelUnitMapping | undefined;
+}
+
 /** TODO: remove this when dashboard refactored. */
 export interface ActorLocation {
   node: WorkerNode | undefined;
@@ -378,7 +384,7 @@ export interface MetaSnapshot {
   views: View[];
   functions: Function[];
   users: UserInfo[];
-  parallelUnitMappings: ParallelUnitMapping[];
+  parallelUnitMappings: FragmentParallelUnitMapping[];
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
@@ -406,7 +412,7 @@ export interface SubscribeResponse {
     | { $case: "view"; view: View }
     | { $case: "function"; function: Function }
     | { $case: "user"; user: UserInfo }
-    | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
     | { $case: "node"; node: WorkerNode }
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
@@ -913,6 +919,36 @@ export const TableFragments_ActorSplitsEntry = {
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
       ? ConnectorSplits.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFragmentParallelUnitMapping(): FragmentParallelUnitMapping {
+  return { fragmentId: 0, mapping: undefined };
+}
+
+export const FragmentParallelUnitMapping = {
+  fromJSON(object: any): FragmentParallelUnitMapping {
+    return {
+      fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
+      mapping: isSet(object.mapping) ? ParallelUnitMapping.fromJSON(object.mapping) : undefined,
+    };
+  },
+
+  toJSON(message: FragmentParallelUnitMapping): unknown {
+    const obj: any = {};
+    message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
+    message.mapping !== undefined &&
+      (obj.mapping = message.mapping ? ParallelUnitMapping.toJSON(message.mapping) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<FragmentParallelUnitMapping>, I>>(object: I): FragmentParallelUnitMapping {
+    const message = createBaseFragmentParallelUnitMapping();
+    message.fragmentId = object.fragmentId ?? 0;
+    message.mapping = (object.mapping !== undefined && object.mapping !== null)
+      ? ParallelUnitMapping.fromPartial(object.mapping)
       : undefined;
     return message;
   },
@@ -1504,7 +1540,7 @@ export const MetaSnapshot = {
       functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => Function.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
-        ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
+        ? object.parallelUnitMappings.map((e: any) => FragmentParallelUnitMapping.fromJSON(e))
         : [],
       nodes: Array.isArray(object?.nodes)
         ? object.nodes.map((e: any) => WorkerNode.fromJSON(e))
@@ -1566,7 +1602,9 @@ export const MetaSnapshot = {
       obj.users = [];
     }
     if (message.parallelUnitMappings) {
-      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
+      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) =>
+        e ? FragmentParallelUnitMapping.toJSON(e) : undefined
+      );
     } else {
       obj.parallelUnitMappings = [];
     }
@@ -1598,7 +1636,8 @@ export const MetaSnapshot = {
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
     message.functions = object.functions?.map((e) => Function.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
-    message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
+    message.parallelUnitMappings =
+      object.parallelUnitMappings?.map((e) => FragmentParallelUnitMapping.fromPartial(e)) || [];
     message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
@@ -1682,7 +1721,7 @@ export const SubscribeResponse = {
         : isSet(object.parallelUnitMapping)
         ? {
           $case: "parallelUnitMapping",
-          parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+          parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
         }
         : isSet(object.node)
         ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
@@ -1725,7 +1764,7 @@ export const SubscribeResponse = {
       (obj.function = message.info?.function ? Function.toJSON(message.info?.function) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
-      ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
+      ? FragmentParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
       : undefined);
     message.info?.$case === "node" &&
       (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
@@ -1784,7 +1823,7 @@ export const SubscribeResponse = {
     ) {
       message.info = {
         $case: "parallelUnitMapping",
-        parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+        parallelUnitMapping: FragmentParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
       };
     }
     if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {

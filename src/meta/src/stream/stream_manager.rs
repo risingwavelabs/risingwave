@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +19,14 @@ use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{ActorMapping, ParallelUnitMapping};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamNode};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -40,7 +40,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{parallel_unit_mapping_to_actor_mapping, Scheduler, SourceManagerRef};
+use crate::stream::{Scheduler, SourceManagerRef};
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -292,11 +292,7 @@ where
                 .get(upstream_table_id)
                 .unwrap();
 
-            let upstream_fragment_id = upstream_fragment_vnode_info
-                .vnode_mapping
-                .as_ref()
-                .unwrap()
-                .fragment_id;
+            let upstream_fragment_id = upstream_fragment_vnode_info.fragment_id;
 
             let is_singleton =
                 fragment.get_distribution_type()? == FragmentDistributionType::Single;
@@ -331,14 +327,8 @@ where
                 .upstream_fragment_ids
                 .push(upstream_fragment_id as FragmentId);
 
-            let mut vnode_mapping = upstream_fragment_vnode_info.vnode_mapping.clone();
-            // The upstream vnode_mapping is cloned here,
-            // so the fragment id in the mapping needs to be changed to the id of this fragment
-            if let Some(mapping) = vnode_mapping.as_mut() {
-                assert_ne!(mapping.fragment_id, fragment.fragment_id);
-                mapping.fragment_id = fragment.fragment_id;
-            }
-            fragment.vnode_mapping = vnode_mapping;
+            // Set the identical vnode mapping.
+            fragment.vnode_mapping = Some(upstream_fragment_vnode_info.vnode_mapping.clone());
         }
         Ok(())
     }
@@ -439,9 +429,14 @@ where
         let actor_to_vnode_mapping = {
             let mut mapping = HashMap::new();
             for fragment in table_fragments.fragments.values() {
+                let vnode_mapping = fragment
+                    .vnode_mapping
+                    .as_ref()
+                    .map(ParallelUnitMapping::from_protobuf);
+
                 for actor in &fragment.actors {
                     mapping
-                        .try_insert(actor.actor_id, fragment.vnode_mapping.clone())
+                        .try_insert(actor.actor_id, vnode_mapping.clone())
                         .unwrap();
                 }
             }
@@ -466,10 +461,8 @@ where
                     // workaround, we specially compute the consistent hash mapping here.
                     // This arm could be removed after the optimizer has been fully implemented.
                     &[single_downstream_actor] => {
-                        dispatcher.hash_mapping = Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![single_downstream_actor],
-                        });
+                        dispatcher.hash_mapping =
+                            Some(ActorMapping::new_single(single_downstream_actor).to_protobuf());
                     }
 
                     // For normal cases, we can simply transform the mapping from downstream actors
@@ -497,10 +490,11 @@ where
                             .collect::<HashMap<_, _>>();
 
                         // Transform the mapping of parallel unit to the mapping of actor.
-                        dispatcher.hash_mapping = Some(parallel_unit_mapping_to_actor_mapping(
-                            downstream_vnode_mapping,
-                            &parallel_unit_actor_map,
-                        ));
+                        dispatcher.hash_mapping = Some(
+                            downstream_vnode_mapping
+                                .to_actor(&parallel_unit_actor_map)
+                                .to_protobuf(),
+                        );
                     }
                 }
             }

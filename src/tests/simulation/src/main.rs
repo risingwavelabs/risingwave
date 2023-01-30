@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,6 +130,7 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
+        .with_writer(std::io::stderr)
         .init();
 
     let args = Args::parse();

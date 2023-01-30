@@ -1,4 +1,4 @@
-I hereby agree to the terms of the [Singularity Data, Inc. Contributor License Agreement](https://gist.github.com/skyzh/0663682a70b0edde7ae991492f2314cb#file-s9y_cla).
+I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Agreement](https://gist.github.com/TennyZhuang/f00be7f16996ea48effb049aa7be4d66#file-rw_cla).
 
 ## What's changed and what's your intention?
 

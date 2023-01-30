@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -25,8 +26,8 @@ use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation,
-    SourceChangeSplitMutation, StopMutation, UpdateMutation,
+    AddMutation, Dispatcher, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
+    StopMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -290,7 +291,8 @@ where
                                         dispatcher_id,
                                         hash_mapping: reschedule
                                             .upstream_dispatcher_mapping
-                                            .clone(),
+                                            .as_ref()
+                                            .map(|m| m.to_protobuf()),
                                         added_downstream_actor_id: reschedule.added_actors.clone(),
                                         removed_downstream_actor_id: reschedule
                                             .removed_actors

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
-use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -735,31 +735,19 @@ impl BatchPlanFragmenter {
     }
 }
 
-// TODO: let frontend store owner_mapping directly?
-fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Bitmap> {
-    let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
-    let num_vnodes = vnode_mapping.len();
-    for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
-        let bitmap = m
-            .entry(parallel_unit_id)
-            .or_insert_with(|| BitmapBuilder::zeroed(num_vnodes));
-        bitmap.set(i, true);
-    }
-    m.into_iter().map(|(k, v)| (k, v.finish())).collect()
-}
-
 /// Try to derive the partition to read from the scan range.
 /// It can be derived if the value of the distribution key is already known.
 fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
-    vnode_mapping: &VnodeMapping,
+    vnode_mapping: &ParallelUnitMapping,
 ) -> HashMap<ParallelUnitId, TablePartitionInfo> {
     let num_vnodes = vnode_mapping.len();
     let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
-        return vnode_mapping_to_owner_mapping(vnode_mapping.clone())
+        return vnode_mapping
+            .to_bitmaps()
             .into_iter()
             .map(|(k, vnode_bitmap)| {
                 (
@@ -781,9 +769,8 @@ fn derive_partitions(
         match vnode {
             None => {
                 // put this scan_range to all partitions
-                vnode_mapping_to_owner_mapping(vnode_mapping.clone())
-                    .into_iter()
-                    .for_each(|(parallel_unit_id, vnode_bitmap)| {
+                vnode_mapping.to_bitmaps().into_iter().for_each(
+                    |(parallel_unit_id, vnode_bitmap)| {
                         let (bitmap, scan_ranges) = partitions
                             .entry(parallel_unit_id)
                             .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
@@ -792,11 +779,12 @@ fn derive_partitions(
                             .enumerate()
                             .for_each(|(vnode, b)| bitmap.set(vnode, b));
                         scan_ranges.push(scan_range.to_protobuf());
-                    });
+                    },
+                );
             }
             // scan a single partition
             Some(vnode) => {
-                let parallel_unit_id = vnode_mapping[vnode.to_index()];
+                let parallel_unit_id = vnode_mapping[vnode];
                 let (bitmap, scan_ranges) = partitions
                     .entry(parallel_unit_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
