@@ -324,7 +324,6 @@ where
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
             .map_err(|err| PsqlError::QueryError(err.into()))?;
 
-        println!("simple here");
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
             let session = session.clone();
