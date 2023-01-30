@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
@@ -1233,7 +1233,7 @@ impl GrpcMetaClient {
                     tracing::error!("force refresh meta client failed {}", e);
                 }
             } else {
-                tracing::debug!("Skipping the current refresh, somewhere else is already doing it")
+                tracing::debug!("skipping the current refresh, somewhere else is already doing it")
             }
         }
     }
