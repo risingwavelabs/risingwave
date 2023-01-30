@@ -305,7 +305,7 @@ pub fn display_for_explain(list: &ListValue) -> String {
             .map(|v| {
                 match v.as_ref() {
                     None => "null".into(),
-                    Some(scalar) => scalar.as_scalar_ref_impl().to_text()
+                    Some(scalar) => scalar.as_scalar_ref_impl().to_text(),
                 }
             })
             .collect::<Vec<String>>()
