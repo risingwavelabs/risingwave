@@ -86,8 +86,6 @@ impl ElectionClient for EtcdElectionClient {
         let mut election_client = self.client.election_client();
         let mut stop = stop;
 
-        self.is_leader_sender.send_replace(false);
-
         tracing::info!("client {} start election", self.id);
 
         // is restored leader from previous session?
@@ -199,7 +197,10 @@ impl ElectionClient for EtcdElectionClient {
 
         let _guard = scopeguard::guard(handle, |handle| handle.abort());
 
-        if !restored_leader {
+        if restored_leader {
+            self.is_leader_sender.send_replace(true);
+        } else {
+            self.is_leader_sender.send_replace(false);
             tracing::info!("no restored leader, campaigning");
             tokio::select! {
                 biased;
@@ -217,8 +218,6 @@ impl ElectionClient for EtcdElectionClient {
         }
 
         let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
-
-        self.is_leader_sender.send_replace(true);
 
         loop {
             tokio::select! {
