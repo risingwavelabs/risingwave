@@ -286,6 +286,8 @@ export interface CompactTask {
   tableOptions: { [key: number]: TableOption };
   currentEpochTime: number;
   targetSubLevelId: number;
+  /** Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum */
+  isSpaceReclaim: boolean;
 }
 
 export const CompactTask_TaskStatus = {
@@ -1973,6 +1975,7 @@ function createBaseCompactTask(): CompactTask {
     tableOptions: {},
     currentEpochTime: 0,
     targetSubLevelId: 0,
+    isSpaceReclaim: false,
   };
 }
 
@@ -2006,6 +2009,7 @@ export const CompactTask = {
         : {},
       currentEpochTime: isSet(object.currentEpochTime) ? Number(object.currentEpochTime) : 0,
       targetSubLevelId: isSet(object.targetSubLevelId) ? Number(object.targetSubLevelId) : 0,
+      isSpaceReclaim: isSet(object.isSpaceReclaim) ? Boolean(object.isSpaceReclaim) : false,
     };
   },
 
@@ -2048,6 +2052,7 @@ export const CompactTask = {
     }
     message.currentEpochTime !== undefined && (obj.currentEpochTime = Math.round(message.currentEpochTime));
     message.targetSubLevelId !== undefined && (obj.targetSubLevelId = Math.round(message.targetSubLevelId));
+    message.isSpaceReclaim !== undefined && (obj.isSpaceReclaim = message.isSpaceReclaim);
     return obj;
   },
 
@@ -2077,6 +2082,7 @@ export const CompactTask = {
     );
     message.currentEpochTime = object.currentEpochTime ?? 0;
     message.targetSubLevelId = object.targetSubLevelId ?? 0;
+    message.isSpaceReclaim = object.isSpaceReclaim ?? false;
     return message;
   },
 };
