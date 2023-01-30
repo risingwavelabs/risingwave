@@ -19,6 +19,7 @@
 
 use std::fs;
 
+use clap::ArgEnum;
 use serde::{Deserialize, Serialize};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -27,17 +28,40 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
+/// For non-user-facing components where the CLI arguments do not overwrite the config file.
+pub const NO_OVERWRITE: Option<NoOverwrite> = None;
 
-pub fn load_config(path: &str) -> RwConfig
+/// A workaround for a bug in clap where the attribute `from_flag` on `Option<bool>` results in
+/// compilation error.
+pub type Flag = Option<bool>;
+
+pub fn load_config(path: &str, cli_overwrite: Option<impl OverwriteConfig>) -> RwConfig
 where
 {
-    if path.is_empty() {
+    let mut config = if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return RwConfig::default();
+        RwConfig::default()
+    } else {
+        let config_str = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
+        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+    };
+    if let Some(cli_overwrite) = cli_overwrite {
+        cli_overwrite.overwrite(&mut config);
     }
-    let config_str = fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-    toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+    config
+}
+
+pub trait OverwriteConfig {
+    fn overwrite(self, config: &mut RwConfig);
+}
+
+/// A dummy struct for `NO_OVERWRITE`. Do NOT use it directly.
+#[derive(Clone, Copy)]
+pub struct NoOverwrite {}
+
+impl OverwriteConfig for NoOverwrite {
+    fn overwrite(self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
@@ -133,6 +157,12 @@ pub struct ServerConfig {
 
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
+
+    #[serde(default = "default::server::metrics_level")]
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    pub metrics_level: u32,
 }
 
 impl Default for ServerConfig {
@@ -181,6 +211,14 @@ pub struct StreamingConfig {
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
 
+    /// Enable reporting tracing information to jaeger.
+    #[serde(default = "default::streaming::enable_jaegar_tracing")]
+    pub enable_jaeger_tracing: bool,
+
+    /// Enable async stack tracing for risectl.
+    #[serde(default = "default::streaming::async_stack_trace")]
+    pub async_stack_trace: AsyncStackTraceOption,
+
     #[serde(default)]
     pub developer: DeveloperConfig,
 }
@@ -220,6 +258,10 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: u32,
+
+    #[serde(default = "default::storage::state_store")]
+    /// State store url.
+    pub state_store: String,
 
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
@@ -290,6 +332,9 @@ impl Default for StorageConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
+    #[serde(default = "default::file_cache::dir")]
+    pub dir: String,
+
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
 
@@ -309,6 +354,19 @@ pub struct FileCacheConfig {
 impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Debug, Clone, ArgEnum, Serialize, Deserialize)]
+pub enum AsyncStackTraceOption {
+    Off,
+    On,
+    Verbose,
+}
+
+impl Default for AsyncStackTraceOption {
+    fn default() -> Self {
+        Self::On
     }
 }
 
@@ -424,6 +482,10 @@ mod default {
         pub fn connection_pool_size() -> u16 {
             16
         }
+
+        pub fn metrics_level() -> u32 {
+            0
+        }
     }
 
     pub mod storage {
@@ -450,6 +512,12 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> u32 {
             1024
+        }
+
+        pub fn state_store() -> String {
+            // May be problematic for multi-node deployment, but since we override it with CLI and
+            // it will be removed soon, it won't be a problem.
+            "hummock+memory".to_string()
         }
 
         pub fn data_directory() -> String {
@@ -510,6 +578,8 @@ mod default {
     }
 
     pub mod streaming {
+        use crate::config::AsyncStackTraceOption;
+
         pub fn barrier_interval_ms() -> u32 {
             1000
         }
@@ -523,9 +593,21 @@ mod default {
         pub fn checkpoint_frequency() -> usize {
             10
         }
+
+        pub fn enable_jaegar_tracing() -> bool {
+            false
+        }
+
+        pub fn async_stack_trace() -> AsyncStackTraceOption {
+            AsyncStackTraceOption::On
+        }
     }
 
     pub mod file_cache {
+
+        pub fn dir() -> String {
+            "".to_string()
+        }
 
         pub fn capacity_mb() -> usize {
             1024
@@ -549,6 +631,7 @@ mod default {
     }
 
     pub mod developer {
+
         pub fn batch_output_channel_size() -> usize {
             64
         }

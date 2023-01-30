@@ -26,7 +26,7 @@ use clap::Parser;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, StorageConfig};
+use risingwave_common::config::{load_config, RwConfig, StorageConfig, NO_OVERWRITE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
@@ -133,7 +133,7 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(&meta_opts.config_path);
+    let config = load_config(&meta_opts.config_path, NO_OVERWRITE);
     assert!(
         config.meta.enable_compaction_deterministic,
         "enable_compaction_deterministic should be set"
@@ -307,7 +307,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config = load_config(&opts.config_path_for_meta);
+    let config = load_config(&opts.config_path_for_meta, NO_OVERWRITE);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
