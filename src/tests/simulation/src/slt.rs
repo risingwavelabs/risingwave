@@ -44,8 +44,9 @@ const KILL_IGNORE_FILES: &[&str] = &[
 
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
-    let host = cluster.rand_frontend_ip();
-    let risingwave = RisingWave::connect(host, "dev".to_string()).await.unwrap();
+    let risingwave = RisingWave::connect("frontend".into(), "dev".into())
+        .await
+        .unwrap();
     let kill = opts.kill_compute || opts.kill_meta || opts.kill_frontend || opts.kill_compactor;
     let mut tester = sqllogictest::Runner::new(risingwave);
     let files = glob::glob(glob).expect("failed to read glob pattern");
@@ -179,13 +180,14 @@ pub async fn run_parallel_slt_task(
     glob: &str,
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
-    let host = cluster.rand_frontend_ip();
-    let db = RisingWave::connect(host, "dev".to_string()).await.unwrap();
+    let db = RisingWave::connect("frontend".into(), "dev".into())
+        .await
+        .unwrap();
     let mut tester = sqllogictest::Runner::new(db);
     tester
         .run_parallel_async(
             glob,
-            cluster.frontend_ips(),
+            vec!["frontend".into()],
             |host, dbname| async move { RisingWave::connect(host, dbname).await.unwrap() },
             jobs,
         )
