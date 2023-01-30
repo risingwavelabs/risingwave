@@ -14,14 +14,16 @@
 
 use std::fmt::Debug;
 
-use futures::future::ready;
+use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
+use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
-use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::SourceColumnDesc;
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -36,11 +38,20 @@ fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a Borro
     }
 }
 
+impl_common_parser_logic!(DebeziumJsonParser);
+
 #[derive(Debug)]
-pub struct DebeziumJsonParser;
+pub struct DebeziumJsonParser {
+    pub(crate) rw_columns: Vec<SourceColumnDesc>,
+}
 
 impl DebeziumJsonParser {
-    fn parse_inner(
+    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+        Ok(Self { rw_columns })
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn parse_inner(
         &self,
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
@@ -133,21 +144,5 @@ impl DebeziumJsonParser {
                 op
             )))),
         }
-    }
-}
-
-impl SourceParser for DebeziumJsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
     }
 }

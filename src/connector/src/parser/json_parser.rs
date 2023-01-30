@@ -12,26 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::ready;
+use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
+use simd_json::{BorrowedValue, ValueAccess};
 
-use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::impl_common_parser_logic;
+use crate::parser::common::simd_json_parse_value;
+use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::SourceColumnDesc;
+
+impl_common_parser_logic!(JsonParser);
 
 /// Parser for JSON format
 #[derive(Debug)]
-pub struct JsonParser;
+pub struct JsonParser {
+    rw_columns: Vec<SourceColumnDesc>,
+}
 
 impl JsonParser {
-    fn parse_inner(
+    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+        Ok(Self { rw_columns })
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn parse_inner(
         &self,
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        use simd_json::{BorrowedValue, ValueAccess};
-
-        use crate::parser::common::simd_json_parse_value;
-
         let mut payload_mut = payload.to_vec();
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
@@ -54,22 +63,6 @@ impl JsonParser {
     }
 }
 
-impl SourceParser for JsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -82,11 +75,10 @@ mod tests {
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
-    use crate::parser::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
 
     #[tokio::test]
     async fn test_json_parser() {
-        let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("bool", DataType::Boolean, 2.into()),
@@ -100,6 +92,8 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
+        let parser = JsonParser::new(descs.clone()).unwrap();
+
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         for payload in [
@@ -107,7 +101,7 @@ mod tests {
             br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -185,19 +179,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parser_failed() {
-        let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("v1", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
+        let parser = JsonParser::new(descs.clone()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         // Parse an incorrect record.
@@ -205,14 +199,14 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
-            parser.parse(payload, writer).await.unwrap_err();
+            parser.parse_inner(payload, writer).await.unwrap_err();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -223,8 +217,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parse_struct() {
-        let parser = JsonParser;
-
         let descs = vec![
             ColumnDesc::new_struct(
                 "data",
@@ -252,6 +244,8 @@ mod tests {
         .iter()
         .map(SourceColumnDesc::from)
         .collect_vec();
+
+        let parser = JsonParser::new(descs.clone()).unwrap();
         let payload = br#"
         {
             "data": {
@@ -271,7 +265,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).await.unwrap();
+            parser.parse_inner(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
