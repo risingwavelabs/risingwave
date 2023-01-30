@@ -28,7 +28,7 @@ use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
