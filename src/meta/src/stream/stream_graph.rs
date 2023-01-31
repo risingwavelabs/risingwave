@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, HashSet};
-use std::ops::{Deref, Range};
+use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
@@ -117,6 +117,8 @@ struct StreamActorDownstream {
     actors: OrderedActorLink,
 
     /// Whether to place the downstream actors on the same node
+    // TODO: remove this field
+    #[expect(dead_code)]
     same_worker_node: bool,
 }
 
@@ -176,7 +178,7 @@ impl StreamActorBuilder {
         }
     }
 
-    pub fn get_fragment_id(&self) -> GlobalFragmentId {
+    pub fn fragment_id(&self) -> GlobalFragmentId {
         self.fragment_id
     }
 
@@ -259,11 +261,6 @@ impl StreamGraphBuilder {
         );
     }
 
-    /// Number of actors in the graph builder
-    pub fn actor_len(&self) -> usize {
-        self.actor_builders.len()
-    }
-
     /// Add dependency between two connected node in the graph.
     pub fn add_link(
         &mut self,
@@ -271,8 +268,6 @@ impl StreamGraphBuilder {
         upstream_actor_ids: &[GlobalActorId],
         downstream_actor_ids: &[GlobalActorId],
         edge: StreamFragmentEdge,
-        upstream_distribution: &Distribution,
-        downstream_distribution: &Distribution,
     ) {
         let exchange_operator_id = edge.link_id;
         let same_worker_node = edge.same_worker_node;
@@ -383,7 +378,7 @@ impl StreamGraphBuilder {
     /// Build final stream DAG with dependencies with current actor builders.
     #[allow(clippy::type_complexity)]
     pub fn build(
-        mut self,
+        self,
         ctx: &CreateStreamingJobContext,
     ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
         let mut graph: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
@@ -406,10 +401,7 @@ impl StreamGraphBuilder {
             actor.nodes = Some(stream_node);
             actor.mview_definition = ctx.streaming_definition.clone();
 
-            graph
-                .entry(builder.get_fragment_id())
-                .or_default()
-                .push(actor);
+            graph.entry(builder.fragment_id()).or_default().push(actor);
         }
         Ok(graph)
     }
@@ -552,11 +544,11 @@ pub struct ActorGraphBuilder {
     // TODO: also use the physical distribution itself
     distributions: HashMap<GlobalFragmentId, Distribution>,
 
-    fragment_graph: CompleteStreamFragmentGraph,
+    fragment_graph: StreamFragmentGraph,
 }
 
 impl ActorGraphBuilder {
-    pub fn new_new(complete_graph: CompleteStreamFragmentGraph, default_parallelism: u32) -> Self {
+    pub fn new(complete_graph: CompleteStreamFragmentGraph, default_parallelism: u32) -> Self {
         let fake_parallel_units = (0..default_parallelism).map(|id| ParallelUnit {
             id,
             worker_node_id: 0,
@@ -567,16 +559,12 @@ impl ActorGraphBuilder {
                 .schedule(&complete_graph)
                 .unwrap();
 
-        // let fragment_graph = complete_graph.into_inner();
+        let fragment_graph = complete_graph.into_inner();
 
         Self {
             distributions,
-            fragment_graph: complete_graph,
+            fragment_graph,
         }
-    }
-
-    pub fn new(_fragment_graph: StreamFragmentGraph, _default_parallelism: u32) -> Self {
-        todo!()
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
@@ -602,8 +590,7 @@ impl ActorGraphBuilder {
         let stream_graph = stream_graph
             .into_iter()
             .map(|(fragment_id, actors)| {
-                // TODO: seal
-                let fragment = self.fragment_graph.graph.seal_fragment(fragment_id, actors);
+                let fragment = self.fragment_graph.seal_fragment(fragment_id, actors);
                 let fragment_id = fragment_id.as_global_id();
                 (fragment_id, fragment)
             })
@@ -621,10 +608,9 @@ impl ActorGraphBuilder {
     ) -> MetaResult<BuildActorGraphState> {
         let mut state = BuildActorGraphState::new(id_gen);
 
-        // TODO: topo order
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // popped out from the heap will be the top-most node in plan, or the sink in stream graph.)
-        for fragment_id in self.fragment_graph.graph.topo_order()? {
+        for fragment_id in self.fragment_graph.topo_order()? {
             // Build the actors corresponding to the fragment
             self.build_actor_graph_fragment(fragment_id, &mut state, ctx)?;
         }
@@ -641,8 +627,8 @@ impl ActorGraphBuilder {
         let current_fragment = self
             .fragment_graph
             .get_fragment(fragment_id)
-            .into_building()
-            .unwrap();
+            .unwrap()
+            .clone();
 
         let upstream_table_id = current_fragment
             .upstream_table_ids
@@ -658,7 +644,7 @@ impl ActorGraphBuilder {
         let distribution = &self.distributions[&fragment_id];
         let parallel_degree = distribution.parallelism() as u32;
 
-        let node = Arc::new(current_fragment.node.clone().unwrap());
+        let node = Arc::new(current_fragment.node.unwrap());
 
         let actor_ids = (0..parallel_degree)
             .map(|_| state.next_actor_id())
@@ -671,22 +657,18 @@ impl ActorGraphBuilder {
         }
 
         for (downstream_fragment_id, dispatch_edge) in
-            self.fragment_graph.get_building_downstreams(fragment_id)
+            self.fragment_graph.get_downstreams(fragment_id)
         {
             let downstream_actors = state
                 .fragment_actors
                 .get(downstream_fragment_id)
                 .expect("downstream fragment not processed yet");
 
-            let downstream_distribution = &self.distributions[&downstream_fragment_id];
-
             state.stream_graph_builder.add_link(
                 fragment_id,
                 &actor_ids,
                 downstream_actors,
                 dispatch_edge.clone(),
-                distribution,
-                downstream_distribution,
             );
         }
 
@@ -1031,6 +1013,7 @@ impl StreamFragmentGraph {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
+    #[expect(dead_code)]
     fn edges(
         &self,
     ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, &StreamFragmentEdge)> {
@@ -1058,12 +1041,6 @@ impl Distribution {
     }
 }
 
-#[derive(Debug, Clone, EnumAsInner)]
-enum GraphFragment {
-    Building(BuildingFragment),
-    Existing(Fragment),
-}
-
 pub struct CompleteStreamFragmentGraph {
     graph: StreamFragmentGraph,
 
@@ -1073,28 +1050,19 @@ pub struct CompleteStreamFragmentGraph {
     downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
 
     /// stores edges between fragments: downstream -> upstream.
+    #[expect(dead_code)]
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
 }
 
 impl CompleteStreamFragmentGraph {
-    fn get_fragment(&self, fragment_id: GlobalFragmentId) -> GraphFragment {
-        self.existing_fragments
-            .get(&fragment_id)
-            .map(|f| GraphFragment::Existing(f.clone()))
-            .or_else(|| {
-                self.graph
-                    .fragments
-                    .get(&fragment_id)
-                    .map(|f| GraphFragment::Building(f.clone()))
-            })
-            .expect("fragment not found")
-    }
-
-    fn get_building_downstreams(
-        &self,
-        fragment_id: GlobalFragmentId,
-    ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
-        self.graph.get_downstreams(fragment_id)
+    #[cfg(test)]
+    pub fn for_test(graph: StreamFragmentGraph) -> Self {
+        Self {
+            graph,
+            existing_fragments: Default::default(),
+            downstreams: Default::default(),
+            upstreams: Default::default(),
+        }
     }
 
     pub fn new(

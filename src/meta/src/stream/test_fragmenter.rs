@@ -36,7 +36,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CreateStreamingJobContext, StreamFragmentGraph};
+use crate::stream::{CompleteStreamFragmentGraph, CreateStreamingJobContext, StreamFragmentGraph};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -415,7 +415,10 @@ async fn test_graph_builder() -> MetaResult<()> {
         ..Default::default()
     };
 
-    let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
+    let actor_graph_builder = ActorGraphBuilder::new(
+        CompleteStreamFragmentGraph::for_test(fragment_graph),
+        parallel_degree,
+    );
 
     let graph = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
