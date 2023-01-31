@@ -386,6 +386,7 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
 }
 
 export const CompactTask_TaskType = {
+  TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
   BASE: "BASE",
   SPACE_RECLAIM: "SPACE_RECLAIM",
   MANUAL: "MANUAL",
@@ -398,15 +399,18 @@ export type CompactTask_TaskType = typeof CompactTask_TaskType[keyof typeof Comp
 export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType {
   switch (object) {
     case 0:
+    case "TYPE_UNSPECIFIED":
+      return CompactTask_TaskType.TYPE_UNSPECIFIED;
+    case 1:
     case "BASE":
       return CompactTask_TaskType.BASE;
-    case 1:
+    case 2:
     case "SPACE_RECLAIM":
       return CompactTask_TaskType.SPACE_RECLAIM;
-    case 2:
+    case 3:
     case "MANUAL":
       return CompactTask_TaskType.MANUAL;
-    case 3:
+    case 4:
     case "SHARED_BUFFER":
       return CompactTask_TaskType.SHARED_BUFFER;
     case -1:
@@ -418,6 +422,8 @@ export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType 
 
 export function compactTask_TaskTypeToJSON(object: CompactTask_TaskType): string {
   switch (object) {
+    case CompactTask_TaskType.TYPE_UNSPECIFIED:
+      return "TYPE_UNSPECIFIED";
     case CompactTask_TaskType.BASE:
       return "BASE";
     case CompactTask_TaskType.SPACE_RECLAIM:
@@ -2023,7 +2029,7 @@ function createBaseCompactTask(): CompactTask {
     tableOptions: {},
     currentEpochTime: 0,
     targetSubLevelId: 0,
-    taskType: CompactTask_TaskType.BASE,
+    taskType: CompactTask_TaskType.TYPE_UNSPECIFIED,
   };
 }
 
@@ -2057,7 +2063,9 @@ export const CompactTask = {
         : {},
       currentEpochTime: isSet(object.currentEpochTime) ? Number(object.currentEpochTime) : 0,
       targetSubLevelId: isSet(object.targetSubLevelId) ? Number(object.targetSubLevelId) : 0,
-      taskType: isSet(object.taskType) ? compactTask_TaskTypeFromJSON(object.taskType) : CompactTask_TaskType.BASE,
+      taskType: isSet(object.taskType)
+        ? compactTask_TaskTypeFromJSON(object.taskType)
+        : CompactTask_TaskType.TYPE_UNSPECIFIED,
     };
   },
 
@@ -2130,7 +2138,7 @@ export const CompactTask = {
     );
     message.currentEpochTime = object.currentEpochTime ?? 0;
     message.targetSubLevelId = object.targetSubLevelId ?? 0;
-    message.taskType = object.taskType ?? CompactTask_TaskType.BASE;
+    message.taskType = object.taskType ?? CompactTask_TaskType.TYPE_UNSPECIFIED;
     return message;
   },
 };
