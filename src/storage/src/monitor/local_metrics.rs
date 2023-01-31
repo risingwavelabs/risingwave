@@ -31,9 +31,7 @@ thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = Re
 macro_rules! inc_local_metrics {
     ($self:ident, $metrics: ident, $($x:ident),*) => {{
         $(
-            if $self.$x > 0 {
-                $metrics.$x.inc_by($self.$x);
-            }
+            $metrics.$x.inc_by($self.$x);
         )*
     }}
 }
@@ -128,6 +126,7 @@ impl StoreLocalStatistic {
         metrics
             .non_overlapping_iter_count
             .observe(self.overlapping_iter_count as f64);
+        metrics.collect_count += 1;
         if metrics.collect_count > FLUSH_LOCAL_METRICS_TIMES {
             metrics.flush();
             metrics.collect_count = 0;
