@@ -47,16 +47,10 @@ impl MetaNodeService {
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--dashboard-host")
-            .arg(format!(
-                "{}:{}",
-                config.listen_addr, config.dashboard_port
-            ));
+            .arg(format!("{}:{}", config.listen_addr, config.dashboard_port));
 
         cmd.arg("--prometheus-host")
-            .arg(format!(
-                "{}:{}",
-                config.listen_addr, config.exporter_port
-            ))
+            .arg(format!("{}:{}", config.listen_addr, config.exporter_port))
             .arg("--connector-rpc-endpoint")
             .arg(&config.connector_rpc_endpoint);
 

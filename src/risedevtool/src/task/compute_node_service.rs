@@ -50,10 +50,7 @@ impl ComputeNodeService {
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_addr, config.port))
             .arg("--prometheus-listener-addr")
-            .arg(format!(
-                "{}:{}",
-                config.listen_addr, config.exporter_port
-            ))
+            .arg(format!("{}:{}", config.listen_addr, config.exporter_port))
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")

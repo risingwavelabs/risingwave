@@ -47,10 +47,7 @@ impl FrontendService {
             .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--prometheus-listener-addr")
-            .arg(format!(
-                "{}:{}",
-                config.listen_addr, config.exporter_port
-            ))
+            .arg(format!("{}:{}", config.listen_addr, config.exporter_port))
             .arg("--health-check-listener-addr")
             .arg(format!(
                 "{}:{}",
