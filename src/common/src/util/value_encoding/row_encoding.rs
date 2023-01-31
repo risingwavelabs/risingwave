@@ -152,7 +152,7 @@ pub struct Serde {
 }
 
 impl ValueRowSerde for Serde {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Serde {
         let serializer = Serializer::new(column_ids);
         let deserializer = Deserializer::new(column_ids, schema);
         Serde {
@@ -160,9 +160,11 @@ impl ValueRowSerde for Serde {
             deserializer,
         }
     }
+
     fn serialize(&self, row: impl Row) -> Vec<u8> {
         self.serializer.serialize(row)
     }
+
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         self.deserializer.deserialize(encoded_bytes)
     }

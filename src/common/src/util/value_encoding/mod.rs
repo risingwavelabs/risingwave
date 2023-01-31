@@ -290,7 +290,7 @@ pub struct BasicSerde {
 }
 
 impl ValueRowSerde for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> Self {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> BasicSerde {
         BasicSerde {
             deserializer: RowDeserializer::new(schema.to_vec()),
         }
