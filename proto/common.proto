@@ -30,6 +30,7 @@ enum WorkerType {
   UNSPECIFIED = 0;
   FRONTEND = 1;
   COMPUTE_NODE = 2;
+  RISE_CTL = 3;
   COMPACTOR = 4;
 }
 
@@ -62,7 +63,7 @@ message Buffer {
 
 // Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-  repeated uint64 original_indices = 1;
+  repeated uint32 original_indices = 1;
   repeated uint32 data = 2;
 }
 
