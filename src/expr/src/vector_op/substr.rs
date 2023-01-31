@@ -42,9 +42,10 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     }
     let start = start.checked_sub(1).ok_or(ExprError::NumericOutOfRange)?;
     let begin = min(max(start, 0) as usize, s.len());
-    let end = begin
-        .checked_add(count as usize)
+    let end = (start
+        .checked_add(count)
         .ok_or(ExprError::NumericOutOfRange)?
+        .max(0) as usize)
         .min(s.len());
     writer.write_str(&s[begin..end]).unwrap();
     Ok(())
