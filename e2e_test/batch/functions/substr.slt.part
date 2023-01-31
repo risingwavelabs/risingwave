@@ -3,7 +3,7 @@ statement error out of range
 select substr('W7Jc3Vyufj', (INT '-2147483648'));
 
 -- issue: https://github.com/risingwavelabs/risingwave/issues/7601
-statement error out of range
+QUERY T
 select substr('a', 2147483646, 1);
-
-select substr('a', 2147483640, 1);
+----
+(empty)
