@@ -223,7 +223,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 10,
-            (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
+            (1..129).map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
 
@@ -352,7 +352,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 20,
-            (1..129).into_iter().collect_vec(),
+            (1..129).collect_vec(),
         )
         .await;
 
