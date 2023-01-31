@@ -18,7 +18,6 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::StructOpt;
-use risingwave_common::config::load_config;
 use tempfile::TempPath;
 use tokio::signal;
 

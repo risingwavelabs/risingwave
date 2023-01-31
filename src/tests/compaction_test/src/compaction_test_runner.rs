@@ -133,7 +133,10 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(&meta_opts.config_path, Some(meta_opts.override_opts));
+    let config = load_config(
+        &meta_opts.config_path,
+        Some(meta_opts.override_opts.clone()),
+    );
     assert!(
         config.meta.enable_compaction_deterministic,
         "enable_compaction_deterministic should be set"
