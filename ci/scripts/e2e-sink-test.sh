@@ -66,7 +66,8 @@ java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-sourc
 sleep 1
 
 echo "--- testing sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sleep 1
 
 # check sink destination postgres
