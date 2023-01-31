@@ -142,8 +142,7 @@ where
             locations: &'a mut ScheduledLocations,
             /// New dispatchers for this mview.
             dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
-            /// New vnode bitmaps for chain actors.
-            actor_vnode_bitmaps: &'a mut HashMap<ActorId, Option<Buffer>>,
+
             /// Upstream Materialize actor ids grouped by worker id.
             upstream_worker_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
@@ -196,7 +195,8 @@ where
                 self.locations
                     .actor_locations
                     .insert(actor_id, upstream_parallel_unit);
-                self.actor_vnode_bitmaps
+                self.locations
+                    .actor_vnode_bitmaps
                     .insert(actor_id, upstream_vnode_bitmap.clone());
 
                 // fill upstream node-actor info for later use
@@ -273,7 +273,6 @@ where
             tables_worker_actors,
             locations,
             dispatchers,
-            actor_vnode_bitmaps: &mut Default::default(),
             upstream_worker_actors,
         };
 
@@ -314,7 +313,12 @@ where
                 )?;
 
                 // setup actor vnode bitmap.
-                actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
+                actor.vnode_bitmap = env
+                    .locations
+                    .actor_vnode_bitmaps
+                    .get(&actor.actor_id)
+                    .unwrap()
+                    .clone();
 
                 // setup upstream actor id
                 actor.upstream_actor_id.push(upstream_actor_ids[idx]);

@@ -19,8 +19,9 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::ParallelUnitMapping;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
+use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -40,6 +41,8 @@ pub struct ScheduledLocations {
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
     /// worker location map.
     pub worker_locations: WorkerLocations,
+    /// actor vnode bitmap.
+    pub actor_vnode_bitmaps: HashMap<ActorId, Option<Buffer>>,
 }
 
 impl ScheduledLocations {
@@ -52,6 +55,7 @@ impl ScheduledLocations {
         Self {
             actor_locations: Default::default(),
             worker_locations: workers.into_iter().map(|w| (w.id, w)).collect(),
+            actor_vnode_bitmaps: Default::default(),
         }
     }
 
@@ -178,8 +182,8 @@ impl Scheduler {
             };
 
             let parallel_unit = if let Some(colocated_actor_id) = &actor.colocated_upstream_actor_id
-                && !actor.upstream_actor_id.is_empty()
             {
+                assert!(!actor.upstream_actor_id.is_empty());
                 // Schedule the fragment to the same parallel unit as upstream.
                 locations.schedule_colocate_with(&[colocated_actor_id.id])?
             } else {
@@ -200,7 +204,7 @@ impl Scheduler {
                 .insert(fragment.actors[0].actor_id, parallel_unit);
         } else {
             // Normal fragment
-            let parallel_units = if self.all_parallel_units.len() < fragment.actors.len() {
+            if self.all_parallel_units.len() < fragment.actors.len() {
                 bail!(
                     "not enough parallel units to schedule, required {} got {}",
                     fragment.actors.len(),
@@ -211,52 +215,63 @@ impl Scheduler {
                 .iter()
                 .any(|actor| actor.colocated_upstream_actor_id.is_some())
             {
-                // This is a `NoShuffle` connected fragment. We need to follow the `parallel_units`
-                // of its corresponding upstream fragment.
-                let mut parallel_units = vec![];
-                for actor in &fragment.actors {
-                    if let Some(colocated_actor_id) = &actor.colocated_upstream_actor_id {
-                        let location = locations
-                            .actor_locations
-                            .get(&colocated_actor_id.id)
-                            .ok_or_else(|| {
-                                anyhow!("actor location not found: {}", colocated_actor_id.id)
-                            })?;
-                        parallel_units.push(location.clone());
+                let mut parallel_unit_bitmap = HashMap::default();
+                // Record actor locations and set vnodes into the actors.
+                for actor in &mut fragment.actors {
+                    let colocated_actor_id = actor
+                        .colocated_upstream_actor_id
+                        .clone()
+                        .expect("colocated actor id must exists");
+                    assert!(!actor.upstream_actor_id.is_empty());
+                    let parallel_unit =
+                        locations.schedule_colocate_with(&[colocated_actor_id.id])?;
+                    let vnode_bitmap = locations
+                        .actor_vnode_bitmaps
+                        .get(&colocated_actor_id.id)
+                        .unwrap()
+                        .clone();
+
+                    if let Some(buffer) = vnode_bitmap.as_ref() {
+                        parallel_unit_bitmap.insert(parallel_unit.id, Bitmap::from(buffer));
                     }
+
+                    actor.vnode_bitmap = vnode_bitmap.clone();
+                    locations
+                        .actor_locations
+                        .insert(actor.actor_id, parallel_unit);
+                    locations
+                        .actor_vnode_bitmaps
+                        .insert(actor.actor_id, vnode_bitmap);
                 }
-                parallel_units.sort_unstable_by_key(|p| p.id);
-                parallel_units
+
+                // Construct `vnode_mapping` by merging all `vnode_bitmap` of the colocated upstream
+                // actors. Set fragment `vnode_mapping` manually.
+                fragment.vnode_mapping =
+                    Some(ParallelUnitMapping::from_bitmaps(&parallel_unit_bitmap).to_protobuf());
             } else {
                 // By taking a prefix of all parallel units, we schedule the actors round-robin-ly.
                 // Then sort them by parallel unit id to make the actor ids continuous against the
                 // parallel unit id.
                 let mut parallel_units = self.all_parallel_units[..fragment.actors.len()].to_vec();
                 parallel_units.sort_unstable_by_key(|p| p.id);
-                parallel_units
-            };
 
-            // Build vnode mapping according to the parallel units.
-            let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
-            let vnode_bitmaps = vnode_mapping.to_bitmaps();
+                // Build vnode mapping according to the parallel units.
+                let vnode_mapping = self.set_fragment_vnode_mapping(fragment, &parallel_units)?;
+                let vnode_bitmaps = vnode_mapping.to_bitmaps();
 
-            // Record actor locations and set vnodes into the actors.
-            for (actor, parallel_unit) in fragment.actors.iter_mut().zip_eq(parallel_units) {
-                let parallel_unit = if let Some(colocated_actor_id) = &actor.colocated_upstream_actor_id
-                    && !actor.upstream_actor_id.is_empty()
-                {
+                // Record actor locations and set vnodes into the actors.
+                for (actor, parallel_unit) in fragment.actors.iter_mut().zip_eq(parallel_units) {
+                    let vnode_bitmap =
+                        Some(vnode_bitmaps.get(&parallel_unit.id).unwrap().to_protobuf());
+                    actor.vnode_bitmap = vnode_bitmap.clone();
                     locations
-                        .schedule_colocate_with(&[colocated_actor_id.id])?
-                } else {
-                    parallel_unit.clone()
-                };
-
-                actor.vnode_bitmap =
-                    Some(vnode_bitmaps.get(&parallel_unit.id).unwrap().to_protobuf());
-                locations
-                    .actor_locations
-                    .insert(actor.actor_id, parallel_unit);
-            }
+                        .actor_locations
+                        .insert(actor.actor_id, parallel_unit);
+                    locations
+                        .actor_vnode_bitmaps
+                        .insert(actor.actor_id, vnode_bitmap);
+                }
+            };
         }
 
         Ok(())
