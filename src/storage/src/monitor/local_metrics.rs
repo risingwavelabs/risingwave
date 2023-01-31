@@ -397,7 +397,7 @@ impl LocalStoreMetrics {
 
 macro_rules! define_bloom_filter_metrics {
     ($($x:ident),*) => (
-        pub struct BloomFilterLocalMetrics {
+        struct BloomFilterLocalMetrics {
             $($x: GenericLocalCounter<prometheus::core::AtomicU64>,)*
         }
 

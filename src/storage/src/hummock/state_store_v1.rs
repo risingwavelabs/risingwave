@@ -86,7 +86,6 @@ impl HummockStorageV1 {
             sync_uncommitted_data,
         } = self.read_filter(epoch, &read_options, &(table_key..=table_key))?;
 
-        let mut table_counts = 0;
         let full_key = FullKey::new(table_id, table_key, epoch);
 
         // Query shared buffer. Return the value without iterating SSTs if found
@@ -105,7 +104,7 @@ impl HummockStorageV1 {
                     .report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
                 return Ok(v.into_user_value());
             }
-            table_counts += table_count;
+            local_stats.sub_iter_count += table_count as u64;
         }
         for sync_uncommitted_data in sync_uncommitted_data {
             let (value, table_count) = get_from_order_sorted_uncommitted_data(
@@ -121,7 +120,7 @@ impl HummockStorageV1 {
                     .report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
                 return Ok(v.into_user_value());
             }
-            table_counts += table_count;
+            local_stats.sub_iter_count += table_count as u64;
         }
 
         let dist_key_hash = read_options
@@ -144,7 +143,7 @@ impl HummockStorageV1 {
                     let sstable_infos =
                         prune_ssts(level.table_infos.iter(), table_id, &(table_key..=table_key));
                     for sstable_info in sstable_infos {
-                        table_counts += 1;
+                        local_stats.sub_iter_count += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
@@ -183,7 +182,7 @@ impl HummockStorageV1 {
                         continue;
                     }
 
-                    table_counts += 1;
+                    local_stats.sub_iter_count += 1;
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
@@ -205,10 +204,6 @@ impl HummockStorageV1 {
         }
 
         local_stats.report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&["", "sub-iter"])
-            .observe(table_counts as f64);
         Ok(None)
     }
 
