@@ -21,7 +21,7 @@ pub struct GrafanaGen;
 
 impl GrafanaGen {
     pub fn gen_custom_ini(&self, config: &GrafanaConfig) -> String {
-        let grafana_host = &config.listen_addr;
+        let grafana_host = &config.listen_address;
         let grafana_port = config.port;
 
         format!(

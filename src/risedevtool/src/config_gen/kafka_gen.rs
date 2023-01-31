@@ -20,7 +20,7 @@ pub struct KafkaGen;
 
 impl KafkaGen {
     pub fn gen_server_properties(&self, config: &KafkaConfig, kafka_log_dirs: &str) -> String {
-        let kafka_listen_host = &config.listen_addr;
+        let kafka_listen_host = &config.listen_address;
         let kafka_advertise_host = &config.address;
         let kafka_port = &config.port;
         let zookeeper_hosts = config
