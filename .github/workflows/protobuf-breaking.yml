@@ -1,0 +1,18 @@
+name: Protobuf Breaking Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [proto/**]
+
+jobs:
+  validate-protos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bufbuild/buf-setup-action@v1
+      # Run breaking change detection against the `main` branch
+      - uses: bufbuild/buf-breaking-action@v1
+        with:
+          input: 'proto'
+          against: '.git#branch=main,subdir=proto'
