@@ -65,7 +65,7 @@ pub struct MetaNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long = "host", default_value = "127.0.0.1:5690")]
+    #[clap(long, default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
     /// Deprecated. But we keep it for backward compatibility.
