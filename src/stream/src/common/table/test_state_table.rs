@@ -22,6 +22,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_storage::table::DEFAULT_VNODE;
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
@@ -49,7 +50,7 @@ async fn test_state_table_update_insert() {
     );
 
     test_env.register_table(table.clone()).await;
-    let mut state_table =
+    let mut state_table: StateTable<_, BasicSerde> =
         StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
             .await;
 
