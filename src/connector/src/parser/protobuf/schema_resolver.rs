@@ -31,7 +31,7 @@ const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
 // TODO(Tao): Probably we should never allow to use S3 URI.
 pub(super) async fn load_file_descriptor_from_s3(
     location: &Url,
-    properties: HashMap<String, String>,
+    properties: &HashMap<String, String>,
 ) -> Result<Vec<u8>> {
     let bucket = location.domain().ok_or_else(|| {
         RwError::from(InternalError(format!(

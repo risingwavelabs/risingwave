@@ -1415,6 +1415,10 @@ where
         }
     }
 
+    pub async fn list_databases(&self) -> Vec<Database> {
+        self.core.lock().await.database.list_databases()
+    }
+
     pub async fn list_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_tables()
     }

@@ -41,7 +41,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
+    version_update_payload, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
     GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
 };
@@ -161,7 +161,7 @@ use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, ProstTableStatsMap,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::CompactionGroup as ProstCompactionGroup;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -511,7 +511,7 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-    ) -> Result<pin_version_response::Payload> {
+    ) -> Result<version_update_payload::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
