@@ -30,8 +30,7 @@ enum WorkerType {
   UNSPECIFIED = 0;
   FRONTEND = 1;
   COMPUTE_NODE = 2;
-  RISE_CTL = 3;
-  COMPACTOR = 4;
+  COMPACTOR = 5;
 }
 
 message ParallelUnit {
