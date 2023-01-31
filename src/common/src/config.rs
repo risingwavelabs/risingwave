@@ -52,6 +52,15 @@ where
     config
 }
 
+/// Map command line flag to `Flag`. Should only be used in `#[derive(OverrideConfig)]`.
+pub fn true_if_present(b: bool) -> Flag {
+    if b {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 pub trait OverrideConfig {
     fn r#override(self, config: &mut RwConfig);
 }
@@ -315,6 +324,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::object_store_use_batch_delete")]
     pub object_store_use_batch_delete: bool,
 
+    #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
+    pub max_concurrent_compaction_task_number: u64,
+
     /// Whether to enable state_store_v1 for hummock
     #[serde(default = "default::storage::enable_state_store_v1")]
     pub enable_state_store_v1: bool,
@@ -572,6 +584,11 @@ mod default {
         pub fn object_store_use_batch_delete() -> bool {
             true
         }
+
+        pub fn max_concurrent_compaction_task_number() -> u64 {
+            16
+        }
+
         pub fn enable_state_store_v1() -> bool {
             false
         }
