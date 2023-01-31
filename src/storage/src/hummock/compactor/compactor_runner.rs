@@ -87,7 +87,7 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 watermark: task.watermark,
                 stats_target_table_ids: Some(stats_target_table_ids),
-                is_space_reclaim_compaction: task.is_space_reclaim,
+                task_type: task.task_type(),
             },
         );
 

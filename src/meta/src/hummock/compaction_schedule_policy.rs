@@ -369,7 +369,7 @@ mod tests {
     use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::HummockContextId;
-    use risingwave_pb::hummock::compact_task::TaskStatus;
+    use risingwave_pb::hummock::compact_task::{self, TaskStatus};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, InputLevel, SstableInfo};
     use tokio::sync::mpsc::error::TryRecvError;
@@ -438,7 +438,7 @@ mod tests {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: 0,
-            is_space_reclaim: false,
+            task_type: compact_task::TaskType::Base as i32,
         }
     }
 

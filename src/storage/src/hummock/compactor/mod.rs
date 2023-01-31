@@ -41,7 +41,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::LocalSstableInfo;
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
@@ -248,7 +248,12 @@ impl Compactor {
 
         {
             // cancel space_reclaim_compaction when delete ratio too low
-            if output_ssts.is_empty() && compact_task.is_space_reclaim {
+            if output_ssts.is_empty()
+                && matches!(
+                    compact_task.task_type(),
+                    compact_task::TaskType::SpaceReclaim,
+                )
+            {
                 task_status = TaskStatus::ManualCanceled;
             }
         }
@@ -757,7 +762,10 @@ impl Compactor {
 
         let min_delete_ratio = 15;
         let ssts = {
-            if self.task_config.is_space_reclaim_compaction {
+            if matches!(
+                self.task_config.task_type,
+                compact_task::TaskType::SpaceReclaim,
+            ) {
                 if let Some(delete_ratio) = compaction_statstics.delete_ratio() && delete_ratio < min_delete_ratio {
                     // not need to rewrite sst-files 
                     tracing::debug!("space_reclaim_compaction reject delete_ratio {} too low compaction_statstics {:?}", delete_ratio, compaction_statstics);

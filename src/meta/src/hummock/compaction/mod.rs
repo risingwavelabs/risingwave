@@ -14,27 +14,28 @@
 
 pub mod compaction_config;
 mod level_selector;
-mod manual_compaction_picker;
-mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
-mod tier_compaction_picker;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_pb::hummock::compact_task::TaskStatus;
-pub use tier_compaction_picker::TierCompactionPicker;
-mod base_level_compaction_picker;
+use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+
+mod picker;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-pub use base_level_compaction_picker::LevelCompactionPicker;
+use picker::{
+    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker,
+    SpaceReclaimCompactionPicker, TierCompactionPicker,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
-use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
-use crate::hummock::compaction::manual_compaction_picker::ManualCompactionSelector;
+use crate::hummock::compaction::level_selector::{
+    DynamicLevelSelector, LevelSelector, ManualCompactionSelector,
+};
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
 use crate::rpc::metrics::MetaMetrics;
@@ -91,7 +92,7 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub compression_algorithm: String,
     pub target_file_size: u64,
-    pub is_space_reclaim: bool,
+    pub compaction_task_type: compact_task::TaskType,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -165,7 +166,7 @@ impl CompactStatus {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
-            is_space_reclaim: ret.is_space_reclaim,
+            task_type: ret.compaction_task_type as i32,
         };
         Some(compact_task)
     }
@@ -355,7 +356,7 @@ pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
     base_level: usize,
-    is_space_reclaim: bool,
+    compaction_task_type: compact_task::TaskType,
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
@@ -375,6 +376,6 @@ pub fn create_compaction_task(
         input,
         compression_algorithm,
         target_file_size,
-        is_space_reclaim,
+        compaction_task_type,
     }
 }

@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
 
 pub use super::context::CompactorContext;
 use crate::hummock::compactor::{
@@ -108,7 +108,8 @@ pub struct TaskConfig {
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
-    pub is_space_reclaim_compaction: bool,
+    // pub is_space_reclaim_compaction: bool,
+    pub task_type: compact_task::TaskType,
 }
 
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {

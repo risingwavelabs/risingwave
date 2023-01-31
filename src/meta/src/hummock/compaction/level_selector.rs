@@ -21,15 +21,18 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{compact_task, CompactionConfig};
 
-use super::create_compaction_task;
+use super::picker::SpaceReclaimCompactionPicker;
+use super::{
+    create_compaction_task, LevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
+    TierCompactionPicker,
+};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionPicker, CompactionTask, LevelCompactionPicker,
-    LocalPickerStatistic, LocalSelectorStatistic, TierCompactionPicker,
+    create_overlap_strategy, CompactionPicker, CompactionTask, LocalPickerStatistic,
+    LocalSelectorStatistic, MinOverlappingPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
 use crate::rpc::metrics::MetaMetrics;
@@ -50,6 +53,8 @@ pub trait LevelSelector: Sync + Send {
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
 
     fn name(&self) -> &'static str;
+
+    fn task_type(&self) -> compact_task::TaskType;
 }
 
 #[derive(Default)]
@@ -64,13 +69,13 @@ pub struct SelectContext {
     pub score_levels: Vec<(u64, usize, usize)>,
 }
 
-pub struct LevelSelectorCore {
+pub struct DynamicLevelSelectorCore {
     config: Arc<CompactionConfig>,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 pub struct DynamicLevelSelector {
-    inner: LevelSelectorCore,
+    inner: DynamicLevelSelectorCore,
+    overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 impl Default for DynamicLevelSelector {
@@ -84,43 +89,42 @@ impl Default for DynamicLevelSelector {
 impl DynamicLevelSelector {
     pub fn new(config: Arc<CompactionConfig>, overlap_strategy: Arc<dyn OverlapStrategy>) -> Self {
         Self {
-            inner: LevelSelectorCore::new(config, overlap_strategy),
+            inner: DynamicLevelSelectorCore::new(config),
+            overlap_strategy,
         }
     }
 }
 
-impl LevelSelectorCore {
-    pub fn new(config: Arc<CompactionConfig>, overlap_strategy: Arc<dyn OverlapStrategy>) -> Self {
-        Self {
-            config,
-            overlap_strategy,
-        }
+impl DynamicLevelSelectorCore {
+    pub fn new(config: Arc<CompactionConfig>) -> Self {
+        Self { config }
     }
 
     pub fn get_config(&self) -> &CompactionConfig {
         self.config.as_ref()
     }
 
-    pub fn get_overlap_strategy(&self) -> Arc<dyn OverlapStrategy> {
-        self.overlap_strategy.clone()
-    }
+    // pub fn get_overlap_strategy(&self) -> Arc<dyn OverlapStrategy> {
+    //     self.overlap_strategy.clone()
+    // }
 
     fn create_compaction_picker(
         &self,
         select_level: usize,
         target_level: usize,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
                 Box::new(TierCompactionPicker::new(
                     self.config.clone(),
-                    self.overlap_strategy.clone(),
+                    overlap_strategy,
                 ))
             } else {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
                     self.config.clone(),
-                    self.overlap_strategy.clone(),
+                    overlap_strategy,
                 ))
             }
         } else {
@@ -129,7 +133,7 @@ impl LevelSelectorCore {
                 select_level,
                 target_level,
                 self.config.max_bytes_for_level_base,
-                self.overlap_strategy.clone(),
+                overlap_strategy,
             ))
         }
     }
@@ -276,9 +280,11 @@ impl LevelSelector for DynamicLevelSelector {
             if score <= SCORE_BASE {
                 return None;
             }
-            let picker = self
-                .inner
-                .create_compaction_picker(select_level, target_level);
+            let picker = self.inner.create_compaction_picker(
+                select_level,
+                target_level,
+                self.overlap_strategy.clone(),
+            );
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
@@ -286,7 +292,7 @@ impl LevelSelector for DynamicLevelSelector {
                     self.inner.get_config(),
                     ret,
                     ctx.base_level,
-                    false,
+                    self.task_type(),
                 ));
             }
             selector_stats
@@ -298,6 +304,144 @@ impl LevelSelector for DynamicLevelSelector {
 
     fn name(&self) -> &'static str {
         "DynamicLevelSelector"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Base
+    }
+}
+
+pub struct ManualCompactionSelector {
+    inner: DynamicLevelSelectorCore,
+    option: ManualCompactionOption,
+    overlap_strategy: Arc<dyn OverlapStrategy>,
+}
+
+impl ManualCompactionSelector {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+        option: ManualCompactionOption,
+    ) -> Self {
+        Self {
+            inner: DynamicLevelSelectorCore::new(config),
+            option,
+            overlap_strategy,
+        }
+    }
+}
+
+impl LevelSelector for ManualCompactionSelector {
+    fn need_compaction(&self, levels: &Levels, _: &[LevelHandler]) -> bool {
+        // TODO: consider about space reclaim
+        let ctx = self.inner.calculate_level_base_size(levels);
+        if self.option.level > 0 && self.option.level < ctx.base_level {
+            return false;
+        }
+        true
+    }
+
+    fn pick_compaction(
+        &self,
+        task_id: HummockCompactionTaskId,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        _selector_stats: &mut LocalSelectorStatistic,
+    ) -> Option<CompactionTask> {
+        let ctx = self.inner.calculate_level_base_size(levels);
+        let (picker, base_level) = {
+            let target_level = if self.option.level == 0 {
+                ctx.base_level
+            } else if self.option.level == self.inner.get_config().max_level as usize {
+                self.option.level
+            } else {
+                self.option.level + 1
+            };
+            if self.option.level > 0 && self.option.level < ctx.base_level {
+                return None;
+            }
+            (
+                ManualCompactionPicker::new(
+                    self.overlap_strategy.clone(),
+                    self.option.clone(),
+                    target_level,
+                ),
+                ctx.base_level,
+            )
+        };
+
+        let compaction_input =
+            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
+        compaction_input.add_pending_task(task_id, level_handlers);
+
+        Some(create_compaction_task(
+            self.inner.get_config(),
+            compaction_input,
+            base_level,
+            self.task_type(),
+        ))
+    }
+
+    fn name(&self) -> &'static str {
+        "ManualCompactionSelector"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Manual
+    }
+}
+
+pub struct SpaceReclaimCompactionSelector {
+    inner: DynamicLevelSelectorCore,
+}
+
+impl SpaceReclaimCompactionSelector {
+    pub fn new(config: Arc<CompactionConfig>) -> Self {
+        Self {
+            inner: DynamicLevelSelectorCore::new(config),
+        }
+    }
+}
+
+impl LevelSelector for SpaceReclaimCompactionSelector {
+    fn need_compaction(&self, levels: &Levels, _: &[LevelHandler]) -> bool {
+        if levels.levels.is_empty() {
+            return false;
+        }
+
+        // TODO: refine me
+        let last_level = levels.levels.last().unwrap();
+        !last_level.table_infos.is_empty()
+    }
+
+    fn pick_compaction(
+        &self,
+        task_id: HummockCompactionTaskId,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        _selector_stats: &mut LocalSelectorStatistic,
+    ) -> Option<CompactionTask> {
+        let ctx = self.inner.calculate_level_base_size(levels);
+        let picker = SpaceReclaimCompactionPicker::new(5);
+
+        let compaction_input =
+            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
+        compaction_input.add_pending_task(task_id, level_handlers);
+
+        Some(create_compaction_task(
+            self.inner.get_config(),
+            compaction_input,
+            ctx.base_level,
+            self.task_type(),
+        ))
+    }
+
+    fn name(&self) -> &'static str {
+        "SpaceReclaimCompaction"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Base
     }
 }
 
@@ -467,8 +611,7 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
-        let selector =
-            LevelSelectorCore::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
+        let selector = DynamicLevelSelectorCore::new(Arc::new(config));
         let levels = vec![
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),

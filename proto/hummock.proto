@@ -244,8 +244,16 @@ message CompactTask {
   map<uint32, TableOption> table_options = 17;
   uint64 current_epoch_time = 18;
   uint64 target_sub_level_id = 19;
+
+  enum TaskType {
+    BASE = 0;
+    SPACE_RECLAIM = 1;
+    MANUAL = 2;
+    SHARED_BUFFER = 3;
+  }
+
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
-  bool is_space_reclaim = 20;
+  TaskType task_type = 20;
 }
 
 message LevelHandler {

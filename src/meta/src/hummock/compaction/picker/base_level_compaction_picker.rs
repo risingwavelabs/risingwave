@@ -20,9 +20,10 @@ use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
-use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::{
+    CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 fn cal_file_size(table_infos: &[SstableInfo]) -> u64 {
