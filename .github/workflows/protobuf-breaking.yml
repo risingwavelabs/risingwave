@@ -15,4 +15,4 @@ jobs:
       - uses: bufbuild/buf-breaking-action@v1
         with:
           input: 'proto'
-          against: '.git#branch=main,subdir=proto'
+          against: 'https://github.com/risingwavelabs/risingwave.git#branch=main,subdir=proto'
