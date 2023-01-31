@@ -387,7 +387,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let distinct = self.flip_coin() && self.is_distinct_allowed;
         let filter = if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
-            Some(Box::new(self.gen_expr(&DataType::Boolean, context)))
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
+            // Prevent correlated query with `FILTER`
+            let old_ctxt = self.new_local_context();
+            let expr = Some(Box::new(self.gen_expr(&DataType::Boolean, context)));
+            self.restore_context(old_ctxt);
+            expr
         } else {
             None
         };
@@ -661,7 +666,7 @@ pub fn print_function_table() -> String {
         .map(|sig| {
             format!(
                 "{:?} CAST {:?} -> {:?}",
-                sig.context, sig.to_type, sig.from_type,
+                sig.context, sig.from_type, sig.to_type,
             )
         })
         .sorted()
