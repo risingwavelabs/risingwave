@@ -2,6 +2,9 @@ statement ok
 set rw_implicit_flush = true;
 
 statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
 set streaming_parallelism = 2;
 
 statement ok

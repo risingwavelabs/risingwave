@@ -592,14 +592,16 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        // TODO: make it a logical optimization.
-        // Rewrite joins with index to delta join
-        plan = self.optimize_by_rules(
-            plan,
-            "To IndexDeltaJoin".to_string(),
-            vec![IndexDeltaJoinRule::create()],
-            ApplyOrder::BottomUp,
-        );
+        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+            // TODO: make it a logical optimization.
+            // Rewrite joins with index to delta join
+            plan = self.optimize_by_rules(
+                plan,
+                "To IndexDeltaJoin".to_string(),
+                vec![IndexDeltaJoinRule::create()],
+                ApplyOrder::BottomUp,
+            );
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
