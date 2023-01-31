@@ -205,50 +205,6 @@ impl ManualCompactionPicker {
         }
         true
     }
-
-    //     fn pick_space_reclaim_compaction(
-    //         &self,
-    //         levels: &Levels,
-    //         level_handlers: &[LevelHandler],
-    //     ) -> Option<CompactionInput> {
-    //         assert!(!levels.levels.is_empty());
-    //         let reclaimed_level = levels.levels.last().unwrap();
-    //         let max_reclain_count = self.option.max_space_reclaim_file_count; // todo use config
-    //         let mut select_input_ssts = vec![];
-    //         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
-
-    //         for sst in &reclaimed_level.table_infos {
-    //             if level_handler.is_pending_compact(&sst.id) {
-    //                 continue;
-    //             }
-
-    //             select_input_ssts.push(sst.clone());
-    //             if select_input_ssts.len() == max_reclain_count {
-    //                 break;
-    //             }
-    //         }
-
-    //         if select_input_ssts.is_empty() {
-    //             return None;
-    //         }
-
-    //         Some(CompactionInput {
-    //             input_levels: vec![
-    //                 InputLevel {
-    //                     level_idx: reclaimed_level.level_idx,
-    //                     level_type: reclaimed_level.level_type,
-    //                     table_infos: select_input_ssts,
-    //                 },
-    //                 InputLevel {
-    //                     level_idx: reclaimed_level.level_idx,
-    //                     level_type: reclaimed_level.level_type,
-    //                     table_infos: vec![],
-    //                 },
-    //             ],
-    //             target_level: reclaimed_level.level_idx as usize,
-    //             target_sub_level_id: 0,
-    //         })
-    //     }
 }
 
 impl CompactionPicker for ManualCompactionPicker {
@@ -555,8 +511,6 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::from([2]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
 
             let target_level = option.level + 1;
@@ -688,8 +642,6 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
-            is_space_reclaim_compaction: false,
-            max_space_reclaim_file_count: 5,
         };
         let picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 0);
@@ -716,8 +668,6 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
-            is_space_reclaim_compaction: false,
-            max_space_reclaim_file_count: 5,
         };
         let picker = ManualCompactionPicker::new(
             Arc::new(RangeOverlapStrategy::default()),
@@ -765,8 +715,6 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
-            is_space_reclaim_compaction: false,
-            max_space_reclaim_file_count: 5,
         };
         let picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
@@ -818,8 +766,6 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -862,8 +808,6 @@ pub mod tests {
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -886,8 +830,6 @@ pub mod tests {
                 },
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1, 2, 3]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -932,8 +874,6 @@ pub mod tests {
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -978,8 +918,6 @@ pub mod tests {
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
                 internal_table_id: HashSet::from([1]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1023,8 +961,6 @@ pub mod tests {
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1058,8 +994,6 @@ pub mod tests {
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1083,8 +1017,6 @@ pub mod tests {
                 },
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1]),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1136,8 +1068,6 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1184,8 +1114,6 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1256,8 +1184,6 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let selector = ManualCompactionSelector::new(
                 config.clone(),
@@ -1291,8 +1217,6 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let selector = ManualCompactionSelector::new(
                 config,
@@ -1361,8 +1285,6 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 3,
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let selector = ManualCompactionSelector::new(
                 config.clone(),
@@ -1398,8 +1320,6 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 4,
-                is_space_reclaim_compaction: false,
-                max_space_reclaim_file_count: 5,
             };
             let selector = ManualCompactionSelector::new(
                 config,

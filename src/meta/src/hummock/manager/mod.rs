@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, SstIdRange, FIRST_VERSION_ID,
     INVALID_VERSION_ID,
 };
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -50,7 +50,10 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
+use crate::hummock::compaction::{
+    create_overlap_strategy, CompactStatus, DynamicLevelSelector, LevelSelector,
+    LocalSelectorStatistic, ManualCompactionOption,
+};
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -191,6 +194,7 @@ macro_rules! start_measure_real_process_timer {
 pub(crate) use start_measure_real_process_timer;
 
 use self::compaction_group_manager::CompactionGroupManagerInner;
+use super::compaction::{ManualCompactionSelector, SpaceReclaimCompactionSelector};
 use super::Compactor;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -212,6 +216,35 @@ pub enum CompactionResumeTrigger {
     CompactorAddition { context_id: HummockContextId },
     /// A compaction task is reported when all compactors are not idle.
     TaskReport { original_task_num: usize },
+}
+
+pub struct CompactionPickParma {
+    task_type: compact_task::TaskType,
+
+    manual_compaction_option: Option<ManualCompactionOption>,
+}
+
+impl CompactionPickParma {
+    pub fn new_base_parma() -> Self {
+        Self {
+            task_type: compact_task::TaskType::Base,
+            manual_compaction_option: None,
+        }
+    }
+
+    pub fn new_space_reclaim_parma() -> Self {
+        Self {
+            task_type: compact_task::TaskType::SpaceReclaim,
+            manual_compaction_option: None,
+        }
+    }
+
+    pub fn new_manual_parma(manual_compaction_option: ManualCompactionOption) -> Self {
+        Self {
+            task_type: compact_task::TaskType::Manual,
+            manual_compaction_option: Some(manual_compaction_option),
+        }
+    }
 }
 
 impl<S> HummockManager<S>
@@ -726,7 +759,8 @@ where
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
-        manual_compaction_option: Option<ManualCompactionOption>,
+        // manual_compaction_option: Option<ManualCompactionOption>,
+        selector: Box<dyn LevelSelector>,
     ) -> Result<Option<CompactTask>> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
@@ -779,15 +813,16 @@ where
             // sync_group has not been called for this group, which means no data even written.
             return Ok(None);
         }
-        let can_trivial_move = manual_compaction_option.is_none();
+
+        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Base);
+
         let mut stats = LocalSelectorStatistic::default();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             compaction_group_id,
-            manual_compaction_option,
-            group_config.compaction_config(),
             &mut stats,
+            selector,
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
@@ -894,20 +929,66 @@ where
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
+        compaction_pick_parma: CompactionPickParma,
     ) -> Result<Option<CompactTask>> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
-        while let Some(task) = self
-            .get_compact_task_impl(compaction_group_id, None)
-            .await?
-        {
-            if let TaskStatus::Pending = task.task_status() {
-                return Ok(Some(task));
+
+        let group_config = self
+            .compaction_group(compaction_group_id)
+            .await
+            .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
+
+        let compaction_config = group_config.compaction_config();
+        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
+
+        // dispatch
+        match compaction_pick_parma.task_type {
+            compact_task::TaskType::Base => {
+                while let Some(task) = self
+                    .get_compact_task_impl(
+                        compaction_group_id,
+                        Box::new(DynamicLevelSelector::new(
+                            Arc::new(compaction_config.clone()),
+                            overlap_strategy.clone(),
+                        )),
+                    )
+                    .await?
+                {
+                    if let TaskStatus::Pending = task.task_status() {
+                        return Ok(Some(task));
+                    }
+                    assert!(CompactStatus::is_trivial_move_task(&task));
+                }
+
+                Ok(None)
             }
-            assert!(CompactStatus::is_trivial_move_task(&task));
+
+            compact_task::TaskType::SpaceReclaim => {
+                let selector = Box::new(SpaceReclaimCompactionSelector::new(Arc::new(
+                    compaction_config,
+                )));
+
+                self.get_compact_task_impl(compaction_group_id, selector)
+                    .await
+            }
+
+            compact_task::TaskType::Manual => {
+                let selector = Box::new(ManualCompactionSelector::new(
+                    Arc::new(compaction_config),
+                    overlap_strategy,
+                    compaction_pick_parma.manual_compaction_option.unwrap(),
+                ));
+
+                self.get_compact_task_impl(compaction_group_id, selector)
+                    .await
+            }
+
+            _ => {
+                panic!("SharedBuffer compaction not expected")
+            }
         }
-        Ok(None)
     }
 
     pub async fn manual_get_compact_task(
@@ -915,8 +996,11 @@ where
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
-        self.get_compact_task_impl(compaction_group_id, Some(manual_compaction_option))
-            .await
+        self.get_compact_task(
+            compaction_group_id,
+            CompactionPickParma::new_manual_parma(manual_compaction_option),
+        )
+        .await
     }
 
     #[named]
@@ -1245,8 +1329,11 @@ where
             compact_task.compaction_group_id,
         );
 
-        if !deterministic_mode {
-            self.try_send_compaction_request(compact_task.compaction_group_id);
+        if !deterministic_mode && matches!(compact_task.task_type(), compact_task::TaskType::Base) {
+            self.try_send_compaction_request(
+                compact_task.compaction_group_id,
+                compact_task.task_type(),
+            );
         }
 
         #[cfg(test)]
@@ -1695,7 +1782,7 @@ where
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
             for id in modified_compaction_groups {
-                self.try_send_compaction_request(id);
+                self.try_send_compaction_request(id, compact_task::TaskType::Base);
             }
         }
         #[cfg(test)]
@@ -1941,7 +2028,7 @@ where
             return Ok(());
         }
         for compaction_group in compaction_groups {
-            self.try_send_compaction_request(compaction_group);
+            self.try_send_compaction_request(compaction_group, compact_task::TaskType::Base);
         }
         Ok(())
     }
@@ -1990,9 +2077,13 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
+    pub fn try_send_compaction_request(
+        &self,
+        compaction_group: CompactionGroupId,
+        task_type: compact_task::TaskType,
+    ) -> bool {
         if let Some(sender) = self.compaction_request_channel.read().as_ref() {
-            match sender.try_sched_compaction(compaction_group) {
+            match sender.try_sched_compaction(compaction_group, task_type) {
                 Ok(_) => true,
                 Err(e) => {
                     tracing::error!(

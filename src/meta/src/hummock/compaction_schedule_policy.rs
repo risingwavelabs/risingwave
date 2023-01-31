@@ -383,7 +383,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::HummockManager;
+    use crate::hummock::{CompactionPickParma, HummockManager};
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -514,7 +514,10 @@ mod tests {
         ));
 
         let task = hummock_manager
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap()
             .unwrap();

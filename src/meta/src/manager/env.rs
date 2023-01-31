@@ -119,7 +119,7 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
-            periodic_space_reclaim_compaction_interval_sec: 1800,
+            periodic_space_reclaim_compaction_interval_sec: 60,
         }
     }
 }

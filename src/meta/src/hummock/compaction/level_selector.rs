@@ -441,7 +441,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
     }
 
     fn task_type(&self) -> compact_task::TaskType {
-        compact_task::TaskType::Base
+        compact_task::TaskType::SpaceReclaim
     }
 }
 

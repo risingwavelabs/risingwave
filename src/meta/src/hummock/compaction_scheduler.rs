@@ -19,7 +19,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
@@ -27,8 +27,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 
-use super::Compactor;
-use crate::hummock::compaction::ManualCompactionOption;
+use super::{CompactionPickParma, Compactor};
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
@@ -37,10 +36,12 @@ use crate::storage::MetaStore;
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
+type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
 pub struct CompactionRequestChannel {
-    request_tx: UnboundedSender<CompactionGroupId>,
+    request_tx: UnboundedSender<CompactionRequestChannelItem>,
     scheduled: Mutex<HashSet<CompactionGroupId>>,
 }
 
@@ -54,7 +55,7 @@ pub enum ScheduleStatus {
 }
 
 impl CompactionRequestChannel {
-    pub fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
+    pub fn new(request_tx: UnboundedSender<CompactionRequestChannelItem>) -> Self {
         Self {
             request_tx,
             scheduled: Default::default(),
@@ -65,12 +66,13 @@ impl CompactionRequestChannel {
     pub fn try_sched_compaction(
         &self,
         compaction_group: CompactionGroupId,
-    ) -> Result<bool, SendError<CompactionGroupId>> {
+        task_type: compact_task::TaskType,
+    ) -> Result<bool, SendError<CompactionRequestChannelItem>> {
         let mut guard = self.scheduled.lock();
         if guard.contains(&compaction_group) {
             return Ok(false);
         }
-        self.request_tx.send(compaction_group)?;
+        self.request_tx.send((compaction_group, task_type))?;
         guard.insert(compaction_group);
         Ok(true)
     }
@@ -114,7 +116,8 @@ where
     }
 
     pub async fn start(&self, mut shutdown_rx: Receiver<()>) {
-        let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let (sched_tx, mut sched_rx) =
+            tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
         self.hummock_manager.init_compaction_scheduler(
@@ -134,10 +137,10 @@ where
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
-            let compaction_group: CompactionGroupId = tokio::select! {
-                compaction_group = sched_rx.recv() => {
-                    match compaction_group {
-                        Some(compaction_group) => compaction_group,
+            let (compaction_group, task_type) = tokio::select! {
+                recv = sched_rx.recv() => {
+                    match recv {
+                        Some((compaction_group, task_type)) => (compaction_group, task_type),
                         None => {
                             tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
                                 it means it has either died or started a new session. Exiting.");
@@ -145,6 +148,7 @@ where
                         }
                     }
                 },
+
                 _ = min_trigger_interval.tick() => {
                     // Disable periodic trigger for compaction_deterministic_test.
                     if self.env.opts.compaction_deterministic_test {
@@ -152,36 +156,22 @@ where
                     }
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
-                        if let Err(e) = sched_channel.try_sched_compaction(cg_id) {
-                            tracing::warn!("Failed to schedule compaction for compaction group {}. {}", cg_id, e);
+                        if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::Base) {
+                            tracing::warn!("Failed to schedule base compaction for compaction group {}. {}", cg_id, e);
                         }
                     }
                     continue;
                 },
 
                 _ = min_space_reclaim_trigger_interval.tick() => {
-                     // Disable periodic trigger for compaction_deterministic_test.
-                     if self.env.opts.compaction_deterministic_test {
+                      // Disable periodic trigger for compaction_deterministic_test.
+                      if self.env.opts.compaction_deterministic_test {
                         continue;
                     }
-
-                    let manual_compaction_option = ManualCompactionOption {
-                        is_space_reclaim_compaction: true,
-                        max_space_reclaim_file_count: 5,
-                        ..Default::default()
-                    };
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
-                        match self.hummock_manager.trigger_manual_compaction(cg_id, manual_compaction_option.clone()).await {
-                            Ok(_) => {
-                                tracing::info!("cg_id {} trigger space_reclaim_compactio success", cg_id);
-
-                            },
-
-                            Err(msg) => {
-                                tracing::error!("cg_id {} trigger space_reclaim_compaction fail {}", cg_id, msg);
-
-                            }
+                        if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::SpaceReclaim) {
+                            tracing::warn!("Failed to schedule base compaction for compaction group {}. {}", cg_id, e);
                         }
                     }
                     continue;
@@ -212,8 +202,21 @@ where
             };
 
             // Pick a task and assign it to this compactor.
-            self.pick_and_assign(compaction_group, compactor, sched_channel.clone())
-                .await;
+            let compaction_pick_param = match task_type {
+                compact_task::TaskType::Base => CompactionPickParma::new_base_parma(),
+                compact_task::TaskType::SpaceReclaim => {
+                    CompactionPickParma::new_space_reclaim_parma()
+                }
+                _ => panic!("Error type when scheduler trigger compaction"),
+            };
+
+            self.pick_and_assign(
+                compaction_group,
+                compactor,
+                sched_channel.clone(),
+                compaction_pick_param,
+            )
+            .await;
         }
     }
 
@@ -225,9 +228,15 @@ where
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
         sched_channel: Arc<CompactionRequestChannel>,
+        compaction_pick_parma: CompactionPickParma,
     ) -> ScheduleStatus {
         let schedule_status = self
-            .pick_and_assign_impl(compaction_group, compactor, sched_channel)
+            .pick_and_assign_impl(
+                compaction_group,
+                compactor,
+                sched_channel,
+                compaction_pick_parma,
+            )
             .await;
 
         let cancel_state = match &schedule_status {
@@ -269,11 +278,12 @@ where
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
         sched_channel: Arc<CompactionRequestChannel>,
+        compaction_pick_parma: CompactionPickParma,
     ) -> ScheduleStatus {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
-            .get_compact_task(compaction_group)
+            .get_compact_task(compaction_group, compaction_pick_parma)
             .await;
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
@@ -341,7 +351,9 @@ where
         }
 
         // 4. Reschedule it with best effort, in case there are more tasks.
-        if let Err(e) = sched_channel.try_sched_compaction(compaction_group) {
+        if let Err(e) =
+            sched_channel.try_sched_compaction(compaction_group, compact_task::TaskType::Base)
+        {
             tracing::error!(
                 "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
                 compaction_group,
@@ -359,11 +371,12 @@ mod tests {
 
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::CompactionGroupId;
 
-    use crate::hummock::compaction_scheduler::{CompactionRequestChannel, ScheduleStatus};
+    use crate::hummock::compaction_scheduler::{
+        CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
+    };
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::CompactionScheduler;
+    use crate::hummock::{CompactionPickParma, CompactionScheduler};
 
     #[tokio::test]
     async fn test_pick_and_assign() {
@@ -373,7 +386,8 @@ mod tests {
         let compaction_scheduler =
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
-        let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let (request_tx, _request_rx) =
+            tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         // Add a compactor with invalid context_id.
@@ -388,7 +402,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await
         );
@@ -401,7 +416,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -418,7 +434,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await
         );
@@ -447,7 +464,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await
         );
@@ -473,7 +491,8 @@ mod tests {
             compactor_manager.clone(),
         );
 
-        let (request_tx, _request_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionGroupId>();
+        let (request_tx, _request_rx) =
+            tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
@@ -489,7 +508,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await
         );
@@ -504,7 +524,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -521,7 +542,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await,
             ScheduleStatus::SendFailure(_)
@@ -546,7 +568,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -574,7 +597,8 @@ mod tests {
                 .pick_and_assign(
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
-                    request_channel.clone()
+                    request_channel.clone(),
+                    CompactionPickParma::new_base_parma(),
                 )
                 .await,
             ScheduleStatus::Ok

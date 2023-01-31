@@ -25,16 +25,15 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{
-    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker,
-    SpaceReclaimCompactionPicker, TierCompactionPicker,
+    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
 };
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
-use crate::hummock::compaction::level_selector::{
-    DynamicLevelSelector, LevelSelector, ManualCompactionSelector,
+pub use crate::hummock::compaction::level_selector::{
+    DynamicLevelSelector, LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
@@ -119,26 +118,14 @@ impl CompactStatus {
         levels: &Levels,
         task_id: HummockCompactionTaskId,
         compaction_group_id: CompactionGroupId,
-        manual_compaction_option: Option<ManualCompactionOption>,
-        compaction_config: CompactionConfig,
         stats: &mut LocalSelectorStatistic,
+
+        selector: Box<dyn LevelSelector>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-
-        let ret = if let Some(manual_compaction_option) = manual_compaction_option {
-            self.manual_pick_compaction(
-                levels,
-                task_id,
-                manual_compaction_option,
-                compaction_config,
-                stats,
-            )?
-        } else {
-            self.pick_compaction(levels, task_id, compaction_config, stats)?
-        };
-
+        let ret = selector.pick_compaction(task_id, levels, &mut self.level_handlers, stats)?;
         let target_level_id = ret.input.target_level;
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -194,36 +181,6 @@ impl CompactStatus {
         false
     }
 
-    fn pick_compaction(
-        &mut self,
-        levels: &Levels,
-        task_id: HummockCompactionTaskId,
-        compaction_config: CompactionConfig,
-        stats: &mut LocalSelectorStatistic,
-    ) -> Option<CompactionTask> {
-        self.create_level_selector(compaction_config)
-            .pick_compaction(task_id, levels, &mut self.level_handlers, stats)
-    }
-
-    fn manual_pick_compaction(
-        &mut self,
-        levels: &Levels,
-        task_id: HummockCompactionTaskId,
-        manual_compaction_option: ManualCompactionOption,
-        compaction_config: CompactionConfig,
-        stats: &mut LocalSelectorStatistic,
-    ) -> Option<CompactionTask> {
-        // manual_compaction no need to select level
-        // level determined by option
-        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
-        ManualCompactionSelector::new(
-            Arc::new(compaction_config),
-            overlap_strategy,
-            manual_compaction_option,
-        )
-        .pick_compaction(task_id, levels, &mut self.level_handlers, stats)
-    }
-
     /// Declares a task as either succeeded, failed or canceled.
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
@@ -247,18 +204,6 @@ impl CompactStatus {
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
     }
-
-    /// Creates a level selector.
-    ///
-    /// The method should be lightweight because we recreate a level selector everytime so that the
-    /// latest compaction config is applied to it.
-    fn create_level_selector(&self, compaction_config: CompactionConfig) -> Box<dyn LevelSelector> {
-        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
-        Box::new(DynamicLevelSelector::new(
-            Arc::new(compaction_config),
-            overlap_strategy,
-        ))
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -271,10 +216,6 @@ pub struct ManualCompactionOption {
     pub internal_table_id: HashSet<u32>,
     /// Input level.
     pub level: usize,
-
-    /// space reclaim compaction
-    pub is_space_reclaim_compaction: bool,
-    pub max_space_reclaim_file_count: usize,
 }
 
 impl Default for ManualCompactionOption {
@@ -288,8 +229,6 @@ impl Default for ManualCompactionOption {
             },
             internal_table_id: HashSet::default(),
             level: 1,
-            is_space_reclaim_compaction: false,
-            max_space_reclaim_file_count: 5,
         }
     }
 }
