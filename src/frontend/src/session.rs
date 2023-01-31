@@ -148,8 +148,9 @@ impl FrontendEnv {
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let config = load_config(&opts.config_path, NO_OVERRIDE);
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}",
-            config.server
+            "Starting frontend node with config {:?} with debug assertions {}",
+            config,
+            if cfg!(debug_assertions) { "on" } else { "off" }
         );
         let batch_config = config.batch;
 
@@ -232,7 +233,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
-        if opts.metrics_level > 0 {
+        if config.server.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
