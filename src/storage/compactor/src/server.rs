@@ -58,6 +58,7 @@ pub async fn compactor_serve(
     // Register to the cluster.
     let meta_client = MetaClient::register_new(
         &opts.meta_address,
+        opts.meta_address_mode,
         WorkerType::Compactor,
         &advertise_addr,
         0,

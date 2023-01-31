@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use etcd_client::{Client, ConnectOptions, Error, GetOptions};
-use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -28,17 +28,7 @@ const META_ELECTION_KEY: &str = "__meta_election_";
 
 pub struct ElectionMember {
     pub id: String,
-    pub lease: i64,
-}
-
-impl From<ElectionMember> for MetaLeaderInfo {
-    fn from(val: ElectionMember) -> Self {
-        let ElectionMember { id, lease } = val;
-        MetaLeaderInfo {
-            node_address: id,
-            lease_id: lease as u64,
-        }
-    }
+    pub is_leader: bool,
 }
 
 #[async_trait::async_trait]
@@ -76,7 +66,7 @@ impl ElectionClient for EtcdElectionClient {
         Ok(leader.and_then(|leader| {
             leader.kv().map(|leader_kv| ElectionMember {
                 id: String::from_utf8_lossy(leader_kv.value()).to_string(),
-                lease: leader_kv.lease(),
+                is_leader: true,
             })
         }))
     }
@@ -261,15 +251,30 @@ impl ElectionClient for EtcdElectionClient {
             .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
             .await?;
 
-        // todo, sort by revision
-        Ok(keys
+        let member_ids: HashSet<_> = keys
             .kvs()
             .iter()
-            .map(|kv| ElectionMember {
-                id: String::from_utf8_lossy(kv.value()).to_string(),
-                lease: kv.lease(),
-            })
-            .collect())
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string())
+            .collect();
+
+        let members = match self.leader().await? {
+            Some(leader) => member_ids
+                .into_iter()
+                .map(|id| {
+                    let is_leader = id == leader.id;
+                    ElectionMember { id, is_leader }
+                })
+                .collect(),
+            None => member_ids
+                .into_iter()
+                .map(|id| ElectionMember {
+                    id,
+                    is_leader: false,
+                })
+                .collect(),
+        };
+
+        Ok(members)
     }
 
     fn id(&self) -> MetaResult<String> {

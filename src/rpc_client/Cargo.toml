@@ -11,6 +11,8 @@ repository = { workspace = true }
 anyhow = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
+clap = { version = "3", features = ["derive"] }
+either = "1.8.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 paste = "1"
 rand = "0.8"

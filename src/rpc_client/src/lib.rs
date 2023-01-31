@@ -21,6 +21,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(generators)]
+#![feature(iterator_try_collect)]
+#![feature(hash_drain_filter)]
 
 #[cfg(madsim)]
 use std::collections::HashMap;
@@ -52,7 +54,7 @@ mod stream_client;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-pub use meta_client::MetaClient;
+pub use meta_client::{MetaAddressMode, MetaClient};
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]
