@@ -288,6 +288,7 @@ pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
     metrics: Arc<HummockStateStoreMetrics>,
     table_id: TableId,
+    local_stats: StoreLocalStatistic,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -315,23 +316,21 @@ impl HummockStorageIterator {
         inner: UserIterator<HummockStorageIteratorPayload>,
         metrics: Arc<HummockStateStoreMetrics>,
         table_id: TableId,
+        local_stats: StoreLocalStatistic,
     ) -> Self {
         Self {
             inner,
             metrics,
             table_id,
+            local_stats,
         }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        self.inner.collect_local_statistic(stats);
     }
 }
 
 impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
-        let mut stats = StoreLocalStatistic::default();
-        self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics, self.table_id.to_string().as_str());
+        self.inner.collect_local_statistic(&mut self.local_stats);
+        self.local_stats
+            .report_for_iter(&self.metrics, &self.table_id);
     }
 }

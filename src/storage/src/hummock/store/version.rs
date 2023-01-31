@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
 use std::iter::once;
 use std::ops::Bound::{Excluded, Included};
-use std::ops::{Deref, RangeBounds};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -410,10 +410,7 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<Option<Bytes>> {
-        let mut table_counts = 0;
         let mut local_stats = StoreLocalStatistic::default();
-        let table_id_string = read_options.table_id.to_string();
-        let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 
@@ -436,7 +433,7 @@ impl HummockVersionReader {
 
         let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
-            table_counts += 1;
+            local_stats.sub_iter_count += 1;
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
@@ -447,12 +444,8 @@ impl HummockVersionReader {
             )
             .await?
             {
-                local_stats.report_bloom_filter_metrics(
-                    self.state_store_metrics.as_ref(),
-                    "get",
-                    table_id_label,
-                    false,
-                );
+                local_stats
+                    .report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
                 return Ok(data.into_user_value());
             }
         }
@@ -475,7 +468,7 @@ impl HummockVersionReader {
                         &(table_key..=table_key),
                     );
                     for sstable_info in sstable_infos {
-                        table_counts += 1;
+                        local_stats.sub_iter_count += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
@@ -486,14 +479,10 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
-                            local_stats.report_bloom_filter_metrics(
+                            local_stats.report_for_get(
                                 self.state_store_metrics.as_ref(),
-                                "get",
-                                table_id_label,
-                                false,
+                                &read_options.table_id,
                             );
-                            // todo add global stat to report
-                            local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
                         }
                     }
@@ -519,7 +508,7 @@ impl HummockVersionReader {
                         continue;
                     }
 
-                    table_counts += 1;
+                    local_stats.sub_iter_count += 1;
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
@@ -530,31 +519,17 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
-                        local_stats.report_bloom_filter_metrics(
+                        local_stats.report_for_get(
                             self.state_store_metrics.as_ref(),
-                            "get",
-                            table_id_label,
-                            false,
+                            &read_options.table_id,
                         );
-                        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
                 }
             }
         }
 
-        local_stats.report_bloom_filter_metrics(
-            self.state_store_metrics.as_ref(),
-            "get",
-            table_id_label,
-            true,
-        );
-        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "sub-iter"])
-            .observe(table_counts as f64);
-
+        local_stats.report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
         Ok(None)
     }
 
@@ -572,10 +547,7 @@ impl HummockVersionReader {
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
         let mut delete_range_iter = ForwardMergeRangeIterator::default();
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "staging-imm-iter"])
-            .observe(imms.len() as f64);
+        local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
             if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
                 delete_range_iter.add_batch_iter(imm.delete_range_iter());
@@ -614,10 +586,7 @@ impl HummockVersionReader {
                 Arc::new(SstableIteratorReadOptions::default()),
             )));
         }
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "staging-sst-iter"])
-            .observe(staging_sst_iter_count as f64);
+        local_stats.staging_sst_iter_count = staging_sst_iter_count;
         let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
 
         // 2. build iterator from committed
@@ -763,15 +732,8 @@ impl HummockVersionReader {
                 overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
             }
         }
-
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "committed-overlapping-iter"])
-            .observe(overlapping_iter_count as f64);
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "committed-non-overlapping-iter"])
-            .observe(non_overlapping_iters.len() as f64);
+        local_stats.overlapping_iter_count = overlapping_iter_count;
+        local_stats.non_overlapping_iter_count = non_overlapping_iters.len() as u64;
 
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
@@ -803,19 +765,11 @@ impl HummockVersionReader {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
 
-        local_stats.report_bloom_filter_metrics(
-            self.state_store_metrics.as_ref(),
-            "iter",
-            table_id_label,
-            user_iter.is_valid(),
-        );
-
-        local_stats.report(self.state_store_metrics.deref(), table_id_label);
-
         Ok(HummockStorageIterator::new(
             user_iter,
             self.state_store_metrics.clone(),
             read_options.table_id,
+            local_stats,
         )
         .into_stream())
     }
