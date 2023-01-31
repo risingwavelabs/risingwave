@@ -278,8 +278,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: u32,
 
-    #[serde(default = "default::storage::state_store")]
     /// State store url.
+    #[serde(default = "default::storage::state_store")]
     pub state_store: String,
 
     /// Remote directory for storing data and metadata objects.
