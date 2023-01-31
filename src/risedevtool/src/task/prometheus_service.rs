@@ -43,7 +43,7 @@ impl PrometheusService {
     pub fn apply_command_args(cmd: &mut Command, config: &PrometheusConfig) -> Result<()> {
         cmd.arg(format!(
             "--web.listen-address={}:{}",
-            config.listen_address, config.port
+            config.listen_addr, config.port
         ));
         cmd.arg("--storage.tsdb.retention.time=30d");
         Ok(())
