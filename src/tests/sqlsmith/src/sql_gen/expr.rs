@@ -52,7 +52,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
 
-        if *typ == DataType::Boolean && self.rng.gen_bool(0.1) {
+        if *typ == DataType::Boolean && self.rng.gen_bool(0.05) {
             return match self.rng.gen_bool(0.5) {
                 true => {
                     let (ty, expr) = self.gen_arbitrary_expr(context);
@@ -346,7 +346,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         // Generating correlated subquery tends to create queries which cannot be unnested.
         // we still want to test it, but reduce the chance it occurs.
-        let (subquery, _) = match self.rng.gen_bool(0.1) {
+        let (subquery, _) = match self.rng.gen_bool(0.05) {
             true => self.gen_correlated_query(),
             false => self.gen_local_query(),
         };
