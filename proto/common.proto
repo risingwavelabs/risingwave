@@ -22,7 +22,6 @@ message HostAddress {
 
 // Encode which host machine an actor resides.
 message ActorInfo {
-  uint32 actor_id = 1;
   HostAddress host = 2;
 }
 
@@ -30,8 +29,8 @@ enum WorkerType {
   UNSPECIFIED = 0;
   FRONTEND = 1;
   COMPUTE_NODE = 2;
-  RISE_CTL = 3;
-  COMPACTOR = 4;
+  RISE_CONTROL = 3;
+  COMPACTOR = 5;
 }
 
 message ParallelUnit {
@@ -64,12 +63,12 @@ message Buffer {
 // Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
   repeated uint32 original_indices = 1;
-  repeated uint32 data = 2;
+  repeated uint64 data = 2;
 }
 
 message BatchQueryEpoch {
   oneof epoch {
-    uint64 committed = 1;
+    string committed = 1;
     uint64 current = 2;
     uint64 backup = 3;
   }
