@@ -14,12 +14,17 @@
 
 use std::cmp::{max, min};
 use std::fmt::Write;
+use crate::ExprError;
 
 use crate::{bail, Result};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
-    let start = min(max(start - 1, 0) as usize, s.len());
+    let start = (start
+        .checked_sub(1)
+        .ok_or(ExprError::NumericOutOfRange)?
+        .max(0) as usize)
+        .min(s.len());
     writer.write_str(&s[start..]).unwrap();
     Ok(())
 }
@@ -36,8 +41,14 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);
     }
-    let begin = max(start - 1, 0) as usize;
-    let end = min(max(start - 1 + count, 0) as usize, s.len());
+    let start = start
+        .checked_sub(1)
+        .ok_or(ExprError::NumericOutOfRange)?;
+    let begin = max(start, 0) as usize;
+    let end = (start
+        .checked_add(count)
+        .ok_or(ExprError::NumericOutOfRange)? as usize)
+        .min(s.len());
     writer.write_str(&s[begin..end]).unwrap();
     Ok(())
 }
