@@ -14,9 +14,8 @@
 
 use std::cmp::{max, min};
 use std::fmt::Write;
-use crate::ExprError;
 
-use crate::{bail, Result};
+use crate::{bail, ExprError, Result};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
@@ -41,9 +40,7 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);
     }
-    let start = start
-        .checked_sub(1)
-        .ok_or(ExprError::NumericOutOfRange)?;
+    let start = start.checked_sub(1).ok_or(ExprError::NumericOutOfRange)?;
     let begin = max(start, 0) as usize;
     let end = (start
         .checked_add(count)
