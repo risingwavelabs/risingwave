@@ -860,7 +860,7 @@ impl<S: StateStore> StateTable<S> {
             let in_storage = self.row_deserializer.deserialize(stored_value).unwrap();
             let to_write = self.row_deserializer.deserialize(value).unwrap();
             panic!(
-                "overrides an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
+                "overwrites an existing key!\ntable_id: {}, vnode: {}, key: {:?}\nvalue in storage: {:?}\nvalue to write: {:?}",
                 self.table_id(),
                 vnode,
                 key,
