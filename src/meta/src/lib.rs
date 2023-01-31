@@ -65,7 +65,7 @@ pub struct MetaNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, default_value = "127.0.0.1:5690")]
+    #[clap(long = "host", default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
     /// The address for contacting this instance of the service.
@@ -73,7 +73,7 @@ pub struct MetaNodeOpts {
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    #[clap(long, required_if_eq("backend", "etcd"))]
+    #[clap(long = "client_address", required_if_eq("backend", "etcd"))]
     advertise_addr: Option<String>,
 
     #[clap(long)]
@@ -140,7 +140,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let (contact_addr, backend) = match opts.backend {
+        let (advertise_addr, backend) = match opts.backend {
             Backend::Etcd => (
                 opts.advertise_addr
                     .expect("advertise_addr must be specified when using etcd"),
@@ -172,7 +172,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            contact_addr,
+            advertise_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,

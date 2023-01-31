@@ -26,14 +26,14 @@ pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, default_value = "127.0.0.1:6660")]
+    #[clap(long = "host", default_value = "127.0.0.1:6660")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long)]
+    #[clap(long = "client_address")]
     pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.
@@ -85,7 +85,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Contact address is not specified, defaulting to listen address");
+                tracing::warn!("advertise addr is not specified, defaulting to listen address");
                 &opts.listen_addr
             })
             .parse()

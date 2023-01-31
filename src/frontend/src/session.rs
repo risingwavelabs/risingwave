@@ -157,12 +157,12 @@ impl FrontendEnv {
             .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Contact address is not specified, defaulting to listen_addr");
+                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
                 &opts.listen_addr
             })
             .parse()
             .unwrap();
-        tracing::info!("Contact address is {}", frontend_address);
+        tracing::info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let meta_client = MetaClient::register_new(

@@ -66,7 +66,7 @@ use crate::{AsyncStackTraceOption, ComputeNodeOpts};
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
-    contact_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
@@ -85,7 +85,7 @@ pub async fn compute_node_serve(
     let meta_client = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
-        &contact_addr,
+        &advertise_addr,
         opts.parallelism,
     )
     .await
@@ -204,7 +204,7 @@ pub async fn compute_node_serve(
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
     let stream_mgr = Arc::new(LocalStreamManager::new(
-        contact_addr.clone(),
+        advertise_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
@@ -235,7 +235,7 @@ pub async fn compute_node_serve(
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
-        contact_addr.clone(),
+        advertise_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
@@ -250,7 +250,7 @@ pub async fn compute_node_serve(
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
-        contact_addr.clone(),
+        advertise_addr.clone(),
         connector_params,
         stream_config,
         worker_id,
@@ -322,7 +322,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(&contact_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     (join_handle_vec, shutdown_send)
 }
