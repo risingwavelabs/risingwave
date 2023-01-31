@@ -28,6 +28,16 @@ use crate::monitor::CompactorMetrics;
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
+macro_rules! inc_local_metrics {
+    ($self:ident, $metrics: ident, $($x:ident),*) => {{
+        $(
+            if $self.$x > 0 {
+                $metrics.$x.inc_by($self.$x);
+            }
+        )*
+    }}
+}
+
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
@@ -40,7 +50,7 @@ pub struct StoreLocalStatistic {
     pub skip_multi_version_key_count: u64,
     pub skip_delete_key_count: u64,
     pub processed_key_count: u64,
-    pub bloom_filter_true_negative_count: u64,
+    pub bloom_filter_true_negative_counts: u64,
     pub remote_io_time: Arc<AtomicU64>,
     pub bloom_filter_check_counts: u64,
     pub get_shared_buffer_hit_counts: u64,
@@ -68,7 +78,7 @@ impl StoreLocalStatistic {
         self.skip_multi_version_key_count += other.skip_multi_version_key_count;
         self.skip_delete_key_count += other.skip_delete_key_count;
         self.processed_key_count += other.processed_key_count;
-        self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
+        self.bloom_filter_true_negative_counts += other.bloom_filter_true_negative_counts;
         self.remote_io_time.fetch_add(
             other.remote_io_time.load(Ordering::Relaxed),
             Ordering::Relaxed,
@@ -89,53 +99,23 @@ impl StoreLocalStatistic {
     }
 
     fn report(&self, metrics: &mut LocalStoreMetrics) {
-        if self.cache_data_block_total > 0 {
-            metrics
-                .cache_data_block_total
-                .inc_by(self.cache_data_block_total);
-        }
-
-        if self.cache_data_block_miss > 0 {
-            metrics
-                .cache_data_block_miss
-                .inc_by(self.cache_data_block_miss);
-        }
-
-        if self.cache_meta_block_total > 0 {
-            metrics
-                .cache_meta_block_total
-                .inc_by(self.cache_meta_block_total);
-        }
-
-        if self.cache_meta_block_miss > 0 {
-            metrics
-                .cache_meta_block_miss
-                .inc_by(self.cache_meta_block_miss);
-        }
-
+        inc_local_metrics!(
+            self,
+            metrics,
+            cache_data_block_total,
+            cache_data_block_miss,
+            cache_meta_block_total,
+            cache_meta_block_miss,
+            skip_multi_version_key_count,
+            skip_delete_key_count,
+            get_shared_buffer_hit_counts,
+            total_key_count,
+            processed_key_count
+        );
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
             metrics.remote_io_time.observe(t / 1000.0);
         }
-
-        if self.skip_multi_version_key_count > 0 {
-            metrics
-                .skip_multi_version_key_count
-                .inc_by(self.skip_multi_version_key_count);
-        }
-
-        if self.skip_delete_key_count > 0 {
-            metrics
-                .skip_delete_key_count
-                .inc_by(self.skip_delete_key_count);
-        }
-
-        if self.get_shared_buffer_hit_counts > 0 {
-            metrics
-                .get_shared_buffer_hit_counts
-                .inc_by(self.get_shared_buffer_hit_counts);
-        }
-
         metrics
             .staging_imm_iter_count
             .observe(self.staging_imm_iter_count as f64);
@@ -148,9 +128,6 @@ impl StoreLocalStatistic {
         metrics
             .non_overlapping_iter_count
             .observe(self.overlapping_iter_count as f64);
-        metrics.total_key_count.inc_by(self.total_key_count);
-        metrics.processed_key_count.inc_by(self.processed_key_count);
-
         if metrics.collect_count > FLUSH_LOCAL_METRICS_TIMES {
             metrics.flush();
             metrics.collect_count = 0;
@@ -204,17 +181,17 @@ impl StoreLocalStatistic {
         if self.bloom_filter_check_counts == 0 {
             return;
         }
-
         // checks SST bloom filters
-        metrics
-            .bloom_filter_check_counts
-            .inc_by(self.bloom_filter_check_counts);
-        metrics.read_req_check_bloom_filter_counts.inc();
-        metrics
-            .bloom_filter_true_negative_counts
-            .inc_by(self.bloom_filter_true_negative_count);
+        inc_local_metrics!(
+            self,
+            metrics,
+            bloom_filter_check_counts,
+            bloom_filter_true_negative_counts
+        );
 
-        if self.bloom_filter_check_counts > self.bloom_filter_true_negative_count {
+        metrics.read_req_check_bloom_filter_counts.inc();
+
+        if self.bloom_filter_check_counts > self.bloom_filter_true_negative_counts {
             if !self.found_key {
                 // false positive
                 // checks SST bloom filters (at least one bloom filter return true) but returns
@@ -229,29 +206,21 @@ impl StoreLocalStatistic {
 
     pub fn report_for_iter(&self, metrics: &HummockStateStoreMetrics, table_id: &TableId) {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            if let Some(local) = local_metrics.get_mut(&table_id.table_id) {
-                self.report_bloom_filter_metrics(&mut local.iter_filter_metrics);
-                self.report(local);
-            } else {
-                let mut local = LocalStoreMetrics::new(metrics, table_id.to_string().as_str());
-                self.report_bloom_filter_metrics(&mut local.iter_filter_metrics);
-                self.report(&mut local);
-                local_metrics.insert(table_id.table_id, local);
-            }
+            let table_metrics = local_metrics
+                .entry(table_id.table_id)
+                .or_insert_with(|| LocalStoreMetrics::new(metrics, table_id.to_string().as_str()));
+            self.report(table_metrics);
+            self.report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
         });
     }
 
     pub fn report_for_get(&self, metrics: &HummockStateStoreMetrics, table_id: &TableId) {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            if let Some(local) = local_metrics.get_mut(&table_id.table_id) {
-                self.report_bloom_filter_metrics(&mut local.get_filter_metrics);
-                self.report(local);
-            } else {
-                let mut local = LocalStoreMetrics::new(metrics, table_id.to_string().as_str());
-                self.report_bloom_filter_metrics(&mut local.get_filter_metrics);
-                self.report(&mut local);
-                local_metrics.insert(table_id.table_id, local);
-            }
+            let table_metrics = local_metrics
+                .entry(table_id.table_id)
+                .or_insert_with(|| LocalStoreMetrics::new(metrics, table_id.to_string().as_str()));
+            self.report(table_metrics);
+            self.report_bloom_filter_metrics(&mut table_metrics.get_filter_metrics);
         });
     }
 
@@ -280,7 +249,7 @@ impl StoreLocalStatistic {
             || self.skip_multi_version_key_count != 0
             || self.skip_delete_key_count != 0
             || self.processed_key_count != 0
-            || self.bloom_filter_true_negative_count != 0
+            || self.bloom_filter_true_negative_counts != 0
             || self.remote_io_time.load(Ordering::Relaxed) != 0
             || self.bloom_filter_check_counts != 0
     }
@@ -427,53 +396,33 @@ impl LocalStoreMetrics {
     }
 }
 
-pub struct BloomFilterLocalMetrics {
-    bloom_filter_check_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
-    read_req_check_bloom_filter_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
-    bloom_filter_true_negative_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
-    read_req_positive_but_non_exist_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
-    read_req_bloom_filter_positive_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
-}
-
-impl BloomFilterLocalMetrics {
-    pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str, oper_type: &str) -> Self {
-        // checks SST bloom filters
-        let bloom_filter_check_counts = metrics
-            .bloom_filter_check_counts
-            .with_label_values(&[table_id_label, oper_type])
-            .local();
-
-        let read_req_check_bloom_filter_counts = metrics
-            .read_req_check_bloom_filter_counts
-            .with_label_values(&[table_id_label, oper_type])
-            .local();
-
-        let bloom_filter_true_negative_counts = metrics
-            .bloom_filter_true_negative_counts
-            .with_label_values(&[table_id_label, oper_type])
-            .local();
-        let read_req_positive_but_non_exist_counts = metrics
-            .read_req_positive_but_non_exist_counts
-            .with_label_values(&[table_id_label, oper_type])
-            .local();
-        let read_req_bloom_filter_positive_counts = metrics
-            .read_req_bloom_filter_positive_counts
-            .with_label_values(&[table_id_label, oper_type])
-            .local();
-        Self {
-            bloom_filter_check_counts,
-            read_req_check_bloom_filter_counts,
-            bloom_filter_true_negative_counts,
-            read_req_positive_but_non_exist_counts,
-            read_req_bloom_filter_positive_counts,
+macro_rules! define_bloom_filter_metrics {
+    ($($x:ident),*) => (
+        pub struct BloomFilterLocalMetrics {
+            $($x: GenericLocalCounter<prometheus::core::AtomicU64>,)*
         }
-    }
 
-    pub fn flush(&mut self) {
-        self.bloom_filter_check_counts.flush();
-        self.read_req_check_bloom_filter_counts.flush();
-        self.bloom_filter_true_negative_counts.flush();
-        self.read_req_positive_but_non_exist_counts.flush();
-        self.read_req_bloom_filter_positive_counts.flush();
-    }
+        impl BloomFilterLocalMetrics {
+            pub fn new(metrics: &HummockStateStoreMetrics, table_id_label: &str, oper_type: &str) -> Self {
+                // checks SST bloom filters
+                Self {
+                    $($x: metrics.$x.with_label_values(&[table_id_label, oper_type]).local(),)*
+                }
+            }
+
+            pub fn flush(&mut self) {
+                $(
+                    self.$x.flush();
+                )*
+            }
+        }
+    )
 }
+
+define_bloom_filter_metrics!(
+    bloom_filter_check_counts,
+    read_req_check_bloom_filter_counts,
+    bloom_filter_true_negative_counts,
+    read_req_positive_but_non_exist_counts,
+    read_req_bloom_filter_positive_counts
+);
