@@ -17,21 +17,12 @@ use prometheus::{register_int_counter_vec_with_registry, Registry};
 
 pub struct ExchangeServiceMetrics {
     pub registry: Registry,
-    pub stream_exchange_bytes: GenericCounterVec<AtomicU64>,
     pub stream_fragment_exchange_bytes: GenericCounterVec<AtomicU64>,
     pub actor_sampled_serialize_duration_ns: GenericCounterVec<AtomicU64>,
 }
 
 impl ExchangeServiceMetrics {
     pub fn new(registry: Registry) -> Self {
-        let stream_exchange_bytes = register_int_counter_vec_with_registry!(
-            "stream_exchange_send_size",
-            "Total size of messages that have been send to downstream Actor",
-            &["up_actor_id", "down_actor_id"],
-            registry
-        )
-        .unwrap();
-
         let stream_fragment_exchange_bytes = register_int_counter_vec_with_registry!(
             "stream_exchange_frag_send_size",
             "Total size of messages that have been send to downstream Fragment",
@@ -50,7 +41,6 @@ impl ExchangeServiceMetrics {
 
         Self {
             registry,
-            stream_exchange_bytes,
             stream_fragment_exchange_bytes,
             actor_sampled_serialize_duration_ns,
         }

@@ -28,7 +28,7 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
@@ -166,9 +166,14 @@ where
                         }
                     }
 
-                    PsqlError::StartupError(_)
-                    | PsqlError::PasswordError(_)
-                    | PsqlError::SslError(_) => {
+                    PsqlError::SslError(e) => {
+                        // For ssl error, because the stream has already been consumed, so there is
+                        // no way to write more message.
+                        error!("SSL connection setup error: {}", e);
+                        return true;
+                    }
+
+                    PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
                         // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
