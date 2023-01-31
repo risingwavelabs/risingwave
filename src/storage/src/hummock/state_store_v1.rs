@@ -603,9 +603,9 @@ impl StateStore for HummockStorageV1 {
 }
 
 pub struct HummockStateStoreIter {
-    table_id: TableId,
     inner: DirectedUserIterator,
     metrics: Arc<HummockStateStoreMetrics>,
+    table_id: TableId,
 }
 
 impl HummockStateStoreIter {

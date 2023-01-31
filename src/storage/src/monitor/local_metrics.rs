@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -411,7 +411,7 @@ impl LocalStoreMetrics {
         }
     }
 
-    pub fn flush(&self) {
+    pub fn flush(&mut self) {
         self.cache_data_block_total.flush();
         self.cache_data_block_miss.flush();
         self.cache_meta_block_total.flush();
@@ -469,7 +469,7 @@ impl BloomFilterLocalMetrics {
         }
     }
 
-    pub fn flush(&self) {
+    pub fn flush(&mut self) {
         self.bloom_filter_check_counts.flush();
         self.read_req_check_bloom_filter_counts.flush();
         self.bloom_filter_true_negative_counts.flush();
