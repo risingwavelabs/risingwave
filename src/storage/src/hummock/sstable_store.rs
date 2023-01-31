@@ -20,10 +20,10 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata,
-    ObjectStoreRef, ObjectStreamingUploader,
+    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
+    ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -285,13 +285,8 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let is_remote = is_remote_sst_id(sst_id);
-        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
-        let mut ret = format!("{}/{}{}.data", self.path, obj_prefix, sst_id);
-        if !is_remote {
-            ret = get_local_path(&ret);
-        }
-        ret
+        let obj_prefix = self.store.get_object_prefix(sst_id, true);
+        format!("{}/{}{}.data", self.path, obj_prefix, sst_id)
     }
 
     pub fn get_sst_id_from_path(&self, path: &str) -> HummockSstableId {
