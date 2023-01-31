@@ -96,6 +96,13 @@ pub struct RwConfig {
     pub backup: BackupConfig,
 }
 
+#[derive(Copy, Clone, Debug, Default, ArgEnum, Serialize, Deserialize)]
+pub enum MetaBackend {
+    #[default]
+    Mem,
+    Etcd,
+}
+
 /// The section `[meta]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -144,6 +151,9 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::node_num_monitor_interval_sec")]
     pub node_num_monitor_interval_sec: u64,
+
+    #[serde(default = "default::meta::backend")]
+    pub backend: MetaBackend,
 }
 
 impl Default for MetaConfig {
@@ -369,17 +379,12 @@ impl Default for FileCacheConfig {
     }
 }
 
-#[derive(Debug, Clone, ArgEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, ArgEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
     Off,
+    #[default]
     On,
     Verbose,
-}
-
-impl Default for AsyncStackTraceOption {
-    fn default() -> Self {
-        Self::On
-    }
 }
 
 /// The subsections `[batch.developer]` and `[streaming.developer]`.
@@ -452,6 +457,8 @@ impl Default for BackupConfig {
 
 mod default {
     pub mod meta {
+        use crate::config::MetaBackend;
+
         pub fn min_sst_retention_time_sec() -> u64 {
             604800
         }
@@ -478,6 +485,10 @@ mod default {
 
         pub fn node_num_monitor_interval_sec() -> u64 {
             10
+        }
+
+        pub fn backend() -> MetaBackend {
+            MetaBackend::Mem
         }
     }
 

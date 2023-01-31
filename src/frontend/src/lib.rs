@@ -66,6 +66,7 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
+/// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     // TODO: rename to listen_address and separate out the port.
@@ -97,8 +98,12 @@ pub struct FrontendOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(flatten)]
+    override_opts: OverrideConfigOpts,
 }
 
+/// Command-line arguments for frontend-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
@@ -125,8 +130,9 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-        pg_serve(&opts.host, session_mgr, Some(TlsConfig::new_default()))
+        let addr = opts.host.clone();
+        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        pg_serve(&addr, session_mgr, Some(TlsConfig::new_default()))
             .await
             .unwrap();
     })

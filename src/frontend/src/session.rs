@@ -30,7 +30,7 @@ use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
-use risingwave_common::config::{load_config, BatchConfig, NO_OVERRIDE};
+use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
@@ -144,9 +144,9 @@ impl FrontendEnv {
     }
 
     pub async fn init(
-        opts: &FrontendOpts,
+        opts: FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(&opts.config_path, NO_OVERRIDE);
+        let config = load_config(&opts.config_path, Some(opts.override_opts));
         tracing::info!(
             "Starting frontend node with config {:?} with debug assertions {}",
             config,
@@ -625,7 +625,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 }
 
 impl SessionManagerImpl {
-    pub async fn new(opts: &FrontendOpts) -> Result<Self> {
+    pub async fn new(opts: FrontendOpts) -> Result<Self> {
         let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
             FrontendEnv::init(opts).await?;
         Ok(Self {
