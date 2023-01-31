@@ -35,11 +35,43 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     let mut binder = Binder::new(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, indices): (Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
-        let (catalogs, indices) = match relation {
-            Relation::Source(s) => (s.catalog.columns, vec![]),
-            Relation::BaseTable(t) => (t.table_catalog.columns, t.table_indexes),
-            Relation::SystemTable(t) => (t.sys_table_catalog.columns, vec![]),
+    let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
+        let (column_catalogs, pk_column_catalogs, indices) = match relation {
+            Relation::Source(s) => {
+                let pk_column_catalogs = s
+                    .catalog
+                    .pk_col_ids
+                    .iter()
+                    .map(|&column_id| {
+                        s.catalog
+                            .columns
+                            .iter()
+                            .filter(|x| x.column_id() == column_id)
+                            .exactly_one()
+                            .unwrap()
+                            .clone()
+                    })
+                    .collect_vec();
+                (s.catalog.columns, pk_column_catalogs, vec![])
+            }
+            Relation::BaseTable(t) => {
+                let pk_column_catalogs = t
+                    .table_catalog
+                    .pk()
+                    .iter()
+                    .map(|idx| t.table_catalog.columns[idx.index].clone())
+                    .collect_vec();
+                (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
+            }
+            Relation::SystemTable(t) => {
+                let pk_column_catalogs = t
+                    .sys_table_catalog
+                    .pk
+                    .iter()
+                    .map(|idx| t.sys_table_catalog.columns[*idx].clone())
+                    .collect_vec();
+                (t.sys_table_catalog.columns, pk_column_catalogs, vec![])
+            }
             _ => {
                 return Err(
                     CatalogError::NotFound("table or source", table_name.to_string()).into(),
@@ -47,9 +79,13 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
             }
         };
         (
-            catalogs
+            column_catalogs
                 .iter()
                 .filter(|c| !c.is_hidden)
+                .map(|c| c.column_desc.clone())
+                .collect(),
+            pk_column_catalogs
+                .iter()
                 .map(|c| c.column_desc.clone())
                 .collect(),
             indices,
@@ -58,6 +94,20 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
+
+    // Convert primary key to rows
+    if !pk_columns.is_empty() {
+        rows.push(Row::new(vec![
+            Some("primary key".into()),
+            Some(
+                format!(
+                    "{}",
+                    display_comma_separated(&pk_columns.into_iter().map(|x| x.name).collect_vec()),
+                )
+                .into(),
+            ),
+        ]));
+    }
 
     // Convert all indexes to rows
     rows.extend(indices.iter().map(|index| {
@@ -149,7 +199,7 @@ mod tests {
     async fn test_describe_handler() {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend
-            .run_sql("create table t (v1 int, v2 int);")
+            .run_sql("create table t (v1 int, v2 int, v3 int primary key, v4 int);")
             .await
             .unwrap();
 
@@ -180,7 +230,10 @@ mod tests {
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
             "v1".into() => "Int32".into(),
             "v2".into() => "Int32".into(),
-            "idx1".into() => "index(v1, v2) distributed by(v1, v2)".into(),
+            "v3".into() => "Int32".into(),
+            "v4".into() => "Int32".into(),
+            "primary key".into() => "v3".into(),
+            "idx1".into() => "index(v1, v2, v3) include(v4) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);
