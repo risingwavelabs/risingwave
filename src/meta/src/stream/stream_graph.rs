@@ -1070,7 +1070,6 @@ impl CompleteStreamFragmentGraph {
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
     ) -> MetaResult<Self> {
-        // Create edges.
         let mut downstreams = HashMap::new();
         let mut upstreams = HashMap::new();
 
@@ -1081,15 +1080,20 @@ impl CompleteStreamFragmentGraph {
                     .context("upstream materialized view fragment not found")?;
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
+                // We always use `NoShuffle` for the exchange between the upstream `Materialize` and
+                // the downstream `Chain` of the new materialized view.
+                let dt = DispatcherType::NoShuffle;
+
                 downstreams
                     .entry(mview_id)
                     .or_insert_with(HashMap::new)
-                    .insert(id, DispatcherType::NoShuffle);
-
+                    .try_insert(id, dt)
+                    .unwrap();
                 upstreams
                     .entry(id)
                     .or_insert_with(HashMap::new)
-                    .insert(mview_id, DispatcherType::NoShuffle);
+                    .try_insert(mview_id, dt)
+                    .unwrap();
             }
         }
 
