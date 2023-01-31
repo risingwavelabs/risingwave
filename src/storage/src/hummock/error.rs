@@ -44,7 +44,7 @@ enum HummockErrorInner {
     SharedBufferError(String),
     #[error("Wait epoch error {0}.")]
     WaitEpoch(String),
-    #[error("Read current epoch error {0}.")]
+    #[error("ReadCurrentEpoch error {0}.")]
     ReadCurrentEpoch(String),
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
