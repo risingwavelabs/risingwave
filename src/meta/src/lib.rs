@@ -61,6 +61,10 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
+    /// Deprecated. But we keep it for backward compatibility.
+    #[clap(long)]
+    host: Option<String>,
+
     /// The endpoint for this meta node, which also serves as its unique identifier in cluster
     /// membership and leader election.
     #[clap(long)]
@@ -113,13 +117,14 @@ pub struct MetaNodeOpts {
 
 /// Command-line arguments for compute-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
-struct OverrideConfigOpts {
+pub struct OverrideConfigOpts {
     #[clap(long, arg_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
 }
 
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 
 use risingwave_common::config::{load_config, MetaBackend};
@@ -132,13 +137,14 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         tracing::info!("Starting meta node with options {:?}", opts);
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         tracing::info!("Starting meta node with config {:?}", config);
-        let listen_addr = opts.listen_addr.parse().unwrap();
+        let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
+        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
         let (meta_endpoint, backend) = match config.meta.backend {
             MetaBackend::Etcd => (
                 opts.meta_endpoint
-                    .expect("meta_endpoint must be specified when using etcd"),
+                    .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port())),
                 MetaStoreBackend::Etcd {
                     endpoints: opts
                         .etcd_endpoints
