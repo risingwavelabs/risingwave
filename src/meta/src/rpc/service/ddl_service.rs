@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -489,6 +489,30 @@ where
         Err(Status::unimplemented(
             "replace table plan is not implemented yet",
         ))
+    }
+
+    async fn java_get_table(
+        &self,
+        request: Request<JavaGetTableRequest>,
+    ) -> Result<Response<JavaGetTableResponse>, Status> {
+        let req = request.into_inner();
+        let database = self
+            .catalog_manager
+            .list_databases()
+            .await
+            .into_iter()
+            .find(|db| db.name == req.database_name);
+        if let Some(db) = database {
+            let table = self
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .find(|t| t.name == req.table_name && t.database_id == db.id);
+            Ok(Response::new(JavaGetTableResponse { table }))
+        } else {
+            Ok(Response::new(JavaGetTableResponse { table: None }))
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1413,6 +1413,10 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
+    }
+
+    pub async fn list_databases(&self) -> Vec<Database> {
+        self.core.lock().await.database.list_databases()
     }
 
     pub async fn list_tables(&self) -> Vec<Table> {
