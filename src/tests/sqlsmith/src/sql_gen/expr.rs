@@ -154,7 +154,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
-        let num_fields = self.rng.gen_range(1..10);
+        let num_fields = self.rng.gen_range(1..4);
         let fields = (0..num_fields)
             .map(|_| self.gen_data_type_inner(depth))
             .collect();
@@ -268,7 +268,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_case(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        let n = self.rng.gen_range(1..10);
+        let n = self.rng.gen_range(1..4);
         Expr::Case {
             operand: None,
             conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean, context),
@@ -297,8 +297,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
-        let n = self.rng.gen_range(1..10);
-        self.gen_n_exprs_with_type(n, &DataType::Varchar, context)
+        let n = self.rng.gen_range(1..4);
+        (0..n)
+            .map(|_| {
+                if self.rng.gen_bool(0.1) {
+                    self.gen_explicit_cast(&DataType::Varchar, context)
+                } else {
+                    self.gen_expr(&DataType::Varchar, context)
+                }
+            })
+            .collect()
     }
 
     /// Generates `n` expressions of type `ret`.
