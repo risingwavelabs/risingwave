@@ -143,7 +143,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
         let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
-        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
+        let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
         let advertise_addr = opts
