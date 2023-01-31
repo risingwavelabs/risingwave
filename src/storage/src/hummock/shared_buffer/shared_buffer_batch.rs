@@ -43,6 +43,7 @@ pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
+    _bloom_filter: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
@@ -52,6 +53,7 @@ impl SharedBufferBatchInner {
     fn new(
         payload: Vec<SharedBufferItem>,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
+        _bloom_filter: Vec<u8>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
@@ -91,6 +93,7 @@ impl SharedBufferBatchInner {
             range_tombstone_list,
             size,
             largest_table_key,
+            _bloom_filter,
             _tracker,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
         }
@@ -132,6 +135,7 @@ impl SharedBufferBatch {
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
                 sorted_items,
+                vec![],
                 vec![],
                 size,
                 None,
@@ -287,6 +291,7 @@ impl SharedBufferBatch {
         size: usize,
         delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
+        bloom_filter: Vec<u8>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         let delete_range_tombstones = delete_ranges
@@ -304,8 +309,13 @@ impl SharedBufferBatch {
         {
             Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
         }
-        let inner =
-            SharedBufferBatchInner::new(sorted_items, delete_range_tombstones, size, tracker);
+        let inner = SharedBufferBatchInner::new(
+            sorted_items,
+            delete_range_tombstones,
+            bloom_filter,
+            size,
+            tracker,
+        );
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
@@ -745,6 +755,7 @@ mod tests {
             0,
             delete_ranges,
             Default::default(),
+            vec![],
             None,
         );
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));

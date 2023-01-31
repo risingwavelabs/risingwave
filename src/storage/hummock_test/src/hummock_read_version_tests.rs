@@ -58,6 +58,7 @@ async fn test_read_version_basic() {
             size,
             vec![],
             TableId::from(table_id),
+            vec![],
             None,
         );
 
@@ -95,6 +96,7 @@ async fn test_read_version_basic() {
                 size,
                 vec![],
                 TableId::from(table_id),
+                vec![],
                 None,
             );
 
@@ -273,6 +275,7 @@ async fn test_read_filter_basic() {
             size,
             vec![],
             TableId::from(table_id),
+            vec![],
             None,
         );
 

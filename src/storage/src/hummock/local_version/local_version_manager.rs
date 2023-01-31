@@ -145,6 +145,7 @@ impl LocalVersionManager {
             size,
             delete_ranges,
             table_id,
+            vec![],
             Some(
                 self.buffer_tracker
                     .get_memory_limiter()

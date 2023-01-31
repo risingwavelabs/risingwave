@@ -773,6 +773,7 @@ mod tests {
             size,
             vec![],
             TEST_TABLE_ID,
+            vec![],
             tracker,
         )
     }

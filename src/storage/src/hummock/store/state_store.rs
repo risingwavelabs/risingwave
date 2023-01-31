@@ -16,12 +16,15 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use tokio::sync::mpsc;
 use tracing::warn;
+use xxhash_rust::xxh32;
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -33,8 +36,9 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
+use crate::hummock::sstable::Bloom;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
-use crate::hummock::{MemoryLimiter, SstableIterator};
+use crate::hummock::{MemoryLimiter, SstableIterator, DEFAULT_BLOOM_FALSE_POSITIVE};
 use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -183,7 +187,16 @@ impl StateStoreWrite for LocalHummockStorage {
             let table_id = write_options.table_id;
 
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-            let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+
+            let pure_key_hashes = sorted_items
+                .iter()
+                .map(|(key, _)| xxh32::xxh32(&key[VirtualNode::SIZE..], 0))
+                .collect_vec();
+            let bits_per_key =
+                Bloom::bloom_bits_per_key(pure_key_hashes.len(), DEFAULT_BLOOM_FALSE_POSITIVE);
+            let bloom_filter = Bloom::build_from_key_hashes(&pure_key_hashes, bits_per_key);
+
+            let size = SharedBufferBatch::measure_batch_size(&sorted_items) + bloom_filter.len();
             let limiter = self.core.memory_limiter.as_ref();
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
                 tracker
@@ -212,6 +225,7 @@ impl StateStoreWrite for LocalHummockStorage {
                 size,
                 delete_ranges,
                 table_id,
+                bloom_filter,
                 Some(tracker),
             );
             let imm_size = imm.size();

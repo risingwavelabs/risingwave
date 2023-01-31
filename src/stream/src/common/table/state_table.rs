@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
@@ -958,6 +958,7 @@ impl<S: StateStore> StateTable<S> {
         &self,
         pk_prefix: impl Row,
     ) -> StreamExecutorResult<RowStream<'_, S>> {
+        use futures::StreamExt;
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
             .await?;
@@ -1001,6 +1002,7 @@ impl<S: StateStore> StateTable<S> {
         // iterate over each vnode that the `StateTable` owns.
         vnode: VirtualNode,
     ) -> StreamExecutorResult<RowStream<'_, S>> {
+        use futures::StreamExt;
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
@@ -1156,6 +1158,7 @@ where
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok = (Cow<'a, Bytes>, OwnedRow), error = StreamExecutorError)]
     async fn into_stream(self) {
+        use futures::StreamExt;
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
 
