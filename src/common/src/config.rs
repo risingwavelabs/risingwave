@@ -28,14 +28,14 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
-/// For non-user-facing components where the CLI arguments do not overwrite the config file.
-pub const NO_OVERWRITE: Option<NoOverwrite> = None;
+/// For non-user-facing components where the CLI arguments do not override the config file.
+pub const NO_OVERRIDE: Option<NoOverride> = None;
 
 /// A workaround for a bug in clap where the attribute `from_flag` on `Option<bool>` results in
 /// compilation error.
 pub type Flag = Option<bool>;
 
-pub fn load_config(path: &str, cli_overwrite: Option<impl OverwriteConfig>) -> RwConfig
+pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
 {
     let mut config = if path.is_empty() {
@@ -46,22 +46,22 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
-    if let Some(cli_overwrite) = cli_overwrite {
-        cli_overwrite.overwrite(&mut config);
+    if let Some(cli_override) = cli_override {
+        cli_override.r#override(&mut config);
     }
     config
 }
 
-pub trait OverwriteConfig {
-    fn overwrite(self, config: &mut RwConfig);
+pub trait OverrideConfig {
+    fn r#override(self, config: &mut RwConfig);
 }
 
-/// A dummy struct for `NO_OVERWRITE`. Do NOT use it directly.
+/// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
 #[derive(Clone, Copy)]
-pub struct NoOverwrite {}
+pub struct NoOverride {}
 
-impl OverwriteConfig for NoOverwrite {
-    fn overwrite(self, _config: &mut RwConfig) {}
+impl OverrideConfig for NoOverride {
+    fn r#override(self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a

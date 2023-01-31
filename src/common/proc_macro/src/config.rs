@@ -33,24 +33,24 @@ use quote::quote;
 use syn::DeriveInput;
 
 #[derive(FromAttributes)]
-pub struct Overwrite {
+pub struct OverrideOpts {
     pub path: Option<syn::Expr>,
     pub optional_in_config: Option<()>,
 }
 
 #[cfg_attr(coverage, no_coverage)]
-pub fn produce_overwrite_config(input: DeriveInput) -> TokenStream {
+pub fn produce_override_config(input: DeriveInput) -> TokenStream {
     let struct_ident = input.ident;
-    let mut overwrite_stmts = Vec::new();
+    let mut override_stmts = Vec::new();
 
     if let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data {
         for field in fields {
-            let overwrite_opts = Overwrite::from_attributes(&field.attrs)
-                .expect_or_abort("Failed to parse `overwrite` attribute");
-            let path = overwrite_opts.path.expect("`path` must exist");
+            let override_opts = OverrideOpts::from_attributes(&field.attrs)
+                .expect_or_abort("Failed to parse `override_opts` attribute");
+            let path = override_opts.path.expect("`path` must exist");
             let field_ident = field.ident;
 
-            let overwrite_stmt = if overwrite_opts.optional_in_config.is_some() {
+            let override_stmt = if override_opts.optional_in_config.is_some() {
                 quote! {
                     if self.#field_ident.is_some() {
                         config.#path = self.#field_ident;
@@ -64,14 +64,14 @@ pub fn produce_overwrite_config(input: DeriveInput) -> TokenStream {
                 }
             };
 
-            overwrite_stmts.push(overwrite_stmt);
+            override_stmts.push(override_stmt);
         }
     }
 
     quote! {
-        impl risingwave_common::config::OverwriteConfig for #struct_ident {
-            fn overwrite(self, config: &mut risingwave_common::config::RwConfig) {
-                #(#overwrite_stmts)*
+        impl risingwave_common::config::OverrideConfig for #struct_ident {
+            fn r#override(self, config: &mut risingwave_common::config::RwConfig) {
+                #(#override_stmts)*
             }
         }
     }

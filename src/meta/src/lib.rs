@@ -122,14 +122,14 @@ pub struct MetaNodeOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, NO_OVERWRITE};
+use risingwave_common::config::{load_config, NO_OVERRIDE};
 
 /// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let config = load_config(&opts.config_path, NO_OVERWRITE);
+        let config = load_config(&opts.config_path, NO_OVERRIDE);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
         let listen_addr = opts.listen_addr.parse().unwrap();

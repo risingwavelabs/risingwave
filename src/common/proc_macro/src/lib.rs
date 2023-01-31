@@ -33,26 +33,26 @@ use syn::parse_macro_input;
 
 mod config;
 
-/// Sections in the configuration file can use `#[derive(OverwriteConfig)]` to generate the
+/// Sections in the configuration file can use `#[derive(OverrideConfig)]` to generate the
 /// implementation of overwriting configs from the file.
 ///
-/// In the struct definition, use #[overwrite(path = ...)] on a field to indicate the field in
-/// `RwConfig` to overwrite.
+/// In the struct definition, use #[override_opts(path = ...)] on a field to indicate the field in
+/// `RwConfig` to override.
 ///
 /// An example:
 ///
 /// ```ignore
-/// #[derive(OverwriteConfig)]
+/// #[derive(OverrideConfig)]
 /// struct Opts {
-///     #[overwrite(path = meta.listen_addr)]
+///     #[override_opts(path = meta.listen_addr)]
 ///     listen_addr: Option<String>,
 /// }
 /// ```
 ///
 /// will generate
 ///
-/// impl OverwriteConfig for Opts {
-///     fn overwrite(self, config: &mut RwConfig) {
+/// impl OverrideConfig for Opts {
+///     fn r#override(self, config: &mut RwConfig) {
 ///         if let Some(v) = self.required_str {
 ///             config.meta.listen_addr = v;
 ///         }
@@ -60,12 +60,12 @@ mod config;
 /// }
 /// ```
 #[cfg_attr(coverage, no_coverage)]
-#[proc_macro_derive(OverwriteConfig, attributes(overwrite))]
+#[proc_macro_derive(OverrideConfig, attributes(override_opts))]
 #[proc_macro_error]
-pub fn overwrite_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn override_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input);
 
-    let gen = config::produce_overwrite_config(input);
+    let gen = config::produce_override_config(input);
 
     gen.into()
 }

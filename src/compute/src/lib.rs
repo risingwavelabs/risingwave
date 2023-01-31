@@ -32,7 +32,7 @@ use clap::Parser;
 use risingwave_common::config::{AsyncStackTraceOption, Flag};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverwriteConfig;
+use risingwave_common_proc_macro::OverrideConfig;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
@@ -72,12 +72,12 @@ pub struct ComputeNodeOpts {
     pub parallelism: usize,
 
     #[clap(flatten)]
-    overwrite_config: OverwriteConfigOpts,
+    override_config: OverrideConfigOpts,
 }
 
-/// Command-line arguments for compute-node that overwrites the config file.
-#[derive(Parser, Clone, Debug, OverwriteConfig)]
-struct OverwriteConfigOpts {
+/// Command-line arguments for compute-node that overrides the config file.
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+struct OverrideConfigOpts {
     /// One of:
     /// 1. `hummock+{object_store}` where `object_store`
     /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
@@ -85,30 +85,30 @@ struct OverwriteConfigOpts {
     /// 2. `in-memory`
     /// 3. `sled://{path}`
     #[clap(long)]
-    #[overwrite(path = storage.state_store)]
+    #[override_opts(path = storage.state_store)]
     pub state_store: Option<String>,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
     #[clap(long)]
-    #[overwrite(path = server.metrics_level)]
+    #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.
     #[clap(long)]
-    #[overwrite(path = storage.file_cache.dir)]
+    #[override_opts(path = storage.file_cache.dir)]
     pub file_cache_dir: Option<String>,
 
     /// Enable reporting tracing information to jaeger.
     #[clap(parse(from_flag), long)]
-    #[overwrite(path = streaming.enable_jaeger_tracing)]
+    #[override_opts(path = streaming.enable_jaeger_tracing)]
     pub enable_jaeger_tracing: Flag,
 
     /// Enable async stack tracing for risectl.
     #[clap(long, arg_enum)]
-    #[overwrite(path = streaming.async_stack_trace)]
+    #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }
 

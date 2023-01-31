@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::StructOpt;
-use risingwave_common::config::{load_config, NO_OVERWRITE};
+use risingwave_common::config::{load_config, NO_OVERRIDE};
 use tempfile::TempPath;
 use tokio::signal;
 
@@ -155,7 +155,7 @@ pub async fn playground() -> Result<()> {
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
 
-                let _config = load_config(&opts.config_path, NO_OVERWRITE);
+                let _config = load_config(&opts.config_path, NO_OVERRIDE);
 
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {
