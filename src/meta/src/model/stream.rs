@@ -245,6 +245,7 @@ impl TableFragments {
         })
     }
 
+    /// Returns the fragment with the `Mview` type flag.
     pub fn mview_fragment(&self) -> Option<Fragment> {
         self.fragments
             .values()

@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, HashMap, LinkedList};
 
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::ParallelUnitMapping;
@@ -23,32 +24,31 @@ use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use super::{CompleteStreamFragmentGraph, GlobalFragmentId as Id};
-use crate::stream::stream_graph::Distribution;
 use crate::MetaResult;
 
 type HashMappingId = usize;
 
+/// The internal distribution structure for processing in the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DistId {
     Hash(HashMappingId),
     Singleton,
 }
 
+/// Facts as the input of the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Fact {
+    /// An edge in the stream graph.
     Edge {
         from: Id,
         to: Id,
         dt: DispatcherType,
     },
-    Internal {
-        id: Id,
-        dist: DistId,
-    },
-    External {
-        id: Id,
-        dist: DistId,
-    },
+    /// A distribution requirement for a building fragment.
+    InternalReq { id: Id, dist: DistId },
+    /// A distribution requirement for an existing fragment.
+    ExternalReq { id: Id, dist: DistId },
+    /// The default distribution for a building fragment.
     Default(DistId),
 }
 
@@ -70,33 +70,59 @@ crepe::crepe! {
     #[derive(Debug)]
     struct Failed(Id);
 
+    // Extract facts.
     Edge(from, to, dt) <- Input(f), let Fact::Edge { from, to, dt } = f;
-    Internal(id, dist) <- Input(f), let Fact::Internal { id, dist } = f;
-    External(id, dist) <- Input(f), let Fact::External { id, dist } = f;
+    Internal(id, dist) <- Input(f), let Fact::InternalReq { id, dist } = f;
+    External(id, dist) <- Input(f), let Fact::ExternalReq { id, dist } = f;
     Default(dist) <- Input(f), let Fact::Default(dist) = f;
 
+    // Internal fragments.
     Fragment(x) <- Edge(x, _, _), !External(x, _);
     Fragment(y) <- Edge(_, y, _), !External(y, _);
 
+    // Requirements in the facts.
     Requirement(x, d) <- Internal(x, d);
     Requirement(x, d) <- External(x, d);
-
+    // Requirements of `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
-
+    // Requirements of `Simple` edges.
     Requirement(y, DistId::Singleton) <- Edge(_, y, Simple);
 
+    // Multiple requirements lead to failure.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
+
+    // Take the single requirement as the result.
     Success(x, d) <- Fragment(x), Requirement(x, d), !Failed(x);
+    // Take the default distribution as the result, if no requirement.
     Success(x, d) <- Fragment(x), Default(d), !Requirement(x, _);
 }
 
-/// [`Scheduler`] defines schedule logic for mv actors.
+/// The distribution of a fragment.
+#[derive(EnumAsInner)]
+pub(super) enum Distribution {
+    Singleton,
+    Hash(ParallelUnitMapping),
+}
+
+impl Distribution {
+    /// The parallelism required by the distribution.
+    pub fn parallelism(&self) -> usize {
+        match self {
+            Distribution::Singleton => 1,
+            Distribution::Hash(mapping) => mapping.iter_unique().count(),
+        }
+    }
+}
+
+/// [`Scheduler`] schedules the distribution of fragments in a stream graph.
 pub(super) struct Scheduler {
+    /// The default distribution for fragments, if there's no requirement derived.
     default_hash_mapping: ParallelUnitMapping,
 }
 
 impl Scheduler {
+    /// Create a new [`Scheduler`].
     pub fn new(
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
         default_parallelism: usize,
@@ -134,21 +160,22 @@ impl Scheduler {
             );
         }
 
+        // Build the default hash mapping uniformly.
         let default_hash_mapping = ParallelUnitMapping::build(&round_robin);
 
         Ok(Self {
-            // all_parallel_units: round_robin,
-            // default_parallelism,
             default_hash_mapping,
         })
     }
 
+    /// Schedule the given complete graph and returns the distribution of each fragment.
     pub fn schedule(
         &self,
         graph: &CompleteStreamFragmentGraph,
     ) -> MetaResult<HashMap<Id, Distribution>> {
         let existing_distribution = graph.existing_distribution();
 
+        // Build an index map for all hash mappings.
         let all_hash_mappings = existing_distribution
             .values()
             .flat_map(|dist| dist.as_hash())
@@ -156,7 +183,6 @@ impl Scheduler {
             .cloned()
             .unique()
             .collect_vec();
-
         let hash_mapping_id: HashMap<_, _> = all_hash_mappings
             .iter()
             .enumerate()
@@ -172,7 +198,7 @@ impl Scheduler {
         // Internal
         for (&id, fragment) in &graph.graph.fragments {
             if fragment.is_singleton {
-                facts.push(Fact::Internal {
+                facts.push(Fact::InternalReq {
                     id,
                     dist: DistId::Singleton,
                 });
@@ -184,22 +210,23 @@ impl Scheduler {
                 Distribution::Singleton => DistId::Singleton,
                 Distribution::Hash(mapping) => DistId::Hash(hash_mapping_id[&mapping]),
             };
-            facts.push(Fact::External { id, dist });
+            facts.push(Fact::ExternalReq { id, dist });
         }
         // Edges
         for (from, to, dt) in graph.dispatch_edges() {
             facts.push(Fact::Edge { from, to, dt });
         }
 
+        // Run the algorithm.
         let mut crepe = Crepe::new();
         crepe.extend(facts.into_iter().map(Input));
-
         let (success, failed) = crepe.run();
         if !failed.is_empty() {
             bail!("Failed to schedule: {:?}", failed);
         }
         assert_eq!(success.len(), graph.graph.fragments.len());
 
+        // Extract the results.
         let distributions = success
             .into_iter()
             .map(|Success(id, distribution)| {

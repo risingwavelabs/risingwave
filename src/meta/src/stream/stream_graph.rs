@@ -19,7 +19,6 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
@@ -35,6 +34,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
+use self::schedule::Distribution;
 use super::CreateStreamingJobContext;
 use crate::manager::{
     IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingJob,
@@ -117,7 +117,7 @@ struct StreamActorDownstream {
     actors: OrderedActorLink,
 
     /// Whether to place the downstream actors on the same node
-    // TODO: remove this field
+    // TODO: remove this field after scheduler refactoring
     #[expect(dead_code)]
     same_worker_node: bool,
 }
@@ -304,27 +304,24 @@ impl StreamGraphBuilder {
                             same_worker_node,
                         );
 
-                    let ret = self
-                        .actor_builders
+                    self.actor_builders
                         .get_mut(downstream_id)
                         .unwrap()
                         .upstreams
-                        .insert(
+                        .try_insert(
                             exchange_operator_id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(vec![*upstream_id]),
                                 fragment_id: upstream_fragment_id,
                                 same_worker_node,
                             },
-                        );
-
-                    assert!(
-                        ret.is_none(),
-                        "duplicated exchange input {} for no-shuffle actors {:?} -> {:?}",
-                        exchange_operator_id,
-                        upstream_id,
-                        downstream_id
-                    );
+                        )
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "duplicated exchange input {} for no-shuffle actors {:?} -> {:?}",
+                                exchange_operator_id, upstream_id, downstream_id
+                            )
+                        });
                 });
 
             return;
@@ -352,26 +349,24 @@ impl StreamGraphBuilder {
 
         // update actors to have upstreams, link downstream <- upstream.
         downstream_actor_ids.iter().for_each(|downstream_id| {
-            let ret = self
-                .actor_builders
+            self.actor_builders
                 .get_mut(downstream_id)
                 .unwrap()
                 .upstreams
-                .insert(
+                .try_insert(
                     exchange_operator_id,
                     StreamActorUpstream {
                         actors: OrderedActorLink(upstream_actor_ids.to_vec()),
                         fragment_id: upstream_fragment_id,
                         same_worker_node,
                     },
-                );
-            assert!(
-                ret.is_none(),
-                "duplicated exchange input {} for actors {:?} -> {:?}",
-                exchange_operator_id,
-                upstream_actor_ids,
-                downstream_actor_ids
-            );
+                )
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "duplicated exchange input {} for actors {:?} -> {:?}",
+                        exchange_operator_id, upstream_actor_ids, downstream_actor_ids
+                    )
+                });
         });
     }
 
@@ -503,19 +498,23 @@ impl StreamGraphBuilder {
 }
 
 /// The mutable state when building actor graph.
-// #[derive(Default)]
 struct BuildActorGraphState {
-    /// stream graph builder, to build streaming DAG.
+    /// The stream graph builder, to build streaming DAG.
     stream_graph_builder: StreamGraphBuilder,
-    /// when converting fragment graph to actor graph, we need to know which actors belong to a
+
+    /// When converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<GlobalFragmentId, Vec<GlobalActorId>>,
 
+    /// The next local actor id to use.
     next_local_id: u32,
+
+    /// The global actor id generator.
     actor_id_gen: GlobalActorIdGen,
 }
 
 impl BuildActorGraphState {
+    /// Create an empty state with the given id generator.
     fn new(actor_id_gen: GlobalActorIdGen) -> Self {
         Self {
             stream_graph_builder: Default::default(),
@@ -525,6 +524,7 @@ impl BuildActorGraphState {
         }
     }
 
+    /// Get the next global actor id.
     fn next_actor_id(&mut self) -> GlobalActorId {
         let local_id = self.next_local_id;
         self.next_local_id += 1;
@@ -532,23 +532,28 @@ impl BuildActorGraphState {
         self.actor_id_gen.to_global_id(local_id)
     }
 
+    /// Finish the build and return the inner stream graph builder.
     fn finish(self) -> StreamGraphBuilder {
         assert_eq!(self.actor_id_gen.len, self.next_local_id);
-
         self.stream_graph_builder
     }
 }
 
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
-    // TODO: also use the physical distribution itself
+    /// The pre-scheduled distribution for each fragment.
+    // TODO: this is fake now and only the parallelism is used, we should also use the physical
+    // distribution itself after scheduler refactoring.
     distributions: HashMap<GlobalFragmentId, Distribution>,
 
+    /// The stream fragment graph.
     fragment_graph: StreamFragmentGraph,
 }
 
 impl ActorGraphBuilder {
+    /// Create a new actor graph builder with the given "complete" graph.
     pub fn new(complete_graph: CompleteStreamFragmentGraph, default_parallelism: u32) -> Self {
+        // TODO: use the real parallel units to generate real distribution.
         let fake_parallel_units = (0..default_parallelism).map(|id| ParallelUnit {
             id,
             worker_node_id: 0,
@@ -559,6 +564,8 @@ impl ActorGraphBuilder {
                 .schedule(&complete_graph)
                 .unwrap();
 
+        // TODO: directly use the complete graph when building so that we can generalize the
+        // processing logic for `Chain`s.
         let fragment_graph = complete_graph.into_inner();
 
         Self {
@@ -675,7 +682,7 @@ impl ActorGraphBuilder {
         state
             .fragment_actors
             .try_insert(fragment_id, actor_ids)
-            .unwrap();
+            .unwrap_or_else(|_| panic!("fragment {:?} is already processed", fragment_id));
 
         Ok(())
     }
@@ -1013,7 +1020,6 @@ impl StreamFragmentGraph {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
 
-    #[expect(dead_code)]
     fn edges(
         &self,
     ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, &StreamFragmentEdge)> {
@@ -1026,35 +1032,29 @@ impl StreamFragmentGraph {
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
     LazyLock::new(HashMap::new);
 
-#[derive(EnumAsInner)]
-enum Distribution {
-    Singleton,
-    Hash(ParallelUnitMapping),
-}
-
-impl Distribution {
-    fn parallelism(&self) -> usize {
-        match self {
-            Distribution::Singleton => 1,
-            Distribution::Hash(mapping) => mapping.iter_unique().count(),
-        }
-    }
-}
-
+/// A wrapper of [`StreamFragmentGraph`] that contains the information of existing fragments, which
+/// is connected to the graph's top-most or bottom-most fragments.
+///
+/// For example, if we're going to build a mview on an existing mview, the upstream fragment
+/// containing the `Materialize` node will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
+    /// The fragment graph of this streaming job.
     graph: StreamFragmentGraph,
 
+    /// The required information of existing fragments.
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
-    /// stores edges between fragments: upstream => downstream.
+    /// Extra edges between existing fragments and the building fragments.
     downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
 
-    /// stores edges between fragments: downstream -> upstream.
+    /// Extra edges between existing fragments and the building fragments.
     #[expect(dead_code)]
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
 }
 
 impl CompleteStreamFragmentGraph {
+    /// Create a new [`CompleteStreamFragmentGraph`] with empty existing fragments, i.e., there's no
+    /// upstream mviews.
     #[cfg(test)]
     pub fn for_test(graph: StreamFragmentGraph) -> Self {
         Self {
@@ -1065,6 +1065,7 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV-on-MV.
     pub fn new(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
@@ -1105,20 +1106,15 @@ impl CompleteStreamFragmentGraph {
         })
     }
 
+    /// Returns the dispatcher types of all edges in the complete graph.
     fn dispatch_edges(
         &self,
     ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, DispatcherType)> + '_ {
         self.graph
-            .downstreams
-            .iter()
-            .flat_map(|(&from, tos)| {
-                tos.iter().map(move |(&to, edge)| {
-                    (
-                        from,
-                        to,
-                        edge.get_dispatch_strategy().unwrap().get_type().unwrap(),
-                    )
-                })
+            .edges()
+            .map(|(from, to, edge)| {
+                let dt = edge.get_dispatch_strategy().unwrap().get_type().unwrap();
+                (from, to, dt)
             })
             .chain(
                 self.downstreams
@@ -1127,6 +1123,7 @@ impl CompleteStreamFragmentGraph {
             )
     }
 
+    /// Returns the distribution of the existing fragments.
     fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
         self.existing_fragments
             .iter()
@@ -1145,6 +1142,8 @@ impl CompleteStreamFragmentGraph {
             .collect()
     }
 
+    /// Consumes this complete graph and returns the inner graph.
+    // TODO: remove this after scheduler refactoring.
     pub fn into_inner(self) -> StreamFragmentGraph {
         self.graph
     }

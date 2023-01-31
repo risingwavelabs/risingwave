@@ -841,6 +841,7 @@ where
     }
 
     // we will read three things at once, avoiding locking too much.
+    // TODO: remove this after scheduler refactoring
     pub async fn get_build_graph_info(
         &self,
         table_ids: &HashSet<TableId>,
@@ -859,6 +860,7 @@ where
         Ok(info)
     }
 
+    /// Get the upstream `Materialize` fragments of the specified tables.
     pub async fn get_upstream_mview_fragments(
         &self,
         table_ids: &HashSet<TableId>,
