@@ -167,10 +167,11 @@ async fn main() {
     }
 
     if let Some(count) = args.sqlsmith {
-        let host = cluster.rand_frontend_ip();
         cluster
             .run_on_client(async move {
-                let rw = RisingWave::connect(host, "dev".into()).await.unwrap();
+                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                    .await
+                    .unwrap();
                 risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
             })
             .await;
