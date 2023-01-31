@@ -50,6 +50,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
+primary key _row_id
 
 query III
 show columns from t3;
