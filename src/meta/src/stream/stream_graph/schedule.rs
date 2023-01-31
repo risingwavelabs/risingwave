@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+#![allow(clippy::explicit_iter_loop, reason = "crepe")]
 
 use std::collections::{BTreeMap, HashMap, LinkedList};
 
@@ -91,10 +93,6 @@ crepe::crepe! {
 
 /// [`Scheduler`] defines schedule logic for mv actors.
 pub(super) struct Scheduler {
-    // /// The parallel units of the cluster in a round-robin manner on each worker.
-    // all_parallel_units: Vec<ParallelUnit>,
-
-    // default_parallelism: usize,
     default_hash_mapping: ParallelUnitMapping,
 }
 
