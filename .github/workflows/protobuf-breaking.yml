@@ -6,8 +6,9 @@ on:
     paths: [proto/**]
 
 jobs:
-  validate-protos:
+  buf-breaking-check:
     runs-on: ubuntu-latest
+    name: Check breaking changes in Protobuf files
     steps:
       - uses: actions/checkout@v2
       - uses: bufbuild/buf-setup-action@v1
