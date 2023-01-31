@@ -47,14 +47,14 @@ impl ComputeNodeService {
         config: &ComputeNodeConfig,
         hummock_in_memory_strategy: HummockInMemoryStrategy,
     ) -> Result<()> {
-        cmd.arg("--listen-address")
-            .arg(format!("{}:{}", config.listen_address, config.port))
+        cmd.arg("--listen-addr")
+            .arg(format!("{}:{}", config.listen_addr, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
-                config.listen_address, config.exporter_port
+                config.listen_addr, config.exporter_port
             ))
-            .arg("--contact-address")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")

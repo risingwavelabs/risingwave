@@ -41,11 +41,11 @@ impl EtcdService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &EtcdConfig) -> Result<()> {
-        let listen_urls = format!("http://{}:{}", config.listen_address, config.port);
+        let listen_urls = format!("http://{}:{}", config.listen_addr, config.port);
         let advertise_urls = format!("http://{}:{}", config.address, config.port);
-        let peer_urls = format!("http://{}:{}", config.listen_address, config.peer_port);
+        let peer_urls = format!("http://{}:{}", config.listen_addr, config.peer_port);
         let advertise_peer_urls = format!("http://{}:{}", config.address, config.peer_port);
-        let exporter_urls = format!("http://{}:{}", config.listen_address, config.exporter_port);
+        let exporter_urls = format!("http://{}:{}", config.listen_addr, config.exporter_port);
 
         cmd.arg("--listen-client-urls")
             .arg(&listen_urls)

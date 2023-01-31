@@ -158,7 +158,7 @@ async fn start_compactor_node(
         "compactor-node",
         "--host",
         "127.0.0.1:5550",
-        "--client-address",
+        "--advertise-address",
         &client_addr,
         "--meta-address",
         &meta_rpc_endpoint,

@@ -154,11 +154,11 @@ impl FrontendEnv {
         let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
-            .contact_address
+            .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Contact address is not specified, defaulting to listen_address");
-                &opts.listen_address
+                tracing::warn!("Contact address is not specified, defaulting to listen_addr");
+                &opts.listen_addr
             })
             .parse()
             .unwrap();

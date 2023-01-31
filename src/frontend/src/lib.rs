@@ -67,18 +67,18 @@ use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
-    // TODO: rename to listen_address and separate out the port.
+    // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
     #[clap(long, default_value = "127.0.0.1:4566")]
-    pub listen_address: String,
+    pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
-    /// Optional, we will use listen_address if not specified.
+    /// Optional, we will use listen_addr if not specified.
     #[clap(long)]
-    pub contact_address: Option<String>,
+    pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.
     #[clap(long)]
@@ -128,7 +128,7 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
         pg_serve(
-            &opts.listen_address,
+            &opts.listen_addr,
             session_mgr,
             Some(TlsConfig::new_default()),
         )

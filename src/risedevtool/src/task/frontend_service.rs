@@ -42,19 +42,19 @@ impl FrontendService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
-        cmd.arg("--listen-address")
-            .arg(format!("{}:{}", config.listen_address, config.port))
-            .arg("--contact-address")
+        cmd.arg("--listen-addr")
+            .arg(format!("{}:{}", config.listen_addr, config.port))
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
-                config.listen_address, config.exporter_port
+                config.listen_addr, config.exporter_port
             ))
             .arg("--health-check-listener-addr")
             .arg(format!(
                 "{}:{}",
-                config.listen_address, config.health_check_port
+                config.listen_addr, config.health_check_port
             ))
             .arg("--metrics-level")
             .arg("1");

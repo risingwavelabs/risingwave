@@ -62,11 +62,11 @@ pub enum Backend {
 
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
-    // TODO: rename to listen_address and separate out the port.
+    // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
     #[clap(long, default_value = "127.0.0.1:5690")]
-    listen_address: String,
+    listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
@@ -74,7 +74,7 @@ pub struct MetaNodeOpts {
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
     #[clap(long, required_if_eq("backend", "etcd"))]
-    contact_address: Option<String>,
+    advertise_addr: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -137,13 +137,13 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
-        let listen_addr = opts.listen_address.parse().unwrap();
+        let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
         let (contact_addr, backend) = match opts.backend {
             Backend::Etcd => (
-                opts.contact_address
-                    .expect("contact_address must be specified when using etcd"),
+                opts.advertise_addr
+                    .expect("advertise_addr must be specified when using etcd"),
                 MetaStoreBackend::Etcd {
                     endpoints: opts
                         .etcd_endpoints
@@ -157,8 +157,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 },
             ),
             Backend::Mem => (
-                opts.contact_address
-                    .unwrap_or_else(|| opts.listen_address.clone()),
+                opts.advertise_addr
+                    .unwrap_or_else(|| opts.listen_addr.clone()),
                 MetaStoreBackend::Mem,
             ),
         };

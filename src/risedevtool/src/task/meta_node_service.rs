@@ -42,20 +42,20 @@ impl MetaNodeService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
-        cmd.arg("--listen-address")
-            .arg(format!("{}:{}", config.listen_address, config.port))
-            .arg("--contact-address")
+        cmd.arg("--listen-addr")
+            .arg(format!("{}:{}", config.listen_addr, config.port))
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",
-                config.listen_address, config.dashboard_port
+                config.listen_addr, config.dashboard_port
             ));
 
         cmd.arg("--prometheus-host")
             .arg(format!(
                 "{}:{}",
-                config.listen_address, config.exporter_port
+                config.listen_addr, config.exporter_port
             ))
             .arg("--connector-rpc-endpoint")
             .arg(&config.connector_rpc_endpoint);

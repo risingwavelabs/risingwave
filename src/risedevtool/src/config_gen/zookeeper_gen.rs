@@ -22,7 +22,7 @@ impl ZooKeeperGen {
         config: &ZooKeeperConfig,
         zookeeper_data_dir: &str,
     ) -> String {
-        let zookeeper_listen_host = &config.listen_address;
+        let zookeeper_listen_host = &config.listen_addr;
         let zookeeper_port = &config.port;
 
         format!(
