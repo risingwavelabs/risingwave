@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use madsim::time::{sleep, sleep_until, Instant};
+use madsim::time::{sleep, Instant};
 use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::nexmark::{self, NexmarkCluster, THROUGHPUT};
 
@@ -32,14 +32,12 @@ async fn nexmark_recovery() -> Result<()> {
         NexmarkCluster::new(Configuration::for_scale(), 2, Some(THROUGHPUT * 20)).await?;
 
     // note: feel free to disable queries to speed up the test
-    // cluster.run(nexmark::queries::q3::CREATE).await.unwrap();
+    cluster.run(nexmark::queries::q3::CREATE).await.unwrap();
     cluster.run(nexmark::queries::q4::CREATE).await.unwrap();
-    // cluster.run(nexmark::queries::q5::CREATE).await.unwrap();
-    // cluster.run(nexmark::queries::q7::CREATE).await.unwrap();
-    // cluster.run(nexmark::queries::q8::CREATE).await.unwrap();
-    // cluster.run(nexmark::queries::q9::CREATE).await.unwrap();
-
-    let t0 = Instant::now();
+    cluster.run(nexmark::queries::q5::CREATE).await.unwrap();
+    cluster.run(nexmark::queries::q7::CREATE).await.unwrap();
+    cluster.run(nexmark::queries::q8::CREATE).await.unwrap();
+    cluster.run(nexmark::queries::q9::CREATE).await.unwrap();
 
     // kill nodes and trigger recovery
     for _ in 0..5 {
@@ -48,14 +46,14 @@ async fn nexmark_recovery() -> Result<()> {
     }
 
     // make sure running for enough time
-    sleep_until(t0 + Duration::from_secs(30)).await;
+    sleep(Duration::from_secs(30)).await;
 
-    // let q3 = cluster.run(nexmark::queries::q3::SELECT).await.unwrap();
+    let q3 = cluster.run(nexmark::queries::q3::SELECT).await.unwrap();
     let q4 = cluster.run(nexmark::queries::q4::SELECT).await.unwrap();
-    // let q5 = cluster.run(nexmark::queries::q5::SELECT).await.unwrap();
-    // let q7 = cluster.run(nexmark::queries::q7::SELECT).await.unwrap();
-    // let q8 = cluster.run(nexmark::queries::q8::SELECT).await.unwrap();
-    // let q9 = cluster.run(nexmark::queries::q9::SELECT).await.unwrap();
+    let q5 = cluster.run(nexmark::queries::q5::SELECT).await.unwrap();
+    let q7 = cluster.run(nexmark::queries::q7::SELECT).await.unwrap();
+    let q8 = cluster.run(nexmark::queries::q8::SELECT).await.unwrap();
+    let q9 = cluster.run(nexmark::queries::q9::SELECT).await.unwrap();
 
     // uncomment the following lines to generate results
     // std::fs::write("tests/nexmark_result/q3.txt", q3).unwrap();
@@ -65,11 +63,11 @@ async fn nexmark_recovery() -> Result<()> {
     // std::fs::write("tests/nexmark_result/q8.txt", q8).unwrap();
     // std::fs::write("tests/nexmark_result/q9.txt", q9).unwrap();
 
-    // assert_eq!(q3, include_str!("nexmark_result/q3.txt"));
+    assert_eq!(q3, include_str!("nexmark_result/q3.txt"));
     assert_eq!(q4, include_str!("nexmark_result/q4.txt"));
-    // assert_eq!(q5, include_str!("nexmark_result/q5.txt"));
-    // assert_eq!(q7, include_str!("nexmark_result/q7.txt"));
-    // assert_eq!(q8, include_str!("nexmark_result/q8.txt"));
-    // assert_eq!(q9, include_str!("nexmark_result/q9.txt"));
+    assert_eq!(q5, include_str!("nexmark_result/q5.txt"));
+    assert_eq!(q7, include_str!("nexmark_result/q7.txt"));
+    assert_eq!(q8, include_str!("nexmark_result/q8.txt"));
+    assert_eq!(q9, include_str!("nexmark_result/q9.txt"));
     Ok(())
 }
