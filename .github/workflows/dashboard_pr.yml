@@ -5,7 +5,7 @@ on:
     paths: [dashboard/**, proto/**]
 
 concurrency:
-  group: dashbaord-build-${{ github.ref }}
+  group: dashboard-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

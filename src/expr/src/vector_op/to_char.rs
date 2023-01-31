@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     });
     ChronoPatternBuilder {
         tmpl: chrono_tmpl,
-        items_builder: |tmpl| StrftimeItems::new(tmpl).into_iter().collect::<Vec<_>>(),
+        items_builder: |tmpl| StrftimeItems::new(tmpl).collect::<Vec<_>>(),
     }
     .build()
 }

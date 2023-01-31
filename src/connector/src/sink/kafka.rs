@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,6 +45,8 @@ pub struct KafkaConfig {
     #[serde(rename = "kafka.topic")]
     pub topic: String,
 
+    pub use_transaction: bool,
+
     // Optional. If not specified, the default value is None and messages are sent to random
     // partition. if we want to guarantee exactly once delivery, we need to specify the
     // partition number. The partition number should set by meta.
@@ -73,12 +75,17 @@ impl KafkaConfig {
                 "format must be set to \"append_only\" or \"debezium\"".to_string(),
             ));
         }
+        let use_txn = values
+            .get("use_transaction")
+            .map(|v| v == "true")
+            .unwrap_or(true);
 
         let topic = values.get("kafka.topic").expect("kafka.topic must be set");
 
         Ok(KafkaConfig {
             brokers: brokers.to_string(),
             topic: topic.to_string(),
+            use_transaction: use_txn,
             identifier: identifier.to_owned(),
             partition: None,
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
@@ -452,14 +459,19 @@ pub struct KafkaTransactionConductor {
 
 impl KafkaTransactionConductor {
     async fn new(config: KafkaConfig) -> Result<Self> {
-        let inner: ThreadedProducer<DefaultProducerContext> = ClientConfig::new()
-            .set("bootstrap.servers", &config.brokers)
-            .set("message.timeout.ms", "5000")
-            .set("transactional.id", &config.identifier) // required by kafka transaction
-            .create()
-            .await?;
+        let inner: ThreadedProducer<DefaultProducerContext> = {
+            let mut c = ClientConfig::new();
+            c.set("bootstrap.servers", &config.brokers)
+                .set("message.timeout.ms", "5000");
+            if config.use_transaction {
+                c.set("transactional.id", &config.identifier); // required by kafka transaction
+            }
+            c.create().await?
+        };
 
-        inner.init_transactions(config.timeout).await?;
+        if config.use_transaction {
+            inner.init_transactions(config.timeout).await?;
+        }
 
         Ok(KafkaTransactionConductor {
             properties: config,
@@ -469,15 +481,27 @@ impl KafkaTransactionConductor {
 
     #[expect(clippy::unused_async)]
     async fn start_transaction(&self) -> KafkaResult<()> {
-        self.inner.begin_transaction()
+        if self.properties.use_transaction {
+            self.inner.begin_transaction()
+        } else {
+            Ok(())
+        }
     }
 
     async fn commit_transaction(&self) -> KafkaResult<()> {
-        self.inner.commit_transaction(self.properties.timeout).await
+        if self.properties.use_transaction {
+            self.inner.commit_transaction(self.properties.timeout).await
+        } else {
+            Ok(())
+        }
     }
 
     async fn abort_transaction(&self) -> KafkaResult<()> {
-        self.inner.abort_transaction(self.properties.timeout).await
+        if self.properties.use_transaction {
+            self.inner.abort_transaction(self.properties.timeout).await
+        } else {
+            Ok(())
+        }
     }
 
     async fn flush(&self) -> KafkaResult<()> {

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
-    LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
+    LogicalNow, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
     PlanTreeNodeUnary,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
@@ -39,6 +39,10 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 
     fn visit_logical_limit(&mut self, plan: &LogicalLimit) -> bool {
         plan.limit() <= 1 || self.visit(plan.input())
+    }
+
+    fn visit_logical_now(&mut self, _plan: &LogicalNow) -> bool {
+        true
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {

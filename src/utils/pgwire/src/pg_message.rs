@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -332,8 +332,14 @@ impl FeStartupMessage {
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let len = stream.read_i32().await?;
         let protocol_num = stream.read_i32().await?;
-        let payload_len = len - 8;
-        let mut payload = vec![0; payload_len as usize];
+        let payload_len = (len - 8) as usize;
+        if payload_len >= isize::MAX as usize {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Payload length has exceed usize::MAX {:?}", payload_len),
+            ));
+        }
+        let mut payload = vec![0; payload_len];
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
@@ -506,8 +512,14 @@ impl<'a> BeMessage<'a> {
             // +-----+-----------+-----------------+
             BeMessage::CommandComplete(cmd) => {
                 let rows_cnt = cmd.rows_cnt;
-                let stmt_type = cmd.stmt_type;
+                let mut stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                stmt_type = match stmt_type {
+                    StatementType::INSERT_RETURNING => StatementType::INSERT,
+                    StatementType::DELETE_RETURNING => StatementType::DELETE,
+                    StatementType::UPDATE_RETURNING => StatementType::UPDATE,
+                    s => s,
+                };
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");

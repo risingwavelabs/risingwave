@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
@@ -164,13 +163,8 @@ impl DispatchExecutorInner {
         // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
         // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
         if let DispatcherImpl::Hash(dispatcher) = dispatcher {
-            dispatcher.hash_mapping = {
-                let compressed_mapping = update.get_hash_mapping()?;
-                decompress_data(
-                    &compressed_mapping.original_indices,
-                    &compressed_mapping.data,
-                )
-            }
+            dispatcher.hash_mapping =
+                ActorMapping::from_protobuf(update.get_hash_mapping()?).to_expanded();
         }
 
         Ok(())
@@ -320,13 +314,8 @@ impl DispatcherImpl {
                     .map(|i| *i as usize)
                     .collect();
 
-                let hash_mapping = {
-                    let compressed_mapping = dispatcher.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                };
+                let hash_mapping =
+                    ActorMapping::from_protobuf(dispatcher.get_hash_mapping()?).to_expanded();
 
                 DispatcherImpl::Hash(HashDataDispatcher::new(
                     outputs,
@@ -521,7 +510,7 @@ pub struct HashDataDispatcher {
     keys: Vec<usize>,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
-    hash_mapping: Vec<ActorId>,
+    hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
 }
 
@@ -539,7 +528,7 @@ impl HashDataDispatcher {
     pub fn new(
         outputs: Vec<BoxedOutput>,
         keys: Vec<usize>,
-        hash_mapping: Vec<ActorId>,
+        hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {

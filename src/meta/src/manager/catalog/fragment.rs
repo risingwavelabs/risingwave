@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNod
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
+use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
@@ -39,7 +40,7 @@ use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, TableFragments, ValTransaction,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::{actor_mapping_to_parallel_unit_mapping, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -48,20 +49,18 @@ pub struct FragmentManagerCore {
 
 impl FragmentManagerCore {
     /// List all fragment vnode mapping info that not in `State::Initial`.
-    pub fn all_running_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
+    pub fn all_running_fragment_mappings(
+        &self,
+    ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
         self.table_fragments
             .values()
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
                 table_fragments.fragments.values().map(|fragment| {
-                    let parallel_unit_mapping = fragment
-                        .vnode_mapping
-                        .as_ref()
-                        .expect("no data distribution found");
-                    ParallelUnitMapping {
+                    let parallel_unit_mapping = fragment.vnode_mapping.clone().unwrap();
+                    FragmentParallelUnitMapping {
                         fragment_id: fragment.fragment_id,
-                        original_indices: parallel_unit_mapping.original_indices.clone(),
-                        data: parallel_unit_mapping.data.clone(),
+                        mapping: Some(parallel_unit_mapping),
                     }
                 })
             })
@@ -84,11 +83,13 @@ pub struct ActorInfos {
 }
 
 pub struct FragmentVNodeInfo {
+    pub fragment_id: FragmentId,
+
     /// actor id => parallel unit
     pub actor_parallel_unit_maps: BTreeMap<ActorId, ParallelUnit>,
 
     /// fragment vnode mapping info
-    pub vnode_mapping: Option<ParallelUnitMapping>,
+    pub vnode_mapping: ParallelUnitMapping,
 }
 
 #[derive(Default)]
@@ -167,9 +168,14 @@ where
                     .vnode_mapping
                     .clone()
                     .expect("no data distribution found");
+                let fragment_mapping = FragmentParallelUnitMapping {
+                    fragment_id: fragment.fragment_id,
+                    mapping: Some(mapping),
+                };
+
                 self.env
                     .notification_manager()
-                    .notify_frontend(operation, Info::ParallelUnitMapping(mapping))
+                    .notify_frontend(operation, Info::ParallelUnitMapping(fragment_mapping))
                     .await;
             }
         }
@@ -694,17 +700,17 @@ where
                     }
 
                     if let Some(actor_mapping) = upstream_dispatcher_mapping.as_ref() {
-                        *vnode_mapping = actor_mapping_to_parallel_unit_mapping(
-                            fragment_id,
-                            &actor_to_parallel_unit,
-                            actor_mapping,
-                        )
+                        *vnode_mapping = actor_mapping
+                            .to_parallel_unit(&actor_to_parallel_unit)
+                            .to_protobuf();
                     }
 
                     if !fragment.state_table_ids.is_empty() {
-                        let mut mapping = vnode_mapping.clone();
-                        mapping.fragment_id = fragment.fragment_id;
-                        fragment_mapping_to_notify.push(mapping);
+                        let fragment_mapping = FragmentParallelUnitMapping {
+                            fragment_id: fragment_id as FragmentId,
+                            mapping: Some(vnode_mapping.clone()),
+                        };
+                        fragment_mapping_to_notify.push(fragment_mapping);
                     }
                 }
 
@@ -728,7 +734,9 @@ where
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
                                 if let DispatcherType::Hash = dispatcher.r#type() {
-                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping
+                                        .as_ref()
+                                        .map(|m| m.to_protobuf());
                                 }
 
                                 update_actors(
@@ -880,12 +888,17 @@ where
         for table_id in table_ids {
             let table_fragment = map
                 .get(table_id)
-                .context(format!("table_fragment not exist: id={}", table_id))?;
+                .ok_or_else(|| anyhow!("table_fragment not exist: id={table_id}"))?;
+            let (fragment_id, vnode_mapping) = table_fragment
+                .mview_vnode_mapping()
+                .ok_or_else(|| anyhow!("mview_vnode_mapping not exist: id={table_id}"))?;
+
             info.insert(
                 *table_id,
                 FragmentVNodeInfo {
+                    fragment_id,
                     actor_parallel_unit_maps: table_fragment.mview_actor_parallel_units(),
-                    vnode_mapping: table_fragment.mview_vnode_mapping(),
+                    vnode_mapping,
                 },
             );
         }

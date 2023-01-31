@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -230,14 +230,13 @@ impl StoreLocalStatistic {
                     .read_req_positive_but_non_exist_counts
                     .with_label_values(&[table_id_label, oper_type])
                     .inc();
-            } else {
-                // true positive
-                // checks SST bloom filters and at least one bloom filter returns true
-                metrics
-                    .read_req_bloom_filter_positive_counts
-                    .with_label_values(&[table_id_label, oper_type])
-                    .inc();
             }
+            // positive
+            // checks SST bloom filters and at least one bloom filter returns positive
+            metrics
+                .read_req_bloom_filter_positive_counts
+                .with_label_values(&[table_id_label, oper_type])
+                .inc();
         }
     }
 

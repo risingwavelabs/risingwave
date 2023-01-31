@@ -29,3 +29,6 @@ SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)
 
 statement error
 SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)
+
+statement error
+SELECT OVERLAY('l2bWQBOIj9' PLACING 'DIHgr7AB4z' FROM (INT '-2147483648') FOR (INT '1'));

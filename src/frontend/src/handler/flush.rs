@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,8 +26,7 @@ pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgRespon
 
 pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
     let client = session.env().meta_client();
-    let checkpoint = session.config().only_checkpoint_visible();
-    let snapshot = client.flush(checkpoint).await?;
+    let snapshot = client.flush(true).await?;
     session
         .env()
         .hummock_snapshot_manager()

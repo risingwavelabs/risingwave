@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use std::ops::{Add, Neg, Sub};
 use anyhow::anyhow;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
-use num_traits::{CheckedAdd, CheckedSub, Zero};
+use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
 
@@ -126,15 +126,6 @@ impl IntervalUnit {
         let mut interval = *self;
         interval.justify_interval();
         interval
-    }
-
-    #[must_use]
-    pub fn negative(&self) -> Self {
-        IntervalUnit {
-            months: -self.months,
-            days: -self.days,
-            ms: -self.ms,
-        }
     }
 
     #[must_use]
@@ -582,6 +573,15 @@ impl Eq for IntervalUnit {}
 impl Ord for IntervalUnit {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
+    }
+}
+
+impl CheckedNeg for IntervalUnit {
+    fn checked_neg(&self) -> Option<Self> {
+        let months = self.months.checked_neg()?;
+        let days = self.days.checked_neg()?;
+        let ms = self.ms.checked_neg()?;
+        Some(IntervalUnit { months, days, ms })
     }
 }
 

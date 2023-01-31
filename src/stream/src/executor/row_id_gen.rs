@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
+use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use risingwave_source::row_id::RowIdGenerator;
 
 use super::{
@@ -71,7 +71,7 @@ impl RowIdGenExecutor {
         // TODO: We may generate row id for each vnode in the future instead of using the first
         // vnode.
         let vnode_id = vnodes.next_set_bit(0).unwrap() as u32;
-        RowIdGenerator::with_epoch(vnode_id, *UNIX_SINGULARITY_DATE_EPOCH)
+        RowIdGenerator::with_epoch(vnode_id, *UNIX_RISINGWAVE_DATE_EPOCH)
     }
 
     /// Generate a row ID column according to ops.

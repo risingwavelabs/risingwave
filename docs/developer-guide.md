@@ -232,7 +232,7 @@ cargo run --bin risectl -- --help
 ... or
 
 ```
-./risingwave risectl --help
+./risedev ctl --help
 ```
 
 for more information.
@@ -302,7 +302,7 @@ Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run R
 sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
 
 ```shell
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
+cargo install sqllogictest-bin --locked
 ```
 
 Before running end-to-end tests, you will need to start a full cluster first:
