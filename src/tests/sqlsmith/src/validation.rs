@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,14 @@ fn is_division_by_zero_err(db_error: &str) -> bool {
     db_error.contains(&ExprError::DivisionByZero.to_string())
 }
 
+/// `Casting to u32 out of range` occurs when we have functions
+/// which expect non-negative arguments,
+/// e.g. `select 222 << -1`
+// NOTE: If this error occurs too often, perhaps it is better to
+// wrap call sites with `abs(rhs)`, e.g. 222 << abs(-1);
 fn is_numeric_out_of_range_err(db_error: &str) -> bool {
     db_error.contains(&ExprError::NumericOutOfRange.to_string())
+        || db_error.contains("Casting to u32 out of range")
 }
 
 /// Skip queries with unimplemented features
@@ -56,6 +62,11 @@ fn is_subquery_unnesting_error(db_error: &str) -> bool {
     db_error.contains("Subquery can not be unnested")
 }
 
+/// Can't avoid numeric overflows, we do not eval const expr
+fn is_numeric_overflow_error(db_error: &str) -> bool {
+    db_error.contains("Number") && db_error.contains("overflows")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -68,4 +79,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_hash_shuffle_error(db_error)
         || is_nested_loop_join_error(db_error)
         || is_subquery_unnesting_error(db_error)
+        || is_numeric_overflow_error(db_error)
 }

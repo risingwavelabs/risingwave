@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -171,11 +171,17 @@ pub async fn handle_query(
         | StatementType::UPDATE_RETURNING => None,
 
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let first_row_set = row_stream
-                .next()
-                .await
-                .expect("compute node should return affected rows in output")
-                .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
+            let first_row_set = row_stream.next().await;
+            let first_row_set = match first_row_set {
+                None => {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "no affected rows in output".to_string(),
+                    )))
+                }
+                Some(row) => {
+                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+                }
+            };
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
+use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -32,6 +33,12 @@ pub struct Join<PlanRef> {
     pub on: Condition,
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
+}
+
+impl<PlanRef> Join<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.on = self.on.clone().rewrite_expr(r);
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {

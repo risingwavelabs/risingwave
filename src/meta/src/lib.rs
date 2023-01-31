@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,12 +68,16 @@ pub struct MetaNodeOpts {
     #[clap(long = "host", default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
+    /// Deprecated. But we keep it for backward compatibility.
+    #[clap(long)]
+    host: Option<String>,
+
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    #[clap(long = "client_address", required_if_eq("backend", "etcd"))]
+    #[clap(long, required_if_eq("backend", "etcd"))]
     advertise_addr: Option<String>,
 
     #[clap(long)]
@@ -125,6 +129,7 @@ pub struct MetaNodeOpts {
 }
 
 use std::future::Future;
+use std::net::SocketAddr;
 use std::pin::Pin;
 
 use risingwave_common::config::load_config;
@@ -137,30 +142,26 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
-        let listen_addr = opts.listen_addr.parse().unwrap();
+        let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
+        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let (advertise_addr, backend) = match opts.backend {
-            Backend::Etcd => (
-                opts.advertise_addr
-                    .expect("advertise_addr must be specified when using etcd"),
-                MetaStoreBackend::Etcd {
-                    endpoints: opts
-                        .etcd_endpoints
-                        .split(',')
-                        .map(|x| x.to_string())
-                        .collect(),
-                    credentials: match opts.etcd_auth {
-                        true => Some((opts.etcd_username, opts.etcd_password)),
-                        false => None,
-                    },
+        let advertise_addr = opts
+            .advertise_addr
+            .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
+        let backend = match opts.backend {
+            Backend::Etcd => MetaStoreBackend::Etcd {
+                endpoints: opts
+                    .etcd_endpoints
+                    .split(',')
+                    .map(|x| x.to_string())
+                    .collect(),
+                credentials: match opts.etcd_auth {
+                    true => Some((opts.etcd_username, opts.etcd_password)),
+                    false => None,
                 },
-            ),
-            Backend::Mem => (
-                opts.advertise_addr
-                    .unwrap_or_else(|| opts.listen_addr.clone()),
-                MetaStoreBackend::Mem,
-            ),
+            },
+            Backend::Mem => MetaStoreBackend::Mem,
         };
 
         let max_heartbeat_interval =

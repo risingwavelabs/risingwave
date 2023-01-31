@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -167,11 +167,6 @@ impl RemoteInput {
                 Ok(GetStreamResponse { message, permits }) => {
                     let msg = message.unwrap();
                     let bytes = Message::get_encoded_len(&msg);
-
-                    metrics
-                        .exchange_recv_size
-                        .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
 
                     metrics
                         .exchange_frag_recv_size

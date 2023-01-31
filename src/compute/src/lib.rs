@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,6 +56,12 @@ pub struct ComputeNodeOpts {
     #[clap(long = "client_address")]
     pub advertise_addr: Option<String>,
 
+    /// One of:
+    /// 1. `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
+    /// 2. `in-memory`
+    /// 3. `sled://{path}`
     #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
 
