@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
-const APPEND_ONLY_SINK_CREATE: &str = "create sink s1 from t with (connector='kafka', kafka.brokers='192.168.11.1:29092', kafka.topic='t_sink_append_only', format='append_only');";
+const APPEND_ONLY_SINK_CREATE: &str = "create sink s1 from t with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_append_only', format='append_only');";
 const MV_CREATE: &str = "create materialized view m as select count(*) from t;";
-const DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka', kafka.brokers='192.168.11.1:29092', kafka.topic='t_sink_debezium', format='debezium');";
+const DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_debezium', format='debezium');";
 
 const APPEND_ONLY_TOPIC: &str = "t_sink_append_only";
 const DEBEZIUM_TOPIC: &str = "t_sink_debezium";

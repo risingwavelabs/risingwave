@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
+use tokio::sync::oneshot::error::RecvError;
 
 #[derive(Error, Debug)]
 enum HummockErrorInner {
@@ -44,7 +45,7 @@ enum HummockErrorInner {
     SharedBufferError(String),
     #[error("Wait epoch error {0}.")]
     WaitEpoch(String),
-    #[error("Read current epoch error {0}.")]
+    #[error("ReadCurrentEpoch error {0}.")]
     ReadCurrentEpoch(String),
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
@@ -167,6 +168,12 @@ impl From<prost::DecodeError> for HummockError {
 impl From<ObjectError> for HummockError {
     fn from(error: ObjectError) -> Self {
         HummockErrorInner::ObjectIoError(error.into()).into()
+    }
+}
+
+impl From<RecvError> for HummockError {
+    fn from(error: RecvError) -> Self {
+        ObjectError::from(error).into()
     }
 }
 

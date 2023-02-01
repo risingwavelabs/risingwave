@@ -526,3 +526,15 @@
     create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
   stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)'
+- name: typo pg_teminate_backend
+  sql: |
+    select pg_teminate_backend(1);
+  binder_error: |-
+    Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+- name: regression (#7571) - literal debug display for array with NULL values
+  sql: |
+    select ARRAY[1, null] t;
+  logical_plan: |
+    LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
