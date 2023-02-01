@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
-use std::ops::BitXor;
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -26,7 +25,6 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
-use xxhash_rust::xxh32;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
