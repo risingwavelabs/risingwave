@@ -23,7 +23,6 @@ use tokio::sync::watch;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio::time::sleep_until;
 
 use super::follower_svc::start_follower_srv;
 use crate::manager::MetaOpts;
