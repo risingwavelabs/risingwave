@@ -421,7 +421,14 @@ impl Cluster {
             tracing::info!("kill {name}");
             madsim::runtime::Handle::current().kill(name);
 
-            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let mut t =
+                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            // has a small chance to restart after a long time
+            // so that the node is expired and removed from the cluster
+            if rand::thread_rng().gen_bool(0.1) {
+                // max_heartbeat_interval_secs = 60
+                t += Duration::from_secs(120);
+            }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
             madsim::runtime::Handle::current().restart(name);
