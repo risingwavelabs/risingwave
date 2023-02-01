@@ -42,10 +42,7 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     // the length of `s`.
     // 0 <= begin <= s.len()
     let begin = min(max(start, 0) as usize, s.len());
-    let end = (start
-        .saturating_add(count)
-        .max(0) as usize)
-        .min(s.len());
+    let end = (start.saturating_add(count).max(0) as usize).min(s.len());
     writer.write_str(&s[begin..end]).unwrap();
     Ok(())
 }
