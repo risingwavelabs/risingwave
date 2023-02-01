@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,6 +66,12 @@ impl PlanTreeNodeUnary for StreamShare {
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.logical.clone_with_input(input))
+    }
+}
+
+impl StreamShare {
+    pub fn replace_input(&self, plan: PlanRef) {
+        self.logical.replace_input(plan);
     }
 }
 

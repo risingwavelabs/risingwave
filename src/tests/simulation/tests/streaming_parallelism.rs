@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,10 +37,9 @@ async fn test_streaming_parallelism_default() -> Result<()> {
 }
 
 async fn run_sqls_in_session(cluster: &Cluster, sqls: Vec<String>) {
-    let frontend = cluster.rand_frontend_ip();
     cluster
         .run_on_client(async move {
-            let mut session = RisingWave::connect(frontend, "dev".to_string())
+            let mut session = RisingWave::connect("frontend".into(), "dev".into())
                 .await
                 .expect("failed to connect to RisingWave");
             for sql in sqls {

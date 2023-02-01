@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -434,6 +434,10 @@ where
             // treatment because the upstream and downstream of NoShuffle are always 1-1
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
+            //
+            // Delta join will introduce a `NoShuffle` edge between index chain node and lookup node
+            // (index_mv --NoShuffle--> index_chain --NoShuffle--> lookup) which will break current
+            // `NoShuffle` scaling assumption. Currently we detect this case and forbid it to scale.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
@@ -449,6 +453,20 @@ where
 
                     if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
+                        // If `NoShuffle` used by other fragment type rather than `ChainNode`, bail.
+                        for downstream_fragment_id in downstream_fragments.keys() {
+                            let downstream_fragment = fragment_map
+                                .get(downstream_fragment_id)
+                                .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
+                            if (downstream_fragment.get_fragment_type_mask()
+                                & (FragmentTypeFlag::ChainNode as u32
+                                    | FragmentTypeFlag::Mview as u32))
+                                == 0
+                            {
+                                bail!("Rescheduling NoShuffle edge only supports ChainNode and Mview. Other usage for e.g. delta join is forbidden currently.");
+                            }
+                        }
+
                         queue.extend(downstream_fragments.keys().cloned());
                     }
 
