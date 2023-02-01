@@ -2414,6 +2414,16 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_memory(
+                    "The memory allocated by streaming",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('stream_total_mem_usage')}",
+                            "",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]

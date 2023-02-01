@@ -228,9 +228,16 @@ where
     ) -> Result<Response<DropSinkResponse>, Status> {
         self.check_barrier_manager_status().await?;
         let sink_id = request.into_inner().sink_id;
-
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&sink_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
         // 1. Drop sink in catalog.
-        let version = self.catalog_manager.drop_sink(sink_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_sink(sink_id, internal_tables)
+            .await?;
         // 2. drop streaming job of sink.
         self.stream_manager
             .drop_streaming_jobs(vec![sink_id.into()])
@@ -704,8 +711,9 @@ where
                     .await?
             }
             StreamingJob::Sink(sink) => {
+                let internal_tables = ctx.internal_tables();
                 self.catalog_manager
-                    .finish_create_sink_procedure(sink)
+                    .finish_create_sink_procedure(internal_tables, sink)
                     .await?
             }
             StreamingJob::Table(source, table) => {
