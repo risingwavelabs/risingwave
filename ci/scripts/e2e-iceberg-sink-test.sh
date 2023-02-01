@@ -42,6 +42,11 @@ echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
+echo "--- starting risingwave cluster with connector node"
+cargo make ci-start ci-iceberg-test
+java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-sink.log 2>&1 &
+sleep 1
+
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
 .risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/iceberg
@@ -56,11 +61,6 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
     --S --e "CREATE TABLE demo.demo_db.demo_table(v1 int, v2 int) TBLPROPERTIES ('format-version'='2');"
-
-echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-iceberg-test
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-sink.log 2>&1 &
-sleep 1
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/iceberg_sink.slt'
