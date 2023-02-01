@@ -1620,7 +1620,7 @@ def section_hummock(panels):
                         f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
-                    [60, 90, 99, "max"],
+                    [90, 99, 999, "max"],
                 ),
                 panels.target(
                     f"sum by(le, job, instance)(rate({metric('state_store_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_duration_count')}[$__rate_interval]))",
@@ -1631,7 +1631,7 @@ def section_hummock(panels):
                         f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_scan_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"pure_scan_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
-                    [60, 90, 99, "max"],
+                    [90, 99, 999, "max"],
                 ),
                 panels.target(
                     f"sum by(le, job, instance)(rate({metric('state_store_scan_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_scan_duration_count')}[$__rate_interval]))",
