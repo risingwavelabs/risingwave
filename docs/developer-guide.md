@@ -22,6 +22,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Configure system variables](#configure-system-variables)
   * [Start the playground with RiseDev](#start-the-playground-with-risedev)
   * [Start the playground with cargo](#start-the-playground-with-cargo)
+- [Debug playground using vscode](#debug-playground-using-vscode)
 - [Develop the dashboard](#develop-the-dashboard)
   * [Dashboard v1](#dashboard-v1)
   * [Dashboard v2](#dashboard-v2)
