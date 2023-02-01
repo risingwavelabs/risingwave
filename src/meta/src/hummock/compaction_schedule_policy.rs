@@ -323,10 +323,6 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        // if let CompactorState::Busy(_) = self.state {
-        //     return None;
-        // }
-
         if let Some(compactor) = self.fetch_idle_compactor(compactor_assigned_task_num) {
             return Some(compactor);
         }

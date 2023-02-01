@@ -316,14 +316,15 @@ impl Compactor {
         }
     }
 
-    pub fn pre_process_task(task: &mut Task, workload: &CompactorWorkload) -> bool {
-        const CPU_THRESHOLD: u32 = 85;
-        if let Task::CompactTask(compact_task) = task {
-            if workload.cpu > CPU_THRESHOLD && compact_task.input_ssts[0].level_idx != 0 {
-                compact_task.set_task_status(TaskStatus::ManualCanceled);
-                return false;
-            }
-        }
+    pub fn pre_process_task(_task: &mut Task, _workload: &CompactorWorkload) -> bool {
+        // TODO: enable task reject by workload
+        // const CPU_THRESHOLD: u32 = 85;
+        // if let Task::CompactTask(compact_task) = task {
+        //     if workload.cpu > CPU_THRESHOLD && compact_task.input_ssts[0].level_idx != 0 {
+        //         compact_task.set_task_status(TaskStatus::ManualCanceled);
+        //         return false;
+        //     }
+        // }
 
         true
     }
@@ -344,6 +345,7 @@ impl Compactor {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
+            let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
 
             // This outer loop is to recreate stream.
             'start_stream: loop {
@@ -392,6 +394,14 @@ impl Compactor {
                                 });
                             }
 
+                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, last_workload.clone()).await {
+                                // ignore any errors while trying to report task progress
+                                tracing::warn!("Failed to report task progress. {e:?}");
+                            }
+                            continue;
+                        }
+
+                        _ = workload_collect_interval.tick() => {
                             let cpu = match process_collector.cpu_avg() {
                                 Ok(v) => (v * 100.0) as u32,
                                 Err(e) => {
@@ -406,12 +416,9 @@ impl Compactor {
 
                             last_workload = workload.clone();
 
-                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, workload).await {
-                                // ignore any errors while trying to report task progress
-                                tracing::warn!("Failed to report task progress. {e:?}");
-                            }
                             continue;
                         }
+
                         message = stream.next() => {
                             message
                         },
