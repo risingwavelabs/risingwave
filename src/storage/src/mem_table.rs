@@ -28,6 +28,10 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::utils::{
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check,
+    filter_with_delete_range, ENABLE_SANITY_CHECK,
+};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 
@@ -42,8 +46,8 @@ pub enum KeyOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    buffer: BTreeMap<Bytes, KeyOp>,
-    is_consistent_op: bool,
+    pub(crate) buffer: BTreeMap<Bytes, KeyOp>,
+    pub(crate) is_consistent_op: bool,
 }
 
 #[derive(Error, Debug)]
@@ -223,7 +227,7 @@ impl KeyOp {
 }
 
 #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-async fn merge_stream<'a>(
+pub(crate) async fn merge_stream<'a>(
     mem_table_iter: impl Iterator<Item = (&'a Bytes, &'a KeyOp)> + 'a,
     inner_stream: impl StateStoreReadIterStream,
     table_id: TableId,
@@ -334,157 +338,6 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     pub fn inner(&self) -> &S {
         &self.inner
     }
-
-    /// Make sure the key to insert should not exist in storage.
-    async fn do_insert_sanity_check(&self, key: &[u8], value: &[u8]) -> StorageResult<()> {
-        let read_options = ReadOptions {
-            prefix_hint: None,
-            retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            ignore_range_tombstone: false,
-            read_version_from_backup: false,
-        };
-        let stored_value = self.inner.get(key, self.epoch(), read_options).await?;
-
-        if let Some(stored_value) = stored_value {
-            return Err(Box::new(MemTableError::InconsistentOperation {
-                key: Bytes::copy_from_slice(key),
-                prev: KeyOp::Insert(stored_value),
-                new: KeyOp::Insert(Bytes::copy_from_slice(value)),
-            })
-            .into());
-        }
-        Ok(())
-    }
-
-    /// Make sure that the key to delete should exist in storage and the value should be matched.
-    async fn do_delete_sanity_check(&self, key: &[u8], old_value: &[u8]) -> StorageResult<()> {
-        let read_options = ReadOptions {
-            prefix_hint: None,
-            retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            ignore_range_tombstone: false,
-            read_version_from_backup: false,
-        };
-        match self.inner.get(key, self.epoch(), read_options).await? {
-            None => Err(Box::new(MemTableError::InconsistentOperation {
-                key: Bytes::copy_from_slice(key),
-                prev: KeyOp::Delete(Bytes::default()),
-                new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
-            })
-            .into()),
-            Some(stored_value) => {
-                if stored_value != old_value {
-                    Err(Box::new(MemTableError::InconsistentOperation {
-                        key: Bytes::copy_from_slice(key),
-                        prev: KeyOp::Insert(stored_value),
-                        new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
-                    })
-                    .into())
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    /// Make sure that the key to update should exist in storage and the value should be matched
-    async fn do_update_sanity_check(
-        &self,
-        key: &[u8],
-        old_value: &[u8],
-        new_value: &[u8],
-    ) -> StorageResult<()> {
-        let read_options = ReadOptions {
-            prefix_hint: None,
-            ignore_range_tombstone: false,
-            retention_seconds: self.table_option.retention_seconds,
-            table_id: self.table_id,
-            read_version_from_backup: false,
-        };
-
-        match self.inner.get(key, self.epoch(), read_options).await? {
-            None => Err(Box::new(MemTableError::InconsistentOperation {
-                key: Bytes::copy_from_slice(key),
-                prev: KeyOp::Delete(Bytes::default()),
-                new: KeyOp::Update((
-                    Bytes::copy_from_slice(old_value),
-                    Bytes::copy_from_slice(new_value),
-                )),
-            })
-            .into()),
-            Some(stored_value) => {
-                if stored_value != old_value {
-                    Err(Box::new(MemTableError::InconsistentOperation {
-                        key: Bytes::copy_from_slice(key),
-                        prev: KeyOp::Insert(stored_value),
-                        new: KeyOp::Update((
-                            Bytes::copy_from_slice(old_value),
-                            Bytes::copy_from_slice(new_value),
-                        )),
-                    })
-                    .into())
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-}
-
-const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
-
-fn filter_with_delete_range<'a>(
-    kv_iter: impl Iterator<Item = (Bytes, KeyOp)> + 'a,
-    mut delete_ranges_iter: impl Iterator<Item = &'a (Bytes, Bytes)> + 'a,
-) -> impl Iterator<Item = (Bytes, KeyOp)> + 'a {
-    let mut range = delete_ranges_iter.next();
-    if let Some((range_start, range_end)) = range {
-        assert!(
-            range_start <= range_end,
-            "range_end {:?} smaller than range_start {:?}",
-            range_start,
-            range_end
-        );
-    }
-    kv_iter.filter(move |(ref key, _)| {
-        if let Some((range_start, range_end)) = range {
-            if key < range_start {
-                true
-            } else if key < range_end {
-                false
-            } else {
-                // Key has exceeded the current key range. Advance to the next range.
-                loop {
-                    range = delete_ranges_iter.next();
-                    if let Some((range_start, range_end)) = range {
-                        assert!(
-                            range_start <= range_end,
-                            "range_end {:?} smaller than range_start {:?}",
-                            range_start,
-                            range_end
-                        );
-                        if key < range_start {
-                            // Not fall in the next delete range
-                            break true;
-                        } else if key < range_end {
-                            // Fall in the next delete range
-                            break false;
-                        } else {
-                            // Exceed the next delete range. Go to the next delete range if there is
-                            // any in the next loop
-                            continue;
-                        }
-                    } else {
-                        // No more delete range.
-                        break true;
-                    }
-                }
-            }
-        } else {
-            true
-        }
-    })
 }
 
 impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
@@ -551,20 +404,44 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     // state store with `is_consistent_op=false`.
                     KeyOp::Insert(value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            self.do_insert_sanity_check(&key, &value).await?;
+                            do_insert_sanity_check(
+                                &key,
+                                &value,
+                                &self.inner,
+                                self.epoch(),
+                                self.table_id,
+                                self.table_option,
+                            )
+                            .await?;
                         }
                         kv_pairs.push((key, StorageValue::new_put(value)));
                     }
                     KeyOp::Delete(old_value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            self.do_delete_sanity_check(&key, &old_value).await?;
+                            do_delete_sanity_check(
+                                &key,
+                                &old_value,
+                                &self.inner,
+                                self.epoch(),
+                                self.table_id,
+                                self.table_option,
+                            )
+                            .await?;
                         }
                         kv_pairs.push((key, StorageValue::new_delete()));
                     }
                     KeyOp::Update((old_value, new_value)) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
-                            self.do_update_sanity_check(&key, &old_value, &new_value)
-                                .await?;
+                            do_update_sanity_check(
+                                &key,
+                                &old_value,
+                                &new_value,
+                                &self.inner,
+                                self.epoch(),
+                                self.table_id,
+                                self.table_option,
+                            )
+                            .await?;
                         }
                         kv_pairs.push((key, StorageValue::new_put(new_value)));
                     }

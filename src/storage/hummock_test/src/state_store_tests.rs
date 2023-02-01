@@ -1400,7 +1400,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     hummock_storage.clear_shared_buffer().await.unwrap();
 
-    let read_version = local_hummock_storage.inner().read_version();
+    let read_version = local_hummock_storage.read_version();
 
     let read_version = read_version.read();
     assert!(read_version.staging().imm.is_empty());

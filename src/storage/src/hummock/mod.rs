@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
@@ -99,7 +98,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-use crate::store::{gen_min_epoch, ReadOptions};
+use crate::store::{gen_min_epoch, NewLocalOptions, ReadOptions};
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -230,11 +229,11 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    async fn new_local_inner(&self, table_id: TableId) -> LocalHummockStorage {
+    async fn new_local_inner(&self, option: NewLocalOptions) -> LocalHummockStorage {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.hummock_event_sender
             .send(HummockEvent::RegisterReadVersion {
-                table_id,
+                table_id: option.table_id,
                 new_read_version_sender: tx,
             })
             .unwrap();
@@ -247,6 +246,7 @@ impl HummockStorage {
             self.hummock_event_sender.clone(),
             self.buffer_tracker.get_memory_limiter().clone(),
             self.tracing.clone(),
+            option,
         )
     }
 

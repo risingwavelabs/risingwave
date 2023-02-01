@@ -402,7 +402,7 @@ async fn test_state_store_sync() {
         .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
         .await;
 
-    let read_version = hummock_storage.inner().read_version();
+    let read_version = hummock_storage.read_version();
 
     let epoch1: _ = read_version.read().committed().max_committed_epoch() + 1;
     hummock_storage.init(epoch1);
@@ -472,7 +472,7 @@ async fn test_state_store_sync() {
     test_env.storage.try_wait_epoch_for_test(epoch1).await;
     {
         // after sync 1 epoch
-        let read_version = hummock_storage.inner().read_version();
+        let read_version = hummock_storage.read_version();
         assert_eq!(1, read_version.read().staging().imm.len());
         assert!(read_version.read().staging().sst.is_empty());
     }
@@ -517,7 +517,7 @@ async fn test_state_store_sync() {
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
     {
         // after sync all epoch
-        let read_version = hummock_storage.inner().read_version();
+        let read_version = hummock_storage.read_version();
         assert!(read_version.read().staging().imm.is_empty());
         assert!(read_version.read().staging().sst.is_empty());
     }
@@ -647,7 +647,6 @@ async fn test_delete_get() {
         .await;
 
     let initial_epoch = hummock_storage
-        .inner()
         .read_version()
         .read()
         .committed()
@@ -729,7 +728,6 @@ async fn test_multiple_epoch_sync() {
         .await;
 
     let initial_epoch = hummock_storage
-        .inner()
         .read_version()
         .read()
         .committed()
@@ -1181,7 +1179,7 @@ async fn test_hummock_version_reader() {
                     epoch1,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    hummock_storage.inner().read_version(),
+                    hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1210,7 +1208,7 @@ async fn test_hummock_version_reader() {
                     epoch2,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    hummock_storage.inner().read_version(),
+                    hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1239,7 +1237,7 @@ async fn test_hummock_version_reader() {
                     epoch2,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    hummock_storage.inner().read_version(),
+                    hummock_storage.read_version(),
                 )
                 .unwrap();
 
@@ -1265,9 +1263,8 @@ async fn test_hummock_version_reader() {
         }
 
         {
-            let basic_read_version = Arc::new(RwLock::new(
-                hummock_storage.inner().read_version().read().clone(),
-            ));
+            let basic_read_version =
+                Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             let sync_result1 = test_env.storage.seal_and_sync_epoch(epoch1).await.unwrap();
             test_env
@@ -1284,9 +1281,8 @@ async fn test_hummock_version_reader() {
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch2).await;
-            let read_version_2 = Arc::new(RwLock::new(
-                hummock_storage.inner().read_version().read().clone(),
-            ));
+            let read_version_2 =
+                Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
             test_env
@@ -1295,9 +1291,8 @@ async fn test_hummock_version_reader() {
                 .await
                 .unwrap();
             test_env.storage.try_wait_epoch_for_test(epoch3).await;
-            let read_version_3 = Arc::new(RwLock::new(
-                hummock_storage.inner().read_version().read().clone(),
-            ));
+            let read_version_3 =
+                Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             {
                 let read_snapshot = read_filter_for_batch(

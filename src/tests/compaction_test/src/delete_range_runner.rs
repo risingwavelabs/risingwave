@@ -44,7 +44,7 @@ use risingwave_storage::hummock::{
     HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
-use risingwave_storage::store::*;
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
