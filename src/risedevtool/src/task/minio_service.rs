@@ -43,9 +43,9 @@ impl MinioService {
     pub fn apply_command_args(cmd: &mut Command, config: &MinioConfig) -> Result<()> {
         cmd.arg("server")
             .arg("--address")
-            .arg(format!("{}:{}", config.listen_addr, config.port))
+            .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--console-address")
-            .arg(format!("{}:{}", config.listen_addr, config.console_port))
+            .arg(format!("{}:{}", config.listen_address, config.console_port))
             .env("MINIO_ROOT_USER", &config.root_user)
             .env("MINIO_ROOT_PASSWORD", &config.root_password)
             .env("MINIO_PROMETHEUS_AUTH_TYPE", "public")

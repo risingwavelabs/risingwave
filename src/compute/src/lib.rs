@@ -46,14 +46,14 @@ pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long = "host", default_value = "127.0.0.1:5688")]
-    pub listen_addr: String,
+    #[clap(long, alias = "listen-addr", default_value = "127.0.0.1:5688")]
+    pub host: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long = "client_address")]
+    #[clap(long, alias = "client_address", long)]
     pub advertise_addr: Option<String>,
 
     /// One of:
@@ -147,7 +147,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("Compute node options: {:?}", opts);
         validate_opts(&opts);
 
-        let listen_addr = opts.listen_addr.parse().unwrap();
+        let listen_addr = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_addr);
 
         let advertise_addr = opts
@@ -155,7 +155,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .as_ref()
             .unwrap_or_else(|| {
                 tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
-                &opts.listen_addr
+                &opts.host
             })
             .parse()
             .unwrap();

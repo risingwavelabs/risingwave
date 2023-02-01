@@ -25,7 +25,7 @@ pub struct ComputeNodeConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
     pub exporter_port: u16,
     pub async_stack_trace: String,
     pub enable_tiered_cache: bool,
@@ -55,7 +55,7 @@ pub struct MetaNodeConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
     pub dashboard_port: u16,
     pub exporter_port: u16,
 
@@ -77,7 +77,7 @@ pub struct FrontendConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
     pub exporter_port: u16,
     pub health_check_port: u16,
 
@@ -96,7 +96,7 @@ pub struct CompactorConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
     pub exporter_port: u16,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -118,7 +118,7 @@ pub struct MinioConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
 
     pub console_address: String,
     #[serde(with = "string")]
@@ -143,7 +143,7 @@ pub struct EtcdConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
 
     pub peer_port: u16,
     pub unsafe_no_fsync: bool,
@@ -164,7 +164,7 @@ pub struct PrometheusConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
 
     pub remote_write: bool,
     pub remote_write_region: String,
@@ -187,7 +187,7 @@ pub struct GrafanaConfig {
     phantom_use: Option<String>,
     pub id: String,
     pub address: String,
-    pub listen_addr: String,
+    pub listen_address: String,
     pub port: u16,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }
@@ -227,7 +227,7 @@ pub struct KafkaConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
 
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
@@ -258,7 +258,7 @@ pub struct ZooKeeperConfig {
     pub address: String,
     #[serde(with = "string")]
     pub port: u16,
-    pub listen_addr: String,
+    pub listen_address: String,
 
     pub persist_data: bool,
 }
