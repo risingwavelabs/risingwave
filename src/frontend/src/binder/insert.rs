@@ -211,6 +211,8 @@ impl Binder {
         Ok(insert)
     }
 
+    // TODO: Write tests
+
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
     pub(super) fn cast_on_insert(
@@ -226,8 +228,22 @@ impl Binder {
                     .try_collect();
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
-            std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
+            std::cmp::Ordering::Greater => {
+                let mut exprs_null = exprs;
+                exprs_null.push(ExprImpl::literal_null(DataType::Int32));
+                // Push multiple? Push different types?
+                return exprs_null
+                    .into_iter()
+                    .zip_eq(expected_types)
+                    .map(|(e, t)| e.cast_assign(t.clone()))
+                    .try_collect();
+
+                // add an ExprImpl here? Can I just add null values here?
+                "INSERT has more target columns than expressions" // TODO: Fails here
+            }
         };
         Err(ErrorCode::BindError(msg.into()).into())
     }
 }
+
+// create table t1 (v1 int, v2 int); insert into t1 (v1) values (5);
