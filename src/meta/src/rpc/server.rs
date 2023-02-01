@@ -22,6 +22,8 @@ use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
+use tokio::time;
+use tokio::time::sleep_until;
 
 use super::follower_svc::start_follower_srv;
 use crate::manager::MetaOpts;
@@ -141,6 +143,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .await
             {
                 tracing::error!("election error happened, {}", e.to_string());
+                time::sleep(Duration::from_secs(1)).await;
             }
         });
 
