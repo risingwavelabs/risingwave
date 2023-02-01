@@ -27,8 +27,11 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use futures::FutureExt;
 use parking_lot::Mutex;
+use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
@@ -141,6 +144,10 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
 
     fn add_ref(&mut self) {
         self.refs += 1;
+    }
+
+    fn add_multi_refs(&mut self, ref_count: u32) {
+        self.refs += ref_count;
     }
 
     fn unref(&mut self) -> bool {
@@ -319,7 +326,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     }
 }
 
-type RequestQueue = Vec<Sender<()>>;
+type RequestQueue<K, T> = Vec<Sender<CacheableEntry<K, T>>>;
 pub struct LruCacheShard<K: LruKey, T: LruValue> {
     /// The dummy header node of a ring linked list. The linked list is a LRU list, holding the
     /// cache handles that are not used externally.
@@ -327,7 +334,7 @@ pub struct LruCacheShard<K: LruKey, T: LruValue> {
     table: LruHandleTable<K, T>,
     // TODO: may want to use an atomic object linked list shared by all shards.
     object_pool: Vec<Box<LruHandle<K, T>>>,
-    write_request: HashMap<K, RequestQueue>,
+    write_request: HashMap<K, RequestQueue<K, T>>,
     lru_usage: Arc<AtomicUsize>,
     usage: Arc<AtomicUsize>,
     capacity: usize,
@@ -679,21 +686,28 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     ) -> CacheableEntry<K, T> {
         let mut to_delete = vec![];
         // Drop the entries outside lock to avoid deadlock.
+        let mut senders = vec![];
         let handle = unsafe {
             let mut shard = self.shards[self.shard(hash)].lock();
             let pending_request = shard.write_request.remove(&key);
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
             debug_assert!(!ptr.is_null());
-            if let Some(que) = pending_request {
-                for sender in que {
-                    let _ = sender.send(());
-                }
+            if let Some(mut que) = pending_request {
+                (*ptr).add_multi_refs(que.len() as u32);
+                senders = std::mem::take(&mut que);
             }
             CacheableEntry {
                 cache: self.clone(),
                 handle: ptr,
             }
         };
+        for sender in senders {
+            let _ = sender.send(CacheableEntry {
+                cache: self.clone(),
+                handle: handle.handle,
+            });
+        }
+
         // do not deallocate data with holding mutex.
         if let Some(listener) = &self.listener {
             for (key, value) in to_delete {
@@ -769,62 +783,101 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
 
 pub struct CleanCacheGuard<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> {
     cache: &'a Arc<LruCache<K, T>>,
-    key: K,
+    key: Option<K>,
     hash: u64,
-    success: bool,
+}
+
+impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> CleanCacheGuard<'a, K, T> {
+    fn mark_success(mut self) -> K {
+        self.key.take().unwrap()
+    }
 }
 
 impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuard<'a, K, T> {
     fn drop(&mut self) {
-        if !self.success {
-            self.cache.clear_pending_request(&self.key, self.hash);
+        if let Some(key) = self.key.as_ref() {
+            self.cache.clear_pending_request(key, self.hash);
         }
     }
 }
 
-/// Only implement `lookup_with_request_dedup` for static values, as they can be sent across tokio
-/// spawned futures.
+/// `lookup_with_request_dedup.await` can directly return `Result<CacheableEntry<K, T>, E>`, but if
+/// we do not want to wait when cache hit does not happen, we can directly call
+/// `lookup_with_request_dedup` which will return a `LookupResponse` which contains
+/// `Receiver<CacheableEntry<K, T>>` or `JoinHandle<Result<CacheableEntry<K, T>, E>>` when cache hit
+/// does not happen.
+pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
+    Invalid,
+    Cached(CacheableEntry<K, T>),
+    WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
+    Miss(JoinHandle<Result<CacheableEntry<K, T>, E>>),
+}
+
+impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E> Default for LookupResponse<K, T, E> {
+    fn default() -> Self {
+        Self::Invalid
+    }
+}
+
+impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E: From<RecvError>> Future
+    for LookupResponse<K, T, E>
+{
+    type Output = Result<CacheableEntry<K, T>, E>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match &mut *self {
+            Self::Invalid => unreachable!(),
+            Self::Cached(_) => std::task::Poll::Ready(Ok(
+                must_match!(std::mem::take(&mut *self), Self::Cached(entry) => entry),
+            )),
+            Self::WaitPendingRequest(receiver) => {
+                receiver.poll_unpin(cx).map_err(|recv_err| recv_err.into())
+            }
+            Self::Miss(join_handle) => join_handle
+                .poll_unpin(cx)
+                .map(|join_result| join_result.unwrap()),
+        }
+    }
+}
+
+/// Only implement `lookup_with_request_dedup` for static
+/// values, as they can be sent across tokio spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
-    pub async fn lookup_with_request_dedup<F, E, VC>(
+    pub fn lookup_with_request_dedup<F, E, VC>(
         self: &Arc<Self>,
         hash: u64,
         key: K,
         fetch_value: F,
-    ) -> Result<CacheableEntry<K, T>, E>
+    ) -> LookupResponse<K, T, E>
     where
         F: FnOnce() -> VC,
-        E: Error + Send + 'static,
+        E: Error + Send + 'static + From<RecvError>,
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
-        loop {
-            match self.lookup_for_request(hash, key.clone()) {
-                LookupResult::Cached(entry) => return Ok(entry),
-                LookupResult::WaitPendingRequest(recv) => {
-                    let _ = recv.await;
-                    continue;
-                }
-                LookupResult::Miss => {
-                    let this = self.clone();
-                    let fetch_value = fetch_value();
-                    let key2 = key.clone();
-                    let mut guard = CleanCacheGuard {
-                        cache: self,
-                        key,
+        match self.lookup_for_request(hash, key.clone()) {
+            LookupResult::Cached(entry) => LookupResponse::Cached(entry),
+            LookupResult::WaitPendingRequest(receiver) => {
+                LookupResponse::WaitPendingRequest(receiver)
+            }
+            LookupResult::Miss => {
+                let this = self.clone();
+                let fetch_value = fetch_value();
+                let key2 = key;
+                let join_handle = tokio::spawn(async move {
+                    let guard = CleanCacheGuard {
+                        cache: &this,
+                        key: Some(key2),
                         hash,
-                        success: false,
                     };
-                    let ret = tokio::spawn(async move {
-                        let (value, charge) = fetch_value.await?;
-                        let entry = this.insert(key2, hash, charge, value);
-                        Ok(entry)
-                    })
-                    .await
-                    .unwrap();
-                    if ret.is_ok() {
-                        guard.success = true;
-                    }
-                    return ret;
-                }
+                    let (value, charge) = fetch_value.await?;
+                    let key2 = guard.mark_success();
+                    let entry = this.insert(key2, hash, charge, value);
+                    Ok(entry)
+                });
+                LookupResponse::Miss(join_handle)
             }
         }
     }
@@ -838,7 +891,7 @@ pub struct CacheableEntry<K: LruKey, T: LruValue> {
 pub enum LookupResult<K: LruKey, T: LruValue> {
     Cached(CacheableEntry<K, T>),
     Miss,
-    WaitPendingRequest(Receiver<()>),
+    WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
 }
 
 unsafe impl<K: LruKey, T: LruValue> Send for CacheableEntry<K, T> {}

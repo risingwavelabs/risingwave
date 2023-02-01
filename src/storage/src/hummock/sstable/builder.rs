@@ -25,13 +25,12 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
-use xxhash_rust::xxh32;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
-    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, Sstable, SstableMeta, SstableWriter,
+    DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
@@ -203,6 +202,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
+                self.last_extract_key.clear();
             }
             let mut extract_key = user_key(&self.raw_key);
             extract_key = self.filter_key_extractor.extract(extract_key);
@@ -212,7 +212,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // 2. extract_key key is not duplicate
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
-                self.user_key_hashes.push(xxh32::xxh32(extract_key, 0));
+                self.user_key_hashes
+                    .push(Sstable::hash_for_bloom_filter(extract_key, table_id));
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
             }

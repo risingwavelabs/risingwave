@@ -336,6 +336,9 @@ enum ChainType {
 
   // BACKFILL is corresponding to the backfill executor.
   BACKFILL = 3;
+
+  // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
+  UPSTREAM_ONLY = 4;
 }
 
 // ChainNode is used for mv on mv.
@@ -378,6 +381,8 @@ message ArrangementInfo {
   repeated plan_common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
   repeated plan_common.ColumnDesc column_descs = 2;
+  // Used to build storage table by stream lookup join of delta join.
+  plan_common.StorageTableDesc table_desc = 4;
 }
 
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
@@ -413,8 +418,6 @@ message LookupNode {
   }
   // Info about the arrangement
   ArrangementInfo arrangement_table_info = 7;
-  // Internal table of arrangement.
-  catalog.Table arrangement_table = 8;
 }
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
@@ -558,6 +561,11 @@ message Dispatcher {
   repeated uint32 downstream_actor_id = 5;
 }
 
+// Used to place an actor together with another actor in the same worker node.
+message ColocatedActorId {
+  uint32 id = 1;
+}
+
 // A StreamActor is a running fragment of the overall stream graph,
 message StreamActor {
   uint32 actor_id = 1;
@@ -569,8 +577,8 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
-  // Placement rule for actor, need to stay on the same node as upstream.
-  bool same_worker_node_as_upstream = 7;
+  // Placement rule for actor, need to stay on the same node as a specified upstream actor.
+  ColocatedActorId colocated_upstream_actor_id = 7;
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
