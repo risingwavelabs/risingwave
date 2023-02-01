@@ -22,8 +22,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
@@ -80,7 +80,7 @@ impl LocalVersionManager {
     /// being referenced by some readers.
     pub fn try_update_pinned_version(
         &self,
-        pin_resp_payload: pin_version_response::Payload,
+        pin_resp_payload: version_update_payload::Payload,
     ) -> Option<PinnedVersion> {
         let old_version = self.local_version.read();
         let new_version_id = match &pin_resp_payload {

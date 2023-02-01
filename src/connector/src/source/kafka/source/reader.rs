@@ -13,19 +13,25 @@
 // limitations under the License.
 
 use std::mem::swap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
-use crate::source::base::{SourceMessage, SplitReader, MAX_CHUNK_SIZE};
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
-use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
+use crate::source::monitor::SourceMetrics;
+use crate::source::{Column, SourceInfo, SplitId, SplitImpl, SplitMetaData};
+
+impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
@@ -33,15 +39,20 @@ pub struct KafkaSplitReader {
     stop_offset: Option<i64>,
     bytes_per_second: usize,
     max_num_messages: usize,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
-#[async_trait]
-impl SplitReader for KafkaSplitReader {
-    type Properties = KafkaProperties;
-
+impl KafkaSplitReader {
     async fn new(
         properties: KafkaProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut config = ClientConfig::new();
@@ -76,29 +87,27 @@ impl SplitReader for KafkaSplitReader {
             .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 
         let mut start_offset = None;
-        let mut stop_offset = None;
-        if let Some(splits) = state {
-            assert_eq!(splits.len(), 1);
-            let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-            for split in &splits {
-                if let SplitImpl::Kafka(k) = split {
-                    if let Some(offset) = k.start_offset {
-                        start_offset = Some(offset);
-                        tpl.add_partition_offset(
-                            k.topic.as_str(),
-                            k.partition,
-                            Offset::Offset(offset + 1),
-                        )?;
-                    } else {
-                        tpl.add_partition(k.topic.as_str(), k.partition);
-                    }
-                    stop_offset = k.stop_offset;
-                }
-            }
+        assert_eq!(splits.len(), 1);
+        let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
-            consumer.assign(&tpl)?;
+        let split = splits.into_iter().next().unwrap().into_kafka().unwrap();
+
+        let split_id = split.id();
+
+        if let Some(offset) = split.start_offset {
+            start_offset = Some(offset);
+            tpl.add_partition_offset(
+                split.topic.as_str(),
+                split.partition,
+                Offset::Offset(offset + 1),
+            )?;
+        } else {
+            tpl.add_partition(split.topic.as_str(), split.partition);
         }
+        let stop_offset = split.stop_offset;
+
+        consumer.assign(&tpl)?;
 
         // The two parameters below are only used by developers for performance testing purposes,
         // so we panic here on purpose if the input is not correctly recognized.
@@ -121,17 +130,17 @@ impl SplitReader for KafkaSplitReader {
             stop_offset,
             bytes_per_second,
             max_num_messages,
+            split_id,
+            parser_config,
+            metrics,
+            source_info,
         })
-    }
-
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
     }
 }
 
 impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(self) {
+    pub async fn into_data_stream(self) {
         if let Some(stop_offset) = self.stop_offset {
             if let Some(start_offset) = self.start_offset && (start_offset+1) >= stop_offset {
                 yield Vec::new();

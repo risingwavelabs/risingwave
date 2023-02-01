@@ -32,7 +32,7 @@ const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 /// S3 file location format: <s3://bucket_name/file_name>
 pub(super) async fn read_schema_from_s3(
     url: &Url,
-    properties: HashMap<String, String>,
+    properties: &HashMap<String, String>,
 ) -> Result<String> {
     let bucket = url
         .domain()

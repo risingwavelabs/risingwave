@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use console::style;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
@@ -352,7 +352,7 @@ fn main() -> Result<()> {
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-        std::fs::copy(config_path, target)?;
+        std::fs::copy(config_path, target).context("config file not found")?;
     }
 
     {

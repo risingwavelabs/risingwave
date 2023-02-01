@@ -1433,27 +1433,7 @@ def section_streaming_exchange(outer_panels):
             "Streaming Exchange",
             [
                 panels.timeseries_bytes_per_sec(
-                    "Exchange Send Throughput",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_exchange_send_size')}[$__rate_interval])",
-                            "{{up_actor_id}}->{{down_actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Exchange Recv Throughput",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_exchange_recv_size')}[$__rate_interval])",
-                            "{{up_actor_id}}->{{down_actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "Fragment Exchange Send Throughput",
+                    "Fragment-level Remote Exchange Send Throughput",
                     "",
                     [
                         panels.target(
@@ -1463,7 +1443,7 @@ def section_streaming_exchange(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Fragment Exchange Recv Throughput",
+                    "Fragment-level Remote Exchange Recv Throughput",
                     "",
                     [
                         panels.target(
