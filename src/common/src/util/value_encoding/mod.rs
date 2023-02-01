@@ -241,12 +241,12 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     Ok(Decimal::unordered_deserialize(bytes))
 }
 
-pub trait ValueRowSerializer: Clone {
+trait ValueRowSerializer: Clone {
     fn new(column_ids: &[ColumnId]) -> impl ValueRowSerializer;
     fn serialize(&self, row: impl Row) -> Vec<u8>;
 }
 
-pub trait ValueRowDeserializer: Clone {
+trait ValueRowDeserializer: Clone {
     fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowDeserializer;
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
@@ -326,7 +326,8 @@ mod tests {
         let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
         let rows = vec![row1, row2, row3];
         let mut array = vec![];
-        let serializer = row_encoding::Serializer::new(&column_ids);
+        let data_types = vec![DataType::Int16, DataType::Varchar];
+        let serializer = row_encoding::Serde::new(&column_ids, &data_types);
         for row in &rows {
             let row_bytes = serializer.serialize(row);
             array.push(row_bytes);
@@ -368,11 +369,11 @@ mod tests {
     fn test_row_decoding() {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let serializer = row_encoding::Serializer::new(&column_ids);
-        let row_bytes = serializer.serialize(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
-        let deserializer = row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
-        let decoded = deserializer.deserialize(&row_bytes[..]);
+        let serde = row_encoding::Serde::new(&column_ids, &data_types);
+        let row_bytes = serde.serialize(row1);
+        
+        let decoded = serde.deserialize(&row_bytes);
         assert_eq!(
             decoded.unwrap(),
             vec![Some(Int16(5)), Some(Utf8("abc".into()))]

@@ -17,12 +17,12 @@ use std::collections::BTreeMap;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::row::{OwnedRow, Row, RowDeserializer};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
-    row_encoding, ValueRowDeserializer, ValueRowSerializer,
+    BasicSerde, row_encoding::Serde, ValueRowSerde
 };
 
 struct Case {
@@ -78,7 +78,7 @@ fn basic_encode(c: &Case) -> Vec<Vec<u8>> {
 }
 
 fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
-    let seralizer = row_encoding::Serializer::new(&c.column_ids);
+    let seralizer = Serde::new(&c.column_ids, &c.schema);
     let mut array = vec![];
     for row in &c.rows {
         let row_bytes = seralizer.serialize(row);
@@ -130,11 +130,11 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer = RowDeserializer::new(c.schema.clone());
+    let deserializer = BasicSerde::new(&c.column_ids, &c.schema);
     let mut res = vec![];
     if c.column_ids == c.needed_ids {
         for byte in bytes {
-            let row = deserializer.deserialize(&byte[..])?.into_inner();
+            let row = deserializer.deserialize(&byte[..])?;
             res.push(row);
         }
     } else {
@@ -150,7 +150,7 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
             .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
             .collect::<BTreeMap<_, _>>();
         for byte in bytes {
-            let row = deserializer.deserialize(&byte[..])?.into_inner();
+            let row = deserializer.deserialize(&byte[..])?;
             let mut needed = vec![None; c.needed_ids.len()];
             for (i, c) in c.needed_ids.iter().enumerate() {
                 let ri = *needed_to_row.get(c).unwrap();
@@ -168,7 +168,7 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer = row_encoding::Deserializer::new(&c.needed_ids, &c.needed_schema);
+    let deserializer = Serde::new(&c.needed_ids, &c.needed_schema);
     let mut res = vec![];
     for byte in bytes {
         let row = deserializer.deserialize(byte)?;
