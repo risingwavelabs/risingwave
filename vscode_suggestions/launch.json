@@ -2,7 +2,8 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch 'risingwave p' debug",
+            // Use this if you want to debug risedev p locally
+            "name": "Launch playground debug",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/risingwave",
