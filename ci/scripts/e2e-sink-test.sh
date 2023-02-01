@@ -59,12 +59,27 @@ createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
+node_port=60061
+node_timeout=10
+java -jar ./connector-service.jar --port $node_port > .risingwave/log/connector-source.log 2>&1 &
 echo "waiting for connector node to start"
-while (! nc -z localhost 60061) && (eq $CONNECTOR_TIMEOUT 0) ; do
-  sleep 0.1
+start_time=$(date +%s)
+while :
+do
+    if nc -z localhost $node_port; then
+        echo "Port $node_port is listened! Connector Node is up!"
+        break
+    fi
+
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+    if [ $elapsed_time -ge $node_timeout ]; then
+        echo "Timeout waiting for port $node_port to be listened!"
+        exit 1
+    fi
+    sleep 0.1
 done
-nc -z localhost 60061 && echo "connector node failed to start" && exit 1
+
 
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe

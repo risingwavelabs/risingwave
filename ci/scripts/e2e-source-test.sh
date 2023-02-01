@@ -60,12 +60,27 @@ export PGPASSWORD='postgres';
 createdb -h db -U postgres cdc_test
 psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
+node_port=60061
+node_timeout=10
+java -jar ./connector-service.jar --port $node_port > .risingwave/log/connector-source.log 2>&1 &
 echo "waiting for connector node to start"
-while (! nc -z localhost 60061); do
-  sleep 0.1
+start_time=$(date +%s)
+while :
+do
+    if nc -z localhost $node_port; then
+        echo "Port $node_port is listened! Connector Node is up!"
+        break
+    fi
+
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+    if [ $elapsed_time -ge $node_timeout ]; then
+        echo "Timeout waiting for port $node_port to be listened!"
+        exit 1
+    fi
+    sleep 0.1
 done
-nc -z localhost 60061 && echo "connector node failed to start" && exit 1
+
 
 
 echo "---- mysql & postgres cdc validate test"
