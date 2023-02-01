@@ -96,6 +96,21 @@ impl CompactionStatistics {
 
         Some(self.iter_drop_key_counts / self.iter_total_key_counts)
     }
+
+    pub fn drop_result(&self, task_type: compact_task::TaskType) -> bool {
+        let min_delete_ratio = 15;
+        match task_type {
+            compact_task::TaskType::SpaceReclaim => {
+                if let Some(delete_ratio) = self.delete_ratio() && delete_ratio > min_delete_ratio {
+                    return false;
+                }
+
+                true
+            }
+
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone)]

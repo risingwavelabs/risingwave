@@ -108,7 +108,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let (ssts, table_stats_map) = self
+        let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -118,7 +118,7 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        Ok((self.split_index, ssts, table_stats_map))
+        Ok((self.split_index, ssts, compaction_stat))
     }
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(

@@ -41,7 +41,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::LocalSstableInfo;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse};
 use risingwave_rpc_client::HummockMetaClient;
@@ -76,7 +76,7 @@ pub struct Compactor {
     get_id_time: Arc<AtomicU64>,
 }
 
-pub type CompactOutput = (usize, Vec<LocalSstableInfo>, TableStatsMap);
+pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
 
 impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
@@ -174,6 +174,7 @@ impl Compactor {
         context.compactor_metrics.compact_task_pending_num.inc();
         let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
+        let mut need_cancel = true;
         let mut compaction_futures = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
@@ -216,8 +217,11 @@ impl Compactor {
                 }
                 future_result = buffered.next() => {
                     match future_result {
-                        Some(Ok(Ok((split_index, ssts, table_stats_map)))) => {
-                            output_ssts.push((split_index, ssts, table_stats_map));
+                        Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
+                            if !compact_stat.drop_result(compact_task.task_type()) {
+                                need_cancel = false;
+                            }
+                            output_ssts.push((split_index, ssts, compact_stat));
                         }
                         Some(Ok(Err(e))) => {
                             task_status = TaskStatus::ExecuteFailed;
@@ -244,18 +248,12 @@ impl Compactor {
         }
 
         // Sort by split/key range index.
-        output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+        if !output_ssts.is_empty() {
+            output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+        }
 
-        {
-            // cancel space_reclaim_compaction when delete ratio too low
-            if output_ssts.is_empty()
-                && matches!(
-                    compact_task.task_type(),
-                    compact_task::TaskType::SpaceReclaim,
-                )
-            {
-                task_status = TaskStatus::ManualCanceled;
-            }
+        if need_cancel {
+            task_status = TaskStatus::ManualCanceled;
         }
 
         sync_point::sync_point!("BEFORE_COMPACT_REPORT");
@@ -290,8 +288,15 @@ impl Compactor {
             .sorted_output_ssts
             .reserve(compact_task.splits.len());
         let mut compaction_write_bytes = 0;
-        for (_, ssts, table_stats_change) in output_ssts {
-            add_table_stats_map(&mut table_stats_map, &table_stats_change);
+        for (
+            _,
+            ssts,
+            CompactionStatistics {
+                delta_drop_stat, ..
+            },
+        ) in output_ssts
+        {
+            add_table_stats_map(&mut table_stats_map, &delta_drop_stat);
             for sst_info in ssts {
                 compaction_write_bytes += sst_info.file_size();
                 compact_task.sorted_output_ssts.push(sst_info.sst_info);
@@ -634,7 +639,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<(Vec<LocalSstableInfo>, TableStatsMap)> {
+    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context
@@ -733,7 +738,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<(Vec<SplitTableOutput>, TableStatsMap)> {
+    ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
@@ -751,7 +756,7 @@ impl Compactor {
             del_agg,
             self.task_config.key_range.clone(),
         );
-        let compaction_statstics = Compactor::compact_and_build_sst(
+        let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,
             &self.task_config,
             self.context.compactor_metrics.clone(),
@@ -760,24 +765,14 @@ impl Compactor {
         )
         .await?;
 
-        let min_delete_ratio = 15;
         let ssts = {
-            if matches!(
-                self.task_config.task_type,
-                compact_task::TaskType::SpaceReclaim,
-            ) {
-                if let Some(delete_ratio) = compaction_statstics.delete_ratio() && delete_ratio < min_delete_ratio {
-                    // not need to rewrite sst-files 
-                    tracing::debug!("space_reclaim_compaction reject delete_ratio {} too low compaction_statstics {:?}", delete_ratio, compaction_statstics);
-                    vec![]
-                } else {
-                    sst_builder.finish().await?
-                }
+            if compaction_statistics.drop_result(self.task_config.task_type) {
+                vec![]
             } else {
                 sst_builder.finish().await?
             }
         };
 
-        Ok((ssts, compaction_statstics.delta_drop_stat))
+        Ok((ssts, compaction_statistics))
     }
 }
