@@ -57,8 +57,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     remove_compaction_group_in_sst_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_stale_ssts_stat,
-    trigger_version_stat,
+    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
@@ -467,8 +466,7 @@ where
 
         let checkpoint_id = versioning_guard.checkpoint_version.id;
         versioning_guard.ssts_to_delete.clear();
-        versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id);
-        trigger_stale_ssts_stat(&self.metrics, versioning_guard.ssts_to_delete.len());
+        versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
         let preserved_deltas: HashSet<HummockVersionId> =
             HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
         versioning_guard.deltas_to_delete = versioning_guard
@@ -1757,11 +1755,10 @@ where
             return Ok(0);
         }
         commit_multi_var!(self, None, Transaction::default(), checkpoint)?;
-        versioning.extend_ssts_to_delete_from_deltas((
-            Excluded(old_checkpoint_id),
-            Included(new_checkpoint_id),
-        ));
-        trigger_stale_ssts_stat(&self.metrics, versioning.ssts_to_delete.len());
+        versioning.extend_ssts_to_delete_from_deltas(
+            (Excluded(old_checkpoint_id), Included(new_checkpoint_id)),
+            &self.metrics,
+        );
         #[cfg(test)]
         {
             drop(versioning_guard);
