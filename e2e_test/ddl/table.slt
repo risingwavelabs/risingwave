@@ -126,12 +126,26 @@ statement error
 create table t (v1 varchar collate "en_US");
 
 # Test create-table-as 
-statement error alias must be specified
+statement ok
 create table t as select 1;
 
-# FIXME: this should be supported
-statement error alias must be specified
+statement ok
+drop table t;
+
+statement error
+create table t as select 1,2;
+
+statement ok
+create table t as select 1 as a, 2 as b;
+
+statement ok
+drop table t;
+
+statement ok 
 create table t(v1) as select 1;
+
+statement ok
+drop table t;
 
 statement ok
 create table t (v1 int,v2 int);

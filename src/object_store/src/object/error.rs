@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::marker::{Send, Sync};
 
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
+use tokio::sync::oneshot::error::RecvError;
 
 #[derive(Error, Debug)]
 enum ObjectErrorInner {
@@ -85,6 +86,12 @@ where
 impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
     fn from(e: aws_smithy_http::byte_stream::Error) -> Self {
         ObjectErrorInner::S3(e.into()).into()
+    }
+}
+
+impl From<RecvError> for ObjectError {
+    fn from(e: RecvError) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
     }
 }
 

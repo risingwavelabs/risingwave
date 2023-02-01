@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroup, TableOption};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::backup_reader::BackupReader;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
     HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
@@ -540,8 +540,8 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let context = Arc::new(Context {
-        options: config,
+    let compactor_context = Arc::new(CompactorContext {
+        storage_config: config,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
         compactor_metrics,
@@ -551,14 +551,10 @@ fn run_compactor_thread(
         read_memory_limiter: MemoryLimiter::unlimit(),
         sstable_id_manager,
         task_progress_manager: Default::default(),
-    });
-    let context = CompactorContext::with_config(
-        context,
-        CompactorRuntimeConfig {
+        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number: 4,
-        },
-    );
-    let compactor_context = Arc::new(context);
+        })),
+    });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,
         meta_client,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -97,8 +97,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 RisingWaveService::Meta(osstrs([
                     "--listen-addr",
                     "0.0.0.0:5690",
-                    "--host",
-                    "127.0.0.1",
+                    "--meta-endpoint",
+                    "127.0.0.1:5690",
                     "--dashboard-host",
                     "0.0.0.0:5691",
                 ])),

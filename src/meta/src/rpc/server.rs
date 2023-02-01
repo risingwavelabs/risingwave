@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -154,6 +154,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             let mut is_leader_watcher = election_client.subscribe();
             let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
             let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
+
+            let _resp = is_leader_watcher.changed().await;
 
             // If not the leader, spawn a follower.
             let follower_handle: Option<JoinHandle<()>> = if !*is_leader_watcher.borrow() {

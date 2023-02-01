@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -262,7 +262,6 @@ fn build_fragment(
     };
 
     // handle join logic
-    // TODO: frontend won't generate delta index join now, so this branch will never hit.
     if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap() {
         if delta_index_join.get_join_type()? == JoinType::Inner
             && delta_index_join.condition.is_none()

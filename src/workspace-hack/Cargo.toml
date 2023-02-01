@@ -64,7 +64,6 @@ lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] 
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
-minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nom = { version = "7" }
@@ -153,7 +152,6 @@ lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] 
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
-minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 nom = { version = "7" }
