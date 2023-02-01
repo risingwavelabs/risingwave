@@ -31,8 +31,8 @@ use xxhash_rust::xxh32;
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
-    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, Sstable, SstableMeta, SstableWriter,
+    DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
@@ -214,7 +214,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
                 self.user_key_hashes
-                    .push(xxh32::xxh32(extract_key, 0).bitxor(table_id));
+                    .push(Sstable::hash_for_bloom_filter(extract_key, table_id));
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
             }
