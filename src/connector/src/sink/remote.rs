@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
@@ -66,7 +67,7 @@ impl RemoteConfig {
             .to_string();
 
         if !is_valid_remote_sink(sink_type.as_str()) {
-            return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
+            return Err(SinkError::Config(anyhow!("invalid sink type: {sink_type}")));
         }
 
         Ok(RemoteConfig {
