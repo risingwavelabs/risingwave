@@ -56,10 +56,10 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S, SD = BasicSerde>
+pub struct StateTableInner<S, SD = BasicSerde>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -127,8 +127,10 @@ where
     num_wmked_commits_since_last_clean: usize,
 }
 
+pub type StateTable<S> = StateTableInner<S, BasicSerde>;
+
 // initialize
-impl<S, SD> StateTable<S, SD>
+impl<S, SD> StateTableInner<S, SD>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -225,7 +227,7 @@ where
 
         let column_ids = input_value_indices
             .iter()
-            .map(|idx| table_columns[*idx].column_id.clone())
+            .map(|idx| table_columns[*idx].column_id)
             .collect_vec();
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
@@ -425,12 +427,9 @@ where
         let column_ids = match &value_indices {
             Some(value_indices) => value_indices
                 .iter()
-                .map(|idx| table_columns[*idx].column_id.clone())
+                .map(|idx| table_columns[*idx].column_id)
                 .collect_vec(),
-            None => table_columns
-                .iter()
-                .map(|c| c.column_id.clone())
-                .collect_vec(),
+            None => table_columns.iter().map(|c| c.column_id).collect_vec(),
         };
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
@@ -532,7 +531,7 @@ where
 const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 // point get
-impl<S, SD> StateTable<S, SD>
+impl<S, SD> StateTableInner<S, SD>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -625,7 +624,7 @@ where
     }
 }
 // write
-impl<S, SD> StateTable<S, SD>
+impl<S, SD> StateTableInner<S, SD>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -981,7 +980,7 @@ fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U
 }
 
 // Iterator functions
-impl<S, SD> StateTable<S, SD>
+impl<S, SD> StateTableInner<S, SD>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1001,15 +1000,13 @@ where
             .await?;
 
         let storage_iter = storage_iter_stream.into_stream();
-        Ok(
-            StateTableRowIter::<_, _, SD>::new(
-                mem_table_iter,
-                storage_iter,
-                self.row_serde.clone(),
-            )
-            .into_stream()
-            .map(get_second),
+        Ok(StateTableInnerRowIter::<_, _, SD>::new(
+            mem_table_iter,
+            storage_iter,
+            self.row_serde.clone(),
         )
+        .into_stream()
+        .map(get_second))
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -1018,7 +1015,7 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTable` owns.
+        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local, SD>)> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
@@ -1040,14 +1037,14 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTable` owns.
+        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
     ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_serde.clone())
+            StateTableInnerRowIter::new(mem_table_iter, storage_iter, self.row_serde.clone())
                 .into_stream()
                 .map(get_second),
         )
@@ -1058,14 +1055,14 @@ where
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTable` owns.
+        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         let (mem_table_iter, storage_iter_stream) =
             self.iter_with_pk_range_inner(pk_range, vnode).await?;
         let storage_iter = storage_iter_stream.into_stream();
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_serde.clone())
+            StateTableInnerRowIter::new(mem_table_iter, storage_iter, self.row_serde.clone())
                 .into_stream(),
         )
     }
@@ -1082,7 +1079,7 @@ where
         let storage_iter = storage_iter_stream.into_stream();
 
         Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_serde.clone())
+            StateTableInnerRowIter::new(mem_table_iter, storage_iter, self.row_serde.clone())
                 .into_stream(),
         )
     }
@@ -1171,9 +1168,9 @@ pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
 pub type RowStreamWithPk<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<(Cow<'a, Bytes>, OwnedRow)>> + 'a;
 
-/// `StateTableRowIter` is able to read the just written data (uncommitted data).
+/// `StateTableInnerRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
-struct StateTableRowIter<'a, M, C, SD = BasicSerde>
+struct StateTableInnerRowIter<'a, M, C, SD = BasicSerde>
 where
     SD: ValueRowSerde,
 {
@@ -1183,7 +1180,7 @@ where
     deserializer: SD,
 }
 
-impl<'a, M, C, SD> StateTableRowIter<'a, M, C, SD>
+impl<'a, M, C, SD> StateTableInnerRowIter<'a, M, C, SD>
 where
     M: Iterator<Item = (&'a Bytes, &'a KeyOp)>,
     C: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>>,
