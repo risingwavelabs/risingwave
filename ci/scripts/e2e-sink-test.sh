@@ -80,7 +80,6 @@ do
     sleep 0.1
 done
 
-
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
 

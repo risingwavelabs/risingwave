@@ -81,7 +81,9 @@ do
     sleep 0.1
 done
 
-
+# start risingwave cluster
+cargo make ci-start ci-1cn-1fe-with-recovery
+sleep 2
 
 echo "---- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
