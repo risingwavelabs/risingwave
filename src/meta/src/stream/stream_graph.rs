@@ -641,9 +641,8 @@ impl ActorGraphBuilder {
         Ok(stream_graph)
     }
 
-    /// Build actor graph from fragment graph using reverse topological order(from upstream to
-    /// downstream), because we want to setup parallelism for `NoShuffle` dispatcher correctly.
-    /// Setup dispatcher in actor and generate actors by their parallelism.
+    /// Build actor graph from fragment graph using topological order. Setup dispatcher in actor and
+    /// generate actors by their parallelism.
     fn build_actor_graph(
         &self,
         id_gen: GlobalActorIdGen,

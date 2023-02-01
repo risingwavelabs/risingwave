@@ -431,8 +431,8 @@ async fn test_graph_builder() -> MetaResult<()> {
     let sink_actor_ids = table_fragments.mview_actor_ids();
     let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![1, 2, 3, 4]);
-    assert_eq!(sink_actor_ids, vec![9]);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(internal_table_ids.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
@@ -446,26 +446,26 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(1, vec![5, 6, 7, 8]);
-    expected_downstream.insert(2, vec![5, 6, 7, 8]);
-    expected_downstream.insert(3, vec![5, 6, 7, 8]);
-    expected_downstream.insert(4, vec![5, 6, 7, 8]);
-    expected_downstream.insert(5, vec![9]);
-    expected_downstream.insert(6, vec![9]);
-    expected_downstream.insert(7, vec![9]);
-    expected_downstream.insert(8, vec![9]);
-    expected_downstream.insert(9, vec![]);
+    expected_downstream.insert(1, vec![]);
+    expected_downstream.insert(2, vec![1]);
+    expected_downstream.insert(3, vec![1]);
+    expected_downstream.insert(4, vec![1]);
+    expected_downstream.insert(5, vec![1]);
+    expected_downstream.insert(6, vec![2, 3, 4, 5]);
+    expected_downstream.insert(7, vec![2, 3, 4, 5]);
+    expected_downstream.insert(8, vec![2, 3, 4, 5]);
+    expected_downstream.insert(9, vec![2, 3, 4, 5]);
 
     let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(1, vec![]);
-    expected_upstream.insert(2, vec![]);
-    expected_upstream.insert(3, vec![]);
-    expected_upstream.insert(4, vec![]);
-    expected_upstream.insert(5, vec![1, 2, 3, 4]);
-    expected_upstream.insert(6, vec![1, 2, 3, 4]);
-    expected_upstream.insert(7, vec![1, 2, 3, 4]);
-    expected_upstream.insert(8, vec![1, 2, 3, 4]);
-    expected_upstream.insert(9, vec![5, 6, 7, 8]);
+    expected_upstream.insert(1, vec![2, 3, 4, 5]);
+    expected_upstream.insert(2, vec![6, 7, 8, 9]);
+    expected_upstream.insert(3, vec![6, 7, 8, 9]);
+    expected_upstream.insert(4, vec![6, 7, 8, 9]);
+    expected_upstream.insert(5, vec![6, 7, 8, 9]);
+    expected_upstream.insert(6, vec![]);
+    expected_upstream.insert(7, vec![]);
+    expected_upstream.insert(8, vec![]);
+    expected_upstream.insert(9, vec![]);
 
     for actor in actors {
         println!("actor_id = {}", actor.get_actor_id());
