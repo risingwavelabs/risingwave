@@ -48,11 +48,11 @@ pub async fn compactor_serve(
     client_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, Some(opts.override_config));
     tracing::info!(
-        "Starting compactor with config {:?} and opts {:?}",
+        "Starting compactor node with config {:?} with debug assertions {}",
         config,
-        opts
+        if cfg!(debug_assertions) { "on" } else { "off" }
     );
 
     // Register to the cluster.
@@ -80,7 +80,8 @@ pub async fn compactor_serve(
     let storage_config = Arc::new(config.storage);
     let object_store = Arc::new(
         parse_remote_object_store(
-            opts.state_store
+            storage_config
+                .state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
@@ -105,6 +106,7 @@ pub async fn compactor_serve(
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
     let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
+    let max_concurrent_task_number = storage_config.max_concurrent_compaction_task_number;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
         sstable_store.clone(),
@@ -129,7 +131,7 @@ pub async fn compactor_serve(
         sstable_id_manager: sstable_id_manager.clone(),
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
-            max_concurrent_task_number: opts.max_concurrent_task_number,
+            max_concurrent_task_number,
         })),
     });
     let sub_tasks = vec![
@@ -173,7 +175,7 @@ pub async fn compactor_serve(
     });
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.server.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
             registry.clone(),

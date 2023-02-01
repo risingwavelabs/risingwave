@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 
 use risingwave_object_store::object::ObjectError;
 use thiserror::Error;
+use tokio::sync::oneshot::error::RecvError;
 
 #[derive(Error, Debug)]
 enum HummockErrorInner {
@@ -167,6 +168,12 @@ impl From<prost::DecodeError> for HummockError {
 impl From<ObjectError> for HummockError {
     fn from(error: ObjectError) -> Self {
         HummockErrorInner::ObjectIoError(error.into()).into()
+    }
+}
+
+impl From<RecvError> for HummockError {
+    fn from(error: RecvError) -> Self {
+        ObjectError::from(error).into()
     }
 }
 

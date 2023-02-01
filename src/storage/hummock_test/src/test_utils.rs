@@ -205,19 +205,13 @@ impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalState
     }
 }
 
-impl<G: Clone, L: Clone> Clone for LocalGlobalStateStoreHolder<G, L> {
+impl<G, L> Clone for LocalGlobalStateStoreHolder<G, L> {
     fn clone(&self) -> Self {
-        Self {
-            local: self.local.clone(),
-            global: self.global.clone(),
-        }
+        unimplemented!()
     }
 }
 
-impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G>
-where
-    <G as StateStore>::Local: Clone,
-{
+impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G> {
     type Local = G::Local;
 
     type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;
