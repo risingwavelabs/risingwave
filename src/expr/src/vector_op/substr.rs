@@ -41,6 +41,9 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
         bail!("length in substr should be non-negative: {}", count);
     }
     let start = start.checked_sub(1).ok_or(ExprError::NumericOutOfRange)?;
+    // NOTE: we use `s.len()` here as an upper bound.
+    // This is so it will return an empty slice if it exceeds
+    // the length of `s`.
     let begin = min(max(start, 0) as usize, s.len());
     let end = (start
         .checked_add(count)
