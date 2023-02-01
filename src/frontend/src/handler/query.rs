@@ -19,6 +19,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::types::Format;
 use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -93,7 +94,7 @@ pub fn gen_batch_query_plan(
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
@@ -133,6 +134,9 @@ pub async fn handle_query(
         .map(|f| f.data_type())
         .collect_vec();
 
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
+
     let mut row_stream = {
         let query_epoch = session.config().get_query_epoch();
         let query_snapshot = if let Some(query_epoch) = query_epoch {
@@ -149,7 +153,7 @@ pub async fn handle_query(
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
-                format,
+                formats,
                 session.clone(),
             )),
             // Local mode do not support cancel tasks.
@@ -157,7 +161,7 @@ pub async fn handle_query(
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
                     distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
-                    format,
+                    formats,
                     session.clone(),
                 ))
             }
@@ -179,7 +183,7 @@ pub async fn handle_query(
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            if format {
+            if let Format::Binary = first_field_format {
                 Some(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
