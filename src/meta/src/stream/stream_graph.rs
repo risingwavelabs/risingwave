@@ -551,27 +551,29 @@ pub struct ActorGraphBuilder {
 }
 
 impl ActorGraphBuilder {
-    /// Create a new actor graph builder with the given "complete" graph.
-    pub fn new(complete_graph: CompleteStreamFragmentGraph, default_parallelism: u32) -> Self {
+    /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
+    /// graph is failed to be scheduled.
+    pub fn new(
+        complete_graph: CompleteStreamFragmentGraph,
+        default_parallelism: u32,
+    ) -> MetaResult<Self> {
         // TODO: use the real parallel units to generate real distribution.
         let fake_parallel_units = (0..default_parallelism).map(|id| ParallelUnit {
             id,
             worker_node_id: 0,
         });
         let distributions =
-            schedule::Scheduler::new(fake_parallel_units, default_parallelism as usize)
-                .unwrap()
-                .schedule(&complete_graph)
-                .unwrap();
+            schedule::Scheduler::new(fake_parallel_units, default_parallelism as usize)?
+                .schedule(&complete_graph)?;
 
         // TODO: directly use the complete graph when building so that we can generalize the
         // processing logic for `Chain`s.
         let fragment_graph = complete_graph.into_inner();
 
-        Self {
+        Ok(Self {
             distributions,
             fragment_graph,
-        }
+        })
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
@@ -1065,7 +1067,8 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV-on-MV.
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV-on-MV. Returns an error if the upstream
+    /// `Matererialize` is failed to resolve.
     pub fn new(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,

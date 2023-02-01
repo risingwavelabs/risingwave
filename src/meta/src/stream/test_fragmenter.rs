@@ -418,7 +418,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         parallel_degree,
-    );
+    )?;
 
     let graph = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)

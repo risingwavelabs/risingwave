@@ -620,7 +620,7 @@ where
             CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
 
         // TODO(bugen): we should merge this step with the `Scheduler`.
-        let actor_graph_builder = ActorGraphBuilder::new(complete_graph, default_parallelism);
+        let actor_graph_builder = ActorGraphBuilder::new(complete_graph, default_parallelism)?;
 
         let graph = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)
