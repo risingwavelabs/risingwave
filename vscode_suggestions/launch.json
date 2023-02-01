@@ -11,7 +11,7 @@
                 "playground"
             ],
             "cwd": "${workspaceRoot}",
-            "preLaunchTask": "risedev down"
+            "preLaunchTask": "build rw bin"
         }
     ]
 }

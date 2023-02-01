@@ -2,12 +2,12 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "risedev down",
+            "label": "build rw bin",
             "type": "shell",
             "command": "/bin/bash",
             "args": [
                 "-c",
-                "risedev down ; exit 0"
+                "risedev k ; cargo build --bin risingwave"
             ]
         }
     ]
