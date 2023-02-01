@@ -44,8 +44,7 @@ cargo make link-all-in-one-binaries
 
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
-.risingwave/bin/mcli -C .risingwave/config/mcli alias set iceberg-minio http://127.0.0.1:9301 hummockadmin hummockadmin
-.risingwave/bin/mcli -C .risingwave/config/mcli mb iceberg-minio/iceberg
+.risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/iceberg
 wget https://downloads.apache.org/spark/spark-3.3.1/spark-3.3.1-bin-hadoop3.tgz
 tar xvf spark-3.3.1-bin-hadoop3.tgz
 DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.0.0,org.apache.hadoop:hadoop-aws:3.3.2
