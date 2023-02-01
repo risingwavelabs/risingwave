@@ -1656,6 +1656,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "crepe"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "493fa2eaae544a976a9e60394d012254515885d19015e75f5d7cfb28a5db1069"
+dependencies = [
+ "petgraph",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "criterion"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6195,8 +6208,10 @@ dependencies = [
  "chrono",
  "clap 3.2.23",
  "crc32fast",
+ "crepe",
  "derivative",
  "either",
+ "enum-as-inner",
  "fail",
  "function_name",
  "futures",
