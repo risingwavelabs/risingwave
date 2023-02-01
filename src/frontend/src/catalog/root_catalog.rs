@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -481,14 +481,7 @@ impl Catalog {
     ) -> CatalogResult<()> {
         let schema = self.get_schema_by_name(db_name, schema_name)?;
 
-        // Resolve source first.
-        if schema.get_source_by_name(relation_name).is_some() {
-            // TODO: check if it is a materialized source and improve the err msg
-            Err(CatalogError::Duplicated(
-                "source",
-                relation_name.to_string(),
-            ))
-        } else if let Some(table) = schema.get_table_by_name(relation_name) {
+        if let Some(table) = schema.get_table_by_name(relation_name) {
             if table.is_index() {
                 Err(CatalogError::Duplicated("index", relation_name.to_string()))
             } else if table.is_mview() {
@@ -499,6 +492,11 @@ impl Catalog {
             } else {
                 Err(CatalogError::Duplicated("table", relation_name.to_string()))
             }
+        } else if schema.get_source_by_name(relation_name).is_some() {
+            Err(CatalogError::Duplicated(
+                "source",
+                relation_name.to_string(),
+            ))
         } else if schema.get_sink_by_name(relation_name).is_some() {
             Err(CatalogError::Duplicated("sink", relation_name.to_string()))
         } else if schema.get_view_by_name(relation_name).is_some() {

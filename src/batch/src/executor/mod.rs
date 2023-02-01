@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -208,7 +208,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutor<()>,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            // NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::HashAgg => HashAggExecutorBuilder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::TableFunction => TableFunctionExecutorBuilder,

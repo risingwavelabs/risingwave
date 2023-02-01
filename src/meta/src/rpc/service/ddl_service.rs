@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
+use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -34,7 +32,7 @@ use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
-    SourceManagerRef,
+    SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -492,6 +490,30 @@ where
             "replace table plan is not implemented yet",
         ))
     }
+
+    async fn java_get_table(
+        &self,
+        request: Request<JavaGetTableRequest>,
+    ) -> Result<Response<JavaGetTableResponse>, Status> {
+        let req = request.into_inner();
+        let database = self
+            .catalog_manager
+            .list_databases()
+            .await
+            .into_iter()
+            .find(|db| db.name == req.database_name);
+        if let Some(db) = database {
+            let table = self
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .find(|t| t.name == req.table_name && t.database_id == db.id);
+            Ok(Response::new(JavaGetTableResponse { table }))
+        } else {
+            Ok(Response::new(JavaGetTableResponse { table: None }))
+        }
+    }
 }
 
 impl<S> DdlServiceImpl<S>
@@ -513,7 +535,7 @@ where
     async fn create_stream_job(
         &self,
         stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraph,
+        fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
 
@@ -542,101 +564,68 @@ where
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraph,
+        fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
-        // 1. assign a new id to the stream job.
+        // 1. Assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
-        // 2. resolve the dependent relations.
-        let dependent_relations = get_dependent_relations(&fragment_graph)?;
-        stream_job.set_dependent_relations(dependent_relations);
-
-        // 3. Get the env for streaming jobs
+        // 2. Get the env for streaming jobs
         let env = fragment_graph.get_env().unwrap().clone();
+        let default_parallelism =
+            if let Some(Parallelism { parallelism }) = fragment_graph.parallelism {
+                parallelism as usize
+            } else {
+                self.cluster_manager.get_active_parallel_unit_count().await
+            } as u32;
 
-        // 4. Mark current relation as "creating" and add reference count to dependent relations.
+        // 3. Build fragment graph.
+        let fragment_graph =
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+                .await?;
+        let internal_tables = fragment_graph.internal_tables();
+
+        // 4. Set the graph-related fields and freeze the `stream_job`.
+        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        let dependent_relations = fragment_graph.dependent_relations();
+        stream_job.set_dependent_relations(dependent_relations.clone());
+
+        let stream_job = &*stream_job;
+
+        // 5. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
             .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        // 5. build fragment graph.
-        use risingwave_common::catalog::TableId;
-        let dependent_table_ids = fragment_graph
-            .dependent_table_ids
-            .iter()
-            .map(|table_id| TableId::new(*table_id))
-            .collect();
-
+        // 6. Build actor graph from the fragment graph.
+        // TODO: directly store the freezed `stream_job`.
         let mut ctx = CreateStreamingJobContext {
-            schema_id: stream_job.schema_id(),
-            database_id: stream_job.database_id(),
-            streaming_job_name: stream_job.name(),
             streaming_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_mview_map: self
                 .fragment_manager
-                .get_build_graph_info(&dependent_table_ids)
+                .get_build_graph_info(dependent_relations)
                 .await?
                 .table_mview_actor_ids,
-            dependent_table_ids,
+            dependent_table_ids: dependent_relations.clone(),
+            internal_tables,
             ..Default::default()
         };
 
-        let table_ids_cnt = fragment_graph.table_ids_cnt;
-        let default_parallelism = if self.env.opts.minimal_scheduling {
-            self.cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
-                .await
-                .len()
-        } else {
-            self.cluster_manager.get_active_parallel_unit_count().await
-        };
-        let mut actor_graph_builder = ActorGraphBuilder::new(
-            self.env.id_gen_manager_ref(),
-            fragment_graph,
-            default_parallelism as u32,
-            &mut ctx,
-        )
-        .await?;
-
-        // fill correct table id in fragment graph and fill fragment id in table.
-        match stream_job {
-            StreamingJob::MaterializedView(table)
-            | StreamingJob::Index(_, table)
-            | StreamingJob::Table(_, table) => {
-                table.fragment_id = actor_graph_builder.fill_database_object_id(
-                    table.database_id,
-                    table.schema_id,
-                    table.id.into(),
-                );
-            }
-            StreamingJob::Sink(sink) => {
-                actor_graph_builder.fill_database_object_id(
-                    sink.database_id,
-                    sink.schema_id,
-                    sink.id.into(),
-                );
-            }
-        }
+        // TODO(bugen): we should merge this step with the `Scheduler`.
+        let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, default_parallelism);
 
         let graph = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)
             .await?;
 
-        assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
-
-        // 6. mark creating tables.
-        let mut creating_tables = ctx.internal_tables();
-        match stream_job {
-            StreamingJob::MaterializedView(table)
-            | StreamingJob::Index(_, table)
-            | StreamingJob::Table(_, table) => creating_tables.push(table.clone()),
-
-            StreamingJob::Sink(_) => {
-                // No need to mark it as creating. Do nothing.
-            }
-        }
+        // 7. mark creating tables, including internal tables and the table of the stream job.
+        // Note(bugen): should we take `Sink` into account as well?
+        let creating_tables = ctx
+            .internal_tables()
+            .into_iter()
+            .chain(stream_job.table().cloned())
+            .collect_vec();
 
         self.catalog_manager
             .mark_creating_tables(&creating_tables)
@@ -790,34 +779,4 @@ where
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
         Ok(id)
     }
-}
-
-fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<Vec<TableId>> {
-    // TODO: distinguish SourceId and TableId
-    fn resolve_dependent_relations(
-        stream_node: &StreamNode,
-        dependent_relations: &mut HashSet<TableId>,
-    ) -> MetaResult<()> {
-        match stream_node.node_body.as_ref().unwrap() {
-            NodeBody::Source(source_node) => {
-                if let Some(source) = &source_node.source_inner {
-                    dependent_relations.insert(source.get_source_id());
-                }
-            }
-            NodeBody::Chain(chain_node) => {
-                dependent_relations.insert(chain_node.get_table_id());
-            }
-            _ => {}
-        }
-        for child in &stream_node.input {
-            resolve_dependent_relations(child, dependent_relations)?;
-        }
-        Ok(())
-    }
-
-    let mut dependent_relations = Default::default();
-    for fragment in fragment_graph.fragments.values() {
-        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)?;
-    }
-    Ok(dependent_relations.into_iter().collect())
 }

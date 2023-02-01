@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ pub mod hash_join;
 pub mod local_lookup_join;
 mod lookup_join_base;
 pub mod nested_loop_join;
-mod sort_merge_join;
 
 pub use chunked_data::*;
 pub use distributed_lookup_join::*;
@@ -32,12 +31,12 @@ use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
-pub use sort_merge_join::*;
 
 use crate::error::BatchError;
-use crate::executor::join::JoinType::Inner;
-#[derive(Copy, Clone, Debug, PartialEq)]
+
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum JoinType {
+    #[default]
     Inner,
     LeftOuter,
     /// Semi join when probe side should output when matched
@@ -102,12 +101,6 @@ impl JoinType {
 
     fn keep_right(self) -> bool {
         matches!(self, JoinType::RightAnti | JoinType::RightSemi)
-    }
-}
-
-impl Default for JoinType {
-    fn default() -> Self {
-        Inner
     }
 }
 

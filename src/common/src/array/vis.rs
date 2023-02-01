@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -66,6 +66,14 @@ impl Vis {
         match self {
             Vis::Bitmap(b) => VisRef::Bitmap(b),
             Vis::Compact(c) => VisRef::Compact(*c),
+        }
+    }
+
+    /// Returns a bitmap of this `Vis`.
+    pub fn to_bitmap(&self) -> Bitmap {
+        match self {
+            Vis::Bitmap(b) => b.clone(),
+            Vis::Compact(c) => Bitmap::ones(*c),
         }
     }
 

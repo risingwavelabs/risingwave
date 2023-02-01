@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,6 +60,7 @@ pub trait PlanNode:
     + Display
     + Downcast
     + ColPrunable
+    + ExprRewritable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -372,6 +373,16 @@ impl dyn PlanNode {
         }
     }
 
+    pub fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         self.to_batch_prost_identity(true)
@@ -407,6 +418,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod expr_rewritable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -456,6 +469,7 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_now;
 mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
@@ -528,6 +542,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_now::LogicalNow;
 pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
@@ -564,7 +579,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
-use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
@@ -606,6 +621,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Union }
             , { Logical, OverAgg }
             , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -685,6 +701,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Union }
             , { Logical, OverAgg }
             , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }

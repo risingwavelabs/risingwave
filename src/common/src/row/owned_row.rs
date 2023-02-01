@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops;
+use std::ops::{self, Deref};
 
 use itertools::Itertools;
 
@@ -38,19 +38,6 @@ impl ops::Index<usize> for OwnedRow {
     }
 }
 
-impl PartialOrd for OwnedRow {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl Ord for OwnedRow {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
-    }
-}
-
 impl AsRef<OwnedRow> for OwnedRow {
     fn as_ref(&self) -> &OwnedRow {
         self
@@ -72,6 +59,10 @@ impl OwnedRow {
     /// Retrieve the underlying [`Vec<Datum>`].
     pub fn into_inner(self) -> Vec<Datum> {
         self.0
+    }
+
+    pub fn as_inner(&self) -> &[Datum] {
+        &self.0
     }
 
     /// Parse an [`OwnedRow`] from a pretty string, only used in tests.
@@ -171,10 +162,55 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
     }
 }
 
+/// A simple wrapper for [`OwnedRow`], which assumes that all fields are defined as `ASC` order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AscentOwnedRow(OwnedRow);
+
+impl AscentOwnedRow {
+    pub fn into_inner(self) -> OwnedRow {
+        self.0
+    }
+}
+
+impl Deref for AscentOwnedRow {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Row for AscentOwnedRow {
+    type Iter<'a> = <OwnedRow as Row>::Iter<'a>;
+
+    deref_forward_row! {}
+
+    fn into_owned_row(self) -> OwnedRow {
+        self.into_inner()
+    }
+}
+
+impl PartialOrd for AscentOwnedRow {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.as_inner().partial_cmp(other.0.as_inner())
+    }
+}
+
+impl Ord for AscentOwnedRow {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
+    }
+}
+
+impl From<OwnedRow> for AscentOwnedRow {
+    fn from(row: OwnedRow) -> Self {
+        Self(row)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use itertools::Itertools;
 
     use super::*;
@@ -243,21 +279,5 @@ mod tests {
 
         let row_default = OwnedRow::default();
         assert_eq!(row_default.hash(hash_builder).0, 0);
-    }
-
-    #[test]
-    fn test_cmp() {
-        let tys = [Ty::Int64, Ty::Int64];
-
-        for ((s1, tys1), (s2, tys2), expected) in [
-            (("1 2", &tys[..]), ("1 2", &tys[..]), Ordering::Equal),
-            (("1 2", &tys[..]), ("1", &tys[..1]), Ordering::Greater),
-            (("1 2", &tys[..]), ("2 1", &tys[..]), Ordering::Less),
-            (("1 2", &tys[..]), ("2", &tys[..1]), Ordering::Less),
-        ] {
-            let r1 = OwnedRow::from_pretty_with_tys(tys1, s1);
-            let r2 = OwnedRow::from_pretty_with_tys(tys2, s2);
-            assert_eq!(r1.cmp(&r2), expected);
-        }
     }
 }

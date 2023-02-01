@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,12 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
-use risingwave_pb::hummock::{pin_version_response, SstableInfo};
+use risingwave_pb::hummock::{version_update_payload, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::watch;
@@ -84,7 +85,7 @@ pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
-use crate::hummock::compactor::Context;
+use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
 use crate::hummock::iterator::{
@@ -119,7 +120,7 @@ impl Drop for HummockStorageShutdownGuard {
 pub struct HummockStorage {
     hummock_event_sender: UnboundedSender<HummockEvent>,
 
-    context: Arc<Context>,
+    context: Arc<CompactorContext>,
 
     buffer_tracker: BufferTracker,
 
@@ -138,6 +139,9 @@ pub struct HummockStorage {
     tracing: Arc<risingwave_tracing::RwTracingService>,
 
     backup_reader: BackupReaderRef,
+
+    /// current_epoch < min_current_epoch cannot be read.
+    min_current_epoch: Arc<AtomicU64>,
 }
 
 impl HummockStorage {
@@ -173,7 +177,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
-            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -184,15 +188,18 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         ));
 
-        let compactor_context = Arc::new(Context::new_local_compact_context(
+        let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            CompactorRuntimeConfig::default(),
         ));
 
+        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
+        let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let hummock_event_handler = HummockEventHandler::new(
             event_tx.clone(),
             event_rx,
@@ -204,7 +211,7 @@ impl HummockStorage {
             context: compactor_context,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            seal_epoch: hummock_event_handler.sealed_epoch(),
+            seal_epoch,
             hummock_event_sender: event_tx.clone(),
             pinned_version: hummock_event_handler.pinned_version(),
             hummock_version_reader: HummockVersionReader::new(
@@ -217,6 +224,7 @@ impl HummockStorage {
             read_version_mapping: hummock_event_handler.read_version_mapping(),
             tracing,
             backup_reader,
+            min_current_epoch,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -273,7 +281,7 @@ impl HummockStorage {
         let version_id = version.id;
         self.hummock_event_sender
             .send(HummockEvent::VersionUpdate(
-                pin_version_response::Payload::PinnedVersion(version),
+                version_update_payload::Payload::PinnedVersion(version),
             ))
             .unwrap();
 
@@ -301,6 +309,13 @@ impl HummockStorage {
         self.buffer_tracker.get_buffer_size()
     }
 
+    pub async fn try_wait_epoch_for_test(&self, wait_epoch: u64) {
+        let mut rx = self.version_update_notifier_tx.subscribe();
+        while *(rx.borrow_and_update()) < wait_epoch {
+            rx.changed().await.unwrap();
+        }
+    }
+
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
         options: Arc<StorageConfig>,
@@ -321,8 +336,12 @@ impl HummockStorage {
         .await
     }
 
-    pub fn options(&self) -> &Arc<StorageConfig> {
-        &self.context.options
+    pub fn storage_config(&self) -> &Arc<StorageConfig> {
+        &self.context.storage_config
+    }
+
+    pub fn version_reader(&self) -> &HummockVersionReader {
+        &self.hummock_version_reader
     }
 }
 
@@ -535,7 +554,7 @@ impl HummockStorageV1 {
         observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
-            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -546,13 +565,14 @@ impl HummockStorageV1 {
             hummock_meta_client.clone(),
         ));
 
-        let compactor_context = Arc::new(Context::new_local_compact_context(
+        let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
+            CompactorRuntimeConfig::default(),
         ));
 
         let buffer_tracker = BufferTracker::from_storage_config(&options);

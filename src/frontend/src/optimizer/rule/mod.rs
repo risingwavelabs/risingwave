@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -81,6 +81,8 @@ mod dag_to_tree_rule;
 pub use dag_to_tree_rule::*;
 mod apply_share_eliminate_rule;
 pub use apply_share_eliminate_rule::*;
+mod stream;
+pub use stream::filter_with_now_to_join_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -112,6 +114,7 @@ macro_rules! for_all_rules {
             ,{UnionMergeRule}
             ,{DagToTreeRule}
             ,{AggDedupGroupKeyRule}
+            ,{FilterWithNowToJoinRule}
         }
     };
 }

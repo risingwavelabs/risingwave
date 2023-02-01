@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -280,26 +280,22 @@ export default function Streaming() {
             ></Input>
             <datalist id="relationList">
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.name} key={r.id}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.name} key={r.id}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </datalist>
             <Select
               value={router.query.id}
               onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.id} key={r.name}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.id} key={r.name}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </Select>
           </FormControl>
           <FormControl>

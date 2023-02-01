@@ -13,6 +13,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
+primary key _row_id
 
 query TT
 show columns from t3;
@@ -30,6 +31,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
+primary key _row_id
 idx1 index(v1, v2) include(v3) distributed by(v1, v2)
 
 statement ok
@@ -79,10 +81,6 @@ show materialized views;
 mv3
 
 query T
-show materialized sources;
-----
-
-query T
 show sources;
 ----
 
@@ -129,6 +127,7 @@ definition Varchar
 matviewid Int32
 matviewtimezone Varchar
 matviewgraph Varchar
+primary key schemaname
 
 query TT
 show columns from pg_catalog.pg_matviews;

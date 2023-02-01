@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -22,12 +22,12 @@ use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ExecutorCache<OwnedRow, BTreeSet<OwnedRow>>,
+    data: ExecutorCache<OwnedRow, HashSet<OwnedRow>>,
 }
 
 impl LookupCache {
     /// Lookup a row in cache. If not found, return `None`.
-    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&BTreeSet<OwnedRow>> {
+    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&HashSet<OwnedRow>> {
         self.data.get(key)
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ use serial_test::serial;
 use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
-use crate::get_test_notification_client;
+use crate::get_notification_client_for_test;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -241,7 +241,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         &hummock_manager_ref,
         TableId::from(existing_table_id),
     )

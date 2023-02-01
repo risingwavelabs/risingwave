@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{Sink as ProstSink, Table};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
     TableWithJoins,
@@ -138,8 +139,12 @@ pub async fn handle_create_sink(
     let (sink, graph) = {
         let context = OptimizerContext::from_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
-
-        (sink, build_graph(plan))
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
+        (sink, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();

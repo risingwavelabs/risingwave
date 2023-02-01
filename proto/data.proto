@@ -4,6 +4,7 @@ package data;
 
 import "common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message IntervalUnit {

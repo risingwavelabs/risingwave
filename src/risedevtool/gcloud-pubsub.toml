@@ -13,7 +13,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_PUBSUB" ] }
 description = "Download and enable Google Pubsub Emulator"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -d "${PREFIX_BIN}/gcloud" ]; then
     exit 0
@@ -26,7 +26,7 @@ echo "install the pubsub-emulator"
 mv "${PREFIX_TMP}/${GCLOUD_SDK_DIR}" "${PREFIX_BIN}/gcloud"
 # startup script for the emulator. bypasses gcloud because it detaches the java process from the runner
 cat <<EOF > "${PREFIX_BIN}/gcloud/start-pubsub-emulator.sh"
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ \$# -lt 1 ]; then
     echo "Usage: start-pubsub-emulator.sh <port>"

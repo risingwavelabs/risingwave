@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,9 +29,9 @@ use tracing::log::warn;
 
 use super::store::state_store::HummockStorageIterator;
 use super::store::version::CommittedVersion;
-use super::utils::validate_epoch;
+use super::utils::validate_safe_epoch;
 use super::HummockStorage;
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
@@ -95,7 +95,7 @@ impl HummockStorage {
     ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
         match self.backup_reader.try_get_hummock_version(epoch).await {
             Ok(Some(backup_version)) => {
-                validate_epoch(backup_version.safe_epoch(), epoch)?;
+                validate_safe_epoch(backup_version.safe_epoch(), epoch)?;
                 Ok((Vec::default(), Vec::default(), backup_version))
             }
             Ok(None) => Err(HummockError::read_backup_error(format!(
@@ -114,7 +114,7 @@ impl HummockStorage {
         key_range: &TableKeyRange,
     ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
         let pinned_version = self.pinned_version.load();
-        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+        validate_safe_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
         let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
@@ -178,28 +178,14 @@ impl StateStore for HummockStorage {
     /// we will only check whether it is le `sealed_epoch` and won't wait.
     fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            // Ok(self.local_version_manager.try_wait_epoch(epoch).await?)
+            self.validate_read_epoch(wait_epoch.clone())?;
             let wait_epoch = match wait_epoch {
-                HummockReadEpoch::Committed(epoch) => epoch,
-                HummockReadEpoch::Current(epoch) => {
-                    // let sealed_epoch = self.local_version.read().get_sealed_epoch();
-                    let sealed_epoch = (*self.seal_epoch).load(MemOrdering::SeqCst);
-                    assert!(
-                        epoch <= sealed_epoch
-                            && epoch != HummockEpoch::MAX
-                        ,
-                        "current epoch can't read, because the epoch in storage is not updated, epoch{}, sealed epoch{}"
-                        ,epoch
-                        ,sealed_epoch
-                    );
-                    return Ok(());
+                HummockReadEpoch::Committed(epoch) => {
+                    assert_ne!(epoch, HummockEpoch::MAX, "epoch should not be u64::MAX");
+                    epoch
                 }
-                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
+                _ => return Ok(()),
             };
-            if wait_epoch == HummockEpoch::MAX {
-                panic!("epoch should not be u64::MAX");
-            }
-
             let mut receiver = self.version_update_notifier_tx.subscribe();
             // avoid unnecessary check in the loop if the value does not change
             let max_committed_epoch = *receiver.borrow_and_update();
@@ -226,9 +212,7 @@ impl StateStore for HummockStorage {
                         continue;
                     }
                     Ok(Err(_)) => {
-                        return StorageResult::Err(StorageError::Hummock(
-                            HummockError::wait_epoch("tx dropped"),
-                        ));
+                        return Err(HummockError::wait_epoch("tx dropped").into());
                     }
                     Ok(Ok(_)) => {
                         let max_committed_epoch = *receiver.borrow();
@@ -268,7 +252,16 @@ impl StateStore for HummockStorage {
         }
         // Update `seal_epoch` synchronously,
         // as `HummockEvent::SealEpoch` is handled asynchronously.
+        assert!(epoch > self.seal_epoch.load(MemOrdering::SeqCst));
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+        if is_checkpoint {
+            let _ = self.min_current_epoch.compare_exchange(
+                HummockEpoch::MAX,
+                epoch,
+                MemOrdering::SeqCst,
+                MemOrdering::SeqCst,
+            );
+        }
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,
@@ -278,6 +271,8 @@ impl StateStore for HummockStorage {
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        self.min_current_epoch
+            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         async move {
             let (tx, rx) = oneshot::channel();
             self.hummock_event_sender
@@ -290,6 +285,34 @@ impl StateStore for HummockStorage {
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
         async move { self.new_local_inner(table_id).await }
+    }
+
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        if let HummockReadEpoch::Current(read_current_epoch) = epoch {
+            assert_ne!(
+                read_current_epoch,
+                HummockEpoch::MAX,
+                "epoch should not be u64::MAX"
+            );
+            let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
+            if read_current_epoch > sealed_epoch {
+                return Err(HummockError::read_current_epoch(format!(
+                    "Cannot read when cluster is under recovery. read {} > max seal epoch {}",
+                    read_current_epoch, sealed_epoch
+                ))
+                .into());
+            }
+
+            let min_current_epoch = self.min_current_epoch.load(MemOrdering::SeqCst);
+            if read_current_epoch < min_current_epoch {
+                return Err(HummockError::read_current_epoch(format!(
+                    "Cannot read when cluster is under recovery. read {} < min current epoch {}",
+                    read_current_epoch, min_current_epoch
+                ))
+                .into());
+            }
+        }
+        Ok(())
     }
 }
 

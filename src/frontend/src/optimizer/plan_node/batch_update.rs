@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,6 +89,7 @@ impl ToBatchProst for BatchUpdate {
         NodeBody::Update(UpdateNode {
             exprs,
             table_id: self.logical.table_id().table_id(),
+            returning: self.logical.has_returning(),
         })
     }
 }

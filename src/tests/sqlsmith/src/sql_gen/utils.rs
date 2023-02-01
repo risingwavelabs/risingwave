@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,8 +45,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.bound_columns = old_cols;
     }
 
-    // TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
-    pub(crate) fn _clone_local_context(&mut self) -> Context {
+    pub(crate) fn clone_local_context(&mut self) -> Context {
         let current_bound_relations = self.bound_relations.clone();
         let current_bound_columns = self.bound_columns.clone();
         (current_bound_columns, current_bound_relations)

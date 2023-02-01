@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,12 +42,15 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-    pub exchange_recv_size: GenericCounterVec<AtomicU64>,
+    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
+
+    // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
@@ -98,6 +101,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let source_row_per_barrier = register_int_counter_vec_with_registry!(
+            "stream_source_rows_per_barrier_counts",
+            "Total number of rows that have been output from source per barrier",
+            &["actor_id", "executor_id"],
+            registry
+        )
+        .unwrap();
+
         let actor_execution_time = register_gauge_vec_with_registry!(
             "stream_actor_actor_execution_time",
             "Total execution time (s) of an actor",
@@ -118,14 +129,6 @@ impl StreamingMetrics {
             "stream_actor_input_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of input buffer",
             &["actor_id", "upstream_fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let exchange_recv_size = register_int_counter_vec_with_registry!(
-            "stream_exchange_recv_size",
-            "Total size of messages that have been received from upstream Actor",
-            &["up_actor_id", "down_actor_id"],
             registry
         )
         .unwrap();
@@ -261,6 +264,14 @@ impl StreamingMetrics {
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
             "Join executor lookup total operation",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_join_insert_cache_miss_count",
+            "Join executor cache miss when insert operation",
             &["actor_id", "side"],
             registry
         )
@@ -432,10 +443,11 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
-            exchange_recv_size,
+            source_row_per_barrier,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
+            join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,6 +182,14 @@ impl EqJoinPredicate {
                 (left, right)
             })
             .collect()
+    }
+
+    pub fn eq_keys_are_type_aligned(&self) -> bool {
+        let mut aligned = true;
+        for (l, r, _) in &self.eq_keys {
+            aligned &= l.data_type == r.data_type;
+        }
+        aligned
     }
 
     pub fn left_eq_indexes(&self) -> Vec<usize> {

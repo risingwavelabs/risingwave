@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,15 +20,15 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::{AvroParserConfig, ProtobufParserConfig};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::RowFormatType;
-use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
-use super::create_table::{bind_sql_table_constraints, gen_materialize_plan};
+use super::create_table::bind_sql_table_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -36,8 +36,6 @@ use crate::catalog::{ColumnId, ROW_ID_COLUMN_ID};
 use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
-use crate::optimizer::OptimizerContext;
-use crate::stream_fragmenter::build_graph;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
@@ -46,10 +44,10 @@ async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser = AvroParser::new(
+    let parser = AvroParserConfig::new(
+        &with_properties,
         schema.row_schema_location.0.as_str(),
         schema.use_schema_registry,
-        with_properties,
     )
     .await?;
     let vec_column_desc = parser.map_to_columns()?;
@@ -67,11 +65,11 @@ async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser = ProtobufParser::new(
+    let parser = ProtobufParserConfig::new(
+        &with_properties,
         &schema.row_schema_location.0,
         &schema.message_name.0,
         schema.use_schema_registry,
-        with_properties,
     )
     .await?;
     let column_descs = parser.map_to_columns()?;
@@ -240,13 +238,12 @@ pub(crate) async fn resolve_source_schema(
 }
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
-pub(crate) fn check_and_add_timestamp_column(
+fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
     column_descs: &mut Vec<ColumnDesc>,
-    is_materialized: bool,
     col_id_gen: &mut ColumnIdGenerator,
 ) {
-    if is_kafka_source(with_properties) && !is_materialized {
+    if is_kafka_source(with_properties) {
         let kafka_timestamp_column = ColumnDesc {
             data_type: DataType::Timestamptz,
             column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
@@ -260,7 +257,6 @@ pub(crate) fn check_and_add_timestamp_column(
 
 pub async fn handle_create_source(
     handler_args: HandlerArgs,
-    is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
     let with_properties = handler_args.with_options.inner().clone();
@@ -270,18 +266,14 @@ pub async fn handle_create_source(
     let (mut column_descs, pk_column_id_from_columns) =
         bind_sql_columns(stmt.columns, &mut col_id_gen)?;
 
-    check_and_add_timestamp_column(
-        &with_properties,
-        &mut column_descs,
-        is_materialized,
-        &mut col_id_gen,
-    );
+    check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
-    if row_id_index.is_none() && !is_materialized {
+    if row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
-            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
+            "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
+                .to_owned(),
         )
         .into());
     }
@@ -292,7 +284,7 @@ pub async fn handle_create_source(
         &with_properties,
         row_id_index,
         &pk_column_ids,
-        is_materialized,
+        false,
     )
     .await?;
 
@@ -321,25 +313,9 @@ pub async fn handle_create_source(
         info: Some(source_info),
         owner: session.user_id(),
     };
+
     let catalog_writer = session.env().catalog_writer();
-
-    // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
-    if is_materialized {
-        let (graph, table) = {
-            let context = OptimizerContext::from_handler_args(handler_args);
-            let (plan, table) =
-                gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
-            let graph = build_graph(plan);
-
-            (graph, table)
-        };
-
-        catalog_writer
-            .create_table(Some(source), table, graph)
-            .await?;
-    } else {
-        catalog_writer.create_source(source).await?;
-    }
+    catalog_writer.create_source(source).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
 }

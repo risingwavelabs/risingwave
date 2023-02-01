@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -554,7 +554,7 @@ mod tests {
                 order_by_2(),
                 1,
                 vec![1, 2],
-                state_table.clone(),
+                state_table,
                 Arc::new(AtomicU64::new(0)),
             )
             .unwrap(),
