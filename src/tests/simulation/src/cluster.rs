@@ -378,6 +378,10 @@ impl Cluster {
                 }
                 nodes.push(format!("meta-{}", i));
             }
+            // don't kill all meta services
+            if nodes.len() == self.config.meta_nodes {
+                nodes.truncate(1);
+            }
         }
         if opts.kill_frontend {
             let rand = rand::thread_rng().gen_range(0..3);
