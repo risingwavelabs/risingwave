@@ -21,8 +21,9 @@ use anyhow::Context;
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::bail;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -30,8 +31,8 @@ use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    agg_call_state, ColocatedActorId, DispatchStrategy, Dispatcher, DispatcherType, MergeNode,
-    StreamActor, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    agg_call_state, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 use self::schedule::Distribution;
@@ -109,30 +110,16 @@ impl OrderedActorLink {
     }
 }
 
-struct StreamActorDownstream {
-    dispatch_strategy: DispatchStrategy,
-    dispatcher_id: u64,
-
-    /// Downstream actors.
-    actors: OrderedActorLink,
-
-    /// Whether to place the downstream actors on the same node
-    // TODO: remove this field after scheduler refactoring
-    #[expect(dead_code)]
-    same_worker_node: bool,
-}
-
 #[derive(Debug)]
 struct StreamActorUpstream {
     /// Upstream actors
     actors: OrderedActorLink,
     /// associate fragment id
     fragment_id: GlobalFragmentId,
-    /// Whether to place the upstream actors on the same node
-    same_worker_node: bool,
 }
 
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
+#[derive(Debug)]
 struct StreamActorBuilder {
     /// actor id field
     actor_id: GlobalActorId,
@@ -143,39 +130,28 @@ struct StreamActorBuilder {
     /// associated stream node
     nodes: Arc<StreamNode>,
 
-    /// downstream dispatchers (dispatcher, downstream actor, hash mapping)
-    downstreams: Vec<StreamActorDownstream>,
+    new_downstreams: HashMap<u64, Dispatcher>,
 
     /// upstreams, exchange node operator_id -> upstream actor ids
     upstreams: HashMap<u64, StreamActorUpstream>,
 
-    /// Whether to place this actors on the same node as chain's upstream MVs.
-    chain_same_worker_node: bool,
+    vnode_bitmap: Option<Bitmap>,
 }
 
 impl StreamActorBuilder {
-    fn is_chain_same_worker_node(stream_node: &StreamNode) -> bool {
-        fn visit(stream_node: &StreamNode) -> bool {
-            if let Some(NodeBody::Chain(ref chain)) = stream_node.node_body {
-                return chain.same_worker_node;
-            }
-            stream_node.input.iter().any(visit)
-        }
-        visit(stream_node)
-    }
-
     pub fn new(
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
+        vnode_bitmap: Option<Bitmap>,
         node: Arc<StreamNode>,
     ) -> Self {
         Self {
             actor_id,
             fragment_id,
-            chain_same_worker_node: Self::is_chain_same_worker_node(&node),
             nodes: node,
-            downstreams: vec![],
+            new_downstreams: HashMap::new(),
             upstreams: HashMap::new(),
+            vnode_bitmap,
         }
     }
 
@@ -183,94 +159,73 @@ impl StreamActorBuilder {
         self.fragment_id
     }
 
-    /// Add a dispatcher to this actor.
-    pub fn add_dispatcher(
+    pub fn add_dispatcher_hash(
         &mut self,
-        dispatch_strategy: DispatchStrategy,
+        column_indices: &[u32],
         dispatcher_id: u64,
-        downstream_actors: OrderedActorLink,
-        same_worker_node: bool,
+        downstream_actors: &[GlobalActorId],
+        downstream_actor_mapping: ActorMapping,
     ) {
-        self.downstreams.push(StreamActorDownstream {
-            dispatch_strategy,
+        let dispatcher = Dispatcher {
+            r#type: DispatcherType::Hash as _,
+            column_indices: column_indices.to_vec(),
+            hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id,
-            actors: downstream_actors,
-            same_worker_node,
-        });
+            downstream_actor_id: OrderedActorLink(downstream_actors.to_vec()).as_global_ids(), /* TODO */
+        };
+
+        self.new_downstreams
+            .try_insert(dispatcher_id, dispatcher)
+            .unwrap();
+    }
+
+    pub fn add_dispatcher_normal(
+        &mut self,
+        dispatcher_type: DispatcherType,
+        dispatcher_id: u64,
+        downstream_actors: &[GlobalActorId],
+    ) {
+        assert_ne!(dispatcher_type, DispatcherType::Hash);
+        let dispatcher = Dispatcher {
+            r#type: dispatcher_type as _,
+            column_indices: Vec::new(),
+            hash_mapping: None,
+            dispatcher_id,
+            downstream_actor_id: OrderedActorLink(downstream_actors.to_vec()).as_global_ids(), /* TODO */
+        };
+
+        self.new_downstreams
+            .try_insert(dispatcher_id, dispatcher)
+            .unwrap();
     }
 
     /// Build an actor after seal.
-    pub fn build(&self) -> StreamActor {
-        let dispatcher = self
-            .downstreams
+    pub fn build(&self, ctx: &CreateStreamingJobContext) -> StreamActor {
+        // TODO: store each upstream separately
+        let upstream_actor_id = self
+            .upstreams
             .iter()
-            .map(
-                |StreamActorDownstream {
-                     dispatch_strategy,
-                     dispatcher_id,
-                     actors,
-                     same_worker_node: _,
-                 }| Dispatcher {
-                    downstream_actor_id: actors.as_global_ids(),
-                    r#type: dispatch_strategy.r#type,
-                    column_indices: dispatch_strategy.column_indices.clone(),
-                    // will be filled later by stream manager
-                    hash_mapping: None,
-                    dispatcher_id: *dispatcher_id,
-                },
-            )
-            .collect_vec();
+            .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
+            .map(|x| x.as_global_id())
+            .collect();
 
         StreamActor {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
             nodes: Some(self.nodes.deref().clone()),
-            dispatcher,
-            upstream_actor_id: self
-                .upstreams
-                .iter()
-                .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
-                .map(|x| x.as_global_id())
-                .collect(), // TODO: store each upstream separately
-            colocated_upstream_actor_id: if self.chain_same_worker_node {
-                if self.upstreams.is_empty() {
-                    None
-                } else {
-                    Some(ColocatedActorId {
-                        id: self
-                            .upstreams
-                            .values()
-                            .exactly_one()
-                            .unwrap()
-                            .actors
-                            .as_global_ids()
-                            .into_iter()
-                            .exactly_one()
-                            .unwrap(),
-                    })
-                }
-            } else if self.upstreams.values().any(|u| u.same_worker_node) {
-                Some(ColocatedActorId {
-                    id: self
-                        .upstreams
-                        .values()
-                        .filter(|x| x.same_worker_node)
-                        .exactly_one()
-                        .unwrap()
-                        .actors
-                        .as_global_ids()
-                        .into_iter()
-                        .exactly_one()
-                        .unwrap(),
-                })
-            } else {
-                None
-            },
-            vnode_bitmap: None,
-            // To be filled by `StreamGraphBuilder::build`
-            mview_definition: "".to_owned(),
+            dispatcher: self.new_downstreams.values().cloned().collect(),
+            upstream_actor_id,
+            colocated_upstream_actor_id: None, // TODO: remove this
+            vnode_bitmap: self.vnode_bitmap.as_ref().map(Bitmap::to_protobuf),
+            mview_definition: ctx.streaming_definition.clone(),
         }
     }
+}
+
+struct Node<'a> {
+    fragment_id: GlobalFragmentId,
+    actor_ids: &'a [GlobalActorId],
+    distribution: &'a Distribution,
 }
 
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
@@ -278,6 +233,8 @@ impl StreamActorBuilder {
 #[derive(Default)]
 struct StreamGraphBuilder {
     actor_builders: BTreeMap<GlobalActorId, StreamActorBuilder>,
+
+    locations: BTreeMap<GlobalActorId, ParallelUnitId>,
 }
 
 impl StreamGraphBuilder {
@@ -286,121 +243,130 @@ impl StreamGraphBuilder {
         &mut self,
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
+        parallel_unit_id: ParallelUnitId,
+        vnode_bitmap: Option<Bitmap>,
         node: Arc<StreamNode>,
     ) {
-        self.actor_builders.insert(
-            actor_id,
-            StreamActorBuilder::new(actor_id, fragment_id, node),
-        );
+        self.actor_builders
+            .try_insert(
+                actor_id,
+                StreamActorBuilder::new(actor_id, fragment_id, vnode_bitmap, node),
+            )
+            .unwrap();
+
+        self.locations
+            .try_insert(actor_id, parallel_unit_id)
+            .unwrap();
     }
 
     /// Add dependency between two connected node in the graph.
-    pub fn add_link(
+    pub fn add_link<'a>(
         &mut self,
-        upstream_fragment_id: GlobalFragmentId,
-        upstream_actor_ids: &[GlobalActorId],
-        downstream_actor_ids: &[GlobalActorId],
-        edge: StreamFragmentEdge,
+        upstream: Node<'a>,
+        downstream: Node<'a>,
+        dispatch_strategy: DispatchStrategy,
     ) {
-        let exchange_operator_id = edge.link_id;
-        let same_worker_node = edge.same_worker_node;
-        let dispatch_strategy = edge.dispatch_strategy.unwrap();
-        // We can't use the exchange operator id directly as the dispatch id, because an exchange
-        // could belong to more than one downstream in DAG.
-        // We can use downstream fragment id as an unique id for dispatcher.
-        // In this way we can ensure the dispatchers of `StreamActor` would have different id,
-        // even though they come from the same exchange operator.
-        let dispatch_id = edge.downstream_id as u64;
+        // Since the frontend uses the exchange's operator ID as the `link_id` of the edge, if
+        // there're multiple downstreams of a fragment, we cannot ensure this is unique. So we
+        // concat the fragment IDs to a unique link ID.
+        let link_id = ((upstream.fragment_id.as_global_id() as u64) << 32)
+            | downstream.fragment_id.as_global_id() as u64;
 
-        if dispatch_strategy.get_type().unwrap() == DispatcherType::NoShuffle {
-            assert_eq!(
-                upstream_actor_ids.len(),
-                downstream_actor_ids.len(),
-                "mismatched length when processing no-shuffle exchange: {:?} -> {:?} on exchange {}",
-                upstream_actor_ids,
-                downstream_actor_ids,
-                exchange_operator_id
-            );
+        let dt = dispatch_strategy.r#type();
+        match dt {
+            DispatcherType::NoShuffle => {
+                for (upstream_id, downstream_id) in upstream
+                    .actor_ids
+                    .iter()
+                    .zip_eq(downstream.actor_ids.iter())
+                {
+                    let upstream_location = self.locations[upstream_id];
+                    let downstream_location = self.locations[downstream_id];
+                    assert_eq!(upstream_location, downstream_location);
 
-            // update 1v1 relationship
-            upstream_actor_ids
-                .iter()
-                .zip_eq(downstream_actor_ids.iter())
-                .for_each(|(upstream_id, downstream_id)| {
                     self.actor_builders
                         .get_mut(upstream_id)
                         .unwrap()
-                        .add_dispatcher(
-                            dispatch_strategy.clone(),
-                            dispatch_id,
-                            OrderedActorLink(vec![*downstream_id]),
-                            same_worker_node,
-                        );
+                        .add_dispatcher_normal(dt, link_id, &[*downstream_id]);
 
+                    // TODO: refactor
                     self.actor_builders
                         .get_mut(downstream_id)
                         .unwrap()
                         .upstreams
                         .try_insert(
-                            exchange_operator_id,
+                            link_id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(vec![*upstream_id]),
-                                fragment_id: upstream_fragment_id,
-                                same_worker_node,
+                                fragment_id: upstream.fragment_id,
                             },
                         )
                         .unwrap_or_else(|_| {
                             panic!(
                                 "duplicated exchange input {} for no-shuffle actors {:?} -> {:?}",
-                                exchange_operator_id, upstream_id, downstream_id
+                                link_id, upstream_id, downstream_id
                             )
                         });
-                });
+                }
+            }
 
-            return;
+            // Otherwise, make m * n links between actors.
+            DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
+                if let DispatcherType::Hash = dt {
+                    let downstream_locations: HashMap<ParallelUnitId, ActorId> = downstream
+                        .actor_ids
+                        .iter()
+                        .map(|&actor_id| (self.locations[&actor_id], actor_id.as_global_id()))
+                        .collect();
+                    let actor_mapping = downstream
+                        .distribution
+                        .as_hash()
+                        .unwrap()
+                        .to_actor(&downstream_locations);
+
+                    for upstream_id in upstream.actor_ids {
+                        self.actor_builders
+                            .get_mut(upstream_id)
+                            .unwrap()
+                            .add_dispatcher_hash(
+                                &dispatch_strategy.column_indices,
+                                link_id,
+                                downstream.actor_ids,
+                                actor_mapping.clone(),
+                            );
+                    }
+                } else {
+                    for upstream_id in upstream.actor_ids {
+                        self.actor_builders
+                            .get_mut(upstream_id)
+                            .unwrap()
+                            .add_dispatcher_normal(dt, link_id, downstream.actor_ids);
+                    }
+                }
+
+                for downstream_id in downstream.actor_ids {
+                    self.actor_builders
+                        .get_mut(downstream_id)
+                        .unwrap()
+                        .upstreams
+                        .try_insert(
+                            link_id,
+                            StreamActorUpstream {
+                                actors: OrderedActorLink(upstream.actor_ids.to_vec()),
+                                fragment_id: upstream.fragment_id,
+                            },
+                        )
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "duplicated exchange input {} for actors {:?} -> {:?}",
+                                link_id, upstream.actor_ids, downstream.actor_ids
+                            )
+                        });
+                }
+            }
+
+            DispatcherType::Unspecified => unreachable!(),
         }
-
-        // otherwise, make m * n links between actors.
-
-        assert!(
-            !same_worker_node,
-            "same_worker_node only applies to 1v1 dispatchers."
-        );
-
-        // update actors to have dispatchers, link upstream -> downstream.
-        upstream_actor_ids.iter().for_each(|upstream_id| {
-            self.actor_builders
-                .get_mut(upstream_id)
-                .unwrap()
-                .add_dispatcher(
-                    dispatch_strategy.clone(),
-                    dispatch_id,
-                    OrderedActorLink(downstream_actor_ids.to_vec()),
-                    same_worker_node,
-                );
-        });
-
-        // update actors to have upstreams, link downstream <- upstream.
-        downstream_actor_ids.iter().for_each(|downstream_id| {
-            self.actor_builders
-                .get_mut(downstream_id)
-                .unwrap()
-                .upstreams
-                .try_insert(
-                    exchange_operator_id,
-                    StreamActorUpstream {
-                        actors: OrderedActorLink(upstream_actor_ids.to_vec()),
-                        fragment_id: upstream_fragment_id,
-                        same_worker_node,
-                    },
-                )
-                .unwrap_or_else(|_| {
-                    panic!(
-                        "duplicated exchange input {} for actors {:?} -> {:?}",
-                        exchange_operator_id, upstream_actor_ids, downstream_actor_ids
-                    )
-                });
-        });
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
@@ -412,7 +378,7 @@ impl StreamGraphBuilder {
         let mut graph: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
 
         for builder in self.actor_builders.values() {
-            let mut actor = builder.build();
+            let mut actor = builder.build(ctx);
             let upstream_actors = builder
                 .upstreams
                 .iter()
@@ -426,8 +392,8 @@ impl StreamGraphBuilder {
             let stream_node =
                 self.build_inner(actor.get_nodes()?, &upstream_actors, &upstream_fragments)?;
 
+            // TODO: move to build
             actor.nodes = Some(stream_node);
-            actor.mview_definition = ctx.streaming_definition.clone();
 
             graph.entry(builder.fragment_id()).or_default().push(actor);
         }
@@ -588,15 +554,11 @@ impl ActorGraphBuilder {
     /// graph is failed to be scheduled.
     pub fn new(
         complete_graph: CompleteStreamFragmentGraph,
+        all_parallel_units: impl IntoIterator<Item = ParallelUnit>,
         default_parallelism: u32,
     ) -> MetaResult<Self> {
-        // TODO: use the real parallel units to generate real distribution.
-        let fake_parallel_units = (0..default_parallelism).map(|id| ParallelUnit {
-            id,
-            worker_node_id: 0,
-        });
         let distributions =
-            schedule::Scheduler::new(fake_parallel_units, default_parallelism as usize)?
+            schedule::Scheduler::new(all_parallel_units, default_parallelism as usize)?
                 .schedule(&complete_graph)?;
 
         // TODO: directly use the complete graph when building so that we can generalize the
@@ -684,34 +646,51 @@ impl ActorGraphBuilder {
                 .insert(fragment_id.as_global_id(), upstream_table_id);
         }
 
-        let distribution = &self.distributions[&fragment_id];
-        let parallel_degree = distribution.parallelism() as u32;
-
         let node = Arc::new(current_fragment.node.unwrap());
 
-        let actor_ids = (0..parallel_degree)
-            .map(|_| state.next_actor_id())
+        let distribution = &self.distributions[&fragment_id];
+
+        let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
+
+        let actor_ids = distribution
+            .parallel_units()
+            .map(|parallel_unit_id| {
+                let actor_id = state.next_actor_id();
+                let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&parallel_unit_id]).cloned();
+
+                state.stream_graph_builder.add_actor(
+                    actor_id,
+                    fragment_id,
+                    parallel_unit_id,
+                    vnode_bitmap,
+                    node.clone(),
+                );
+                actor_id
+            })
             .collect_vec();
 
-        for &actor_id in &actor_ids {
-            state
-                .stream_graph_builder
-                .add_actor(actor_id, fragment_id, node.clone());
-        }
-
-        for (downstream_fragment_id, dispatch_edge) in
+        for (&downstream_fragment_id, dispatch_edge) in
             self.fragment_graph.get_downstreams(fragment_id)
         {
             let downstream_actors = state
                 .fragment_actors
-                .get(downstream_fragment_id)
+                .get(&downstream_fragment_id)
                 .expect("downstream fragment not processed yet");
 
+            let downstream_distribution = &self.distributions[&downstream_fragment_id];
+
             state.stream_graph_builder.add_link(
-                fragment_id,
-                &actor_ids,
-                downstream_actors,
-                dispatch_edge.clone(),
+                Node {
+                    fragment_id,
+                    actor_ids: &actor_ids,
+                    distribution,
+                },
+                Node {
+                    fragment_id: downstream_fragment_id,
+                    actor_ids: &downstream_actors,
+                    distribution: downstream_distribution,
+                },
+                dispatch_edge.get_dispatch_strategy().unwrap().clone(),
             );
         }
 
@@ -1169,14 +1148,14 @@ impl CompleteStreamFragmentGraph {
         self.existing_fragments
             .iter()
             .map(|(&id, f)| {
+                let mapping = ParallelUnitMapping::from_protobuf(f.get_vnode_mapping().unwrap());
                 let dist = match f.get_distribution_type().unwrap() {
                     FragmentDistributionType::Unspecified => unreachable!(),
-                    FragmentDistributionType::Single => Distribution::Singleton,
-                    FragmentDistributionType::Hash => {
-                        let mapping =
-                            ParallelUnitMapping::from_protobuf(f.get_vnode_mapping().unwrap());
-                        Distribution::Hash(mapping)
+                    FragmentDistributionType::Single => {
+                        let parallel_unit = mapping.iter_unique().exactly_one().ok().unwrap();
+                        Distribution::Singleton(parallel_unit)
                     }
+                    FragmentDistributionType::Hash => Distribution::Hash(mapping),
                 };
                 (id, dist)
             })

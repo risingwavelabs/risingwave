@@ -16,10 +16,13 @@
 
 use std::collections::{BTreeMap, HashMap, LinkedList};
 
+use either::Either;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use risingwave_common::bail;
-use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
@@ -31,8 +34,8 @@ type HashMappingId = usize;
 /// The internal distribution structure for processing in the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DistId {
+    Singleton(ParallelUnitId),
     Hash(HashMappingId),
-    Singleton,
 }
 
 /// Facts as the input of the scheduler.
@@ -86,8 +89,6 @@ crepe::crepe! {
     // Requirements of `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
-    // Requirements of `Simple` edges.
-    Requirement(y, DistId::Singleton) <- Edge(_, y, Simple);
 
     // Multiple requirements lead to failure.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
@@ -101,16 +102,20 @@ crepe::crepe! {
 /// The distribution of a fragment.
 #[derive(EnumAsInner)]
 pub(super) enum Distribution {
-    Singleton,
+    Singleton(ParallelUnitId),
     Hash(ParallelUnitMapping),
 }
 
 impl Distribution {
     /// The parallelism required by the distribution.
     pub fn parallelism(&self) -> usize {
+        self.parallel_units().count()
+    }
+
+    pub fn parallel_units(&self) -> impl Iterator<Item = ParallelUnitId> + '_ {
         match self {
-            Distribution::Singleton => 1,
-            Distribution::Hash(mapping) => mapping.iter_unique().count(),
+            Distribution::Singleton(p) => Either::Left(std::iter::once(*p)),
+            Distribution::Hash(mapping) => Either::Right(mapping.iter_unique()),
         }
     }
 }
@@ -119,6 +124,8 @@ impl Distribution {
 pub(super) struct Scheduler {
     /// The default distribution for fragments, if there's no requirement derived.
     default_hash_mapping: ParallelUnitMapping,
+
+    default_singleton_parallel_unit: ParallelUnitId,
 }
 
 impl Scheduler {
@@ -127,6 +134,10 @@ impl Scheduler {
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
         default_parallelism: usize,
     ) -> MetaResult<Self> {
+        if default_parallelism == 0 {
+            bail!("default parallelism should never be 0");
+        }
+
         // Group parallel units with worker node.
         let mut parallel_units_map = BTreeMap::new();
         for p in parallel_units {
@@ -163,8 +174,11 @@ impl Scheduler {
         // Build the default hash mapping uniformly.
         let default_hash_mapping = ParallelUnitMapping::build(&round_robin);
 
+        let default_singleton_parallel_unit = round_robin.choose(&mut thread_rng()).unwrap().id;
+
         Ok(Self {
             default_hash_mapping,
+            default_singleton_parallel_unit,
         })
     }
 
@@ -200,14 +214,14 @@ impl Scheduler {
             if fragment.is_singleton {
                 facts.push(Fact::InternalReq {
                     id,
-                    dist: DistId::Singleton,
+                    dist: DistId::Singleton(self.default_singleton_parallel_unit),
                 });
             }
         }
         // External
         for (id, req) in existing_distribution {
             let dist = match req {
-                Distribution::Singleton => DistId::Singleton,
+                Distribution::Singleton(parallel_unit) => DistId::Singleton(parallel_unit),
                 Distribution::Hash(mapping) => DistId::Hash(hash_mapping_id[&mapping]),
             };
             facts.push(Fact::ExternalReq { id, dist });
@@ -232,7 +246,7 @@ impl Scheduler {
             .map(|Success(id, distribution)| {
                 let distribution = match distribution {
                     DistId::Hash(mapping) => Distribution::Hash(all_hash_mappings[mapping].clone()),
-                    DistId::Singleton => Distribution::Singleton,
+                    DistId::Singleton(parallel_unit) => Distribution::Singleton(parallel_unit),
                 };
                 (id, distribution)
             })

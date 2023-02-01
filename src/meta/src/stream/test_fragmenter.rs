@@ -18,6 +18,7 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -401,6 +402,15 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     }
 }
 
+fn make_parallel_units() -> Vec<ParallelUnit> {
+    (0..8)
+        .map(|id| ParallelUnit {
+            id,
+            worker_node_id: 0,
+        })
+        .collect()
+}
+
 #[tokio::test]
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
@@ -417,9 +427,9 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
+        make_parallel_units(),
         parallel_degree,
     )?;
-
     let graph = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
