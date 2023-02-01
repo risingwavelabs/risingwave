@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -228,9 +228,16 @@ where
     ) -> Result<Response<DropSinkResponse>, Status> {
         self.check_barrier_manager_status().await?;
         let sink_id = request.into_inner().sink_id;
-
+        let table_fragment = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&sink_id.into())
+            .await?;
+        let internal_tables = table_fragment.internal_table_ids();
         // 1. Drop sink in catalog.
-        let version = self.catalog_manager.drop_sink(sink_id).await?;
+        let version = self
+            .catalog_manager
+            .drop_sink(sink_id, internal_tables)
+            .await?;
         // 2. drop streaming job of sink.
         self.stream_manager
             .drop_streaming_jobs(vec![sink_id.into()])
@@ -490,6 +497,30 @@ where
             "replace table plan is not implemented yet",
         ))
     }
+
+    async fn java_get_table(
+        &self,
+        request: Request<JavaGetTableRequest>,
+    ) -> Result<Response<JavaGetTableResponse>, Status> {
+        let req = request.into_inner();
+        let database = self
+            .catalog_manager
+            .list_databases()
+            .await
+            .into_iter()
+            .find(|db| db.name == req.database_name);
+        if let Some(db) = database {
+            let table = self
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .find(|t| t.name == req.table_name && t.database_id == db.id);
+            Ok(Response::new(JavaGetTableResponse { table }))
+        } else {
+            Ok(Response::new(JavaGetTableResponse { table: None }))
+        }
+    }
 }
 
 impl<S> DdlServiceImpl<S>
@@ -673,8 +704,9 @@ where
                     .await?
             }
             StreamingJob::Sink(sink) => {
+                let internal_tables = ctx.internal_tables();
                 self.catalog_manager
-                    .finish_create_sink_procedure(sink)
+                    .finish_create_sink_procedure(internal_tables, sink)
                     .await?
             }
             StreamingJob::Table(source, table) => {

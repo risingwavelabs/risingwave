@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
-use super::{ColPrunable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
-use crate::expr::{ExprImpl, InputRef, Literal};
+use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
@@ -106,6 +106,12 @@ impl ColPrunable for LogicalUnion {
             .map(|input| input.prune_col(required_cols, ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
+    }
+}
+
+impl ExprRewritable for LogicalUnion {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

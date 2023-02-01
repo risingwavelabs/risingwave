@@ -55,3 +55,12 @@ select v3 from t where v3 > '2022-01-01'::DATE;
 
 statement ok
 drop table t;
+
+# Issue #7566
+# timestamp_interval_sub
+statement error out of range
+select TIMESTAMP '2022-08-09 00:00:00' - (INTERVAL '-2147483648 days');
+
+# timestamp_interval_add
+statement error out of range
+select TIMESTAMP '2022-08-09 00:00:00' + (INTERVAL '-2147483648 days');

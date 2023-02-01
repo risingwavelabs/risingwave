@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,8 +44,9 @@ const KILL_IGNORE_FILES: &[&str] = &[
 
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
-    let host = cluster.rand_frontend_ip();
-    let risingwave = RisingWave::connect(host, "dev".to_string()).await.unwrap();
+    let risingwave = RisingWave::connect("frontend".into(), "dev".into())
+        .await
+        .unwrap();
     let kill = opts.kill_compute || opts.kill_meta || opts.kill_frontend || opts.kill_compactor;
     let mut tester = sqllogictest::Runner::new(risingwave);
     let files = glob::glob(glob).expect("failed to read glob pattern");
@@ -161,7 +162,14 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         break
                     }
                     // allow 'not found' error when retry DROP statement
-                    Err(e) if is_drop && i != 0 && e.to_string().contains("not found") => break,
+                    Err(e)
+                        if is_drop
+                            && i != 0
+                            && e.to_string().contains("not found")
+                            && e.to_string().contains("Catalog error") =>
+                    {
+                        break
+                    }
                     Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
                     Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
                 }
@@ -179,13 +187,14 @@ pub async fn run_parallel_slt_task(
     glob: &str,
     jobs: usize,
 ) -> Result<(), ParallelTestError> {
-    let host = cluster.rand_frontend_ip();
-    let db = RisingWave::connect(host, "dev".to_string()).await.unwrap();
+    let db = RisingWave::connect("frontend".into(), "dev".into())
+        .await
+        .unwrap();
     let mut tester = sqllogictest::Runner::new(db);
     tester
         .run_parallel_async(
             glob,
-            cluster.frontend_ips(),
+            vec!["frontend".into()],
             |host, dbname| async move { RisingWave::connect(host, dbname).await.unwrap() },
             jobs,
         )
