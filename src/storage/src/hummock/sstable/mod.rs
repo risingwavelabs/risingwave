@@ -18,6 +18,7 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
+use std::ops::BitXor;
 
 pub use block::*;
 mod block_iterator;
@@ -154,8 +155,9 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
-        xxh32::xxh32(dist_key, 0)
+    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u32 {
+        let dist_key_hash = xxh32::xxh32(dist_key, 0);
+        table_id.bitxor(dist_key_hash)
     }
 
     #[inline(always)]
