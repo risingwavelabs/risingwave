@@ -202,6 +202,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
+                self.last_extract_key.clear();
             }
             let mut extract_key = user_key(&self.raw_key);
             extract_key = self.filter_key_extractor.extract(extract_key);
