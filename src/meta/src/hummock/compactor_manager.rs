@@ -143,36 +143,33 @@ impl Compactor {
 
     pub fn try_update_state(&self, new_state: CompactorState) {
         // compactor state update interval relay on workload collect interval on compactor side
-        self.set_state(new_state);
+        match new_state {
+            CompactorState::Idle(_) => {
+                if let CompactorState::Burst(last_state_time) = self.state() {
+                    if last_state_time.elapsed().as_secs() > 90 {
+                        self.set_state(new_state)
+                    }
+                }
+            }
 
-        // match new_state {
-        //     CompactorState::Idle(_) => {
-        //         if let CompactorState::Burst(last_state_time) = self.state() {
-        //             if last_state_time.elapsed().as_secs() > 60 {
-        //                 self.set_state(new_state)
-        //             }
-        //         }
-        //     }
+            CompactorState::Burst(_) => match self.state() {
+                CompactorState::Idle(last_state_time) | CompactorState::Busy(last_state_time) => {
+                    if last_state_time.elapsed().as_secs() > 90 {
+                        self.set_state(new_state)
+                    }
+                }
 
-        //     CompactorState::Burst(_) => match self.state() {
-        //         CompactorState::Idle(last_state_time) | CompactorState::Busy(last_state_time) =>
-        // {             if last_state_time.elapsed().as_secs() > 60 {
-        //                 self.set_state(new_state)
-        //             }
-        //         }
+                _ => {}
+            },
 
-        //         _ => {}
-        //     },
-
-        //     CompactorState::Busy(_) => {
-        //         // up
-        //         if let CompactorState::Burst(last_state_time) = self.state() {
-        //             if last_state_time.elapsed().as_secs() > 60 {
-        //                 self.set_state(new_state)
-        //             }
-        //         }
-        //     }
-        // }
+            CompactorState::Busy(_) => {
+                if let CompactorState::Burst(last_state_time) = self.state() {
+                    if last_state_time.elapsed().as_secs() > 90 {
+                        self.set_state(new_state)
+                    }
+                }
+            }
+        }
     }
 }
 
