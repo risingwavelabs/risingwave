@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,11 +16,11 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::SubscribeResponse;
+use risingwave_pb::meta::{FragmentParallelUnitMapping, SubscribeResponse};
 use tokio::sync::watch::Sender;
 
 use crate::catalog::root_catalog::Catalog;
@@ -53,6 +53,7 @@ impl ObserverState for FrontendObserverNode {
             | Info::Source(_)
             | Info::Index(_)
             | Info::Sink(_)
+            | Info::Function(_)
             | Info::View(_) => {
                 self.handle_catalog_notification(resp);
             }
@@ -120,12 +121,15 @@ impl ObserverState for FrontendObserverNode {
             snapshot
                 .parallel_unit_mappings
                 .iter()
-                .map(|mapping| {
-                    (
-                        mapping.fragment_id,
-                        decompress_data(&mapping.original_indices, &mapping.data),
-                    )
-                })
+                .map(
+                    |FragmentParallelUnitMapping {
+                         fragment_id,
+                         mapping,
+                     }| {
+                        let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
+                        (*fragment_id, mapping)
+                    },
+                )
                 .collect(),
         );
         self.hummock_snapshot_manager
@@ -215,6 +219,15 @@ impl FrontendObserverNode {
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
+            Info::Function(function) => match resp.operation() {
+                Operation::Add => catalog_guard.create_function(function),
+                Operation::Delete => catalog_guard.drop_function(
+                    function.database_id,
+                    function.schema_id,
+                    function.id.into(),
+                ),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
             _ => unreachable!(),
         }
         assert!(
@@ -257,32 +270,30 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::ParallelUnitMapping(parallel_unit_mapping) => match resp.operation() {
-                Operation::Add => {
-                    let fragment_id = parallel_unit_mapping.fragment_id;
-                    let mapping = decompress_data(
-                        &parallel_unit_mapping.original_indices,
-                        &parallel_unit_mapping.data,
-                    );
-                    self.worker_node_manager
-                        .insert_fragment_mapping(fragment_id, mapping);
+            Info::ParallelUnitMapping(parallel_unit_mapping) => {
+                let fragment_id = parallel_unit_mapping.fragment_id;
+                let mapping = || {
+                    ParallelUnitMapping::from_protobuf(
+                        parallel_unit_mapping.mapping.as_ref().unwrap(),
+                    )
+                };
+
+                match resp.operation() {
+                    Operation::Add => {
+                        self.worker_node_manager
+                            .insert_fragment_mapping(fragment_id, mapping());
+                    }
+                    Operation::Delete => {
+                        self.worker_node_manager
+                            .remove_fragment_mapping(&fragment_id);
+                    }
+                    Operation::Update => {
+                        self.worker_node_manager
+                            .update_fragment_mapping(fragment_id, mapping());
+                    }
+                    _ => panic!("receive an unsupported notify {:?}", resp),
                 }
-                Operation::Delete => {
-                    let fragment_id = parallel_unit_mapping.fragment_id;
-                    self.worker_node_manager
-                        .remove_fragment_mapping(&fragment_id);
-                }
-                Operation::Update => {
-                    let fragment_id = parallel_unit_mapping.fragment_id;
-                    let mapping = decompress_data(
-                        &parallel_unit_mapping.original_indices,
-                        &parallel_unit_mapping.data,
-                    );
-                    self.worker_node_manager
-                        .update_fragment_mapping(fragment_id, mapping);
-                }
-                _ => panic!("receive an unsupported notify {:?}", resp),
-            },
+            }
             _ => unreachable!(),
         }
     }

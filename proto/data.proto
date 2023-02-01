@@ -4,6 +4,7 @@ package data;
 
 import "common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message IntervalUnit {
@@ -44,7 +45,7 @@ message DataType {
     INTERVAL = 11;
     DATE = 12;
     // Timestamp type with timezone
-    TIMESTAMPZ = 13;
+    TIMESTAMPTZ = 13;
     STRUCT = 15;
     LIST = 16;
     BYTEA = 17;

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,12 +17,17 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
-use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk};
+use super::{
+    BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk, Watermark,
+};
 
 /// Executor which can handle [`StreamChunk`]s one by one.
 pub trait SimpleExecutor: Send + Sync + 'static {
     /// convert a single chunk to zero or one chunks.
     fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>>;
+
+    /// convert a single chunk to zero or one chunks.
+    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>>;
 
     /// See [`super::Executor::schema`].
     fn schema(&self) -> &Schema;
@@ -73,8 +78,11 @@ where
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(w) => {
+                    let watermarks = inner.handle_watermark(w)?;
+                    for watermark in watermarks {
+                        yield Message::Watermark(watermark)
+                    }
                 }
                 Message::Chunk(chunk) => match inner.map_filter_chunk(chunk)? {
                     Some(new_chunk) => yield Message::Chunk(new_chunk),

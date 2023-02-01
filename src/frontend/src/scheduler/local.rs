@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,11 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use futures::Stream;
+use anyhow::Context;
+use futures::executor::block_on;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
@@ -27,6 +27,7 @@ use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -35,6 +36,9 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
+use tokio::sync::mpsc;
+use tokio::task::spawn_blocking;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -45,26 +49,7 @@ use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
-pub struct LocalQueryStream {
-    data_stream: BoxedDataChunkStream,
-}
-
-impl Stream for LocalQueryStream {
-    type Item = Result<DataChunk, BoxedError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.data_stream.as_mut().poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(chunk) => match chunk {
-                Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
-                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
-                },
-                None => Poll::Ready(None),
-            },
-        }
-    }
-}
+pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 
 pub struct LocalQueryExecution {
     sql: String,
@@ -73,6 +58,7 @@ pub struct LocalQueryExecution {
     // The snapshot will be released when LocalQueryExecution is dropped.
     snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
+    cancel_flag: Option<Tripwire<Result<DataChunk, BoxedError>>>,
 }
 
 impl LocalQueryExecution {
@@ -82,6 +68,7 @@ impl LocalQueryExecution {
         sql: S,
         snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
+        cancel_flag: Tripwire<Result<DataChunk, BoxedError>>,
     ) -> Self {
         Self {
             sql: sql.into(),
@@ -89,6 +76,7 @@ impl LocalQueryExecution {
             front_env,
             snapshot,
             auth_context,
+            cancel_flag: Some(cancel_flag),
         }
     }
 
@@ -114,7 +102,6 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            // TODO: Add support to use current epoch when needed
             self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
@@ -129,10 +116,30 @@ impl LocalQueryExecution {
         Box::pin(self.run_inner())
     }
 
-    pub fn stream_rows(self) -> LocalQueryStream {
-        LocalQueryStream {
-            data_stream: self.run(),
+    pub fn stream_rows(mut self) -> LocalQueryStream {
+        let (sender, receiver) = mpsc::channel(10);
+        let tripwire = self.cancel_flag.take().unwrap();
+
+        let mut data_stream = {
+            let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            Box::pin(cancellable_stream(s, tripwire))
+        };
+
+        let future = async move {
+            while let Some(r) = data_stream.next().await {
+                if (sender.send(r).await).is_err() {
+                    tracing::info!("Receiver closed.");
+                }
+            }
+        };
+
+        if cfg!(madsim) {
+            tokio::spawn(future);
+        } else {
+            spawn_blocking(move || block_on(future));
         }
+
+        ReceiverStream::new(receiver)
     }
 
     /// Convert query to plan fragment.
@@ -245,7 +252,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
@@ -278,7 +284,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
@@ -311,7 +316,6 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        // TODO: Add support to use current epoch when needed
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
@@ -401,19 +405,20 @@ impl LocalQueryExecution {
                             .inner_side_table_desc
                             .as_ref()
                             .expect("no side table desc");
-                        node.inner_side_vnode_mapping = self
+                        let table = self
                             .front_env
                             .catalog_reader()
                             .read_guard()
                             .get_table_by_id(&side_table_desc.table_id.into())
-                            .map(|table| {
-                                self.front_env
-                                    .worker_node_manager()
-                                    .get_fragment_mapping(&table.fragment_id)
-                            })
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
+                            .context("side table not found")?;
+                        let mapping = self
+                            .front_env
+                            .worker_node_manager()
+                            .get_fragment_mapping(&table.fragment_id)
+                            .context("fragment mapping not found")?;
+
+                        // TODO: should we use `pb::ParallelUnitMapping` here?
+                        node.inner_side_vnode_mapping = mapping.to_expanded();
                         node.worker_nodes =
                             self.front_env.worker_node_manager().list_worker_nodes();
                     }

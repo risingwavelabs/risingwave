@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
+use risingwave_pb::catalog::ColumnIndex;
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -71,16 +72,20 @@ impl ToDistributedBatch for BatchInsert {
 
 impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let c_idxs = self
+        let column_indices = self
             .logical
-            .column_idxs()
+            .column_indices()
             .iter()
             .map(|&i| i as u32)
             .collect();
         NodeBody::Insert(InsertNode {
-            table_source_id: self.logical.source_id().table_id(),
-            associated_mview_id: self.logical.associated_mview_id().table_id(),
-            column_idxs: c_idxs,
+            table_id: self.logical.table_id().table_id(),
+            column_indices,
+            row_id_index: self
+                .logical
+                .row_id_index()
+                .map(|index| ColumnIndex { index: index as _ }),
+            returning: self.logical.has_returning(),
         })
     }
 }

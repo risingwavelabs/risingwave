@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { MetaBackupManifestId } from "./backup_service";
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -13,7 +13,7 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import { Dispatcher, StreamActor, StreamNode } from "./stream_plan";
+import { Dispatcher, StreamActor, StreamEnvironment, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
@@ -86,6 +86,7 @@ export interface TableFragments {
   fragments: { [key: number]: TableFragments_Fragment };
   actorStatus: { [key: number]: TableFragments_ActorStatus };
   actorSplits: { [key: number]: ConnectorSplits };
+  env: StreamEnvironment | undefined;
 }
 
 /** The state of the fragments of this table */
@@ -278,6 +279,12 @@ export interface TableFragments_ActorSplitsEntry {
   value: ConnectorSplits | undefined;
 }
 
+/** / Parallel unit mapping with fragment id, used for notification. */
+export interface FragmentParallelUnitMapping {
+  fragmentId: number;
+  mapping: ParallelUnitMapping | undefined;
+}
+
 /** TODO: remove this when dashboard refactored. */
 export interface ActorLocation {
   node: WorkerNode | undefined;
@@ -314,6 +321,7 @@ export interface ListTableFragmentsResponse_FragmentInfo {
 
 export interface ListTableFragmentsResponse_TableFragmentInfo {
   fragments: ListTableFragmentsResponse_FragmentInfo[];
+  env: StreamEnvironment | undefined;
 }
 
 export interface ListTableFragmentsResponse_TableFragmentsEntry {
@@ -374,8 +382,9 @@ export interface MetaSnapshot {
   tables: Table[];
   indexes: Index[];
   views: View[];
+  functions: Function[];
   users: UserInfo[];
-  parallelUnitMappings: ParallelUnitMapping[];
+  parallelUnitMappings: FragmentParallelUnitMapping[];
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
@@ -401,8 +410,9 @@ export interface SubscribeResponse {
     | { $case: "sink"; sink: Sink }
     | { $case: "index"; index: Index }
     | { $case: "view"; view: View }
+    | { $case: "function"; function: Function }
     | { $case: "user"; user: UserInfo }
-    | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
     | { $case: "node"; node: WorkerNode }
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
@@ -614,7 +624,14 @@ export const HeartbeatResponse = {
 };
 
 function createBaseTableFragments(): TableFragments {
-  return { tableId: 0, state: TableFragments_State.UNSPECIFIED, fragments: {}, actorStatus: {}, actorSplits: {} };
+  return {
+    tableId: 0,
+    state: TableFragments_State.UNSPECIFIED,
+    fragments: {},
+    actorStatus: {},
+    actorSplits: {},
+    env: undefined,
+  };
 }
 
 export const TableFragments = {
@@ -643,6 +660,7 @@ export const TableFragments = {
           return acc;
         }, {})
         : {},
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -668,6 +686,7 @@ export const TableFragments = {
         obj.actorSplits[k] = ConnectorSplits.toJSON(v);
       });
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -701,6 +720,9 @@ export const TableFragments = {
       },
       {},
     );
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -897,6 +919,36 @@ export const TableFragments_ActorSplitsEntry = {
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
       ? ConnectorSplits.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFragmentParallelUnitMapping(): FragmentParallelUnitMapping {
+  return { fragmentId: 0, mapping: undefined };
+}
+
+export const FragmentParallelUnitMapping = {
+  fromJSON(object: any): FragmentParallelUnitMapping {
+    return {
+      fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
+      mapping: isSet(object.mapping) ? ParallelUnitMapping.fromJSON(object.mapping) : undefined,
+    };
+  },
+
+  toJSON(message: FragmentParallelUnitMapping): unknown {
+    const obj: any = {};
+    message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
+    message.mapping !== undefined &&
+      (obj.mapping = message.mapping ? ParallelUnitMapping.toJSON(message.mapping) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<FragmentParallelUnitMapping>, I>>(object: I): FragmentParallelUnitMapping {
+    const message = createBaseFragmentParallelUnitMapping();
+    message.fragmentId = object.fragmentId ?? 0;
+    message.mapping = (object.mapping !== undefined && object.mapping !== null)
+      ? ParallelUnitMapping.fromPartial(object.mapping)
       : undefined;
     return message;
   },
@@ -1133,7 +1185,7 @@ export const ListTableFragmentsResponse_FragmentInfo = {
 };
 
 function createBaseListTableFragmentsResponse_TableFragmentInfo(): ListTableFragmentsResponse_TableFragmentInfo {
-  return { fragments: [] };
+  return { fragments: [], env: undefined };
 }
 
 export const ListTableFragmentsResponse_TableFragmentInfo = {
@@ -1142,6 +1194,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
       fragments: Array.isArray(object?.fragments)
         ? object.fragments.map((e: any) => ListTableFragmentsResponse_FragmentInfo.fromJSON(e))
         : [],
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -1152,6 +1205,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
     } else {
       obj.fragments = [];
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -1160,6 +1214,9 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
   ): ListTableFragmentsResponse_TableFragmentInfo {
     const message = createBaseListTableFragmentsResponse_TableFragmentInfo();
     message.fragments = object.fragments?.map((e) => ListTableFragmentsResponse_FragmentInfo.fromPartial(e)) || [];
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -1459,6 +1516,7 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     tables: [],
     indexes: [],
     views: [],
+    functions: [],
     users: [],
     parallelUnitMappings: [],
     nodes: [],
@@ -1479,9 +1537,10 @@ export const MetaSnapshot = {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       indexes: Array.isArray(object?.indexes) ? object.indexes.map((e: any) => Index.fromJSON(e)) : [],
       views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
+      functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => Function.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
-        ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
+        ? object.parallelUnitMappings.map((e: any) => FragmentParallelUnitMapping.fromJSON(e))
         : [],
       nodes: Array.isArray(object?.nodes)
         ? object.nodes.map((e: any) => WorkerNode.fromJSON(e))
@@ -1532,13 +1591,20 @@ export const MetaSnapshot = {
     } else {
       obj.views = [];
     }
+    if (message.functions) {
+      obj.functions = message.functions.map((e) => e ? Function.toJSON(e) : undefined);
+    } else {
+      obj.functions = [];
+    }
     if (message.users) {
       obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
     } else {
       obj.users = [];
     }
     if (message.parallelUnitMappings) {
-      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
+      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) =>
+        e ? FragmentParallelUnitMapping.toJSON(e) : undefined
+      );
     } else {
       obj.parallelUnitMappings = [];
     }
@@ -1568,8 +1634,10 @@ export const MetaSnapshot = {
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     message.indexes = object.indexes?.map((e) => Index.fromPartial(e)) || [];
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
+    message.functions = object.functions?.map((e) => Function.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
-    message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
+    message.parallelUnitMappings =
+      object.parallelUnitMappings?.map((e) => FragmentParallelUnitMapping.fromPartial(e)) || [];
     message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
@@ -1646,12 +1714,14 @@ export const SubscribeResponse = {
         ? { $case: "index", index: Index.fromJSON(object.index) }
         : isSet(object.view)
         ? { $case: "view", view: View.fromJSON(object.view) }
+        : isSet(object.function)
+        ? { $case: "function", function: Function.fromJSON(object.function) }
         : isSet(object.user)
         ? { $case: "user", user: UserInfo.fromJSON(object.user) }
         : isSet(object.parallelUnitMapping)
         ? {
           $case: "parallelUnitMapping",
-          parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+          parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
         }
         : isSet(object.node)
         ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
@@ -1690,9 +1760,11 @@ export const SubscribeResponse = {
     message.info?.$case === "index" &&
       (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
     message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
+    message.info?.$case === "function" &&
+      (obj.function = message.info?.function ? Function.toJSON(message.info?.function) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
-      ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
+      ? FragmentParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
       : undefined);
     message.info?.$case === "node" &&
       (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
@@ -1738,6 +1810,9 @@ export const SubscribeResponse = {
     if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
       message.info = { $case: "view", view: View.fromPartial(object.info.view) };
     }
+    if (object.info?.$case === "function" && object.info?.function !== undefined && object.info?.function !== null) {
+      message.info = { $case: "function", function: Function.fromPartial(object.info.function) };
+    }
     if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
       message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };
     }
@@ -1748,7 +1823,7 @@ export const SubscribeResponse = {
     ) {
       message.info = {
         $case: "parallelUnitMapping",
-        parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+        parallelUnitMapping: FragmentParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
       };
     }
     if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {

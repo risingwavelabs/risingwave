@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -246,6 +246,19 @@ impl ToBatchProst for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        Ok(self.clone_with_dist().into())
+        let dist =
+        if self.logical.is_sys_table() {
+            Distribution::Single
+        } else if let Some(distribution_key) = self.logical.distribution_key()
+        && !distribution_key.is_empty() {
+            Distribution::UpstreamHashShard(
+                distribution_key,
+                self.logical.table_desc().table_id,
+            )
+        } else {
+            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before scan.
+            Distribution::SomeShard
+        };
+        Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())
     }
 }

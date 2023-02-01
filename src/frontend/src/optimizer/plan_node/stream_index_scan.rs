@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,9 +14,10 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
+use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
 use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
 use crate::catalog::ColumnId;
@@ -33,11 +34,24 @@ pub struct StreamIndexScan {
     pub base: PlanBase,
     logical: LogicalScan,
     batch_plan_id: PlanNodeId,
+    chain_type: ChainType,
 }
 
 impl StreamIndexScan {
-    pub fn new(logical: LogicalScan) -> Self {
+    pub fn new(logical: LogicalScan, chain_type: ChainType) -> Self {
         let ctx = logical.base.ctx.clone();
+
+        let distribution = {
+            let distribution_key = logical
+                .distribution_key()
+                .expect("distribution key of stream chain must exist in output columns");
+            if distribution_key.is_empty() {
+                Distribution::Single
+            } else {
+                // See also `BatchSeqScan::clone_with_dist`.
+                Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
+            }
+        };
 
         let batch_plan_id = ctx.next_plan_node_id();
         // TODO: derive from input
@@ -46,13 +60,16 @@ impl StreamIndexScan {
             logical.schema().clone(),
             logical.base.logical_pk.clone(),
             logical.functional_dependency().clone(),
-            Distribution::HashShard(logical.distribution_key().unwrap()),
+            distribution,
             false, // TODO: determine the `append-only` field of table scan
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self {
             base,
             logical,
             batch_plan_id,
+            chain_type,
         }
     }
 
@@ -149,7 +166,7 @@ impl StreamIndexScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: true,
-                chain_type: ChainType::Chain as i32,
+                chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
                     .logical

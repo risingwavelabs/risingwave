@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ use crate::error::BoxedError;
 mod native_type;
 mod ops;
 mod scalar_impl;
+mod successor;
 
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -37,6 +38,7 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
+pub use successor::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
@@ -114,7 +116,7 @@ pub enum DataType {
     Timestamp,
     #[display("timestamp with time zone")]
     #[from_str(regex = "(?i)^timestamptz$|^timestamp with time zone$")]
-    Timestampz,
+    Timestamptz,
     #[display("interval")]
     #[from_str(regex = "(?i)^interval$")]
     Interval,
@@ -149,7 +151,7 @@ impl DataTypeName {
             | DataTypeName::Varchar
             | DataTypeName::Date
             | DataTypeName::Timestamp
-            | DataTypeName::Timestampz
+            | DataTypeName::Timestamptz
             | DataTypeName::Time
             | DataTypeName::Bytea
             | DataTypeName::Interval => true,
@@ -171,7 +173,7 @@ impl DataTypeName {
             DataTypeName::Bytea => DataType::Bytea,
             DataTypeName::Date => DataType::Date,
             DataTypeName::Timestamp => DataType::Timestamp,
-            DataTypeName::Timestampz => DataType::Timestampz,
+            DataTypeName::Timestamptz => DataType::Timestamptz,
             DataTypeName::Time => DataType::Time,
             DataTypeName::Interval => DataType::Interval,
             DataTypeName::Struct | DataTypeName::List => {
@@ -208,7 +210,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Date => DataType::Date,
             TypeName::Time => DataType::Time,
             TypeName::Timestamp => DataType::Timestamp,
-            TypeName::Timestampz => DataType::Timestampz,
+            TypeName::Timestamptz => DataType::Timestamptz,
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Bytea => DataType::Bytea,
@@ -238,7 +240,7 @@ impl DataType {
     pub const INTERVAL: DataType = DataType::Interval;
     pub const TIME: DataType = DataType::Time;
     pub const TIMESTAMP: DataType = DataType::Timestamp;
-    pub const TIMESTAMPZ: DataType = DataType::Timestampz;
+    pub const TIMESTAMPTZ: DataType = DataType::Timestamptz;
     pub const VARCHAR: DataType = DataType::Varchar;
 
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -255,7 +257,7 @@ impl DataType {
             DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
             DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
-            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
@@ -283,7 +285,7 @@ impl DataType {
             DataType::Date => TypeName::Date,
             DataType::Time => TypeName::Time,
             DataType::Timestamp => TypeName::Timestamp,
-            DataType::Timestampz => TypeName::Timestampz,
+            DataType::Timestamptz => TypeName::Timestamptz,
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
             DataType::Struct { .. } => TypeName::Struct,
@@ -334,7 +336,7 @@ impl DataType {
     /// Returns the output type of window function on a given input type.
     pub fn window_of(input: &DataType) -> Option<DataType> {
         match input {
-            DataType::Timestampz => Some(DataType::Timestampz),
+            DataType::Timestamptz => Some(DataType::Timestamptz),
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
             _ => None,
         }
@@ -345,7 +347,7 @@ impl DataType {
         use DataType::*;
         match self {
             Boolean | Int16 | Int32 | Int64 => true,
-            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
+            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestamptz
             | Interval | Bytea => false,
             Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
@@ -379,8 +381,8 @@ impl DataType {
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
-            // FIXME(yuhao): Add a timestampz scalar.
-            DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
+            // FIXME(yuhao): Add a timestamptz scalar.
+            DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
@@ -392,6 +394,12 @@ impl DataType {
             )),
             DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
         }
+    }
+}
+
+impl From<DataType> for ProstDataType {
+    fn from(data_type: DataType) -> Self {
+        data_type.to_protobuf()
     }
 }
 
@@ -424,11 +432,6 @@ pub trait Scalar:
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
 pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRefType<'_>> {
     scalar.as_ref().map(|x| x.as_scalar_ref())
-}
-
-/// Convert an `Option<ScalarRef>` to corresponding `Option<Scalar>`.
-pub fn option_to_owned_scalar<S: Scalar>(scalar: &Option<S::ScalarRefType<'_>>) -> Option<S> {
-    scalar.map(|x| x.to_owned_scalar())
 }
 
 /// `ScalarRef` is a trait over all possible references in the evaluation
@@ -801,7 +804,6 @@ macro_rules! scalar_impl_hash {
             }
         }
 
-        #[expect(clippy::derive_hash_xor_eq)]
         impl Hash for ScalarImpl {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {
@@ -900,17 +902,20 @@ impl ScalarImpl {
             Ty::Time => Self::NaiveTime({
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
-                NaiveTimeWrapper::with_secs_nano(secs, nano)?
+                NaiveTimeWrapper::with_secs_nano(secs, nano)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
-                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
+                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
-            Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
+            Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = i32::deserialize(de)?;
-                NaiveDateWrapper::with_days(days)?
+                NaiveDateWrapper::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),
@@ -941,7 +946,7 @@ impl ScalarImpl {
                     DataType::Date => size_of::<NaiveDateWrapper>(),
                     DataType::Time => size_of::<NaiveTimeWrapper>(),
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestampz => size_of::<i64>(),
+                    DataType::Timestamptz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
                     // IntervalUnit is serialized as (i32, i32, i64)
                     DataType::Interval => size_of::<(i32, i32, i64)>(),
@@ -990,7 +995,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
-                    | (DataType::Timestampz, ScalarImpl::Int64(_))
+                    | (DataType::Timestamptz, ScalarImpl::Int64(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
                     | (DataType::Struct { .. }, ScalarImpl::Struct(_))
@@ -1189,7 +1194,7 @@ mod tests {
                     )),
                     DataType::Timestamp,
                 ),
-                DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),
+                DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
                 DataTypeName::Interval => (
                     ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
                     DataType::Interval,
@@ -1304,19 +1309,19 @@ mod tests {
 
         assert_eq!(
             DataType::from_str("timestamptz").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
         assert_eq!(
             DataType::from_str("timestamp with time zone").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
         assert_eq!(
             DataType::from_str("TIMESTAMPTZ").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
         assert_eq!(
             DataType::from_str("TIMESTAMP WITH TIME ZONE").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
 
         assert_eq!(DataType::from_str("interval").unwrap(), DataType::Interval);
@@ -1385,7 +1390,7 @@ mod tests {
         assert_eq!(
             DataType::from_str("timestamptz[]").unwrap(),
             DataType::List {
-                datatype: Box::new(DataType::Timestampz)
+                datatype: Box::new(DataType::Timestamptz)
             }
         );
         assert_eq!(

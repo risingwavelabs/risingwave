@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,15 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamEnvironment,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-type LocalFragmentId = u32;
+pub type LocalFragmentId = u32;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
 #[derive(Clone, Debug)]
@@ -89,10 +91,13 @@ impl StreamFragment {
 #[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
-    fragments: HashMap<LocalFragmentId, StreamFragment>,
+    fragments: HashMap<LocalFragmentId, Rc<StreamFragment>>,
 
     /// stores edges between fragments: (upstream, downstream) => edge.
     edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
+
+    /// Stores the environment for the streaming plan
+    env: StreamEnvironment,
 }
 
 impl StreamFragmentGraph {
@@ -104,17 +109,23 @@ impl StreamFragmentGraph {
                 .map(|(k, v)| (*k, v.to_protobuf()))
                 .collect(),
             edges: self.edges.values().cloned().collect(),
+            env: Some(self.env.clone()),
             // To be filled later
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
+            parallelism: None,
         }
     }
 
     /// Adds a fragment to the graph.
-    pub fn add_fragment(&mut self, stream_fragment: StreamFragment) {
+    pub fn add_fragment(&mut self, stream_fragment: Rc<StreamFragment>) {
         let id = stream_fragment.fragment_id;
         let ret = self.fragments.insert(id, stream_fragment);
         assert!(ret.is_none(), "fragment already exists: {:?}", id);
+    }
+
+    pub fn get_fragment(&self, fragment_id: &LocalFragmentId) -> Option<&Rc<StreamFragment>> {
+        self.fragments.get(fragment_id)
     }
 
     /// Links upstream to downstream in the graph.
@@ -132,13 +143,8 @@ impl StreamFragmentGraph {
             link_id: edge.link_id,
         };
 
-        let ret = self
-            .edges
-            .insert((upstream_id, downstream_id), edge.clone());
-        assert!(
-            ret.is_none(),
-            "edge already exists: {:?}",
-            (upstream_id, downstream_id, edge)
-        );
+        self.edges
+            .try_insert((upstream_id, downstream_id), edge)
+            .unwrap();
     }
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,12 +23,11 @@ use arc_swap::ArcSwap;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, HummockLevelsExt, HummockVersionExt,
+    add_new_sub_level, HummockLevelsExt, HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
@@ -42,7 +41,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::{
-    pin_version_response, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
+    version_update_payload, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
     GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
 };
@@ -69,7 +68,6 @@ use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
 mod compaction_group_manager;
@@ -166,7 +164,7 @@ use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, ProstTableStatsMap,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::CompactionGroup as ProstCompactionGroup;
 
 /// Acquire write lock of the lock with `lock_name`.
@@ -494,9 +492,9 @@ where
     async fn commit_trx(
         &self,
         meta_store: &S,
-        mut trx: Transaction,
+        trx: Transaction,
         context_id: Option<HummockContextId>,
-        info: MetaLeaderInfo,
+        _info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
@@ -506,11 +504,7 @@ where
                 return Err(Error::InvalidContext(context_id));
             }
         }
-        trx.check_equal(
-            META_CF_NAME.to_owned(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            info.encode_to_vec(),
-        );
+
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
@@ -520,7 +514,7 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-    ) -> Result<pin_version_response::Payload> {
+    ) -> Result<version_update_payload::Payload> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -1255,7 +1249,7 @@ where
         );
 
         if !deterministic_mode {
-            self.try_send_compaction_request(compact_task.compaction_group_id)?;
+            self.try_send_compaction_request(compact_task.compaction_group_id);
         }
 
         #[cfg(test)]
@@ -1487,13 +1481,13 @@ where
         epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
         sst_to_context: HashMap<HummockSstableId, HummockContextId>,
-    ) -> Result<()> {
+    ) -> Result<Option<HummockSnapshot>> {
         let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
-            return Ok(());
+            return Ok(None);
         }
         let (raw_compaction_groups, compaction_group_index) =
             self.compaction_groups_and_index().await;
@@ -1687,12 +1681,6 @@ where
 
         self.env
             .notification_manager()
-            .notify_frontend_without_version(
-                Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(snapshot),
-            );
-        self.env
-            .notification_manager()
             .notify_hummock_without_version(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
@@ -1710,18 +1698,18 @@ where
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
             for id in modified_compaction_groups {
-                self.try_send_compaction_request(id)?;
+                self.try_send_compaction_request(id);
             }
         }
         #[cfg(test)]
         {
             self.check_state_consistency().await;
         }
-        Ok(())
+        Ok(Some(snapshot))
     }
 
     /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
+    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
         // We only update `max_current_epoch`!
         let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
             committed_epoch: snapshot.committed_epoch,
@@ -1730,16 +1718,10 @@ where
         assert!(prev_snapshot.current_epoch < max_current_epoch);
 
         tracing::trace!("new current epoch {}", max_current_epoch);
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(
-                Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: prev_snapshot.committed_epoch,
-                    current_epoch: max_current_epoch,
-                }),
-            );
-        Ok(())
+        HummockSnapshot {
+            committed_epoch: prev_snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        }
     }
 
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
@@ -1874,34 +1856,7 @@ where
         read_lock!(self, versioning).await
     }
 
-    /// Reset current version to empty
-    #[named]
-    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        // Reset current version to empty
-        let mut init_version = HummockVersion {
-            id: FIRST_VERSION_ID,
-            levels: Default::default(),
-            max_committed_epoch: INVALID_EPOCH,
-            safe_epoch: INVALID_EPOCH,
-        };
-
-        // Initialize independent levels via corresponding compaction group' config.
-        for compaction_group in self.compaction_groups().await {
-            init_version.levels.insert(
-                compaction_group.group_id(),
-                <Levels as HummockLevelsExt>::build_initial_levels(
-                    &compaction_group.compaction_config(),
-                ),
-            );
-        }
-
-        let old_version = versioning_guard.current_version.clone();
-        versioning_guard.current_version = init_version;
-        Ok(old_version)
-    }
-
-    pub async fn init_metadata_for_replay(
+    pub async fn init_metadata_for_version_replay(
         &self,
         table_catalogs: Vec<Table>,
         compaction_groups: Vec<ProstCompactionGroup>,
@@ -1989,7 +1944,7 @@ where
             return Ok(());
         }
         for compaction_group in compaction_groups {
-            self.try_send_compaction_request(compaction_group)?;
+            self.try_send_compaction_request(compaction_group);
         }
         Ok(())
     }
@@ -2038,13 +1993,22 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
         if let Some(sender) = self.compaction_request_channel.read().as_ref() {
-            sender
-                .try_sched_compaction(compaction_group)
-                .map_err(|e| Error::Internal(anyhow::anyhow!(e.to_string())))
+            match sender.try_sched_compaction(compaction_group) {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!(
+                        "failed to send compaction request for compaction group {}. {}",
+                        compaction_group,
+                        e
+                    );
+                    false
+                }
+            }
         } else {
-            Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
+            tracing::warn!("compaction_request_channel is not initialized");
+            false
         }
     }
 

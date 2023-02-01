@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
 
@@ -220,7 +220,7 @@ impl HashJoin {
     pub fn infer_internal_and_degree_table_catalog(
         input: &impl StreamPlanRef,
         join_key_indices: Vec<usize>,
-    ) -> (TableCatalog, TableCatalog) {
+    ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
         let internal_table_dist_keys = input.distribution().dist_column_indices().to_vec();
@@ -241,8 +241,18 @@ impl HashJoin {
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
-        // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(input.logical_pk());
+
+        // dedup the pk in dist key..
+        let mut deduped_input_pk_indices = vec![];
+        for input_pk_idx in input.logical_pk() {
+            if !pk_indices.contains(input_pk_idx)
+                && !deduped_input_pk_indices.contains(input_pk_idx)
+            {
+                deduped_input_pk_indices.push(*input_pk_idx);
+            }
+        }
+
+        pk_indices.extend(deduped_input_pk_indices.clone());
 
         // Build internal table
         let mut internal_table_catalog_builder =
@@ -252,7 +262,6 @@ impl HashJoin {
         internal_columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
-
         pk_indices.iter().for_each(|idx| {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
         });
@@ -265,7 +274,7 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending);
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
@@ -273,10 +282,10 @@ impl HashJoin {
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
+            deduped_input_pk_indices,
         )
     }
 }
@@ -328,6 +337,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 #[derive(Debug, Clone)]
 pub struct Project {
     pub core: generic::Project<PlanRef>,
+    watermark_derivations: Vec<(usize, usize)>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
@@ -424,9 +434,9 @@ pub fn to_stream_prost_body(
             use generic::dynamic_filter::*;
             let me = &me.core;
             let condition = me
-                .predicate
+                .predicate()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto());
+                .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto());
             let left_table = infer_left_internal_table_catalog(base, me.left_index)
                 .with_id(state.gen_table_id_wrapped());
             let right_table = infer_right_internal_table_catalog(&me.right.0)
@@ -472,7 +482,7 @@ pub fn to_stream_prost_body(
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
+                    .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto()),
                 left_table_id: left_table_desc.table_id.table_id(),
                 right_table_id: right_table_desc.table_id.table_id(),
                 left_info: Some(ArrangementInfo {
@@ -483,6 +493,7 @@ pub fn to_stream_prost_body(
                         .iter()
                         .map(ColumnDesc::to_protobuf)
                         .collect(),
+                    table_desc: Some(left_table_desc.to_protobuf()),
                 }),
                 right_info: Some(ArrangementInfo {
                     arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
@@ -492,6 +503,7 @@ pub fn to_stream_prost_body(
                         .iter()
                         .map(ColumnDesc::to_protobuf)
                         .collect(),
+                    table_desc: Some(right_table_desc.to_protobuf()),
                 }),
                 output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
             })
@@ -514,7 +526,11 @@ pub fn to_stream_prost_body(
         Node::Filter(me) => {
             let me = &me.core;
             ProstNode::Filter(FilterNode {
-                search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
+                search_condition: Some(
+                    base.ctx()
+                        .expr_with_session_timezone(ExprImpl::from(me.predicate.clone()))
+                        .to_expr_proto(),
+                ),
             })
         }
         Node::GlobalSimpleAgg(me) => {
@@ -523,7 +539,11 @@ pub fn to_stream_prost_body(
             let agg_states = me.infer_stream_agg_state(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
-                agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
+                agg_calls: me
+                    .agg_calls
+                    .iter()
+                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
+                    .collect(),
                 distribution_key: base
                     .dist
                     .dist_column_indices()
@@ -553,7 +573,7 @@ pub fn to_stream_prost_body(
                 with_ties: me.core.with_ties,
                 group_key: me.core.group_key.iter().map(|idx| *idx as u32).collect(),
                 table: Some(table.to_internal_table_prost()),
-                order_by_len: me.core.order.len() as u32,
+                order_by: me.core.order.to_protobuf(),
             };
 
             ProstNode::GroupTopN(group_topn_node)
@@ -568,7 +588,7 @@ pub fn to_stream_prost_body(
                     .core
                     .agg_calls
                     .iter()
-                    .map(PlanAggCall::to_protobuf)
+                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
                     .collect(),
 
                 is_append_only: me.core.input.0.append_only,
@@ -589,15 +609,26 @@ pub fn to_stream_prost_body(
             let left_key_indices_prost = left_key_indices.iter().map(|&idx| idx as i32).collect();
             let right_key_indices_prost = right_key_indices.iter().map(|&idx| idx as i32).collect();
 
-            let (left_table, left_degree_table) = HashJoin::infer_internal_and_degree_table_catalog(
-                &me.core.left.0,
-                left_key_indices,
-            );
-            let (right_table, right_degree_table) =
+            let (left_table, left_degree_table, left_deduped_input_pk_indices) =
+                HashJoin::infer_internal_and_degree_table_catalog(
+                    &me.core.left.0,
+                    left_key_indices,
+                );
+            let (right_table, right_degree_table, right_deduped_input_pk_indices) =
                 HashJoin::infer_internal_and_degree_table_catalog(
                     &me.core.right.0,
                     right_key_indices,
                 );
+
+            let left_deduped_input_pk_indices = left_deduped_input_pk_indices
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect();
+
+            let right_deduped_input_pk_indices = right_deduped_input_pk_indices
+                .iter()
+                .map(|idx| *idx as u32)
+                .collect();
 
             let (left_table, left_degree_table) = (
                 left_table.with_id(state.gen_table_id_wrapped()),
@@ -619,11 +650,13 @@ pub fn to_stream_prost_body(
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
+                    .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto()),
                 left_table: Some(left_table.to_internal_table_prost()),
                 right_table: Some(right_table.to_internal_table_prost()),
                 left_degree_table: Some(left_degree_table.to_internal_table_prost()),
                 right_degree_table: Some(right_degree_table.to_internal_table_prost()),
+                left_deduped_input_pk_indices,
+                right_deduped_input_pk_indices,
                 output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
                 is_append_only: me.is_append_only,
             })
@@ -643,7 +676,7 @@ pub fn to_stream_prost_body(
                 agg_calls: me
                     .agg_calls
                     .iter()
-                    .map(generic::PlanAggCall::to_protobuf)
+                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
                     .collect(),
                 distribution_key: base
                     .dist
@@ -675,12 +708,28 @@ pub fn to_stream_prost_body(
                 .collect();
             ProstNode::ProjectSet(ProjectSetNode { select_list })
         }
-        Node::Project(me) => {
-            let me = &me.core;
-            ProstNode::Project(ProjectNode {
-                select_list: me.exprs.iter().map(Expr::to_expr_proto).collect(),
-            })
-        }
+        Node::Project(me) => ProstNode::Project(ProjectNode {
+            select_list: me
+                .core
+                .exprs
+                .iter()
+                .map(|x| {
+                    base.ctx()
+                        .expr_with_session_timezone(x.clone())
+                        .to_expr_proto()
+                })
+                .collect(),
+            watermark_input_key: me
+                .watermark_derivations
+                .iter()
+                .map(|(x, _)| *x as u32)
+                .collect(),
+            watermark_output_key: me
+                .watermark_derivations
+                .iter()
+                .map(|(_, y)| *y as u32)
+                .collect(),
+        }),
         Node::Sink(me) => ProstNode::Sink(SinkNode {
             table_id: me.sink_desc.id().into(),
             properties: me.sink_desc.properties.inner().clone(),
@@ -694,24 +743,23 @@ pub fn to_stream_prost_body(
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;
-            ProstNode::Source(SourceNode {
+            let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
                 source_name: me.name.clone(),
                 state_table: Some(
-                    generic::Source::infer_internal_table_catalog(base)
+                    generic::Source::infer_internal_table_catalog()
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(SourceInfo {
-                    source_info: Some(me.info.clone()),
-                }),
+                info: Some(me.info.clone()),
                 row_id_index: me
                     .row_id_index
                     .map(|index| ColumnIndex { index: index as _ }),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone(),
-            })
+            });
+            ProstNode::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
             let me = &me.core;
@@ -724,7 +772,7 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                order_by_len: me.order.len() as u32,
+                order_by: me.order.to_protobuf(),
             };
             // TODO: support with ties for append only TopN
             // <https://github.com/risingwavelabs/risingwave/issues/5642>

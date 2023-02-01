@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -154,13 +154,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .commit_epoch(epoch, sstables, sst_to_worker)
             .await
-            .map_err(mock_err)
+            .map_err(mock_err)?;
+        Ok(())
     }
 
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager
-            .update_current_epoch(epoch)
-            .map_err(mock_err)
+        self.hummock_manager.update_current_epoch(epoch);
+        Ok(())
     }
 
     async fn subscribe_compact_tasks(

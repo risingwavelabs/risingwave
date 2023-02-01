@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -42,13 +42,17 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-    pub exchange_recv_size: GenericCounterVec<AtomicU64>,
+    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
+
+    // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
+    pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
@@ -58,6 +62,8 @@ pub struct StreamingMetrics {
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
+    pub agg_chunk_lookup_miss_count: GenericCounterVec<AtomicU64>,
+    pub agg_chunk_total_lookup_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -95,6 +101,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let source_row_per_barrier = register_int_counter_vec_with_registry!(
+            "stream_source_rows_per_barrier_counts",
+            "Total number of rows that have been output from source per barrier",
+            &["actor_id", "executor_id"],
+            registry
+        )
+        .unwrap();
+
         let actor_execution_time = register_gauge_vec_with_registry!(
             "stream_actor_actor_execution_time",
             "Total execution time (s) of an actor",
@@ -115,14 +129,6 @@ impl StreamingMetrics {
             "stream_actor_input_buffer_blocking_duration_ns",
             "Total blocking duration (ns) of input buffer",
             &["actor_id", "upstream_fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let exchange_recv_size = register_int_counter_vec_with_registry!(
-            "stream_exchange_recv_size",
-            "Total size of messages that have been received from upstream Actor",
-            &["up_actor_id", "down_actor_id"],
             registry
         )
         .unwrap();
@@ -263,10 +269,26 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_join_insert_cache_miss_count",
+            "Join executor cache miss when insert operation",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
         let join_actor_input_waiting_duration_ns = register_int_counter_vec_with_registry!(
             "stream_join_actor_input_waiting_duration_ns",
             "Total waiting duration (ns) of input buffer of join actor",
             &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let join_match_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_join_match_duration_ns",
+            "Matching duration for each side",
+            &["actor_id", "side"],
             registry
         )
         .unwrap();
@@ -323,6 +345,22 @@ impl StreamingMetrics {
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_chunk_lookup_miss_count = register_int_counter_vec_with_registry!(
+            "stream_agg_chunk_lookup_miss_count",
+            "Aggregation executor chunk-level lookup miss duration",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_chunk_total_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_agg_chunk_lookup_total_count",
+            "Aggregation executor chunk-level lookup total operation",
             &["actor_id"],
             registry
         )
@@ -405,11 +443,13 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
-            exchange_recv_size,
+            source_row_per_barrier,
             exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
+            join_insert_cache_miss_count,
             join_actor_input_waiting_duration_ns,
+            join_match_duration_ns,
             join_barrier_align_duration,
             join_cached_entries,
             join_cached_rows,
@@ -417,6 +457,8 @@ impl StreamingMetrics {
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_keys,
+            agg_chunk_lookup_miss_count,
+            agg_chunk_total_lookup_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

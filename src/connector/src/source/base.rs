@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,22 +13,29 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
-use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::error::ErrorCode;
+use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
 
+use super::datagen::DatagenMeta;
+use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
+use super::google_pubsub::GooglePubsubMeta;
+use super::kafka::KafkaMeta;
+use super::monitor::SourceMetrics;
+use super::nexmark::source::message::NexmarkMeta;
+use crate::parser::ParserConfig;
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
     POSTGRES_CDC_CONNECTOR,
@@ -37,7 +44,6 @@ use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
 };
 use crate::source::dummy_connector::DummySplitReader;
-use crate::source::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::source::google_pubsub::{
     PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
     GOOGLE_PUBSUB_CONNECTOR,
@@ -70,24 +76,73 @@ pub trait SplitEnumerator: Sized {
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
-/// [`SplitReader`] is an abstraction of the external connector read interface,
-/// used to read messages from the outside and transform them into source-oriented
-/// [`SourceMessage`], in order to improve throughput, it is recommended to return a batch of
-/// messages at a time.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceInfo {
+    pub actor_id: u32,
+    pub source_id: TableId,
+}
+
+impl SourceInfo {
+    pub fn new(actor_id: u32, source_id: TableId) -> Self {
+        SourceInfo {
+            actor_id,
+            source_id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceFormat {
+    Invalid,
+    Json,
+    Protobuf,
+    DebeziumJson,
+    Avro,
+    Maxwell,
+    CanalJson,
+    Csv,
+}
+
+pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+
+/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
+/// current design, one connector source can have multiple split reader. The keys are unique
+/// `split_id` and values are the latest offset for each split.
+#[derive(Clone, Debug)]
+pub struct StreamChunkWithState {
+    pub chunk: StreamChunk,
+    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
+}
+
+/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
+impl From<StreamChunk> for StreamChunkWithState {
+    fn from(chunk: StreamChunk) -> Self {
+        Self {
+            chunk,
+            split_offset_mapping: None,
+        }
+    }
+}
+
+/// [`SplitReaderV2`] is a new abstraction of the external connector read interface which is
+/// responsible for parsing, it is used to read messages from the outside and transform them into a
+/// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReader: Sized {
+pub trait SplitReaderV2: Sized {
     type Properties;
 
     async fn new(
         properties: Self::Properties,
-        state: ConnectorState,
+        state: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 
-    fn into_stream(self) -> BoxSourceStream;
+    fn into_stream(self) -> BoxSourceWithStateStream;
 }
-
-pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
@@ -126,19 +181,17 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn set_source_id_for_cdc(&mut self, source_id: u32) {
+    pub fn init_properties_for_cdc(
+        &mut self,
+        source_id: u32,
+        rpc_addr: String,
+        table_schema: Option<TableSchema>,
+    ) {
         match self {
             ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
                 c.source_id = source_id;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn set_connector_node_addr(&mut self, addr: String) {
-        match self {
-            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
-                c.connector_node_addr = addr;
+                c.connector_node_addr = rpc_addr;
+                c.table_schema = table_schema;
             }
             _ => {}
         }
@@ -155,12 +208,32 @@ pub enum SplitImpl {
     GooglePubsub(PubsubSplit),
     MySqlCdc(CdcSplit),
     PostgresCdc(CdcSplit),
+    S3(FsSplit),
 }
 
-pub enum SplitReaderImpl {
+// for the `FsSourceExecutor`
+impl SplitImpl {
+    #[allow(clippy::result_unit_err)]
+    pub fn into_fs(self) -> Result<FsSplit, ()> {
+        match self {
+            Self::S3(split) => Ok(split),
+            _ => Err(()),
+        }
+    }
+
+    pub fn as_fs(&self) -> Option<&FsSplit> {
+        match self {
+            Self::S3(split) => Some(split),
+            _ => None,
+        }
+    }
+}
+
+pub enum SplitReaderV2Impl {
+    S3(Box<S3FileReader>),
+    Dummy(Box<DummySplitReader>),
     Kinesis(Box<KinesisSplitReader>),
     Kafka(Box<KafkaSplitReader>),
-    Dummy(Box<DummySplitReader>),
     Nexmark(Box<NexmarkSplitReader>),
     Pulsar(Box<PulsarSplitReader>),
     Datagen(Box<DatagenSplitReader>),
@@ -178,6 +251,7 @@ pub enum SplitEnumeratorImpl {
     MySqlCdc(DebeziumSplitEnumerator),
     PostgresCdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
+    S3(S3SplitEnumerator),
 }
 
 impl_connector_properties! {
@@ -200,7 +274,8 @@ impl_split_enumerator! {
     { Datagen, DatagenSplitEnumerator },
     { MySqlCdc, DebeziumSplitEnumerator },
     { PostgresCdc, DebeziumSplitEnumerator },
-    { GooglePubsub, PubsubSplitEnumerator}
+    { GooglePubsub, PubsubSplitEnumerator},
+    { S3, S3SplitEnumerator }
 }
 
 impl_split! {
@@ -211,10 +286,12 @@ impl_split! {
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
     { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit }
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
+    { S3, S3_CONNECTOR, FsSplit }
 }
 
 impl_split_reader! {
+    { S3, S3FileReader },
     { Kafka, KafkaSplitReader },
     { Pulsar, PulsarSplitReader },
     { Kinesis, KinesisSplitReader },
@@ -239,12 +316,34 @@ pub type SplitId = Arc<str>;
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
     pub split_id: SplitId,
+
+    pub meta: SourceMeta,
 }
+
+#[derive(Debug, Clone)]
+pub enum SourceMeta {
+    Kafka(KafkaMeta),
+    Nexmark(NexmarkMeta),
+    GooglePubsub(GooglePubsubMeta),
+    Datagen(DatagenMeta),
+    // For the source that doesn't have meta data.
+    Empty,
+}
+
+/// Implement Eq manually to ignore the `meta` field.
+impl PartialEq for SourceMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset
+            && self.split_id == other.split_id
+            && self.payload == other.payload
+    }
+}
+impl Eq for SourceMessage {}
 
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
@@ -254,39 +353,10 @@ pub trait SplitMetaData: Sized {
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
-/// `ConnectorState` cannot be [`None`] and only contains one [`SplitImpl`]. If no split is assigned
-/// to source executor, `ConnectorState` is [`None`] and [`DummySplitReader`] is up instead of other
-/// split readers.
+/// `ConnectorState` cannot be [`None`] and contains one(for mq split readers) or many(for fs
+/// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
+/// [`None`] and [`DummySplitReader`] is up instead of other split readers.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
-
-/// Spawn the data generator to a dedicated runtime, returns a channel receiver
-/// for acquiring the generated data. This is used for the [`DatagenSplitReader`] and
-/// [`NexmarkSplitReader`] in case that they are CPU intensive and may block the streaming actors.
-pub fn spawn_data_generation_stream<T: Send + 'static>(
-    stream: impl Stream<Item = T> + Send + 'static,
-    buffer_size: usize,
-) -> impl Stream<Item = T> + Send + 'static {
-    static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .thread_name("risingwave-data-generation")
-            .enable_all()
-            .build()
-            .expect("failed to build data-generation runtime")
-    });
-
-    let (generation_tx, generation_rx) = mpsc::channel(buffer_size);
-    RUNTIME.spawn(async move {
-        pin_mut!(stream);
-        while let Some(result) = stream.next().await {
-            if generation_tx.send(result).await.is_err() {
-                tracing::warn!("failed to send next event to reader, exit");
-                break;
-            }
-        }
-    });
-
-    tokio_stream::wrappers::ReceiverStream::new(generation_rx)
-}
 
 #[cfg(test)]
 mod tests {

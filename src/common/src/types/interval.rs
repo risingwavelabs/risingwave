@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::error::Error;
-use std::fmt::{Display, Formatter, Write as _};
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
@@ -22,10 +22,9 @@ use std::ops::{Add, Neg, Sub};
 use anyhow::anyhow;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
-use num_traits::{CheckedAdd, CheckedSub, Zero};
+use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
-use smallvec::SmallVec;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
@@ -127,15 +126,6 @@ impl IntervalUnit {
         let mut interval = *self;
         interval.justify_interval();
         interval
-    }
-
-    #[must_use]
-    pub fn negative(&self) -> Self {
-        IntervalUnit {
-            months: -self.months,
-            days: -self.days,
-            ms: -self.ms,
-        }
     }
 
     #[must_use]
@@ -586,6 +576,15 @@ impl Ord for IntervalUnit {
     }
 }
 
+impl CheckedNeg for IntervalUnit {
+    fn checked_neg(&self) -> Option<Self> {
+        let months = self.months.checked_neg()?;
+        let days = self.days.checked_neg()?;
+        let ms = self.ms.checked_neg()?;
+        Some(IntervalUnit { months, days, ms })
+    }
+}
+
 impl CheckedAdd for IntervalUnit {
     fn checked_add(&self, other: &Self) -> Option<Self> {
         let months = self.months.checked_add(other.months)?;
@@ -645,13 +644,13 @@ impl Neg for IntervalUnit {
 }
 
 impl ToText for crate::types::IntervalUnit {
-    fn to_text(&self) -> String {
-        self.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::Interval => self.to_string(),
+            DataType::Interval => self.write(f),
             _ => unreachable!(),
         }
     }
@@ -662,37 +661,47 @@ impl Display for IntervalUnit {
         let years = self.months / 12;
         let months = self.months % 12;
         let days = self.days;
-        let mut v = SmallVec::<[String; 4]>::new();
+        let mut space = false;
+        let mut write = |arg: std::fmt::Arguments<'_>| {
+            if space {
+                write!(f, " ")?;
+            }
+            write!(f, "{arg}")?;
+            space = true;
+            Ok(())
+        };
         if years == 1 {
-            v.push(format!("{years} year"));
+            write(format_args!("{years} year"))?;
         } else if years != 0 {
-            v.push(format!("{years} years"));
+            write(format_args!("{years} years"))?;
         }
         if months == 1 {
-            v.push(format!("{months} mon"));
+            write(format_args!("{months} mon"))?;
         } else if months != 0 {
-            v.push(format!("{months} mons"));
+            write(format_args!("{months} mons"))?;
         }
         if days == 1 {
-            v.push(format!("{days} day"));
+            write(format_args!("{days} day"))?;
         } else if days != 0 {
-            v.push(format!("{days} days"));
+            write(format_args!("{days} days"))?;
         }
         if self.ms != 0 || self.months == 0 && self.days == 0 {
             let hours = self.ms / 1000 / 3600;
             let minutes = (self.ms / 1000 / 60) % 60;
             let seconds = self.ms % 60000 / 1000;
             let secs_fract = self.ms % 1000;
-            let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+            write(format_args!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
             if secs_fract != 0 {
-                write!(format_time, ".{:03}", secs_fract)?;
-                while format_time.ends_with('0') {
-                    format_time.pop();
-                }
+                let mut buf = [0u8; 4];
+                write!(buf.as_mut_slice(), ".{:03}", secs_fract).unwrap();
+                write!(
+                    f,
+                    "{}",
+                    std::str::from_utf8(&buf).unwrap().trim_end_matches('0')
+                )?;
             }
-            v.push(format_time);
         }
-        Display::fmt(&v.join(" "), f)
+        Ok(())
     }
 }
 
@@ -985,17 +994,16 @@ impl IntervalUnit {
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
-                    result = result + (|| match interval_unit {
+                    result = result + match interval_unit {
                         Second => {
+                            // Currently our precision is millisecond, we should consider to refactor it to microseconds later (#4514).
+                            // If unsatisfied precision is passed as input, we should not return None (Error).
                             // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
-                            if second > OrderedF64::from(0) && second < OrderedF64::from(0.001) {
-                                return None;
-                            }
                             let ms = (second.into_inner() * 1000_f64).round() as i64;
                             Some(IntervalUnit::from_millis(ms))
                         }
                         _ => None,
-                    })()
+                    }
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 _ => {

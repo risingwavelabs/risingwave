@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,7 @@ use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
-use risingwave_common::hash::VnodeMapping;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
@@ -168,7 +168,6 @@ impl StageExecution {
         ctx: ExecutionContextRef,
     ) -> Self {
         let tasks = (0..stage.parallelism)
-            .into_iter()
             .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
             .collect();
         Self {
@@ -527,7 +526,7 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<VnodeMapping> {
+    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         self.catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
@@ -548,9 +547,9 @@ impl StageRunner {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         let vnode_mapping = match node_body {
-            Insert(insert_node) => self.get_vnode_mapping(&insert_node.associated_mview_id.into()),
-            Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
-            Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
+            Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
+            Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
+            Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
             _ => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
@@ -564,11 +563,8 @@ impl StageRunner {
                                 .unwrap()
                                 .table_id,
                         ))
-                        .unwrap_or_default()
-                        .iter()
-                        .copied()
-                        .sorted()
-                        .dedup()
+                        .unwrap()
+                        .iter_unique()
                         .collect_vec();
 
                     let pu = id2pu_vec[task_id as usize];
@@ -583,9 +579,8 @@ impl StageRunner {
         };
 
         let worker_node = match vnode_mapping {
-            Some(parallel_unit_ids) => {
-                let parallel_unit_ids =
-                    parallel_unit_ids.into_iter().sorted().dedup().collect_vec();
+            Some(mapping) => {
+                let parallel_unit_ids = mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;

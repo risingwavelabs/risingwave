@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -235,8 +235,7 @@ impl NestedLoopJoinExecutor {
                 )?;
                 // 4. Yield the concatenated chunk.
                 if chunk.cardinality() > 0 {
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
@@ -268,8 +267,7 @@ impl NestedLoopJoinExecutor {
                 )?;
                 if chunk.cardinality() > 0 {
                     matched.set(left_row_idx, true);
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
@@ -351,8 +349,7 @@ impl NestedLoopJoinExecutor {
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
                     matched = &matched | chunk.visibility().unwrap();
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }
@@ -399,8 +396,7 @@ impl NestedLoopJoinExecutor {
             }
             right_chunk.set_visibility(matched);
             if right_chunk.cardinality() > 0 {
-                #[for_await]
-                for spilled in chunk_builder.trunc_data_chunk(right_chunk) {
+                for spilled in chunk_builder.append_chunk(right_chunk) {
                     yield spilled
                 }
             }
@@ -432,8 +428,7 @@ impl NestedLoopJoinExecutor {
                 if chunk.cardinality() > 0 {
                     left_matched.set(left_row_idx, true);
                     right_matched = &right_matched | chunk.visibility().unwrap();
-                    #[for_await]
-                    for spilled in chunk_builder.trunc_data_chunk(chunk) {
+                    for spilled in chunk_builder.append_chunk(chunk) {
                         yield spilled
                     }
                 }

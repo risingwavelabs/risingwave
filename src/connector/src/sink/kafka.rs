@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -45,6 +45,8 @@ pub struct KafkaConfig {
     #[serde(rename = "kafka.topic")]
     pub topic: String,
 
+    pub use_transaction: bool,
+
     // Optional. If not specified, the default value is None and messages are sent to random
     // partition. if we want to guarantee exactly once delivery, we need to specify the
     // partition number. The partition number should set by meta.
@@ -73,12 +75,17 @@ impl KafkaConfig {
                 "format must be set to \"append_only\" or \"debezium\"".to_string(),
             ));
         }
+        let use_txn = values
+            .get("use_transaction")
+            .map(|v| v == "true")
+            .unwrap_or(true);
 
         let topic = values.get("kafka.topic").expect("kafka.topic must be set");
 
         Ok(KafkaConfig {
             brokers: brokers.to_string(),
             topic: topic.to_string(),
+            use_transaction: use_txn,
             identifier: identifier.to_owned(),
             partition: None,
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
@@ -318,7 +325,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
     let data_type = field.data_type();
 
-    tracing::info!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
+    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
 
     let value = match (data_type, scalar_ref) {
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
@@ -350,33 +357,31 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             dt @ DataType::Date
             | dt @ DataType::Time
             | dt @ DataType::Timestamp
-            | dt @ DataType::Timestampz
+            | dt @ DataType::Timestamptz
             | dt @ DataType::Interval
             | dt @ DataType::Bytea,
             scalar,
         ) => {
             json!(scalar.to_text_with_type(&dt))
         }
-        (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in list_ref
-                .values_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
+            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
+            for sub_datum_ref in list_ref.values_ref() {
+                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
             json!(vec)
         }
-        (DataType::Struct { .. }, ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref
-                .fields_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
+            let mut map = Map::with_capacity(st.fields.len());
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
+                st.fields
+                    .iter()
+                    .zip_eq(st.field_names.iter())
+                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
+            ) {
+                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)
@@ -454,14 +459,19 @@ pub struct KafkaTransactionConductor {
 
 impl KafkaTransactionConductor {
     async fn new(config: KafkaConfig) -> Result<Self> {
-        let inner: ThreadedProducer<DefaultProducerContext> = ClientConfig::new()
-            .set("bootstrap.servers", &config.brokers)
-            .set("message.timeout.ms", "5000")
-            .set("transactional.id", &config.identifier) // required by kafka transaction
-            .create()
-            .await?;
+        let inner: ThreadedProducer<DefaultProducerContext> = {
+            let mut c = ClientConfig::new();
+            c.set("bootstrap.servers", &config.brokers)
+                .set("message.timeout.ms", "5000");
+            if config.use_transaction {
+                c.set("transactional.id", &config.identifier); // required by kafka transaction
+            }
+            c.create().await?
+        };
 
-        inner.init_transactions(config.timeout).await?;
+        if config.use_transaction {
+            inner.init_transactions(config.timeout).await?;
+        }
 
         Ok(KafkaTransactionConductor {
             properties: config,
@@ -471,20 +481,31 @@ impl KafkaTransactionConductor {
 
     #[expect(clippy::unused_async)]
     async fn start_transaction(&self) -> KafkaResult<()> {
-        self.inner.begin_transaction()
+        if self.properties.use_transaction {
+            self.inner.begin_transaction()
+        } else {
+            Ok(())
+        }
     }
 
     async fn commit_transaction(&self) -> KafkaResult<()> {
-        self.inner.commit_transaction(self.properties.timeout).await
+        if self.properties.use_transaction {
+            self.inner.commit_transaction(self.properties.timeout).await
+        } else {
+            Ok(())
+        }
     }
 
     async fn abort_transaction(&self) -> KafkaResult<()> {
-        self.inner.abort_transaction(self.properties.timeout).await
+        if self.properties.use_transaction {
+            self.inner.abort_transaction(self.properties.timeout).await
+        } else {
+            Ok(())
+        }
     }
 
     async fn flush(&self) -> KafkaResult<()> {
-        self.inner.flush(self.properties.timeout).await;
-        Ok(())
+        self.inner.flush(self.properties.timeout).await
     }
 
     #[expect(clippy::unused_async)]

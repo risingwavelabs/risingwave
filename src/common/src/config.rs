@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -100,7 +100,8 @@ pub struct MetaConfig {
     pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
-    /// will disable all auto scheduling of compaction tasks
+    /// will disable all auto scheduling of compaction tasks.
+    /// Should only be used in e2e tests.
     #[serde(default)]
     pub enable_compaction_deterministic: bool,
 
@@ -174,11 +175,6 @@ pub struct StreamingConfig {
     /// There will be a checkpoint for every n barriers
     #[serde(default = "default::streaming::checkpoint_frequency")]
     pub checkpoint_frequency: usize,
-
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    #[serde(default)]
-    pub minimal_scheduling: bool,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -336,22 +332,10 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer::stream_enable_executor_row_count")]
     pub stream_enable_executor_row_count: bool,
 
-    /// Whether to use a managed lru cache (evict by epoch)
-    #[serde(default = "default::developer::stream_enable_managed_cache")]
-    pub stream_enable_managed_cache: bool,
-
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::stream_connector_message_buffer_size")]
     pub stream_connector_message_buffer_size: usize,
-
-    /// Limit number of cached entries (one per group key).
-    #[serde(default = "default::developer::stream_unsafe_hash_agg_cache_size")]
-    pub unsafe_stream_hash_agg_cache_size: usize,
-
-    /// Limit number of the cached entries (one per join key) on each side.
-    #[serde(default = "default::developer::unsafe_stream_join_cache_size")]
-    pub unsafe_stream_join_cache_size: usize,
 
     /// Limit number of the cached entries in an extreme aggregation call.
     #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
@@ -449,11 +433,11 @@ mod default {
         }
 
         pub fn block_size_kb() -> u32 {
-            1024
+            64
         }
 
         pub fn bloom_false_positive() -> f64 {
-            0.01
+            0.001
         }
 
         pub fn share_buffers_sync_parallelism() -> u32 {
@@ -477,11 +461,11 @@ mod default {
         }
 
         pub fn block_cache_capacity_mb() -> usize {
-            256
+            512
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
-            64
+            128
         }
 
         pub fn disable_remote_compactor() -> bool {
@@ -539,18 +523,6 @@ mod default {
         pub fn checkpoint_frequency() -> usize {
             10
         }
-
-        #[cfg(madsim)]
-        pub fn total_memory_available_bytes() -> usize {
-            16 * 1024 * 1024 * 1024
-        }
-
-        #[allow(dead_code)]
-        #[cfg(not(madsim))]
-        pub fn total_memory_available_bytes() -> usize {
-            use crate::util::resource_util;
-            resource_util::memory::total_memory_used_bytes()
-        }
     }
 
     pub mod file_cache {
@@ -589,20 +561,8 @@ mod default {
             false
         }
 
-        pub fn stream_enable_managed_cache() -> bool {
-            true
-        }
-
         pub fn stream_connector_message_buffer_size() -> usize {
             16
-        }
-
-        pub fn stream_unsafe_hash_agg_cache_size() -> usize {
-            1 << 16
-        }
-
-        pub fn unsafe_stream_join_cache_size() -> usize {
-            1 << 16
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,11 +17,14 @@ use std::fmt;
 use risingwave_common::error::Result;
 
 use super::{
-    generic, BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -247,15 +250,31 @@ impl fmt::Display for LogicalProjectSet {
 }
 
 impl ColPrunable for LogicalProjectSet {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         // TODO: column pruning for ProjectSet
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
+impl ExprRewritable for LogicalProjectSet {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
+    }
+}
+
 impl PredicatePushdown for LogicalProjectSet {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         // TODO: predicate pushdown for ProjectSet
         LogicalFilter::create(self.clone().into(), predicate)
     }
@@ -270,8 +289,11 @@ impl ToBatch for LogicalProjectSet {
 }
 
 impl ToStream for LogicalProjectSet {
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (project_set, out_col_change) =
             self.rewrite_with_input(input.clone(), input_col_change);
 
@@ -303,8 +325,8 @@ impl ToStream for LogicalProjectSet {
 
     // TODO: implement to_stream_with_dist_required like LogicalProject
 
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamProjectSet::new(new_logical).into())
     }

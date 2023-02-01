@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,19 +15,17 @@
 use risingwave_pb::hummock::{PinnedSnapshotsSummary, PinnedVersionsSummary};
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn list_version() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_version(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let version = meta_client.get_current_version().await?;
     println!("{:#?}", version);
     Ok(())
 }
 
-pub async fn list_pinned_versions() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_pinned_versions(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let PinnedVersionsSummary {
         mut pinned_versions,
         workers,
@@ -48,7 +46,9 @@ pub async fn list_pinned_versions() -> anyhow::Result<()> {
             Some(worker) => {
                 println!(
                     "Worker {} type {} min_pinned_version_id {}",
-                    pinned_version.context_id, worker.r#type, pinned_version.min_pinned_id
+                    pinned_version.context_id,
+                    worker.r#type().as_str_name(),
+                    pinned_version.min_pinned_id
                 );
             }
         }
@@ -56,9 +56,8 @@ pub async fn list_pinned_versions() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn list_pinned_snapshots() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_pinned_snapshots(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let PinnedSnapshotsSummary {
         mut pinned_snapshots,
         workers,
@@ -80,7 +79,7 @@ pub async fn list_pinned_snapshots() -> anyhow::Result<()> {
                 println!(
                     "Worker {} type {} min_pinned_snapshot {}",
                     pinned_snapshot.context_id,
-                    worker.r#type,
+                    worker.r#type().as_str_name(),
                     pinned_snapshot.minimal_pinned_snapshot
                 );
             }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,9 +25,10 @@ pub struct EqJoinPredicate {
     /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
 
-    /// The equal columns indexes(in the input schema) both sides,
-    /// the first is from the left table and the second is from the right table.
-    /// The third is `null_safe` flag.
+    /// `Vec` of `(left_col_index, right_col_index, null_safe)`,
+    /// representing a conjunction of `left_col_index = right_col_index`
+    ///
+    /// Note: `right_col_index` starts from `left_cols_num`
     eq_keys: Vec<(InputRef, InputRef, bool)>,
 
     left_cols_num: usize,
@@ -155,15 +156,40 @@ impl EqJoinPredicate {
     }
 
     /// Get a reference to the join predicate's eq keys.
+    ///
+    /// Note: `right_col_index` starts from `left_cols_num`
     pub fn eq_keys(&self) -> &[(InputRef, InputRef, bool)] {
         self.eq_keys.as_ref()
     }
 
+    /// `Vec` of `(left_col_index, right_col_index)`.
+    ///
+    /// Note: `right_col_index` starts from `0`
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         self.eq_keys
             .iter()
             .map(|(left, right, _)| (left.index(), right.index() - self.left_cols_num))
             .collect()
+    }
+
+    /// Note: `right_col_index` starts from `0`
+    pub fn eq_indexes_typed(&self) -> Vec<(InputRef, InputRef)> {
+        self.eq_keys
+            .iter()
+            .cloned()
+            .map(|(left, mut right, _)| {
+                right.index -= self.left_cols_num;
+                (left, right)
+            })
+            .collect()
+    }
+
+    pub fn eq_keys_are_type_aligned(&self) -> bool {
+        let mut aligned = true;
+        for (l, r, _) in &self.eq_keys {
+            aligned &= l.data_type == r.data_type;
+        }
+        aligned
     }
 
     pub fn left_eq_indexes(&self) -> Vec<usize> {
@@ -173,7 +199,7 @@ impl EqJoinPredicate {
             .collect()
     }
 
-    /// return the eq keys column index **based on the right input schema**
+    /// Note: `right_col_index` starts from `0`
     pub fn right_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys
             .iter()

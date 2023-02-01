@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,13 @@ use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 
 use crate::source::base::SourceMessage;
+use crate::source::SourceMeta;
+
+#[derive(Debug, Clone)]
+pub struct KafkaMeta {
+    // timestamp(milliseconds) of message append in mq
+    pub timestamp: Option<i64>,
+}
 
 impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
     fn from(message: BorrowedMessage<'a>) -> Self {
@@ -25,6 +32,9 @@ impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
             payload: message.payload().map(Bytes::copy_from_slice),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
+            meta: SourceMeta::Kafka(KafkaMeta {
+                timestamp: message.timestamp().to_millis(),
+            }),
         }
     }
 }

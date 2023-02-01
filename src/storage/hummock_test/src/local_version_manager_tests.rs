@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_meta::hummock::test_utils::{
@@ -27,9 +28,9 @@ use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::HummockVersion;
-use risingwave_storage::hummock::compactor::Context;
+use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
@@ -41,7 +42,7 @@ use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
 use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::CompactorMetrics;
 use risingwave_storage::storage_value::StorageValue;
 
 use crate::test_utils::prepare_first_valid_version;
@@ -71,13 +72,14 @@ pub async fn prepare_local_version_manager(
     update_filter_key_extractor_for_table_ids(&filter_key_extractor_manager, &[0]);
 
     let buffer_tracker = BufferTracker::from_storage_config(&opt);
-    let compactor_context = Arc::new(Context::new_local_compact_context(
+    let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
         opt.clone(),
         sstable_store,
         hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
+        Arc::new(CompactorMetrics::unused()),
         sstable_id_manager,
         filter_key_extractor_manager,
+        CompactorRuntimeConfig::default(),
     ));
 
     LocalVersionManager::new(pinned_version, compactor_context, buffer_tracker)

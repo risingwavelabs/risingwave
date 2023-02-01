@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::pin_version_response;
+use risingwave_pb::hummock::version_update_payload;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -57,7 +57,7 @@ pub enum HummockEvent {
 
     Shutdown,
 
-    VersionUpdate(pin_version_response::Payload),
+    VersionUpdate(version_update_payload::Payload),
 
     ImmToUploader(ImmutableMemtable),
 
@@ -97,8 +97,8 @@ impl HummockEvent {
 
             HummockEvent::Shutdown => "Shutdown".to_string(),
 
-            HummockEvent::VersionUpdate(pin_version_response) => {
-                format!("VersionUpdate {:?}", pin_version_response)
+            HummockEvent::VersionUpdate(version_update_payload) => {
+                format!("VersionUpdate {:?}", version_update_payload)
             }
 
             HummockEvent::ImmToUploader(imm) => format!("ImmToUploader {:?}", imm),

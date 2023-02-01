@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
+use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::Condition;
 
@@ -36,6 +37,12 @@ pub struct Scan {
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
+}
+
+impl Scan {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.predicate = self.predicate.clone().rewrite_expr(r);
+    }
 }
 
 impl GenericPlanNode for Scan {

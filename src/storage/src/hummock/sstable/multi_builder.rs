@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,7 +29,7 @@ use crate::hummock::{
     RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
     SstableWriterOptions,
 };
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
@@ -60,7 +60,7 @@ where
     current_builder: Option<SstableBuilder<F::Writer>>,
 
     /// Statistics.
-    pub stats: Arc<StateStoreMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
@@ -77,7 +77,7 @@ where
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(
         builder_factory: F,
-        stats: Arc<StateStoreMetrics>,
+        compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
@@ -92,7 +92,7 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            stats,
+            compactor_metrics,
             task_progress,
             del_agg,
             last_sealed_key: start_key,
@@ -105,7 +105,7 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            stats: Arc::new(StateStoreMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_sealed_key: UserKey::default(),
             del_agg: Arc::new(RangeTombstonesCollector::for_test()),
@@ -174,25 +174,25 @@ where
                 }
 
                 if builder_output.bloom_filter_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_bloom_filter_size
                         .observe(builder_output.bloom_filter_size as _);
                 }
 
                 if builder_output.sst_info.file_size() != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_file_size
                         .observe(builder_output.sst_info.file_size() as _);
                 }
 
                 if builder_output.avg_key_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_avg_key_size
                         .observe(builder_output.avg_key_size as _);
                 }
 
                 if builder_output.avg_value_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_avg_value_size
                         .observe(builder_output.avg_value_size as _);
                 }
@@ -401,7 +401,7 @@ mod tests {
         ]);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(CompactorMetrics::unused()),
             None,
             builder.build(0, false),
             KeyRange::inf(),
@@ -451,7 +451,7 @@ mod tests {
         ]);
         let builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(CompactorMetrics::unused()),
             None,
             builder.build(0, false),
             KeyRange::inf(),

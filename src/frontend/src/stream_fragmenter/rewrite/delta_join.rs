@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,33 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result;
-use risingwave_common::try_match_expand;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::{Field as ProstField, OrderType as ProstOrderType};
+use risingwave_pb::plan_common::Field as ProstField;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ArrangementInfo, DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, LookupUnionNode,
-    StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, LookupNode, LookupUnionNode, StreamNode,
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge};
-use crate::catalog::TableCatalog;
-use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::stream_fragmenter::build_and_add_fragment;
-use crate::WithOptions;
 
-/// All exchanges inside delta join is one-to-one exchange.
-fn build_exchange_for_delta_join(
+fn build_no_shuffle_exchange_for_delta_join(
     state: &mut BuildFragmentGraphState,
     upstream: &StreamNode,
 ) -> StreamNode {
     StreamNode {
         operator_id: state.gen_operator_id() as u64,
-        identity: "Exchange (Lookup and Merge)".into(),
+        identity: "NO SHUFFLE Exchange (Lookup and Merge)".into(),
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
         node_body: Some(NodeBody::Exchange(ExchangeNode {
@@ -49,10 +43,36 @@ fn build_exchange_for_delta_join(
     }
 }
 
+fn build_consistent_hash_shuffle_exchange_for_delta_join(
+    state: &mut BuildFragmentGraphState,
+    upstream: &StreamNode,
+    column_indices: Vec<u32>,
+) -> StreamNode {
+    StreamNode {
+        operator_id: state.gen_operator_id() as u64,
+        identity: "HASH Exchange (Lookup and Merge)".into(),
+        fields: upstream.fields.clone(),
+        stream_key: upstream.stream_key.clone(),
+        node_body: Some(NodeBody::Exchange(ExchangeNode {
+            strategy: Some(dispatch_consistent_hash_shuffle(column_indices)),
+        })),
+        input: vec![],
+        append_only: upstream.append_only,
+    }
+}
+
 fn dispatch_no_shuffle() -> DispatchStrategy {
     DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
         column_indices: vec![],
+    }
+}
+
+fn dispatch_consistent_hash_shuffle(column_indices: Vec<u32>) -> DispatchStrategy {
+    // Actually Hash shuffle is consistent hash shuffle now.
+    DispatchStrategy {
+        r#type: DispatcherType::Hash.into(),
+        column_indices,
     }
 }
 
@@ -79,8 +99,8 @@ fn build_lookup_for_delta_join(
 fn build_delta_join_inner(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
-    arrange_0_frag: StreamFragment,
-    arrange_1_frag: StreamFragment,
+    arrange_0_frag: Rc<StreamFragment>,
+    arrange_1_frag: Rc<StreamFragment>,
     node: &StreamNode,
     is_local_table_id: bool,
 ) -> Result<StreamNode> {
@@ -92,10 +112,26 @@ fn build_delta_join_inner(
 
     let arrange_0 = arrange_0_frag.node.as_ref().unwrap();
     let arrange_1 = arrange_1_frag.node.as_ref().unwrap();
-    let exchange_a0l0 = build_exchange_for_delta_join(state, arrange_0);
-    let exchange_a0l1 = build_exchange_for_delta_join(state, arrange_0);
-    let exchange_a1l0 = build_exchange_for_delta_join(state, arrange_1);
-    let exchange_a1l1 = build_exchange_for_delta_join(state, arrange_1);
+    let exchange_a0l0 = build_no_shuffle_exchange_for_delta_join(state, arrange_0);
+    let exchange_a0l1 = build_consistent_hash_shuffle_exchange_for_delta_join(
+        state,
+        arrange_0,
+        delta_join_node
+            .left_key
+            .iter()
+            .map(|x| *x as u32)
+            .collect_vec(),
+    );
+    let exchange_a1l0 = build_consistent_hash_shuffle_exchange_for_delta_join(
+        state,
+        arrange_1,
+        delta_join_node
+            .right_key
+            .iter()
+            .map(|x| *x as u32)
+            .collect_vec(),
+    );
+    let exchange_a1l1 = build_no_shuffle_exchange_for_delta_join(state, arrange_1);
 
     let i0_length = arrange_0.fields.len();
     let i1_length = arrange_1.fields.len();
@@ -127,19 +163,6 @@ fn build_delta_join_inner(
             },
             column_mapping: lookup_0_column_reordering,
             arrangement_table_info: delta_join_node.left_info.clone(),
-            arrangement_table: Some(
-                infer_internal_table_catalog(
-                    delta_join_node.left_info.as_ref(),
-                    // Use Arrange node's dist key.
-                    try_match_expand!(arrange_0.get_node_body().unwrap(), NodeBody::Arrange)?
-                        .distribution_key
-                        .clone()
-                        .iter()
-                        .map(|x| *x as usize)
-                        .collect(),
-                )
-                .to_internal_table_prost(),
-            ),
         },
     );
     let lookup_1_column_reordering = {
@@ -169,25 +192,14 @@ fn build_delta_join_inner(
             },
             column_mapping: lookup_1_column_reordering,
             arrangement_table_info: delta_join_node.right_info.clone(),
-            arrangement_table: Some(
-                infer_internal_table_catalog(
-                    delta_join_node.right_info.as_ref(),
-                    // Use Arrange node's dist key.
-                    try_match_expand!(arrange_1.get_node_body().unwrap(), NodeBody::Arrange)?
-                        .distribution_key
-                        .clone()
-                        .iter()
-                        .map(|x| *x as usize)
-                        .collect(),
-                )
-                .to_internal_table_prost(),
-            ),
         },
     );
 
     let lookup_0_frag = build_and_add_fragment(state, lookup_0)?;
     let lookup_1_frag = build_and_add_fragment(state, lookup_1)?;
 
+    // Place index(arrange) together with corresponding lookup operator, so that we can lookup on
+    // the same node.
     state.fragment_graph.add_edge(
         arrange_0_frag.fragment_id,
         lookup_0_frag.fragment_id,
@@ -198,28 +210,46 @@ fn build_delta_join_inner(
         },
     );
 
+    // Use consistent hash shuffle to distribute the index(arrange) to another lookup operator, so
+    // that we can find the correct node to lookup.
     state.fragment_graph.add_edge(
         arrange_0_frag.fragment_id,
         lookup_1_frag.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(),
+            dispatch_strategy: dispatch_consistent_hash_shuffle(
+                delta_join_node
+                    .left_key
+                    .iter()
+                    .map(|x| *x as u32)
+                    .collect_vec(),
+            ),
             // stream input doesn't need to be on the same worker node as lookup
             same_worker_node: false,
             link_id: exchange_a0l1.operator_id,
         },
     );
 
+    // Use consistent hash shuffle to distribute the index(arrange) to another lookup operator, so
+    // that we can find the correct node to lookup.
     state.fragment_graph.add_edge(
         arrange_1_frag.fragment_id,
         lookup_0_frag.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(),
+            dispatch_strategy: dispatch_consistent_hash_shuffle(
+                delta_join_node
+                    .right_key
+                    .iter()
+                    .map(|x| *x as u32)
+                    .collect_vec(),
+            ),
             // stream input doesn't need to be on the same worker node as lookup
             same_worker_node: false,
             link_id: exchange_a1l0.operator_id,
         },
     );
 
+    // Place index(arrange) together with corresponding lookup operator, so that we can lookup on
+    // the same node.
     state.fragment_graph.add_edge(
         arrange_1_frag.fragment_id,
         lookup_1_frag.fragment_id,
@@ -230,9 +260,13 @@ fn build_delta_join_inner(
         },
     );
 
-    let exchange_l0m = build_exchange_for_delta_join(state, node);
-    let exchange_l1m = build_exchange_for_delta_join(state, node);
+    let exchange_l0m =
+        build_consistent_hash_shuffle_exchange_for_delta_join(state, node, node.stream_key.clone());
+    let exchange_l1m =
+        build_consistent_hash_shuffle_exchange_for_delta_join(state, node, node.stream_key.clone());
 
+    // LookupUnion's inputs might have different distribution and we need to unify them by using
+    // hash shuffle.
     let union = StreamNode {
         operator_id: state.gen_operator_id() as u64,
         identity: "Union".into(),
@@ -247,7 +281,7 @@ fn build_delta_join_inner(
         lookup_0_frag.fragment_id,
         current_fragment.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(),
+            dispatch_strategy: dispatch_consistent_hash_shuffle(node.stream_key.clone()),
             same_worker_node: false,
             link_id: exchange_l0m.operator_id,
         },
@@ -257,7 +291,7 @@ fn build_delta_join_inner(
         lookup_1_frag.fragment_id,
         current_fragment.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(),
+            dispatch_strategy: dispatch_consistent_hash_shuffle(node.stream_key.clone()),
             same_worker_node: false,
             link_id: exchange_l1m.operator_id,
         },
@@ -289,7 +323,8 @@ pub(crate) fn build_delta_join_without_arrange(
             }
             panic!("exchange other than no_shuffle not allowed between delta join and arrange");
         } else {
-            unimplemented!()
+            // pass
+            node
         }
     }
 
@@ -309,26 +344,4 @@ pub(crate) fn build_delta_join_without_arrange(
     )?;
 
     Ok(union)
-}
-
-fn infer_internal_table_catalog(
-    arrangement_info: Option<&ArrangementInfo>,
-    distribution_key: Vec<usize>,
-) -> TableCatalog {
-    let arrangement_info = arrangement_info.unwrap();
-    // FIXME(st1page)
-    let mut internal_table_catalog_builder = TableCatalogBuilder::new(WithOptions::default());
-    for column_desc in &arrangement_info.column_descs {
-        internal_table_catalog_builder.add_column(&Field::from(&ColumnDesc::from(column_desc)));
-    }
-
-    for order in &arrangement_info.arrange_key_orders {
-        internal_table_catalog_builder.add_order_column(
-            order.index as usize,
-            OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
-        );
-    }
-
-    // TODO: give the real look-up keys
-    internal_table_catalog_builder.build(distribution_key)
 }

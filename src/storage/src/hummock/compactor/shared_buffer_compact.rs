@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
-use crate::hummock::compactor::context::Context;
+use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -44,7 +44,7 @@ const GC_WATERMARK_FOR_FLUSH: u64 = 0;
 
 /// Flush shared buffer to level0. Resulted SSTs are grouped by compaction group.
 pub async fn compact(
-    context: Arc<Context>,
+    context: Arc<CompactorContext>,
     payload: UploadTaskPayload,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
@@ -108,7 +108,7 @@ pub async fn compact(
 
 /// For compaction from shared buffer to level 0, this is the only function gets called.
 async fn compact_shared_buffer(
-    context: Arc<Context>,
+    context: Arc<CompactorContext>,
     payload: UploadTaskPayload,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     // Local memory compaction looks at all key ranges.
@@ -145,9 +145,9 @@ async fn compact_shared_buffer(
         splits.last_mut().unwrap().right = key_before_last.clone();
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
-    let sstable_size = (context.options.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.storage_config.sstable_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
-        context.options.share_buffers_sync_parallelism as u64,
+        context.storage_config.share_buffers_sync_parallelism as u64,
         size_and_start_user_keys.len() as u64,
     );
     let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
@@ -203,7 +203,7 @@ async fn compact_shared_buffer(
         .acquire(existing_table_ids)
         .await;
     let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-    let stats = context.stats.clone();
+    let compactor_metrics = context.compactor_metrics.clone();
 
     let parallelism = splits.len();
     let mut compact_success = true;
@@ -221,7 +221,6 @@ async fn compact_shared_buffer(
         let iter = build_ordered_merge_iter::<ForwardIter>(
             &payload,
             sstable_store.clone(),
-            stats.clone(),
             &mut local_stats,
             Arc::new(SstableIteratorReadOptions::default()),
         )
@@ -236,7 +235,7 @@ async fn compact_shared_buffer(
         });
         compaction_futures.push(handle);
     }
-    local_stats.report(stats.as_ref());
+    local_stats.report_compactor(compactor_metrics.as_ref());
 
     let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
     let mut err = None;
@@ -272,7 +271,7 @@ async fn compact_shared_buffer(
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
-                    .stats
+                    .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
             }
@@ -294,10 +293,10 @@ impl SharedBufferCompactRunner {
     pub fn new(
         split_index: usize,
         key_range: KeyRange,
-        context: Arc<Context>,
+        context: Arc<CompactorContext>,
         sub_compaction_sstable_size: usize,
     ) -> Self {
-        let mut options: SstableBuilderOptions = context.options.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_config.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
         let compactor = Compactor::new(
             context,

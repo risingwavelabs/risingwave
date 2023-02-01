@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "compactor.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message SstableInfo {
@@ -116,16 +117,10 @@ message HummockSnapshot {
   uint64 current_epoch = 2;
 }
 
-message PinVersionRequest {
-  uint32 context_id = 1;
-  uint64 last_pinned = 2;
-}
-
-message PinVersionResponse {
-  common.Status status = 1;
+message VersionUpdatePayload {
   oneof payload {
-    HummockVersionDeltas version_deltas = 2;
-    HummockVersion pinned_version = 3;
+    HummockVersionDeltas version_deltas = 1;
+    HummockVersion pinned_version = 2;
   }
 }
 
@@ -455,12 +450,6 @@ message RiseCtlGetPinnedSnapshotsSummaryResponse {
   PinnedSnapshotsSummary summary = 1;
 }
 
-message ResetCurrentVersionRequest {}
-
-message ResetCurrentVersionResponse {
-  HummockVersion old_version = 1;
-}
-
 message InitMetadataForReplayRequest {
   repeated catalog.Table tables = 1;
   repeated CompactionGroup compaction_groups = 2;
@@ -525,10 +514,17 @@ message SetCompactorRuntimeConfigRequest {
 
 message SetCompactorRuntimeConfigResponse {}
 
+message PinVersionRequest {
+  uint32 context_id = 1;
+}
+
+message PinVersionResponse {
+  HummockVersion pinned_version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
-  rpc ResetCurrentVersion(ResetCurrentVersionRequest) returns (ResetCurrentVersionResponse);
   rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
   rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);
@@ -555,6 +551,7 @@ service HummockManagerService {
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
+  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
 }
 
 message CompactionConfig {

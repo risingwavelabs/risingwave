@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -43,30 +43,13 @@ cargo build \
     -p risingwave_backup_cmd \
     --features "static-link static-log-level" --profile "$profile"
 
+artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test)
+
 echo "--- Compress debug info for artifacts"
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/sqlsmith
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/compaction-test
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/backup-restore
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave_regress_test
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/risedev-dev
-objcopy --compress-debug-sections=zlib-gnu target/"$target"/delete-range-test
+echo -n "${artifacts[*]}" | parallel -d ' ' "objcopy --compress-debug-sections=zlib-gnu target/$target/{} && echo \"compressed {}\""
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
-cp target/"$target"/compaction-test ./compaction-test-"$profile"
-cp target/"$target"/backup-restore ./backup-restore-"$profile"
-cp target/"$target"/risingwave ./risingwave-"$profile"
-cp target/"$target"/risedev-dev ./risedev-dev-"$profile"
-cp target/"$target"/risingwave_regress_test ./risingwave_regress_test-"$profile"
-cp target/"$target"/sqlsmith ./sqlsmith-"$profile"
-cp target/"$target"/delete-range-test ./delete-range-test-"$profile"
-buildkite-agent artifact upload risingwave-"$profile"
-buildkite-agent artifact upload risedev-dev-"$profile"
-buildkite-agent artifact upload risingwave_regress_test-"$profile"
-buildkite-agent artifact upload ./sqlsmith-"$profile"
-buildkite-agent artifact upload ./compaction-test-"$profile"
-buildkite-agent artifact upload ./backup-restore-"$profile"
-buildkite-agent artifact upload ./delete-range-test-"$profile"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"

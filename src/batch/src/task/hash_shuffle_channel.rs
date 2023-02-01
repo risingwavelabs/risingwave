@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -88,7 +88,7 @@ fn generate_new_data_chunks(
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
         let vis_map: Bitmap = vis_map_vec.into_iter().collect();
-        let vis_map = if let Some(visibility) = chunk.get_visibility_ref() {
+        let vis_map = if let Some(visibility) = chunk.visibility() {
             vis_map.bitand(visibility)
         } else {
             vis_map

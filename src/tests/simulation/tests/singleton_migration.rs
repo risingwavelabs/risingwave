@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ use madsim::time::sleep;
 use rand::prelude::SliceRandom;
 use rand::thread_rng;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
+use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -31,6 +31,9 @@ pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 pub use crate::constants::hummock;
 use crate::error::Result;
 use crate::row::OwnedRow;
+
+/// The global version of the catalog.
+pub type CatalogVersion = u64;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
@@ -60,8 +63,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
-
-pub type CatalogVersion = u64;
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
@@ -215,5 +216,40 @@ impl From<u32> for IndexId {
 impl From<IndexId> for u32 {
     fn from(id: IndexId) -> Self {
         id.index_id
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct FunctionId(pub u32);
+
+impl FunctionId {
+    pub const fn new(id: u32) -> Self {
+        FunctionId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        FunctionId(u32::MAX - 1)
+    }
+
+    pub fn function_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for FunctionId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for FunctionId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<FunctionId> for u32 {
+    fn from(id: FunctionId) -> Self {
+        id.0
     }
 }

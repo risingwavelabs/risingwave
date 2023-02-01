@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,7 +38,7 @@ use tracing::log::warn;
 use super::iterator::{
     ConcatIteratorInner, DirectedUserIterator, DirectionEnum, HummockIteratorUnion,
 };
-use super::utils::validate_epoch;
+use super::utils::validate_safe_epoch;
 use super::{
     get_from_order_sorted_uncommitted_data, get_from_sstable_info, hit_sstable_bloom_filter,
     HummockStorageV1, SstableIteratorType,
@@ -54,9 +54,9 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::hummock::{
     DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
-    HummockResult,
+    HummockResult, Sstable,
 };
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -79,6 +79,8 @@ impl HummockStorageV1 {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let table_id = read_options.table_id;
+        let table_id_string = table_id.to_string();
+        let table_id_label = table_id_string.as_str();
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_data,
@@ -101,7 +103,13 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
+                local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
@@ -116,11 +124,22 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
+                local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
+
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
@@ -143,11 +162,18 @@ impl HummockStorageV1 {
                             sstable_info,
                             full_key,
                             &read_options,
+                            dist_key_hash,
                             &mut local_stats,
                         )
                         .await?
                         {
-                            local_stats.report(self.stats.as_ref());
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
+                            local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
                         }
                     }
@@ -178,21 +204,34 @@ impl HummockStorageV1 {
                         &level.table_infos[table_info_idx],
                         full_key,
                         &read_options,
+                        dist_key_hash,
                         &mut local_stats,
                     )
                     .await?
                     {
-                        local_stats.report(self.stats.as_ref());
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
+                        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
                 }
             }
         }
 
-        local_stats.report(self.stats.as_ref());
-        self.stats
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
+        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
+        self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
+            .with_label_values(&["", "sub-iter"])
             .observe(table_counts as f64);
         Ok(None)
     }
@@ -212,7 +251,7 @@ impl HummockStorageV1 {
                 .read_filter(epoch, read_options.table_id, table_key_range);
 
         // Check epoch validity
-        validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+        validate_safe_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
 
         Ok(read_version)
     }
@@ -244,7 +283,6 @@ impl HummockStorageV1 {
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
                     self.sstable_store.clone(),
-                    self.stats.clone(),
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
@@ -259,7 +297,6 @@ impl HummockStorageV1 {
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
                     self.sstable_store.clone(),
-                    self.stats.clone(),
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
@@ -269,9 +306,9 @@ impl HummockStorageV1 {
                 .await?,
             ))
         }
-        self.stats
+        self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["memory-iter"])
+            .with_label_values(&["", "memory-iter"])
             .observe(overlapped_iters.len() as f64);
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with the
@@ -296,7 +333,10 @@ impl HummockStorageV1 {
         );
         assert!(pinned_version.is_valid());
         // encode once
-        let bloom_filter_key = read_options.prefix_hint.as_ref();
+        let bloom_filter_prefix_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|hint| Sstable::hash_for_bloom_filter(hint));
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -324,18 +364,15 @@ impl HummockStorageV1 {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
+                    if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info, &mut local_stats)
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
-                        if hit_sstable_bloom_filter(
-                            sstable.value(),
-                            bloom_filter_key.as_slice(),
-                            &mut local_stats,
-                        ) {
+                        if hit_sstable_bloom_filter(sstable.value(), *prefix_hash, &mut local_stats)
+                        {
                             sstables.push((*sstable_info).clone());
                         }
                     } else {
@@ -358,14 +395,14 @@ impl HummockStorageV1 {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
-                        && !hit_sstable_bloom_filter(
+                    if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key.as_slice(),
+                            *prefix_hash,
                             &mut local_stats,
-                        )
-                    {
-                        continue;
+                        ) {
+                            continue;
+                        }
                     }
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
@@ -379,9 +416,9 @@ impl HummockStorageV1 {
             }
         }
 
-        self.stats
+        self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
+            .with_label_values(&["", "sub-iter"])
             .observe(overlapped_iters.len() as f64);
 
         // TODO: implement delete range if the code of this file would not be delete.
@@ -403,10 +440,22 @@ impl HummockStorageV1 {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
 
-        local_stats.report(self.stats.as_ref());
+        let table_id_string = read_options.table_id.to_string();
+        let table_id_label = table_id_string.as_str();
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iterator.is_valid(),
+        );
+
+        local_stats.report(
+            self.state_store_metrics.as_ref(),
+            table_id.to_string().as_str(),
+        );
         Ok(HummockStateStoreIter::new(
             user_iterator,
-            self.stats.clone(),
+            self.state_store_metrics.clone(),
         ))
     }
 }
@@ -587,16 +636,21 @@ impl StateStore for HummockStorageV1 {
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
     }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        // Returns Ok directly, since removal of HummockStorageV1 is planned.
+        Ok(())
+    }
 }
 
 pub struct HummockStateStoreIter {
     inner: DirectedUserIterator,
-    metrics: Arc<StateStoreMetrics>,
+    metrics: Arc<HummockStateStoreMetrics>,
 }
 
 impl HummockStateStoreIter {
     #[allow(dead_code)]
-    fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
+    fn new(inner: DirectedUserIterator, metrics: Arc<HummockStateStoreMetrics>) -> Self {
         Self { inner, metrics }
     }
 
@@ -615,7 +669,7 @@ impl StateStoreIter for HummockStateStoreIter {
             let iter = &mut self.inner;
 
             if iter.is_valid() {
-                let kv = (iter.key().clone(), Bytes::copy_from_slice(iter.value()));
+                let kv = (iter.key().clone(), iter.value().clone());
                 iter.next().await?;
                 Ok(Some(kv))
             } else {
@@ -629,6 +683,6 @@ impl Drop for HummockStateStoreIter {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics);
+        stats.report(&self.metrics, "");
     }
 }

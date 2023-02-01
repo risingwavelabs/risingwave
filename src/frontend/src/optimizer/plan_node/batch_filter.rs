@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
+use super::generic::GenericPlanRef;
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -77,7 +78,10 @@ impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
             search_condition: Some(
-                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(ExprImpl::from(self.logical.predicate().clone()))
+                    .to_expr_proto(),
             ),
         })
     }

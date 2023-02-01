@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+
+# Exits as soon as any line fails.
+set -euo pipefail
 
 echo "+++ Run unit tests with coverage"
 # use tee to disable progress bar

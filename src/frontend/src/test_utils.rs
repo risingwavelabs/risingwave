@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,15 +23,16 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, View as ProstView,
+    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
+    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
+    View as ProstView,
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -158,9 +159,10 @@ impl LocalFrontend {
     }
 }
 
-pub async fn get_explain_output(sql: &str, session: Arc<SessionImpl>) -> String {
-    let mut rsp = session.run_statement(sql, false).await.unwrap();
-    assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
+    if rsp.get_stmt_type() != StatementType::EXPLAIN {
+        panic!("RESPONSE INVALID: {rsp:?}");
+    }
     let mut res = String::new();
     #[for_await]
     for row_set in rsp.values_stream() {
@@ -225,19 +227,24 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, _view: ProstView) -> Result<()> {
-        todo!()
+    async fn create_view(&self, mut view: ProstView) -> Result<()> {
+        view.id = self.gen_id();
+        self.catalog.write().create_view(&view);
+        self.add_table_or_source_id(view.id, view.schema_id, view.database_id);
+        Ok(())
     }
 
     async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         mut table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let source_id = self.create_source_inner(source)?;
-        table.optional_associated_source_id =
-            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        if let Some(source) = source {
+            let source_id = self.create_source_inner(source)?;
+            table.optional_associated_source_id =
+                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        }
         self.create_materialized_view(table, graph).await?;
         Ok(())
     }
@@ -270,9 +277,15 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
-        self.drop_table_or_source_id(table_id.table_id);
+    async fn create_function(&self, _function: ProstFunction) -> Result<()> {
+        todo!()
+    }
+
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+        if let Some(source_id) = source_id {
+            self.drop_table_or_source_id(source_id);
+        }
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         let indexes =
             self.catalog
                 .read()
@@ -283,9 +296,11 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
-        self.catalog
-            .write()
-            .drop_source(database_id, schema_id, source_id);
+        if let Some(source_id) = source_id {
+            self.catalog
+                .write()
+                .drop_source(database_id, schema_id, source_id);
+        }
         Ok(())
     }
 
@@ -349,6 +364,10 @@ impl CatalogWriter for MockCatalogWriter {
             .write()
             .drop_table(database_id, schema_id, index_table_id);
         Ok(())
+    }
+
+    async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+        todo!()
     }
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {

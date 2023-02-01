@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
@@ -44,11 +45,8 @@ impl DataChunk {
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
     pub fn new<V: Into<Vis>>(columns: Vec<Column>, vis: V) -> Self {
-        let vis = vis.into();
-        let capacity = match &vis {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(c) => *c,
-        };
+        let vis: Vis = vis.into();
+        let capacity = vis.len();
         for column in &columns {
             assert_eq!(capacity, column.array_ref().len());
         }
@@ -109,17 +107,14 @@ impl DataChunk {
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         match &self.vis2 {
-            Vis::Bitmap(b) => b.num_high_bits(),
+            Vis::Bitmap(b) => b.count_ones(),
             Vis::Compact(len) => *len,
         }
     }
 
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
-        match &self.vis2 {
-            Vis::Bitmap(b) => b.len(),
-            Vis::Compact(len) => *len,
-        }
+        self.vis2.len()
     }
 
     pub fn vis(&self) -> &Vis {
@@ -131,14 +126,7 @@ impl DataChunk {
     }
 
     pub fn visibility(&self) -> Option<&Bitmap> {
-        self.get_visibility_ref()
-    }
-
-    pub fn get_visibility_ref(&self) -> Option<&Bitmap> {
-        match &self.vis2 {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        }
+        self.vis2.as_visibility()
     }
 
     pub fn set_vis(&mut self, vis: Vis) {
@@ -319,10 +307,7 @@ impl DataChunk {
     /// * bool - whether this tuple is visible
     pub fn row_at(&self, pos: usize) -> (RowRef<'_>, bool) {
         let row = self.row_at_unchecked_vis(pos);
-        let vis = match &self.vis2 {
-            Vis::Bitmap(bitmap) => bitmap.is_set(pos),
-            Vis::Compact(_) => true,
-        };
+        let vis = self.vis2.is_set(pos);
         (row, vis)
     }
 
@@ -359,11 +344,7 @@ impl DataChunk {
     /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
     /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        if column_mapping
-            .iter()
-            .copied()
-            .eq((0..self.columns().len()).into_iter())
-        {
+        if column_mapping.iter().copied().eq(0..self.columns().len()) {
             return self;
         }
         let mut new_columns = Vec::with_capacity(column_mapping.len());
@@ -399,11 +380,11 @@ impl DataChunk {
     ///
     /// the returned vector's size is self.capacity() and for the invisible row will give a empty
     /// vec<u8>
-    pub fn serialize(&self) -> Vec<Vec<u8>> {
+    pub fn serialize(&self) -> Vec<Bytes> {
         match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers = vec![vec![]; rows_num];
+                let mut buffers = vec![BytesMut::new(); rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), rows_num);
@@ -416,10 +397,10 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers
+                buffers.into_iter().map(BytesMut::freeze).collect_vec()
             }
             Vis::Compact(rows_num) => {
-                let mut buffers = vec![vec![]; *rows_num];
+                let mut buffers = vec![BytesMut::new(); *rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), *rows_num);
@@ -430,7 +411,7 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers
+                buffers.into_iter().map(BytesMut::freeze).collect_vec()
             }
         }
     }
@@ -500,6 +481,7 @@ impl DataChunkTestExt for DataChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {

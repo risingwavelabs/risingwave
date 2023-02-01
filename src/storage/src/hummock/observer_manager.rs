@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_pb::hummock::pin_version_response;
+use risingwave_pb::hummock::version_update_payload;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
@@ -64,7 +64,7 @@ impl ObserverState for HummockObserverNode {
                 let _ = self
                     .version_update_sender
                     .send(HummockEvent::VersionUpdate(
-                        pin_version_response::Payload::VersionDeltas(hummock_version_deltas),
+                        version_update_payload::Payload::VersionDeltas(hummock_version_deltas),
                     ))
                     .inspect_err(|e| {
                         tracing::error!("unable to send version delta: {:?}", e);
@@ -96,7 +96,7 @@ impl ObserverState for HummockObserverNode {
         let _ = self
             .version_update_sender
             .send(HummockEvent::VersionUpdate(
-                pin_version_response::Payload::PinnedVersion(
+                version_update_payload::Payload::PinnedVersion(
                     snapshot
                         .hummock_version
                         .expect("should get hummock version"),

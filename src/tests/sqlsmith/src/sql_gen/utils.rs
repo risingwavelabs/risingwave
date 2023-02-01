@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,8 @@
 use std::mem;
 
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
-    DataType, FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
+    FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
 };
 
 use crate::sql_gen::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
@@ -46,8 +45,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.bound_columns = old_cols;
     }
 
-    // TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
-    pub(crate) fn _clone_local_context(&mut self) -> Context {
+    pub(crate) fn clone_local_context(&mut self) -> Context {
         let current_bound_relations = self.bound_relations.clone();
         let current_bound_columns = self.bound_columns.clone();
         (current_bound_columns, current_bound_relations)
@@ -103,25 +101,4 @@ pub(crate) fn create_args(arg_exprs: Vec<Expr>) -> Vec<FunctionArg> {
 /// Create `FunctionArg` from an `Expr`.
 fn create_function_arg_from_expr(expr: Expr) -> FunctionArg {
     FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-}
-
-/// Used to cast [`DataTypeName`] into [`DataType`] where possible.
-pub(crate) fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataType> {
-    match type_name {
-        DataTypeName::Boolean => Some(DataType::Boolean),
-        DataTypeName::Int16 => Some(DataType::SmallInt(None)),
-        DataTypeName::Int32 => Some(DataType::Int(None)),
-        DataTypeName::Int64 => Some(DataType::BigInt(None)),
-        DataTypeName::Decimal => Some(DataType::Decimal(None, None)),
-        DataTypeName::Float32 => Some(DataType::Real),
-        DataTypeName::Float64 => Some(DataType::Double),
-        DataTypeName::Varchar => Some(DataType::Varchar),
-        DataTypeName::Bytea => Some(DataType::Bytea),
-        DataTypeName::Date => Some(DataType::Date),
-        DataTypeName::Timestamp => Some(DataType::Timestamp(false)),
-        DataTypeName::Timestampz => Some(DataType::Timestamp(true)),
-        DataTypeName::Time => Some(DataType::Time(false)),
-        DataTypeName::Interval => Some(DataType::Interval),
-        DataTypeName::Struct | DataTypeName::List => None,
-    }
 }

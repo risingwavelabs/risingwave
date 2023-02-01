@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,6 +38,9 @@ pub struct ChainExecutor {
     actor_id: ActorId,
 
     info: ExecutorInfo,
+
+    /// Only consume upstream messages.
+    upstream_only: bool,
 }
 
 fn mapping(upstream_indices: &[usize], chunk: StreamChunk) -> StreamChunk {
@@ -57,6 +60,7 @@ impl ChainExecutor {
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
+        upstream_only: bool,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -69,6 +73,7 @@ impl ChainExecutor {
             upstream_indices,
             actor_id: progress.actor_id(),
             progress,
+            upstream_only,
         }
     }
 
@@ -83,7 +88,11 @@ impl ChainExecutor {
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
         // Otherwise, it means we've recovered and the snapshot is already consumed.
-        let to_consume_snapshot = barrier.is_add_dispatcher(self.actor_id);
+        let to_consume_snapshot = barrier.is_add_dispatcher(self.actor_id) && !self.upstream_only;
+
+        if self.upstream_only {
+            self.progress.finish(barrier.epoch.curr);
+        }
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -193,7 +202,15 @@ mod test {
             ],
         ));
 
-        let chain = ChainExecutor::new(first, second, vec![0], progress, schema, PkIndices::new());
+        let chain = ChainExecutor::new(
+            first,
+            second,
+            vec![0],
+            progress,
+            schema,
+            PkIndices::new(),
+            false,
+        );
 
         let mut chain = Box::new(chain).execute();
         chain.next().await;

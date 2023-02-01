@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,9 +24,12 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{
+    CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
+};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::TableOption;
@@ -230,6 +233,18 @@ pub fn update_filter_key_extractor_for_table_ids(
     }
 }
 
+pub fn update_filter_key_extractor_for_tables(
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    tables: &[ProstTable],
+) {
+    for table in tables {
+        filter_key_extractor_manager_ref.update(
+            table.id,
+            Arc::new(FilterKeyExtractorImpl::from_table(table)),
+        )
+    }
+}
+
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
 pub fn iterator_test_key_of_epoch(
     table: HummockSstableId,
@@ -333,7 +348,7 @@ pub async fn commit_from_meta_node<S>(
     hummock_manager_ref: &HummockManager<S>,
     epoch: HummockEpoch,
     ssts: Vec<LocalSstableInfo>,
-) -> crate::hummock::error::Result<()>
+) -> crate::hummock::error::Result<Option<HummockSnapshot>>
 where
     S: MetaStore,
 {

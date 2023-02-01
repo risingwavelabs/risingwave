@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,14 +17,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_common::util::is_stream_source;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{FragmentTypeFlag, SourceNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    FragmentTypeFlag, SourceNode, StreamActor, StreamEnvironment as ProstStreamEnvironment,
+    StreamNode,
+};
 
 use super::{ActorId, FragmentId};
 use crate::manager::{SourceId, WorkerId};
@@ -54,6 +56,33 @@ pub struct TableFragments {
 
     /// The splits of actors
     pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+
+    /// The environment associated with this stream plan and its fragments
+    pub(crate) env: StreamEnvironment,
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamEnvironment {
+    /// The timezone used to interpret timestamps and dates for conversion
+    pub(crate) timezone: Option<String>,
+}
+
+impl StreamEnvironment {
+    pub fn to_protobuf(&self) -> ProstStreamEnvironment {
+        ProstStreamEnvironment {
+            timezone: self.timezone.clone().unwrap_or("".into()),
+        }
+    }
+
+    fn from_protobuf(prost: ProstStreamEnvironment) -> Self {
+        Self {
+            timezone: if prost.get_timezone().is_empty() {
+                None
+            } else {
+                Some(prost.get_timezone().clone())
+            },
+        }
+    }
 }
 
 impl MetadataModel for TableFragments {
@@ -71,16 +100,19 @@ impl MetadataModel for TableFragments {
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
+            env: Some(self.env.to_protobuf()),
         }
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
+        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap().clone());
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
+            env,
         }
     }
 
@@ -90,14 +122,19 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Initialized`.
-    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+    /// Create a new `TableFragments` with state of `Initialized` with env.
+    pub fn new(
+        table_id: TableId,
+        fragments: BTreeMap<FragmentId, Fragment>,
+        env: ProstStreamEnvironment,
+    ) -> Self {
         Self {
             table_id,
             state: State::Initial,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
+            env: StreamEnvironment::from_protobuf(env),
         }
     }
 
@@ -124,6 +161,11 @@ impl TableFragments {
         self.state
     }
 
+    /// Returns the timezone of the table
+    pub fn timezone(&self) -> Option<String> {
+        self.env.timezone.clone()
+    }
+
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
@@ -137,13 +179,19 @@ impl TableFragments {
     /// Returns mview fragment vnode mapping.
     /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
     /// there's no fragment with `FragmentTypeFlag::Mview` exists.
-    pub fn mview_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
+    pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
         self.fragments
             .values()
             .find(|fragment| {
                 (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
             })
-            .and_then(|fragment| fragment.vnode_mapping.clone())
+            .map(|fragment| {
+                (
+                    fragment.fragment_id,
+                    // vnode mapping is always `Some`, even for singletons.
+                    fragment.vnode_mapping.clone().unwrap(),
+                )
+            })
     }
 
     /// Update state of all actors
@@ -225,14 +273,16 @@ impl TableFragments {
         }
     }
 
-    /// Find the source node inside the stream node, if any.
-    pub fn find_source_node(stream_node: &StreamNode) -> Option<&SourceNode> {
+    /// Find the source node that contains an external stream source inside the stream node, if any.
+    pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            return Some(source);
+            if source.source_inner.is_some() {
+                return Some(source);
+            }
         }
 
         for child in &stream_node.input {
-            if let Some(source) = Self::find_source_node(child) {
+            if let Some(source) = Self::find_source_node_with_stream_source(child) {
                 return Some(source);
             }
         }
@@ -240,16 +290,17 @@ impl TableFragments {
         None
     }
 
-    /// Extract the fragments that include stream source executors, grouping by source id.
+    /// Extract the fragments that include source executors that contains an external stream source,
+    /// grouping by source id.
     pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
         let mut source_fragments = HashMap::new();
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                        .filter(|s| is_stream_source(s))
-                        .map(|s| s.source_id)
+                if let Some(source_id) = TableFragments::find_source_node_with_stream_source(
+                    actor.nodes.as_ref().unwrap(),
+                )
+                .map(|s| s.source_inner.as_ref().unwrap().source_id)
                 {
                     source_fragments
                         .entry(source_id)

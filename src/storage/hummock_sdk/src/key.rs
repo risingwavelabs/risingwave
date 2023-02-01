@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,9 +18,8 @@ use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::INVALID_EPOCH;
 
 use crate::HummockEpoch;
 
@@ -326,23 +325,38 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     (start, end)
 }
 
+pub trait CopyFromSlice {
+    fn copy_from_slice(slice: &[u8]) -> Self;
+}
+
+impl CopyFromSlice for Vec<u8> {
+    fn copy_from_slice(slice: &[u8]) -> Self {
+        Vec::from(slice)
+    }
+}
+
+impl CopyFromSlice for Bytes {
+    fn copy_from_slice(slice: &[u8]) -> Self {
+        Bytes::copy_from_slice(slice)
+    }
+}
+
 /// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the
 /// user, to make the code clearer and avoid confusion with encoded [`UserKey`] and [`FullKey`].
 ///
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TableKey<T: AsRef<[u8]>>(pub T);
+
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TableKey")
-            .field(
-                "table_key",
-                &String::from_utf8(self.0.as_ref().to_vec()).unwrap(),
-            )
+            .field("table_key", &self.0.as_ref().to_vec())
             .finish()
     }
 }
+
 impl<T: AsRef<[u8]>> Deref for TableKey<T> {
     type Target = T;
 
@@ -373,7 +387,7 @@ pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyR
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
@@ -439,7 +453,14 @@ impl<'a> UserKey<&'a [u8]> {
     }
 
     pub fn to_vec(self) -> UserKey<Vec<u8>> {
-        UserKey::new(self.table_id, TableKey(Vec::from(*self.table_key)))
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> UserKey<T> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: TableKey(T::copy_from_slice(self.table_key.0)),
+        }
     }
 }
 
@@ -471,13 +492,11 @@ impl UserKey<Vec<u8>> {
         self.table_key.clear();
         self.table_key.extend_from_slice(other.table_key.as_ref());
     }
-}
 
-impl Default for UserKey<Vec<u8>> {
-    fn default() -> Self {
-        Self {
-            table_id: TableId::default(),
-            table_key: TableKey(Vec::new()),
+    pub fn into_bytes(self) -> UserKey<Bytes> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: TableKey(Bytes::from(self.table_key.0)),
         }
     }
 }
@@ -485,7 +504,7 @@ impl Default for UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
@@ -568,9 +587,24 @@ impl<'a> FullKey<&'a [u8]> {
     }
 
     pub fn to_vec(self) -> FullKey<Vec<u8>> {
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> FullKey<T> {
         FullKey {
-            user_key: self.user_key.to_vec(),
+            user_key: self.user_key.copy_into(),
             epoch: self.epoch,
+        }
+    }
+}
+
+impl FullKey<Vec<u8>> {
+    /// Calling this method may accidentally cause memory allocation when converting `Vec` into
+    /// `Bytes`
+    pub fn into_bytes(self) -> FullKey<Bytes> {
+        FullKey {
+            epoch: self.epoch,
+            user_key: self.user_key.into_bytes(),
         }
     }
 }
@@ -590,17 +624,6 @@ impl FullKey<Vec<u8>> {
     pub fn set(&mut self, other: FullKey<&[u8]>) {
         self.user_key.set(other.user_key);
         self.epoch = other.epoch;
-    }
-}
-
-impl Default for FullKey<Vec<u8>> {
-    // Note: Calling `is_empty` on `FullKey::default` will return `true`, so it can be used to
-    // represent unbounded range.
-    fn default() -> Self {
-        Self {
-            user_key: UserKey::default(),
-            epoch: INVALID_EPOCH,
-        }
     }
 }
 

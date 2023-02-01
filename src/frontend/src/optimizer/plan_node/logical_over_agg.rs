@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,10 +22,15 @@ use risingwave_common::types::DataType;
 
 use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
-    gen_filter_and_pushdown, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType,
+};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
@@ -255,18 +260,28 @@ impl fmt::Display for LogicalOverAgg {
 }
 
 impl ColPrunable for LogicalOverAgg {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
+impl ExprRewritable for LogicalOverAgg {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
+    }
+}
+
 impl PredicatePushdown for LogicalOverAgg {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
-        gen_filter_and_pushdown(self, window_pred, other_pred)
+        gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
 }
 
@@ -277,11 +292,14 @@ impl ToBatch for LogicalOverAgg {
 }
 
 impl ToStream for LogicalOverAgg {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 }

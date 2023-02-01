@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
+#![feature(if_let_guard)]
 #![feature(once_cell)]
 
 use rand::Rng;
@@ -45,6 +46,7 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
 }
 
 /// Parse SQL
+/// FIXME(Noel): Introduce error type for sqlsmith for this.
 pub fn parse_sql(sql: &str) -> Vec<Statement> {
     Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
 }
@@ -56,6 +58,9 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             name: name.0[0].real_value(),
             columns: columns.iter().map(|c| c.clone().into()).collect(),
         },
-        _ => panic!("Unexpected statement: {}", statement),
+        _ => panic!(
+            "Only CREATE TABLE statements permitted, received: {}",
+            statement
+        ),
     }
 }

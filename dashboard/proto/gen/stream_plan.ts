@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { ColumnIndex, SourceInfo, Table } from "./catalog";
+import { ColumnIndex, StreamSourceInfo, Table } from "./catalog";
 import { Buffer } from "./common";
 import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
@@ -25,6 +25,8 @@ export const ChainType = {
   REARRANGE: "REARRANGE",
   /** BACKFILL - BACKFILL is corresponding to the backfill executor. */
   BACKFILL: "BACKFILL",
+  /** UPSTREAM_ONLY - UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot. */
+  UPSTREAM_ONLY: "UPSTREAM_ONLY",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -44,6 +46,9 @@ export function chainTypeFromJSON(object: any): ChainType {
     case 3:
     case "BACKFILL":
       return ChainType.BACKFILL;
+    case 4:
+    case "UPSTREAM_ONLY":
+      return ChainType.UPSTREAM_ONLY;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -61,6 +66,8 @@ export function chainTypeToJSON(object: ChainType): string {
       return "REARRANGE";
     case ChainType.BACKFILL:
       return "BACKFILL";
+    case ChainType.UPSTREAM_ONLY:
+      return "UPSTREAM_ONLY";
     case ChainType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -326,21 +333,28 @@ export interface ActorMapping {
   data: number[];
 }
 
-export interface SourceNode {
-  /** use source_id to fetch SourceDesc from local source manager */
+export interface StreamSource {
   sourceId: number;
   stateTable: Table | undefined;
   rowIdIndex: ColumnIndex | undefined;
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
-  info: SourceInfo | undefined;
+  info: StreamSourceInfo | undefined;
   sourceName: string;
 }
 
-export interface SourceNode_PropertiesEntry {
+export interface StreamSource_PropertiesEntry {
   key: string;
   value: string;
+}
+
+export interface SourceNode {
+  /**
+   * The source node can contain either a stream source or nothing. So here we extract all
+   * information about stream source to a message, and here it will be an `Option` in Rust.
+   */
+  sourceInner: StreamSource | undefined;
 }
 
 export interface SinkNode {
@@ -357,6 +371,13 @@ export interface SinkNode_PropertiesEntry {
 
 export interface ProjectNode {
   selectList: ExprNode[];
+  /**
+   * this two field is expressing a list of usize pair, which means when project receives a
+   * watermark with `watermark_input_key[i]` column index, it should derive a new watermark
+   * with `watermark_output_key[i]`th expression
+   */
+  watermarkInputKey: number[];
+  watermarkOutputKey: number[];
 }
 
 export interface FilterNode {
@@ -444,7 +465,7 @@ export interface TopNNode {
   limit: number;
   offset: number;
   table: Table | undefined;
-  orderByLen: number;
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -454,7 +475,7 @@ export interface GroupTopNNode {
   offset: number;
   groupKey: number[];
   table: Table | undefined;
-  orderByLen: number;
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -483,6 +504,20 @@ export interface HashJoinNode {
     | undefined;
   /** The output indices of current node */
   outputIndices: number[];
+  /**
+   * Left deduped input pk indices. The pk of the left_table and
+   * left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
+  leftDedupedInputPkIndices: number[];
+  /**
+   * Right deduped input pk indices. The pk of the right_table and
+   * right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
+  rightDedupedInputPkIndices: number[];
   nullSafe: boolean[];
   /**
    * Whether to optimize for append only stream.
@@ -608,6 +643,8 @@ export interface ArrangementInfo {
   arrangeKeyOrders: ColumnOrder[];
   /** Column descs of the arrangement */
   columnDescs: ColumnDesc[];
+  /** Used to build storage table by stream lookup join of delta join. */
+  tableDesc: StorageTableDesc | undefined;
 }
 
 /**
@@ -647,11 +684,7 @@ export interface LookupNode {
     | { $case: "tableId"; tableId: number }
     | { $case: "indexId"; indexId: number };
   /** Info about the arrangement */
-  arrangementTableInfo:
-    | ArrangementInfo
-    | undefined;
-  /** Internal table of arrangement. */
-  arrangementTable: Table | undefined;
+  arrangementTableInfo: ArrangementInfo | undefined;
 }
 
 /** WatermarkFilter needs to filter the upstream data by the water mark. */
@@ -785,12 +818,19 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+   * - For dispatchers within actors, the id is the same as its downstream fragment id.
+   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
+   *   could belong to more than one downstream in DAG.
    * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
    */
   dispatcherId: number;
   /** Number of downstreams decides how many endpoints a dispatcher should dispatch. */
   downstreamActorId: number[];
+}
+
+/** Used to place an actor together with another actor in the same worker node. */
+export interface ColocatedActorId {
+  id: number;
 }
 
 /** A StreamActor is a running fragment of the overall stream graph, */
@@ -806,8 +846,10 @@ export interface StreamActor {
    * We duplicate the information here to ease the parsing logic in stream manager.
    */
   upstreamActorId: number[];
-  /** Placement rule for actor, need to stay on the same node as upstream. */
-  sameWorkerNodeAsUpstream: boolean;
+  /** Placement rule for actor, need to stay on the same node as a specified upstream actor. */
+  colocatedUpstreamActorId:
+    | ColocatedActorId
+    | undefined;
   /**
    * Vnodes that the executors in this actor own.
    * If the fragment is a singleton, this field will not be set and leave a `None`.
@@ -819,6 +861,12 @@ export interface StreamActor {
   mviewDefinition: string;
 }
 
+/** The environment associated with a stream plan */
+export interface StreamEnvironment {
+  /** The timezone associated with the streaming plan. Only applies to MV for now. */
+  timezone: string;
+}
+
 export interface StreamFragmentGraph {
   /** all the fragments in the graph. */
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
@@ -826,6 +874,11 @@ export interface StreamFragmentGraph {
   edges: StreamFragmentGraph_StreamFragmentEdge[];
   dependentTableIds: number[];
   tableIdsCnt: number;
+  env:
+    | StreamEnvironment
+    | undefined;
+  /** If none, default parallelism will be applied. */
+  parallelism: StreamFragmentGraph_Parallelism | undefined;
 }
 
 export interface StreamFragmentGraph_StreamFragment {
@@ -860,6 +913,10 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   linkId: number;
   upstreamId: number;
   downstreamId: number;
+}
+
+export interface StreamFragmentGraph_Parallelism {
+  parallelism: number;
 }
 
 export interface StreamFragmentGraph_FragmentsEntry {
@@ -1635,7 +1692,7 @@ export const ActorMapping = {
   },
 };
 
-function createBaseSourceNode(): SourceNode {
+function createBaseStreamSource(): StreamSource {
   return {
     sourceId: 0,
     stateTable: undefined,
@@ -1648,8 +1705,8 @@ function createBaseSourceNode(): SourceNode {
   };
 }
 
-export const SourceNode = {
-  fromJSON(object: any): SourceNode {
+export const StreamSource = {
+  fromJSON(object: any): StreamSource {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
       stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
@@ -1662,12 +1719,12 @@ export const SourceNode = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
+      info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
       sourceName: isSet(object.sourceName) ? String(object.sourceName) : "",
     };
   },
 
-  toJSON(message: SourceNode): unknown {
+  toJSON(message: StreamSource): unknown {
     const obj: any = {};
     message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
     message.stateTable !== undefined &&
@@ -1690,13 +1747,13 @@ export const SourceNode = {
         obj.properties[k] = v;
       });
     }
-    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
+    message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
     message.sourceName !== undefined && (obj.sourceName = message.sourceName);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SourceNode>, I>>(object: I): SourceNode {
-    const message = createBaseSourceNode();
+  fromPartial<I extends Exact<DeepPartial<StreamSource>, I>>(object: I): StreamSource {
+    const message = createBaseStreamSource();
     message.sourceId = object.sourceId ?? 0;
     message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
       ? Table.fromPartial(object.stateTable)
@@ -1716,33 +1773,58 @@ export const SourceNode = {
       {},
     );
     message.info = (object.info !== undefined && object.info !== null)
-      ? SourceInfo.fromPartial(object.info)
+      ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
     message.sourceName = object.sourceName ?? "";
     return message;
   },
 };
 
-function createBaseSourceNode_PropertiesEntry(): SourceNode_PropertiesEntry {
+function createBaseStreamSource_PropertiesEntry(): StreamSource_PropertiesEntry {
   return { key: "", value: "" };
 }
 
-export const SourceNode_PropertiesEntry = {
-  fromJSON(object: any): SourceNode_PropertiesEntry {
+export const StreamSource_PropertiesEntry = {
+  fromJSON(object: any): StreamSource_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
 
-  toJSON(message: SourceNode_PropertiesEntry): unknown {
+  toJSON(message: StreamSource_PropertiesEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SourceNode_PropertiesEntry>, I>>(object: I): SourceNode_PropertiesEntry {
-    const message = createBaseSourceNode_PropertiesEntry();
+  fromPartial<I extends Exact<DeepPartial<StreamSource_PropertiesEntry>, I>>(object: I): StreamSource_PropertiesEntry {
+    const message = createBaseStreamSource_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseSourceNode(): SourceNode {
+  return { sourceInner: undefined };
+}
+
+export const SourceNode = {
+  fromJSON(object: any): SourceNode {
+    return { sourceInner: isSet(object.sourceInner) ? StreamSource.fromJSON(object.sourceInner) : undefined };
+  },
+
+  toJSON(message: SourceNode): unknown {
+    const obj: any = {};
+    message.sourceInner !== undefined &&
+      (obj.sourceInner = message.sourceInner ? StreamSource.toJSON(message.sourceInner) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceNode>, I>>(object: I): SourceNode {
+    const message = createBaseSourceNode();
+    message.sourceInner = (object.sourceInner !== undefined && object.sourceInner !== null)
+      ? StreamSource.fromPartial(object.sourceInner)
+      : undefined;
     return message;
   },
 };
@@ -1835,13 +1917,19 @@ export const SinkNode_PropertiesEntry = {
 };
 
 function createBaseProjectNode(): ProjectNode {
-  return { selectList: [] };
+  return { selectList: [], watermarkInputKey: [], watermarkOutputKey: [] };
 }
 
 export const ProjectNode = {
   fromJSON(object: any): ProjectNode {
     return {
       selectList: Array.isArray(object?.selectList) ? object.selectList.map((e: any) => ExprNode.fromJSON(e)) : [],
+      watermarkInputKey: Array.isArray(object?.watermarkInputKey)
+        ? object.watermarkInputKey.map((e: any) => Number(e))
+        : [],
+      watermarkOutputKey: Array.isArray(object?.watermarkOutputKey)
+        ? object.watermarkOutputKey.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -1852,12 +1940,24 @@ export const ProjectNode = {
     } else {
       obj.selectList = [];
     }
+    if (message.watermarkInputKey) {
+      obj.watermarkInputKey = message.watermarkInputKey.map((e) => Math.round(e));
+    } else {
+      obj.watermarkInputKey = [];
+    }
+    if (message.watermarkOutputKey) {
+      obj.watermarkOutputKey = message.watermarkOutputKey.map((e) => Math.round(e));
+    } else {
+      obj.watermarkOutputKey = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ProjectNode>, I>>(object: I): ProjectNode {
     const message = createBaseProjectNode();
     message.selectList = object.selectList?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.watermarkInputKey = object.watermarkInputKey?.map((e) => e) || [];
+    message.watermarkOutputKey = object.watermarkOutputKey?.map((e) => e) || [];
     return message;
   },
 };
@@ -2190,7 +2290,7 @@ export const HashAggNode = {
 };
 
 function createBaseTopNNode(): TopNNode {
-  return { limit: 0, offset: 0, table: undefined, orderByLen: 0, withTies: false };
+  return { limit: 0, offset: 0, table: undefined, orderBy: [], withTies: false };
 }
 
 export const TopNNode = {
@@ -2199,7 +2299,7 @@ export const TopNNode = {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2209,7 +2309,11 @@ export const TopNNode = {
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.orderBy = [];
+    }
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
@@ -2219,14 +2323,14 @@ export const TopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderByLen = object.orderByLen ?? 0;
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
 };
 
 function createBaseGroupTopNNode(): GroupTopNNode {
-  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderByLen: 0, withTies: false };
+  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderBy: [], withTies: false };
 }
 
 export const GroupTopNNode = {
@@ -2236,7 +2340,7 @@ export const GroupTopNNode = {
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2251,7 +2355,11 @@ export const GroupTopNNode = {
       obj.groupKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.orderBy = [];
+    }
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
@@ -2262,7 +2370,7 @@ export const GroupTopNNode = {
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderByLen = object.orderByLen ?? 0;
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
@@ -2279,6 +2387,8 @@ function createBaseHashJoinNode(): HashJoinNode {
     leftDegreeTable: undefined,
     rightDegreeTable: undefined,
     outputIndices: [],
+    leftDedupedInputPkIndices: [],
+    rightDedupedInputPkIndices: [],
     nullSafe: [],
     isAppendOnly: false,
   };
@@ -2296,6 +2406,12 @@ export const HashJoinNode = {
       leftDegreeTable: isSet(object.leftDegreeTable) ? Table.fromJSON(object.leftDegreeTable) : undefined,
       rightDegreeTable: isSet(object.rightDegreeTable) ? Table.fromJSON(object.rightDegreeTable) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      leftDedupedInputPkIndices: Array.isArray(object?.leftDedupedInputPkIndices)
+        ? object.leftDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
+      rightDedupedInputPkIndices: Array.isArray(object?.rightDedupedInputPkIndices)
+        ? object.rightDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
       nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
     };
@@ -2329,6 +2445,16 @@ export const HashJoinNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.leftDedupedInputPkIndices) {
+      obj.leftDedupedInputPkIndices = message.leftDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.leftDedupedInputPkIndices = [];
+    }
+    if (message.rightDedupedInputPkIndices) {
+      obj.rightDedupedInputPkIndices = message.rightDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.rightDedupedInputPkIndices = [];
+    }
     if (message.nullSafe) {
       obj.nullSafe = message.nullSafe.map((e) => e);
     } else {
@@ -2359,6 +2485,8 @@ export const HashJoinNode = {
       ? Table.fromPartial(object.rightDegreeTable)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.leftDedupedInputPkIndices = object.leftDedupedInputPkIndices?.map((e) => e) || [];
+    message.rightDedupedInputPkIndices = object.rightDedupedInputPkIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
     message.isAppendOnly = object.isAppendOnly ?? false;
     return message;
@@ -2700,7 +2828,7 @@ export const BatchPlanNode = {
 };
 
 function createBaseArrangementInfo(): ArrangementInfo {
-  return { arrangeKeyOrders: [], columnDescs: [] };
+  return { arrangeKeyOrders: [], columnDescs: [], tableDesc: undefined };
 }
 
 export const ArrangementInfo = {
@@ -2712,6 +2840,7 @@ export const ArrangementInfo = {
       columnDescs: Array.isArray(object?.columnDescs)
         ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e))
         : [],
+      tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
   },
 
@@ -2727,6 +2856,8 @@ export const ArrangementInfo = {
     } else {
       obj.columnDescs = [];
     }
+    message.tableDesc !== undefined &&
+      (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
     return obj;
   },
 
@@ -2734,6 +2865,9 @@ export const ArrangementInfo = {
     const message = createBaseArrangementInfo();
     message.arrangeKeyOrders = object.arrangeKeyOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
+    message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.tableDesc)
+      : undefined;
     return message;
   },
 };
@@ -2786,7 +2920,6 @@ function createBaseLookupNode(): LookupNode {
     columnMapping: [],
     arrangementTableId: undefined,
     arrangementTableInfo: undefined,
-    arrangementTable: undefined,
   };
 }
 
@@ -2805,7 +2938,6 @@ export const LookupNode = {
       arrangementTableInfo: isSet(object.arrangementTableInfo)
         ? ArrangementInfo.fromJSON(object.arrangementTableInfo)
         : undefined,
-      arrangementTable: isSet(object.arrangementTable) ? Table.fromJSON(object.arrangementTable) : undefined,
     };
   },
 
@@ -2832,8 +2964,6 @@ export const LookupNode = {
     message.arrangementTableInfo !== undefined && (obj.arrangementTableInfo = message.arrangementTableInfo
       ? ArrangementInfo.toJSON(message.arrangementTableInfo)
       : undefined);
-    message.arrangementTable !== undefined &&
-      (obj.arrangementTable = message.arrangementTable ? Table.toJSON(message.arrangementTable) : undefined);
     return obj;
   },
 
@@ -2859,9 +2989,6 @@ export const LookupNode = {
     }
     message.arrangementTableInfo = (object.arrangementTableInfo !== undefined && object.arrangementTableInfo !== null)
       ? ArrangementInfo.fromPartial(object.arrangementTableInfo)
-      : undefined;
-    message.arrangementTable = (object.arrangementTable !== undefined && object.arrangementTable !== null)
-      ? Table.fromPartial(object.arrangementTable)
       : undefined;
     return message;
   },
@@ -3608,6 +3735,28 @@ export const Dispatcher = {
   },
 };
 
+function createBaseColocatedActorId(): ColocatedActorId {
+  return { id: 0 };
+}
+
+export const ColocatedActorId = {
+  fromJSON(object: any): ColocatedActorId {
+    return { id: isSet(object.id) ? Number(object.id) : 0 };
+  },
+
+  toJSON(message: ColocatedActorId): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ColocatedActorId>, I>>(object: I): ColocatedActorId {
+    const message = createBaseColocatedActorId();
+    message.id = object.id ?? 0;
+    return message;
+  },
+};
+
 function createBaseStreamActor(): StreamActor {
   return {
     actorId: 0,
@@ -3615,7 +3764,7 @@ function createBaseStreamActor(): StreamActor {
     nodes: undefined,
     dispatcher: [],
     upstreamActorId: [],
-    sameWorkerNodeAsUpstream: false,
+    colocatedUpstreamActorId: undefined,
     vnodeBitmap: undefined,
     mviewDefinition: "",
   };
@@ -3629,9 +3778,9 @@ export const StreamActor = {
       nodes: isSet(object.nodes) ? StreamNode.fromJSON(object.nodes) : undefined,
       dispatcher: Array.isArray(object?.dispatcher) ? object.dispatcher.map((e: any) => Dispatcher.fromJSON(e)) : [],
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
-      sameWorkerNodeAsUpstream: isSet(object.sameWorkerNodeAsUpstream)
-        ? Boolean(object.sameWorkerNodeAsUpstream)
-        : false,
+      colocatedUpstreamActorId: isSet(object.colocatedUpstreamActorId)
+        ? ColocatedActorId.fromJSON(object.colocatedUpstreamActorId)
+        : undefined,
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       mviewDefinition: isSet(object.mviewDefinition) ? String(object.mviewDefinition) : "",
     };
@@ -3652,7 +3801,9 @@ export const StreamActor = {
     } else {
       obj.upstreamActorId = [];
     }
-    message.sameWorkerNodeAsUpstream !== undefined && (obj.sameWorkerNodeAsUpstream = message.sameWorkerNodeAsUpstream);
+    message.colocatedUpstreamActorId !== undefined && (obj.colocatedUpstreamActorId = message.colocatedUpstreamActorId
+      ? ColocatedActorId.toJSON(message.colocatedUpstreamActorId)
+      : undefined);
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.mviewDefinition !== undefined && (obj.mviewDefinition = message.mviewDefinition);
@@ -3668,7 +3819,10 @@ export const StreamActor = {
       : undefined;
     message.dispatcher = object.dispatcher?.map((e) => Dispatcher.fromPartial(e)) || [];
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
-    message.sameWorkerNodeAsUpstream = object.sameWorkerNodeAsUpstream ?? false;
+    message.colocatedUpstreamActorId =
+      (object.colocatedUpstreamActorId !== undefined && object.colocatedUpstreamActorId !== null)
+        ? ColocatedActorId.fromPartial(object.colocatedUpstreamActorId)
+        : undefined;
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
@@ -3677,8 +3831,30 @@ export const StreamActor = {
   },
 };
 
+function createBaseStreamEnvironment(): StreamEnvironment {
+  return { timezone: "" };
+}
+
+export const StreamEnvironment = {
+  fromJSON(object: any): StreamEnvironment {
+    return { timezone: isSet(object.timezone) ? String(object.timezone) : "" };
+  },
+
+  toJSON(message: StreamEnvironment): unknown {
+    const obj: any = {};
+    message.timezone !== undefined && (obj.timezone = message.timezone);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamEnvironment>, I>>(object: I): StreamEnvironment {
+    const message = createBaseStreamEnvironment();
+    message.timezone = object.timezone ?? "";
+    return message;
+  },
+};
+
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0 };
+  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3700,6 +3876,8 @@ export const StreamFragmentGraph = {
         ? object.dependentTableIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
+      parallelism: isSet(object.parallelism) ? StreamFragmentGraph_Parallelism.fromJSON(object.parallelism) : undefined,
     };
   },
 
@@ -3722,6 +3900,9 @@ export const StreamFragmentGraph = {
       obj.dependentTableIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
+    message.parallelism !== undefined &&
+      (obj.parallelism = message.parallelism ? StreamFragmentGraph_Parallelism.toJSON(message.parallelism) : undefined);
     return obj;
   },
 
@@ -3738,6 +3919,12 @@ export const StreamFragmentGraph = {
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
     message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
+    message.parallelism = (object.parallelism !== undefined && object.parallelism !== null)
+      ? StreamFragmentGraph_Parallelism.fromPartial(object.parallelism)
+      : undefined;
     return message;
   },
 };
@@ -3835,6 +4022,30 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;
+    return message;
+  },
+};
+
+function createBaseStreamFragmentGraph_Parallelism(): StreamFragmentGraph_Parallelism {
+  return { parallelism: 0 };
+}
+
+export const StreamFragmentGraph_Parallelism = {
+  fromJSON(object: any): StreamFragmentGraph_Parallelism {
+    return { parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0 };
+  },
+
+  toJSON(message: StreamFragmentGraph_Parallelism): unknown {
+    const obj: any = {};
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamFragmentGraph_Parallelism>, I>>(
+    object: I,
+  ): StreamFragmentGraph_Parallelism {
+    const message = createBaseStreamFragmentGraph_Parallelism();
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,8 +16,8 @@ use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base, iterator_test_key_of, iterator_test_user_key_of,
-    iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+    gen_iterator_test_sstable_base, iterator_test_bytes_key_of, iterator_test_key_of,
+    iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
     BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
@@ -307,7 +307,7 @@ async fn test_failpoints_user_read_err() {
     while ui.is_valid() {
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_key_of(i));
+        assert_eq!(key, &iterator_test_bytes_key_of(i));
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         i += 1;
         let result = ui.next().await;
@@ -374,7 +374,7 @@ async fn test_failpoints_backward_user_read_err() {
         i -= 1;
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, &iterator_test_key_of(i));
+        assert_eq!(key, &iterator_test_bytes_key_of(i));
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         let result = ui.next().await;
         if result.is_err() {

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, InputRef};
+use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -48,6 +48,16 @@ pub struct Project<PlanRef> {
     pub input: PlanRef,
     // we need some check when construct the `Project::new`
     _private: (),
+}
+
+impl<PlanRef> Project<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.exprs = self
+            .exprs
+            .iter()
+            .map(|e| r.rewrite_expr(e.clone()))
+            .collect();
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {

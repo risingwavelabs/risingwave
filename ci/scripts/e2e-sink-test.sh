@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -43,8 +43,11 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 # prepare environment mysql sink
-apt-get -y install mysql-client
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
+# grant access to `test` for ci test user
+mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test.* TO 'mysqluser'@'%';"
+# create a table named t_remote
+mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE TABLE IF NOT EXISTS test.t_remote (id INT, name VARCHAR(255), PRIMARY KEY (id));"
 
 echo "--- preparing postgresql"
 
@@ -56,19 +59,53 @@ createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
+node_port=60061
+node_timeout=10
+java -jar ./connector-service.jar --port $node_port > .risingwave/log/connector-source.log 2>&1 &
+echo "waiting for connector node to start"
+start_time=$(date +%s)
+while :
+do
+    if nc -z localhost $node_port; then
+        echo "Port $node_port is listened! Connector Node is up!"
+        break
+    fi
+
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+    if [ $elapsed_time -ge $node_timeout ]; then
+        echo "Timeout waiting for port $node_port to be listened!"
+        exit 1
+    fi
+    sleep 0.1
+done
+
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
-sleep 1
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
 sleep 1
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/remote.load.slt'
+
+# check sink destination postgres
+sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
+sleep 1
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
 
-# check sink destination
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/remote.check.slt'
+# check sink destination mysql using shell
+if mysql  --host=mysql --port=3306 -u root -p123456 -sN -e "SELECT * FROM test.t_remote ORDER BY id;" | awk '{
+if ($1 == 1 && $2 == "Alex") c1++;
+ if ($1 == 3 && $2 == "Carl") c2++;
+  if ($1 == 4 && $2 == "Doris") c3++;
+   if ($1 == 5 && $2 == "Eve") c4++;
+    if ($1 == 6 && $2 == "Frank") c5++; }
+     END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1); }'; then
+  echo "mysql sink check passed"
+else
+  echo "The output is not as expected."
+  exit 1
+fi
 
 echo "--- Kill cluster"
 pkill -f connector-service.jar

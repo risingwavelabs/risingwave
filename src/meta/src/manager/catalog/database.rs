@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,9 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 
-use super::{DatabaseId, RelationId, SchemaId, SinkId, SourceId, ViewId};
+use super::{DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
 use crate::manager::{IndexId, MetaSrvEnv, TableId};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -32,6 +32,7 @@ pub type Catalog = (
     Vec<Sink>,
     Vec<Index>,
     Vec<View>,
+    Vec<Function>,
 );
 
 type DatabaseKey = String;
@@ -55,6 +56,8 @@ pub struct DatabaseManager {
     pub(super) tables: BTreeMap<TableId, Table>,
     /// Cached view information.
     pub(super) views: BTreeMap<ViewId, View>,
+    /// Cached function information.
+    pub(super) functions: BTreeMap<FunctionId, Function>,
 
     /// Relation refer count mapping.
     // TODO(zehua): avoid key conflicts after distinguishing table's and source's id generator.
@@ -78,6 +81,7 @@ impl DatabaseManager {
         let tables = Table::list(env.meta_store()).await?;
         let indexes = Index::list(env.meta_store()).await?;
         let views = View::list(env.meta_store()).await?;
+        let functions = Function::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -102,6 +106,7 @@ impl DatabaseManager {
             }
             (view.id, view)
         }));
+        let functions = BTreeMap::from_iter(functions.into_iter().map(|f| (f.id, f)));
 
         Ok(Self {
             databases,
@@ -111,6 +116,7 @@ impl DatabaseManager {
             views,
             tables,
             indexes,
+            functions,
             relation_ref_count,
             in_progress_creation_tracker: HashSet::default(),
             in_progress_creation_streaming_job: HashSet::default(),
@@ -127,6 +133,7 @@ impl DatabaseManager {
             self.sinks.values().cloned().collect_vec(),
             self.indexes.values().cloned().collect_vec(),
             self.views.values().cloned().collect_vec(),
+            self.functions.values().cloned().collect_vec(),
         )
     }
 
@@ -161,9 +168,19 @@ impl DatabaseManager {
                 && x.name.eq(&relation_key.2)
         }) {
             Err(MetaError::catalog_duplicated("view", &relation_key.2))
+        } else if self.functions.values().any(|x| {
+            x.database_id == relation_key.0
+                && x.schema_id == relation_key.1
+                && x.name.eq(&relation_key.2)
+        }) {
+            Err(MetaError::catalog_duplicated("function", &relation_key.2))
         } else {
             Ok(())
         }
+    }
+
+    pub fn list_databases(&self) -> Vec<Database> {
+        self.databases.values().cloned().collect_vec()
     }
 
     pub fn list_creating_tables(&self) -> Vec<Table> {

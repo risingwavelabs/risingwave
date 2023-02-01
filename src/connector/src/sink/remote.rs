@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,14 +27,13 @@ use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
-use risingwave_pb::connector_service::sink_config::table_schema::Column;
-use risingwave_pb::connector_service::sink_config::TableSchema;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
 use risingwave_pb::connector_service::sink_stream_request::{
     Request as SinkRequest, StartEpoch, StartSink, SyncBatch, WriteBatch,
 };
-use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest};
+use risingwave_pb::connector_service::table_schema::Column;
+use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest, TableSchema};
 use serde_json::Value;
 use serde_json::Value::Number;
 use tokio::sync::mpsc;
@@ -49,8 +48,8 @@ use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
 
-pub fn is_valid_remote_sink(sink_type: String) -> bool {
-    return VALID_REMOTE_SINKS.contains(&sink_type.as_str());
+pub fn is_valid_remote_sink(sink_type: &str) -> bool {
+    VALID_REMOTE_SINKS.contains(&sink_type)
 }
 
 #[derive(Clone, Debug)]
@@ -66,7 +65,7 @@ impl RemoteConfig {
             .expect("sink type must be specified")
             .to_string();
 
-        if !is_valid_remote_sink(sink_type.clone()) {
+        if !is_valid_remote_sink(sink_type.as_str()) {
             return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
         }
 
@@ -85,7 +84,7 @@ enum ResponseStreamImpl {
 
 impl ResponseStreamImpl {
     pub async fn next(&mut self) -> Result<SinkResponse> {
-        return match self {
+        match self {
             ResponseStreamImpl::Grpc(ref mut response) => response
                 .next()
                 .await
@@ -96,7 +95,7 @@ impl ResponseStreamImpl {
                     SinkError::Remote("response stream closed unexpectedly".to_string())
                 })
             }
-        };
+        }
     }
 }
 

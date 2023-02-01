@@ -3,32 +3,28 @@
   binder_error: |-
     Feature is not yet implemented: unsupported data type: NUMERIC(20)
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: values (''::float);
+- sql: values ('1'::float);
   logical_plan: |
-    LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
-- sql: values (''::float(24));
+    LogicalValues { rows: [[1:Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
+- sql: values ('1'::float(24));
   logical_plan: |
-    LogicalValues { rows: [['':Varchar::Float32]], schema: Schema { fields: [*VALUES*_0.column_0:Float32] } }
-- sql: values (''::float(25));
+    LogicalValues { rows: [[1:Float32]], schema: Schema { fields: [*VALUES*_0.column_0:Float32] } }
+- sql: values ('1'::float(25));
   logical_plan: |
-    LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
-- sql: values (''::float(53));
+    LogicalValues { rows: [[1:Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
+- sql: values ('1'::float(53));
   logical_plan: |
-    LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
-- sql: values (''::float(54));
-  binder_error: |-
-    Feature is not yet implemented: unsupported data type: FLOAT(54)
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    LogicalValues { rows: [[1:Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
 - sql: values (''::timestamp with time zone);
   logical_plan: |
-    LogicalValues { rows: [['':Varchar::Timestampz]], schema: Schema { fields: [*VALUES*_0.column_0:Timestampz] } }
+    LogicalValues { rows: [['':Varchar::Timestamptz]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamptz] } }
 - sql: values (''::time with time zone);
   binder_error: |-
     Feature is not yet implemented: unsupported data type: TIME WITH TIME ZONE
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- sql: select ''::iNt2;
+- sql: select '1'::iNt2;
   logical_plan: |
-    LogicalProject { exprs: ['':Varchar::Int16] }
+    LogicalProject { exprs: [1:Int16] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: select ''::"iNt2";
   binder_error: |-

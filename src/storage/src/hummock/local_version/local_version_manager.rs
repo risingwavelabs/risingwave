@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,15 +19,15 @@ use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::pin_version_response;
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
-use crate::hummock::compactor::Context;
+use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{LocalVersion, ReadVersion, SyncUncommittedDataStage};
@@ -57,7 +57,7 @@ pub struct LocalVersionManager {
 impl LocalVersionManager {
     pub fn new(
         pinned_version: PinnedVersion,
-        compactor_context: Arc<Context>,
+        compactor_context: Arc<CompactorContext>,
         buffer_tracker: BufferTracker,
     ) -> Arc<Self> {
         assert!(pinned_version.is_valid());
@@ -80,7 +80,7 @@ impl LocalVersionManager {
     /// being referenced by some readers.
     pub fn try_update_pinned_version(
         &self,
-        pin_resp_payload: pin_version_response::Payload,
+        pin_resp_payload: version_update_payload::Payload,
     ) -> Option<PinnedVersion> {
         let old_version = self.local_version.read();
         let new_version_id = match &pin_resp_payload {
@@ -95,16 +95,17 @@ impl LocalVersionManager {
             return None;
         }
 
-        let (newly_pinned_version, version_deltas) = match pin_resp_payload {
-            Payload::VersionDeltas(version_deltas) => {
+        let newly_pinned_version = match pin_resp_payload {
+            Payload::VersionDeltas(mut version_deltas) => {
+                old_version.filter_local_sst(&mut version_deltas);
                 let mut version_to_apply = old_version.pinned_version().version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     version_to_apply.apply_version_delta(version_delta);
                 }
-                (version_to_apply, Some(version_deltas.version_deltas))
+                version_to_apply
             }
-            Payload::PinnedVersion(version) => (version, None),
+            Payload::PinnedVersion(version) => version,
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -118,7 +119,7 @@ impl LocalVersionManager {
 
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
-        new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        new_version.set_pinned_version(newly_pinned_version);
         let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
 

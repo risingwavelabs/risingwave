@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
+use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -32,6 +33,12 @@ pub struct Join<PlanRef> {
     pub on: Condition,
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
+}
+
+impl<PlanRef> Join<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.on = self.on.clone().rewrite_expr(r);
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
@@ -173,7 +180,9 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             }
 
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::RightSemi | JoinType::RightAnti => {
+                ColIndexMapping::empty(right_len, left_len)
+            }
             JoinType::Unspecified => unreachable!(),
         }
     }
@@ -187,7 +196,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len, right_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
             JoinType::Unspecified => unreachable!(),
         }

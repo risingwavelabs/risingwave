@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
 
-use crate::array::StructValue;
+use crate::array::{ListValue, StructValue};
 use crate::types::{DataType, Datum, ScalarImpl};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
@@ -61,15 +61,11 @@ pub trait NumericFieldSequenceGenerator {
 }
 
 /// the way that datagen create the field data. such as 'sequence' or 'random'.
+#[derive(Default)]
 pub enum FieldKind {
     Sequence,
+    #[default]
     Random,
-}
-
-impl Default for FieldKind {
-    fn default() -> Self {
-        FieldKind::Random
-    }
 }
 
 pub enum FieldGeneratorImpl {
@@ -86,6 +82,7 @@ pub enum FieldGeneratorImpl {
     Varchar(VarcharField),
     Timestamp(TimestampField),
     Struct(Vec<(String, FieldGeneratorImpl)>),
+    List(Box<FieldGeneratorImpl>, usize),
 }
 
 impl FieldGeneratorImpl {
@@ -179,6 +176,15 @@ impl FieldGeneratorImpl {
         Ok(FieldGeneratorImpl::Struct(fields))
     }
 
+    pub fn with_list(field: FieldGeneratorImpl, length_option: Option<String>) -> Result<Self> {
+        let list_length = if let Some(length_option) = length_option {
+            length_option.parse::<usize>()?
+        } else {
+            DEFAULT_LENGTH
+        };
+        Ok(FieldGeneratorImpl::List(Box::new(field), list_length))
+    }
+
     pub fn generate(&mut self, offset: u64) -> Value {
         match self {
             FieldGeneratorImpl::I16Sequence(f) => f.generate(),
@@ -199,6 +205,12 @@ impl FieldGeneratorImpl {
                     .map(|(name, gen)| (name.clone(), gen.generate(offset)))
                     .collect();
                 Value::Object(map)
+            }
+            FieldGeneratorImpl::List(field, list_length) => {
+                let vec = (0..*list_length)
+                    .map(|_| field.generate(offset))
+                    .collect::<Vec<_>>();
+                Value::Array(vec)
             }
         }
     }
@@ -223,6 +235,12 @@ impl FieldGeneratorImpl {
                     .map(|(_, gen)| gen.generate_datum(offset))
                     .collect();
                 Some(ScalarImpl::Struct(StructValue::new(data)))
+            }
+            FieldGeneratorImpl::List(field, list_length) => {
+                let data = (0..*list_length)
+                    .map(|_| field.generate_datum(offset))
+                    .collect::<Vec<_>>();
+                Some(ScalarImpl::List(ListValue::new(data)))
             }
         }
     }

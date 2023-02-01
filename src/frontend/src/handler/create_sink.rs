@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,12 +15,13 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{Sink as ProstSink, Table};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
     TableWithJoins,
 };
 
-use super::create_mv::{check_column_names, get_column_names};
+use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
@@ -89,7 +90,7 @@ pub fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name)?;
 
-    let definition = query.to_string();
+    let definition = context.normalized_sql().to_owned();
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -102,22 +103,11 @@ pub fn gen_sink_plan(
     let properties = context.with_options().clone();
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    let col_names = if let Some(col_names) = col_names {
-        // Check the col_names match number of columns in the query.
-        check_column_names(&col_names, &plan_root)?;
-        col_names
-    } else {
-        plan_root
-            .schema()
-            .fields()
-            .iter()
-            .cloned()
-            .map(|field| field.name)
-            .collect()
+    if let Some(col_names) = col_names {
+        plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan =
-        plan_root.gen_create_sink_plan(sink_table_name, definition, col_names, properties)?;
+    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
 
     let sink_catalog_prost = sink_plan
         .sink_catalog()
@@ -147,10 +137,14 @@ pub async fn handle_create_sink(
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
-        let context = OptimizerContext::new_with_handler_args(handle_args);
+        let context = OptimizerContext::from_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
-
-        (sink, build_graph(plan))
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
+        (sink, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();

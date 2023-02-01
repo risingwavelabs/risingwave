@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,68 +53,13 @@ impl AggCall {
     /// Infer the return type for the given agg call.
     /// Returns error if not supported or the arguments are invalid.
     pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Result<DataType> {
-        let invalid = || {
+        risingwave_expr::sig::agg::infer_return_type(agg_kind, inputs).ok_or_else(|| {
             let args = inputs.iter().map(|t| format!("{}", t)).join(", ");
-            Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
+            RwError::from(ErrorCode::InvalidInputSyntax(format!(
                 "Invalid aggregation: {}({})",
                 agg_kind, args
-            ))))
-        };
-
-        // The function signatures are aligned with postgres, see
-        // https://www.postgresql.org/docs/current/functions-aggregate.html.
-        let return_type = match (&agg_kind, inputs) {
-            // Min, Max, FirstValue
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return invalid(),
-
-            // Avg
-            (AggKind::Avg, [input]) => match input {
-                DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
-                    DataType::Decimal
-                }
-                DataType::Float32 | DataType::Float64 => DataType::Float64,
-                DataType::Interval => DataType::Interval,
-                _ => return invalid(),
-            },
-            (AggKind::Avg, _) => return invalid(),
-
-            // Sum
-            (AggKind::Sum, [input]) => match input {
-                DataType::Int16 => DataType::Int64,
-                DataType::Int32 => DataType::Int64,
-                DataType::Int64 => DataType::Decimal,
-                DataType::Decimal => DataType::Decimal,
-                DataType::Float32 => DataType::Float32,
-                DataType::Float64 => DataType::Float64,
-                DataType::Interval => DataType::Interval,
-                _ => return invalid(),
-            },
-            (AggKind::Sum, _) => return invalid(),
-
-            (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
-            (AggKind::Sum0, _) => return invalid(),
-
-            // ApproxCountDistinct
-            (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
-            (AggKind::ApproxCountDistinct, _) => return invalid(),
-
-            // Count
-            (AggKind::Count, [] | [_]) => DataType::Int64,
-            (AggKind::Count, _) => return invalid(),
-
-            // StringAgg
-            (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
-            (AggKind::StringAgg, _) => return invalid(),
-
-            // ArrayAgg
-            (AggKind::ArrayAgg, [input]) => DataType::List {
-                datatype: Box::new(input.clone()),
-            },
-            (AggKind::ArrayAgg, _) => return invalid(),
-        };
-
-        Ok(return_type)
+            )))
+        })
     }
 
     /// Returns error if the function name matches with an existing function

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -65,15 +65,21 @@ pub fn trigger_sst_stat(
 ) {
     let level_sst_cnt = |level_idx: usize| {
         let mut sst_num = 0;
-        current_version.map_level(compaction_group_id, level_idx, |level| {
-            sst_num += level.table_infos.len();
+        current_version.level_iter(compaction_group_id, |level| {
+            if level.level_idx == level_idx as u32 {
+                sst_num += level.table_infos.len();
+            }
+            true
         });
         sst_num
     };
     let level_sst_size = |level_idx: usize| {
         let mut level_sst_size = 0;
-        current_version.map_level(compaction_group_id, level_idx, |level| {
-            level_sst_size += level.total_file_size;
+        current_version.level_iter(compaction_group_id, |level| {
+            if level.level_idx == level_idx as u32 {
+                level_sst_size += level.total_file_size;
+            }
+            true
         });
         level_sst_size / 1024
     };

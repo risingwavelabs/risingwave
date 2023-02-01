@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
 
-use super::generic::PlanAggCall;
+use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -116,14 +116,18 @@ impl ToBatchProst for BatchSortAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(PlanAggCall::to_protobuf)
+                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
                 .collect(),
             group_key: self
                 .group_key()
                 .iter()
-                .clone()
                 .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(*idx, DataType::Int32))))
-                .map(|expr| expr.to_expr_proto())
+                .map(|expr| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(expr)
+                        .to_expr_proto()
+                })
                 .collect::<Vec<ExprNode>>(),
         })
     }

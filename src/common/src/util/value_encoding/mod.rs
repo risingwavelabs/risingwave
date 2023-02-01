@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -152,7 +152,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::NaiveTime(deserialize_naivetime(data)?),
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
-        DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
@@ -215,18 +215,21 @@ fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {
     let secs = data.get_u32_le();
     let nano = data.get_u32_le();
-    NaiveTimeWrapper::with_secs_nano_value(secs, nano)
+    NaiveTimeWrapper::with_secs_nano(secs, nano)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))
 }
 
 fn deserialize_naivedatetime(data: &mut impl Buf) -> Result<NaiveDateTimeWrapper> {
     let secs = data.get_i64_le();
     let nsecs = data.get_u32_le();
-    NaiveDateTimeWrapper::with_secs_nsecs_value(secs, nsecs)
+    NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))
 }
 
 fn deserialize_naivedate(data: &mut impl Buf) -> Result<NaiveDateWrapper> {
     let days = data.get_i32_le();
-    NaiveDateWrapper::with_days_value(days)
+    NaiveDateWrapper::with_days(days)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {

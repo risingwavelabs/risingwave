@@ -1,16 +1,19 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use futures::StreamExt;
@@ -21,9 +24,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::StateStore;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
@@ -130,8 +132,7 @@ async fn create_arrangement(
             arrangement_col_arrange_rules(),
             column_ids,
             1,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await,
@@ -208,22 +209,6 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
-async fn build_state_table_helper<S: StateStore>(
-    s: S,
-    table_id: TableId,
-    columns: Vec<ColumnDesc>,
-    order_types: Vec<OrderPair>,
-    pk_indices: Vec<usize>,
-) -> StateTable<S> {
-    StateTable::new_without_distribution(
-        s,
-        table_id,
-        columns,
-        order_types.iter().map(|pair| pair.order_type).collect_vec(),
-        pk_indices,
-    )
-    .await
-}
 #[tokio::test]
 async fn test_lookup_this_epoch() {
     // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
@@ -248,16 +233,18 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
-        state_table: build_state_table_helper(
+        storage_table: StorageTable::for_test(
             store.clone(),
             table_id,
             arrangement_col_descs(),
-            arrangement_col_arrange_rules(),
+            arrangement_col_arrange_rules()
+                .iter()
+                .map(|x| x.order_type)
+                .collect_vec(),
             vec![1, 0],
-        )
-        .await,
-        lru_manager: None,
-        cache_size: 1 << 16,
+            vec![0, 1],
+        ),
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -294,6 +281,8 @@ async fn test_lookup_this_epoch() {
 }
 
 #[tokio::test]
+#[ignore]
+// Deprecated because the ability to read from prev epoch has been deprecated.
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
@@ -315,16 +304,18 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
-        state_table: build_state_table_helper(
+        storage_table: StorageTable::for_test(
             store.clone(),
             table_id,
             arrangement_col_descs(),
-            arrangement_col_arrange_rules(),
+            arrangement_col_arrange_rules()
+                .iter()
+                .map(|x| x.order_type)
+                .collect_vec(),
             vec![1, 0],
-        )
-        .await,
-        lru_manager: None,
-        cache_size: 1 << 16,
+            vec![0, 1],
+        ),
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();

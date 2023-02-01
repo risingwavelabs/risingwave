@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,13 +27,13 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorMemoryCollector, CompactorSstableStore, MemoryLimiter, SstableIdManager, SstableStore,
+    CompactorMemoryCollector, MemoryLimiter, SstableIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
-    monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
+    monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -68,6 +68,8 @@ pub async fn compactor_serve(
     monitor_process(&registry).unwrap();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
+
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
         hummock_metrics.clone(),
@@ -76,7 +78,6 @@ pub async fn compactor_serve(
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
     let storage_config = Arc::new(config.storage);
-    let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
     let object_store = Arc::new(
         parse_remote_object_store(
             opts.state_store
@@ -84,6 +85,7 @@ pub async fn compactor_serve(
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
             storage_config.object_store_use_batch_delete,
+            "Hummock",
         )
         .await,
     );
@@ -103,24 +105,21 @@ pub async fn compactor_serve(
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
     let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
-    let compact_sstable_store = Arc::new(CompactorSstableStore::new(
-        sstable_store.clone(),
-        Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
-    ));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
-        compact_sstable_store.clone(),
+        sstable_store.clone(),
+        Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
     ));
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_id_manager = Arc::new(SstableIdManager::new(
         hummock_meta_client.clone(),
         storage_config.sstable_id_remote_fetch_number,
     ));
-    let context = Arc::new(Context {
-        options: storage_config,
+    let compactor_context = Arc::new(CompactorContext {
+        storage_config,
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
-        stats: state_store_stats,
+        compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(
             opts.compaction_worker_threads_number,
@@ -129,14 +128,10 @@ pub async fn compactor_serve(
         read_memory_limiter: memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
         task_progress_manager: Default::default(),
-    });
-    let compactor_context = Arc::new(CompactorContext::with_config(
-        context,
-        compact_sstable_store,
-        CompactorRuntimeConfig {
+        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number: opts.max_concurrent_task_number,
-        },
-    ));
+        })),
+    });
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),

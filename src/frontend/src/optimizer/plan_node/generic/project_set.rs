@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprDisplay, ExprImpl};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -32,6 +32,16 @@ use crate::utils::ColIndexMapping;
 pub struct ProjectSet<PlanRef> {
     pub select_list: Vec<ExprImpl>,
     pub input: PlanRef,
+}
+
+impl<PlanRef> ProjectSet<PlanRef> {
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.select_list = self
+            .select_list
+            .iter()
+            .map(|e| r.rewrite_expr(e.clone()))
+            .collect();
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {

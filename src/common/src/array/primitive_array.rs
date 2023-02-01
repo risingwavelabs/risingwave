@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult};
+use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
@@ -126,7 +126,7 @@ impl_primitive_for_others! {
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     bitmap: Bitmap,
     data: Vec<T>,
@@ -153,54 +153,38 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let data: Vec<T> = iter.into_iter().collect();
         PrimitiveArray {
-            bitmap: Bitmap::all_high_bits(data.len()),
+            bitmap: Bitmap::ones(data.len()),
             data,
         }
     }
 }
 
+impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
+    /// Build a [`PrimitiveArray`] from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
+        let data: Vec<T> = iter.into_iter().collect();
+        assert_eq!(data.len(), bitmap.len());
+        PrimitiveArray { bitmap, data }
+    }
+}
+
 impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = T;
-    type RawIter<'a> = std::iter::Cloned<std::slice::Iter<'a, T>>;
     type RefItem<'a> = T;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         *self.data.get_unchecked(idx)
     }
 
-    fn value_at(&self, idx: usize) -> Option<T> {
-        if self.is_null(idx) {
-            None
-        } else {
-            // Safety: the above `is_null` check ensures that the index is valid.
-            Some(unsafe { *self.data.get_unchecked(idx) })
-        }
-    }
-
-    /// # Safety
-    ///
-    /// This function is unsafe because it does not check whether the index is within the bounds of
-    /// the array.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T> {
-        if self.is_null_unchecked(idx) {
-            None
-        } else {
-            Some(*self.data.get_unchecked(idx))
-        }
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+        self.data.iter().cloned()
     }
 
     fn len(&self) -> usize {
         self.data.len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        self.data.iter().cloned()
     }
 
     fn to_protobuf(&self) -> ProstArray {

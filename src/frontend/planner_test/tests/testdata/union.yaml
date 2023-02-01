@@ -95,7 +95,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t1.a, t1.b, t1.c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
+     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
 - sql: |
     create table t1 (a int, b numeric, c bigint, primary key(a));
@@ -153,7 +153,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t1.a, t1.b, t1.c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
+     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -217,3 +217,59 @@
     | └─BatchValues { rows: [[]] }
     └─BatchProject { exprs: [1:Int32] }
       └─BatchValues { rows: [[]] }
+- sql: |
+    select 1 union all select 2 union all select 3 union all select 4 union all select 5
+  optimized_logical_plan: |
+    LogicalUnion { all: true }
+    ├─LogicalProject { exprs: [1:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalProject { exprs: [2:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalProject { exprs: [3:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalProject { exprs: [4:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalProject { exprs: [5:Int32] }
+      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |
+    BatchUnion { all: true }
+    ├─BatchProject { exprs: [1:Int32] }
+    | └─BatchValues { rows: [[]] }
+    ├─BatchProject { exprs: [2:Int32] }
+    | └─BatchValues { rows: [[]] }
+    ├─BatchProject { exprs: [3:Int32] }
+    | └─BatchValues { rows: [[]] }
+    ├─BatchProject { exprs: [4:Int32] }
+    | └─BatchValues { rows: [[]] }
+    └─BatchProject { exprs: [5:Int32] }
+      └─BatchValues { rows: [[]] }
+- sql: |
+    select 1 union select 2 union select 3 union select 4 union select 5
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [1:Int32], aggs: [] }
+    └─LogicalUnion { all: true }
+      ├─LogicalProject { exprs: [1:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      ├─LogicalProject { exprs: [2:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      ├─LogicalProject { exprs: [3:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      ├─LogicalProject { exprs: [4:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [5:Int32] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+        └─BatchUnion { all: true }
+          ├─BatchProject { exprs: [1:Int32] }
+          | └─BatchValues { rows: [[]] }
+          ├─BatchProject { exprs: [2:Int32] }
+          | └─BatchValues { rows: [[]] }
+          ├─BatchProject { exprs: [3:Int32] }
+          | └─BatchValues { rows: [[]] }
+          ├─BatchProject { exprs: [4:Int32] }
+          | └─BatchValues { rows: [[]] }
+          └─BatchProject { exprs: [5:Int32] }
+            └─BatchValues { rows: [[]] }

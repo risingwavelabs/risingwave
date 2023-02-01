@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,12 +14,13 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
-use crate::sql_gen::{Column, SqlGenerator};
+use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
-fn create_join_on_clause(left: String, right: String) -> Expr {
+fn create_equi_expr(left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new(left)));
     let right = Box::new(Expr::Identifier(Ident::new(right)));
     Expr::BinaryOp {
@@ -36,8 +37,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=range) {
             0..=7 => self.gen_simple_table(),
             8..=8 => self.gen_time_window_func(),
-            // TODO: Enable after resolving: <https://github.com/risingwavelabs/risingwave/issues/2771>.
-            9..=9 => self.gen_equijoin_clause(),
+            9..=9 => self.gen_join_clause(),
             10..=10 => self.gen_table_subquery(),
             _ => unreachable!(),
         }
@@ -84,34 +84,91 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
-    fn gen_equijoin_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
-        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
-
+    fn gen_equi_join_columns(
+        &mut self,
+        left_columns: Vec<Column>,
+        right_columns: Vec<Column>,
+    ) -> Option<(Column, Column)> {
         let mut available_join_on_columns = vec![];
         for left_column in &left_columns {
             for right_column in &right_columns {
-                // NOTE: We can support some composite types if we wish to in the future.
-                // see: https://www.postgresql.org/docs/14/functions-comparison.html.
-                // For simplicity only support scalar types for now.
-                let left_ty = left_column.data_type;
-                let right_ty = right_column.data_type;
-                if left_ty.is_scalar() && right_ty.is_scalar() && (left_ty == right_ty) {
+                if left_column.data_type == right_column.data_type {
                     available_join_on_columns.push((left_column, right_column))
                 }
             }
         }
         if available_join_on_columns.is_empty() {
-            return self.gen_simple_table();
+            return None;
         }
         let i = self.rng.gen_range(0..available_join_on_columns.len());
         let (left_column, right_column) = available_join_on_columns[i];
-        let join_on_expr =
-            create_join_on_clause(left_column.name.clone(), right_column.name.clone());
+        Some((left_column.clone(), right_column.clone()))
+    }
+
+    fn gen_join_on_expr(
+        &mut self,
+        left_columns: Vec<Column>,
+        left_table: Vec<Table>,
+        right_columns: Vec<Column>,
+        right_table: Vec<Table>,
+    ) -> Option<Expr> {
+        // Higher chance for equi join,
+        // since non_equi_join could generate lots of invalid queries,
+        // if it requires streaming nested loop join.
+        match self.rng.gen_bool(0.8) {
+            true if let Some((l, r)) = self.gen_equi_join_columns(left_columns, right_columns) => {
+                Some(create_equi_expr(l.name, r.name))
+            },
+            false => {
+                let old_context = self.new_local_context();
+                self.add_relations_to_context(left_table);
+                self.add_relations_to_context(right_table);
+                let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+                self.restore_context(old_context);
+                Some(expr)
+            }
+            _ => None,
+        }
+    }
+
+    fn gen_join_constraint(
+        &mut self,
+        left_columns: Vec<Column>,
+        left_table: Vec<Table>,
+        right_columns: Vec<Column>,
+        right_table: Vec<Table>,
+    ) -> Option<JoinConstraint> {
+        let expr = self.gen_join_on_expr(left_columns, left_table, right_columns, right_table)?;
+        Some(JoinConstraint::On(expr))
+    }
+
+    fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
+        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
+        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
+
+        let join_constraint = self.gen_join_constraint(
+            left_columns,
+            left_table.clone(),
+            right_columns,
+            right_table.clone(),
+        );
+        let Some(join_constraint) = join_constraint else {
+            return self.gen_simple_table();
+        };
+
+        // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
+        // If many failures due to `StreamNestedLoopJoin`, try disable the others.
+        let join_operator = match self.rng.gen_range(0..=4) {
+            0 => JoinOperator::Inner(join_constraint),
+            1 => JoinOperator::LeftOuter(join_constraint),
+            2 => JoinOperator::RightOuter(join_constraint),
+            3 => JoinOperator::FullOuter(join_constraint),
+            _ => JoinOperator::CrossJoin,
+        };
 
         let right_factor_with_join = Join {
             relation: right_factor,
-            join_operator: JoinOperator::Inner(JoinConstraint::On(join_on_expr)),
+            join_operator,
         };
         left_table.append(&mut right_table);
         (

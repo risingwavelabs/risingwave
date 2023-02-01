@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,7 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_test::get_test_notification_client;
+use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -64,7 +64,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             hummock_options,
             sstable_store,
             meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref, worker_node),
+            get_notification_client_for_test(env, hummock_manager_ref, worker_node),
         )
         .await
         .unwrap()
@@ -97,7 +97,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: true,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: Default::default(),
                         read_version_from_backup: false,

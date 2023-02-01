@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,11 +21,11 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::*;
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
+use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
 
@@ -55,8 +55,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
-            table_l
-                .distribution_key
+            node.get_left_deduped_input_pk_indices()
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
@@ -66,8 +65,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
-            table_r
-                .distribution_key
+            node.get_right_deduped_input_pk_indices()
                 .iter()
                 .map(|key| *key as usize)
                 .collect_vec(),
@@ -114,12 +112,11 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            cache_size: stream.config.developer.unsafe_stream_join_cache_size,
             state_table_l,
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
-            lru_manager: stream.context.lru_manager.clone(),
+            lru_manager: stream.get_watermark_epoch(),
             is_append_only,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
@@ -143,12 +140,11 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
-    cache_size: usize,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
-    lru_manager: Option<LruManagerRef>,
+    lru_manager: AtomicU64Ref,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
@@ -176,7 +172,6 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.executor_id,
                         self.cond,
                         self.op_info,
-                        self.cache_size,
                         self.state_table_l,
                         self.degree_state_table_l,
                         self.state_table_r,

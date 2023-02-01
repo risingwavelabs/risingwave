@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
+use super::generic::GenericPlanRef;
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -49,6 +50,19 @@ impl BatchValues {
     pub fn logical(&self) -> &LogicalValues {
         &self.logical
     }
+
+    fn row_to_protobuf(&self, row: &[ExprImpl]) -> ExprTuple {
+        let cells = row
+            .iter()
+            .map(|x| {
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(x.clone())
+                    .to_expr_proto()
+            })
+            .collect();
+        ExprTuple { cells }
+    }
 }
 
 impl fmt::Display for BatchValues {
@@ -72,7 +86,7 @@ impl ToBatchProst for BatchValues {
                 .logical
                 .rows()
                 .iter()
-                .map(|row| row_to_protobuf(row))
+                .map(|row| self.row_to_protobuf(row))
                 .collect(),
             fields: self
                 .logical
@@ -83,11 +97,6 @@ impl ToBatchProst for BatchValues {
                 .collect(),
         })
     }
-}
-
-fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
-    let cells = row.iter().map(Expr::to_expr_proto).collect();
-    ExprTuple { cells }
 }
 
 impl ToLocalBatch for BatchValues {

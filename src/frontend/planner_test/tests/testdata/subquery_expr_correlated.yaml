@@ -189,7 +189,7 @@
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y], predicate: (t1.y = 1000:Int32) }
     └─LogicalProject { exprs: [t2.y, t2.x] }
-      └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+      └─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: (t2.y = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -203,8 +203,7 @@
           └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x > (t2.x + 1000:Int32)), output: [t1.x] }
-    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x] }
-    | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t2.y, (t2.x + 1000:Int32)] }
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - sql: |
@@ -450,6 +449,20 @@
     create table b(b1 int, b2 int, b3 int);
     create table c(c1 int, c2 int, c3 int);
     select count(*) from a, b where a3 = b2 and 3 = (select count(*) from c where b2 = c2 and a3 = c3);
+  logical_plan: |
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { aggs: [count] }
+      └─LogicalProject { exprs: [] }
+        └─LogicalFilter { predicate: (a.a3 = b.b2) AND (3:Int32 = count) }
+          └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
+            ├─LogicalJoin { type: Inner, on: true, output: all }
+            | ├─LogicalScan { table: a, columns: [a.a1, a.a2, a.a3, a._row_id] }
+            | └─LogicalScan { table: b, columns: [b.b1, b.b2, b.b3, b._row_id] }
+            └─LogicalProject { exprs: [count] }
+              └─LogicalAgg { aggs: [count] }
+                └─LogicalProject { exprs: [] }
+                  └─LogicalFilter { predicate: (CorrelatedInputRef { index: 5, correlated_id: 1 } = c.c2) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = c.c3) }
+                    └─LogicalScan { table: c, columns: [c.c1, c.c2, c.c3, c._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
     └─LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a3, a.a3) AND IsNotDistinctFrom(b.b2, b.b2), output: [] }
@@ -461,11 +474,11 @@
           └─LogicalAgg { group_key: [a.a3, b.b2], aggs: [count(1:Int32)] }
             └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a3, c.c3) AND IsNotDistinctFrom(b.b2, c.c2), output: [a.a3, b.b2, 1:Int32] }
               ├─LogicalAgg { group_key: [a.a3, b.b2], aggs: [] }
-              | └─LogicalJoin { type: Inner, on: true, output: all }
+              | └─LogicalJoin { type: Inner, on: (a.a3 = b.b2), output: all }
               |   ├─LogicalScan { table: a, columns: [a.a3] }
               |   └─LogicalScan { table: b, columns: [b.b2] }
               └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
-                └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: IsNotNull(c.c3) AND IsNotNull(c.c2) }
+                └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
@@ -611,9 +624,9 @@
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 right join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t1.y), output: all }
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t2.y), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalJoin { type: LeftOuter, on: (t2.x = t3.x) AND (t2.y = t3.y) AND IsNotDistinctFrom(t2.y, t1.y), output: [t1.y] }
+    └─LogicalJoin { type: LeftOuter, on: (t2.x = t3.x) AND (t2.y = t3.y) AND IsNotDistinctFrom(t2.y, t1.y), output: [t2.y] }
       ├─LogicalJoin { type: Inner, on: true, output: all }
       | ├─LogicalAgg { group_key: [t1.y], aggs: [] }
       | | └─LogicalScan { table: t1, columns: [t1.y] }
@@ -724,3 +737,31 @@
             ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
             | └─LogicalScan { table: strings, columns: [strings.v1] }
             └─LogicalScan { table: strings, columns: [strings.v1] }
+- name: Existential join on outer join with correlated condition
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(a varchar, z int);
+    select x from t1 where y in (select y from t3 full join t2 where t1.x = t2.x and z IS NOT DISTINCT FROM t2.x);
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x), output: [t1.x] }
+    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    └─LogicalProject { exprs: [t2.y, t2.x] }
+      └─LogicalFilter { predicate: IsNotDistinctFrom(t3.z, t2.x) }
+        └─LogicalJoin { type: FullOuter, on: true, output: all }
+          ├─LogicalScan { table: t3, columns: [t3.z] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+- name: Correlated condition in RHS of right outer join
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(a varchar, z int);
+    select x from t1 where y in (select y from t3 right join t2 where t1.x = t2.x and z IS NOT DISTINCT FROM t2.x);
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x), output: [t1.x] }
+    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    └─LogicalProject { exprs: [t2.y, t2.x] }
+      └─LogicalFilter { predicate: IsNotDistinctFrom(t3.z, t2.x) }
+        └─LogicalJoin { type: LeftOuter, on: true, output: [t3.z, t2.x, t2.y] }
+          ├─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+          └─LogicalScan { table: t3, columns: [t3.z] }

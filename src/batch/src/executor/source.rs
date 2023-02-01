@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,22 +15,25 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
+use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::{
+    ConnectorProperties, SourceColumnDesc, SourceFormat, SourceInfo, SplitImpl, SplitMetaData,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
-use risingwave_source::connector_source::{ConnectorSource, SourceContext};
-use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::{SourceColumnDesc, SourceFormat, SourceParserImpl};
+use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
+use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -65,11 +68,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let config = ConnectorProperties::extract(source_props)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
-        let info = try_match_expand!(
-            &source_node.get_info()?.get_source_info()?,
-            ProstSourceInfo::StreamSource
-        )
-        .unwrap();
+        let info = source_node.get_info().unwrap();
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -77,26 +76,16 @@ impl BoxedExecutorBuilder for SourceExecutor {
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::Maxwell => SourceFormat::Maxwell,
             RowFormatType::CanalJson => SourceFormat::CanalJson,
-            RowFormatType::RowUnspecified => unreachable!(),
+            _ => unreachable!(),
         };
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
             return Err(RwError::from(ProtocolError(
                 "protobuf file location not provided".to_string(),
             )));
         }
-        let source_parser_rs = SourceParserImpl::create(
-            &format,
-            &source_node.properties,
-            info.row_schema_location.as_str(),
-            info.use_schema_registry,
-            info.proto_message_name.clone(),
-        )
-        .await;
-        let parser = if let Ok(source_parser) = source_parser_rs {
-            source_parser
-        } else {
-            return Err(source_parser_rs.err().unwrap());
-        };
+
+        let parser_config =
+            SpecificParserConfig::new(format, info, &source_node.properties).await?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -107,8 +96,12 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let connector_source = ConnectorSource {
             config,
             columns,
-            parser,
-            connector_message_buffer_size: source.context().source_manager().msg_buf_size(),
+            parser_config,
+            connector_message_buffer_size: source
+                .context()
+                .get_config()
+                .developer
+                .stream_connector_message_buffer_size,
         };
 
         let column_ids: Vec<_> = source_node
@@ -134,7 +127,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         Ok(Box::new(SourceExecutor {
             connector_source,
             column_ids,
-            metrics: source.context().source_manager().metrics(),
+            metrics: source.context().source_metrics(),
             source_id: TableId::new(source_node.source_id),
             split,
             schema,
@@ -160,23 +153,21 @@ impl Executor for SourceExecutor {
 impl SourceExecutor {
     #[try_stream(ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let reader = self
+        let stream = self
             .connector_source
             .stream_reader(
                 Some(vec![self.split]),
                 self.column_ids,
                 self.metrics,
-                SourceContext::new(u32::MAX, self.source_id),
+                SourceInfo::new(u32::MAX, self.source_id),
             )
             .await?;
-
-        let stream = reader.into_stream();
 
         #[for_await]
         for chunk in stream {
             match chunk {
                 Ok(chunk) => {
-                    yield chunk.chunk.data_chunk().to_owned();
+                    yield covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
                 }
                 Err(e) => {
                     return Err(e);
@@ -184,4 +175,17 @@ impl SourceExecutor {
             }
         }
     }
+}
+
+fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
+    // chunk read from source must be compact
+    assert!(chunk.data_chunk().visibility().is_none());
+
+    if chunk.ops().iter().any(|op| *op != Op::Insert) {
+        return Err(RwError::from(BatchError::Internal(anyhow!(
+            "Only support insert op in batch source executor"
+        ))));
+    }
+
+    Ok(chunk.data_chunk().clone())
 }

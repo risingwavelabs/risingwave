@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
@@ -21,7 +20,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::bind_context::BindContext;
 use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
-use crate::expr::{Expr as _, ExprImpl};
+use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -198,14 +197,9 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self.bind_expr(expr)?;
-                if bound_expr.return_type() != DataType::Boolean {
-                    return Err(ErrorCode::InternalError(format!(
-                        "argument of ON must be boolean, not type {:?}",
-                        bound_expr.return_type()
-                    ))
-                    .into());
-                }
+                let bound_expr = self
+                    .bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
                 (bound_expr, None)
             }
         })

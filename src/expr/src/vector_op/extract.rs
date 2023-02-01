@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -57,7 +57,7 @@ pub fn extract_from_timestamp(time_unit: &str, timestamp: NaiveDateTimeWrapper) 
     res
 }
 
-pub fn extract_from_timestampz(time_unit: &str, usecs: i64) -> Result<Decimal> {
+pub fn extract_from_timestamptz(time_unit: &str, usecs: i64) -> Result<Decimal> {
     match time_unit {
         "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
         // TODO(#5826): all other units depend on implicit session TimeZone

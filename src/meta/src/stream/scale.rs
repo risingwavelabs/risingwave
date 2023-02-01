@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,8 +23,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ParallelUnitId, VirtualNode};
-use risingwave_common::util::prost::is_stream_source;
+use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -32,8 +31,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ActorMapping, DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor,
-    StreamNode,
+    DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor, StreamNode,
 };
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -44,7 +42,6 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::mapping::actor_mapping_from_bitmaps;
 use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
 
@@ -167,10 +164,7 @@ pub(crate) fn rebalance_actor_vnode(
 
     let order_by_bitmap_desc =
         |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
-            bitmap_a
-                .num_high_bits()
-                .cmp(&bitmap_b.num_high_bits())
-                .reverse()
+            bitmap_a.count_ones().cmp(&bitmap_b.count_ones()).reverse()
         };
 
     let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
@@ -184,8 +178,8 @@ pub(crate) fn rebalance_actor_vnode(
     let prev_remain = removed
         .iter()
         .map(|(_, bitmap)| {
-            assert!(bitmap.num_high_bits() >= prev_expected);
-            bitmap.num_high_bits() - prev_expected
+            assert!(bitmap.count_ones() >= prev_expected);
+            bitmap.count_ones() - prev_expected
         })
         .sum::<usize>();
 
@@ -194,7 +188,7 @@ pub(crate) fn rebalance_actor_vnode(
 
     let removed_balances = removed.into_iter().map(|(actor_id, bitmap)| Balance {
         actor_id,
-        balance: bitmap.num_high_bits() as i32,
+        balance: bitmap.count_ones() as i32,
         builder: builder_from_bitmap(&bitmap),
     });
 
@@ -202,7 +196,7 @@ pub(crate) fn rebalance_actor_vnode(
         .into_iter()
         .map(|(actor_id, bitmap)| Balance {
             actor_id,
-            balance: bitmap.num_high_bits() as i32 - expected as i32,
+            balance: bitmap.count_ones() as i32 - expected as i32,
             builder: builder_from_bitmap(&bitmap),
         })
         .collect_vec();
@@ -440,6 +434,10 @@ where
             // treatment because the upstream and downstream of NoShuffle are always 1-1
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
+            //
+            // Delta join will introduce a `NoShuffle` edge between index chain node and lookup node
+            // (index_mv --NoShuffle--> index_chain --NoShuffle--> lookup) which will break current
+            // `NoShuffle` scaling assumption. Currently we detect this case and forbid it to scale.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
@@ -455,6 +453,20 @@ where
 
                     if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
+                        // If `NoShuffle` used by other fragment type rather than `ChainNode`, bail.
+                        for downstream_fragment_id in downstream_fragments.keys() {
+                            let downstream_fragment = fragment_map
+                                .get(downstream_fragment_id)
+                                .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
+                            if (downstream_fragment.get_fragment_type_mask()
+                                & (FragmentTypeFlag::ChainNode as u32
+                                    | FragmentTypeFlag::Mview as u32))
+                                == 0
+                            {
+                                bail!("Rescheduling NoShuffle edge only supports ChainNode and Mview. Other usage for e.g. delta join is forbidden currently.");
+                            }
+                        }
+
                         queue.extend(downstream_fragments.keys().cloned());
                     }
 
@@ -470,8 +482,9 @@ where
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
-                let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                if is_stream_source(source_node) {
+                let source_node =
+                    TableFragments::find_source_node_with_stream_source(stream_node).unwrap();
+                if source_node.source_inner.is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }
@@ -996,19 +1009,15 @@ where
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
                     } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                        Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![
-                                *parallel_unit_to_actor_after_reschedule
-                                    .first_key_value()
-                                    .unwrap()
-                                    .1,
-                            ],
-                        })
+                        let actor_id = parallel_unit_to_actor_after_reschedule
+                            .into_values()
+                            .next()
+                            .unwrap();
+                        Some(ActorMapping::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution
-                        Some(actor_mapping_from_bitmaps(
-                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
+                        Some(ActorMapping::from_bitmaps(
+                            &fragment_actor_bitmap[&fragment_id],
                         ))
                     }
                 }
@@ -1039,21 +1048,19 @@ where
                 }
             }
 
-            let downstream_fragment_id =
+            let downstream_fragment_ids =
                 if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(&fragment_id) {
                     // Skip NoShuffle fragments' downstream
                     if ctx
                         .no_shuffle_source_fragment_ids
                         .contains(&fragment.fragment_id)
                     {
-                        None
+                        vec![]
                     } else {
-                        let downstream_fragment_id =
-                            downstream_fragments.iter().exactly_one().unwrap().0;
-                        Some(*downstream_fragment_id as FragmentId)
+                        downstream_fragments.keys().copied().collect_vec()
                     }
                 } else {
-                    None
+                    vec![]
                 };
 
             let vnode_bitmap_updates = match fragment.distribution_type() {
@@ -1102,7 +1109,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 },
             );
@@ -1445,7 +1452,7 @@ where
                     fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
                     // If downstream scale in/out
-                    *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
+                    *mapping = ActorMapping::from_bitmaps(downstream_updated_bitmap).to_protobuf();
                 }
             }
         }

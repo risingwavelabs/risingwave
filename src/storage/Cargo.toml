@@ -34,6 +34,7 @@ hyper = "0.14"
 itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
+memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
 nix = { version = "0.25", features = ["fs", "mman"] }

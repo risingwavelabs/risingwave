@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -109,15 +109,10 @@ pub mod memory {
         match get_memory_used_in_container(super::util::get_cgroup_version()) {
             Ok(mem_used) => std::cmp::min(mem_used, get_system_memory_used()),
             Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::InvalidData => {
-                        println!("Invalid data error: {}", err)
-                    }
-                    std::io::ErrorKind::NotFound => {
-                        println!("Cgroup interface file was not found: {}", err)
-                    }
-                    _ => panic!("Unexpected error: {}", err),
-                }
+                tracing::warn!(
+                    err = err.to_string(),
+                    "failed to get memory used in container, use system value instead"
+                );
                 get_system_memory_used()
             }
         }
@@ -147,15 +142,10 @@ pub mod memory {
         match get_container_memory_limit(super::util::get_cgroup_version()) {
             Ok(mem_limit) => std::cmp::min(mem_limit, get_system_memory()),
             Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::InvalidData => {
-                        println!("Invalid data error: {}", err)
-                    }
-                    std::io::ErrorKind::NotFound => {
-                        println!("Cgroup interface file was not found: {}", err)
-                    }
-                    _ => panic!("Unexpected error: {}", err),
-                }
+                tracing::warn!(
+                    err = err.to_string(),
+                    "failed to get memory available in container, use system value instead"
+                );
                 get_system_memory()
             }
         }
@@ -241,15 +231,10 @@ pub mod cpu {
         match get_container_cpu_limit(super::util::get_cgroup_version()) {
             Ok(cpu_limit) => cpu_limit,
             Err(err) => {
-                match err.kind() {
-                    std::io::ErrorKind::InvalidData => {
-                        println!("Invalid data error: {}", err)
-                    }
-                    std::io::ErrorKind::NotFound => {
-                        println!("Cgroup interface file was not found: {}", err)
-                    }
-                    _ => panic!("Unexpected error: {}", err),
-                };
+                tracing::warn!(
+                    err = err.to_string(),
+                    "failed to get cpu quota in container, use system value instead"
+                );
                 get_system_cpu()
             }
         }

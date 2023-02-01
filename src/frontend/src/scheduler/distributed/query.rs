@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -207,7 +207,6 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                // TODO: Add support to use current epoch when needed
                 pinned_snapshot.get_batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
@@ -236,6 +235,7 @@ impl QueryRunner {
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
+        let has_lookup_join_stage = self.query.has_lookup_join_stage();
         // To convince the compiler that `pinned_snapshot` will only be dropped once.
         let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
@@ -248,7 +248,9 @@ impl QueryRunner {
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
-                    if stages_with_table_scan.is_empty() {
+                    // If query contains lookup join we need to delay epoch unpin util the end of
+                    // the query.
+                    if !has_lookup_join_stage && stages_with_table_scan.is_empty() {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
@@ -380,6 +382,7 @@ pub(crate) mod tests {
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -397,7 +400,9 @@ pub(crate) mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
+    use crate::scheduler::{
+        ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot, QueryExecutionInfo,
+    };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -423,7 +428,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                pinned_snapshot.into(),
+                PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
@@ -580,7 +585,7 @@ pub(crate) mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        worker_node_manager.insert_fragment_mapping(0, vec![]);
+        worker_node_manager.insert_fragment_mapping(0, ParallelUnitMapping::new_single(0));
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

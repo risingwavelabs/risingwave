@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,7 +50,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::hash::{ParallelUnitId, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
@@ -143,15 +143,13 @@ impl Distribution {
                         .expect("vnode_mapping of UpstreamHashShard should not be none");
 
                     let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
-                        .iter()
-                        .sorted()
-                        .dedup()
+                        .iter_unique()
                         .enumerate()
-                        .map(|(i, &pu)| (pu, i as u32))
+                        .map(|(i, pu)| (pu, i as u32))
                         .collect();
 
                     Some(DistributionProst::ConsistentHashInfo(ConsistentHashInfo {
-                        vmap: vnode_mapping.iter().map(|x| pu2id_map[x]).collect_vec(),
+                        vmap: vnode_mapping.iter().map(|x| pu2id_map[&x]).collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
                 }
@@ -198,7 +196,7 @@ impl Distribution {
     fn get_vnode_mapping(
         fragmenter: &BatchPlanFragmenter,
         table_id: &TableId,
-    ) -> Option<VnodeMapping> {
+    ) -> Option<ParallelUnitMapping> {
         fragmenter
             .catalog_reader()
             .read_guard()

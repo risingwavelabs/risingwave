@@ -9,6 +9,7 @@ import "expr.proto";
 import "plan_common.proto";
 import "source.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message AddMutation {
@@ -113,19 +114,25 @@ message StreamMessage {
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
-  repeated uint64 original_indices = 1;
+  repeated uint32 original_indices = 1;
   repeated uint32 data = 2;
 }
 
-message SourceNode {
-  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
+message StreamSource {
+  uint32 source_id = 1;
   catalog.Table state_table = 2;
   catalog.ColumnIndex row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
-  catalog.SourceInfo info = 7;
+  catalog.StreamSourceInfo info = 7;
   string source_name = 8;
+}
+
+message SourceNode {
+  // The source node can contain either a stream source or nothing. So here we extract all
+  // information about stream source to a message, and here it will be an `Option` in Rust.
+  StreamSource source_inner = 1;
 }
 
 message SinkNode {
@@ -137,6 +144,11 @@ message SinkNode {
 
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_key[i]` column index, it should derive a new watermark
+  // with `watermark_output_key[i]`th expression
+  repeated uint32 watermark_input_key = 2;
+  repeated uint32 watermark_output_key = 3;
 }
 
 message FilterNode {
@@ -210,7 +222,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  uint32 order_by_len = 4;
+  repeated plan_common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -220,7 +232,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  uint32 order_by_len = 5;
+  repeated plan_common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -239,10 +251,21 @@ message HashJoinNode {
   catalog.Table right_degree_table = 9;
   // The output indices of current node
   repeated uint32 output_indices = 10;
-  repeated bool null_safe = 11;
+  // Left deduped input pk indices. The pk of the left_table and
+  // left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
+  // and is expected to be the shortest key which starts with
+  // the join key and satisfies unique constrain.
+  repeated uint32 left_deduped_input_pk_indices = 11;
+  // Right deduped input pk indices. The pk of the right_table and
+  // right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
+  // and is expected to be the shortest key which starts with
+  // the join key and satisfies unique constrain.
+  repeated uint32 right_deduped_input_pk_indices = 12;
+
+  repeated bool null_safe = 13;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 12;
+  bool is_append_only = 14;
 }
 
 message DynamicFilterNode {
@@ -313,6 +336,9 @@ enum ChainType {
 
   // BACKFILL is corresponding to the backfill executor.
   BACKFILL = 3;
+
+  // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
+  UPSTREAM_ONLY = 4;
 }
 
 // ChainNode is used for mv on mv.
@@ -355,6 +381,8 @@ message ArrangementInfo {
   repeated plan_common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
   repeated plan_common.ColumnDesc column_descs = 2;
+  // Used to build storage table by stream lookup join of delta join.
+  plan_common.StorageTableDesc table_desc = 4;
 }
 
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
@@ -390,8 +418,6 @@ message LookupNode {
   }
   // Info about the arrangement
   ArrangementInfo arrangement_table_info = 7;
-  // Internal table of arrangement.
-  catalog.Table arrangement_table = 8;
 }
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
@@ -526,11 +552,18 @@ message Dispatcher {
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as its downstream fragment id.
+  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
+  //   could belong to more than one downstream in DAG.
   // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
+}
+
+// Used to place an actor together with another actor in the same worker node.
+message ColocatedActorId {
+  uint32 id = 1;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,
@@ -544,8 +577,8 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
-  // Placement rule for actor, need to stay on the same node as upstream.
-  bool same_worker_node_as_upstream = 7;
+  // Placement rule for actor, need to stay on the same node as a specified upstream actor.
+  ColocatedActorId colocated_upstream_actor_id = 7;
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
@@ -560,6 +593,12 @@ enum FragmentTypeFlag {
   SINK = 4;
   NOW = 8;
   CHAIN_NODE = 16;
+}
+
+// The environment associated with a stream plan
+message StreamEnvironment {
+  // The timezone associated with the streaming plan. Only applies to MV for now.
+  string timezone = 1;
 }
 
 message StreamFragmentGraph {
@@ -590,6 +629,11 @@ message StreamFragmentGraph {
     uint32 upstream_id = 4;
     uint32 downstream_id = 5;
   }
+
+  message Parallelism {
+    uint64 parallelism = 1;
+  }
+
   // all the fragments in the graph.
   map<uint32, StreamFragment> fragments = 1;
   // edges between fragments.
@@ -597,4 +641,7 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
+  StreamEnvironment env = 5;
+  // If none, default parallelism will be applied.
+  Parallelism parallelism = 6;
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -257,7 +257,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 value_indices,
                 prefix_hint_len,
             );
-
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 scan_ranges,
@@ -395,6 +394,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             next_col_bounds,
         } = scan_range;
 
+        let (start_bound, end_bound) =
+            match table.pk_serializer().get_order_types()[pk_prefix.len()] {
+                OrderType::Ascending => (next_col_bounds.0, next_col_bounds.1),
+                OrderType::Descending => (next_col_bounds.1, next_col_bounds.0),
+            };
+
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
@@ -402,8 +407,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 epoch.into(),
                 &pk_prefix,
                 (
-                    next_col_bounds.0.map(|x| OwnedRow::new(vec![x])),
-                    next_col_bounds.1.map(|x| OwnedRow::new(vec![x])),
+                    start_bound.map(|x| OwnedRow::new(vec![x])),
+                    end_bound.map(|x| OwnedRow::new(vec![x])),
                 ),
                 ordered,
             )

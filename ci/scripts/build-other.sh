@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -6,7 +6,7 @@ set -euo pipefail
 source ci/scripts/common.env.sh
 
 # Should set a stable version of connector node
-STABLE_VERSION=9d2e1331680335661fd3e55ee234532358683201
+STABLE_VERSION=bd12fb55c75f09b234d1b75b8671b7582ca533f3
 
 echo "--- Build Java connector node"
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git

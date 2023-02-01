@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{Array, ListRef, StructRef};
 
-use crate::Result;
+use crate::{ExprError, Result};
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
@@ -55,18 +55,20 @@ where
 }
 
 use std::convert::From;
-use std::ops::Add;
 
+use num_traits::CheckedAdd;
 use risingwave_common::types::ScalarRef;
 
 pub fn sum<R, T>(result: Option<R>, input: Option<T>) -> Result<Option<R>>
 where
-    R: From<T> + Add<Output = R> + Copy,
+    R: From<T> + CheckedAdd<Output = R> + Copy,
 {
     let res = match (result, input) {
         (_, None) => result,
         (None, Some(i)) => Some(R::from(i)),
-        (Some(r), Some(i)) => Some(r + R::from(i)),
+        (Some(r), Some(i)) => r
+            .checked_add(&R::from(i))
+            .map_or(Err(ExprError::NumericOutOfRange), |x| Ok(Some(x)))?,
     };
     Ok(res)
 }
