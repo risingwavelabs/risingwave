@@ -267,9 +267,13 @@ async fn pull_version_deltas(
 ) -> anyhow::Result<Vec<HummockVersionDelta>> {
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client =
-        MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0)
-            .await?;
+    let meta_client = MetaClient::register_new(
+        cluster_meta_endpoint,
+        WorkerType::RiseCtl,
+        advertise_addr,
+        0,
+    )
+    .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned pull worker id {}", worker_id);
     meta_client.activate(advertise_addr).await.unwrap();
@@ -317,7 +321,8 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0).await?;
+        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
+            .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&advertise_addr).await.unwrap();
