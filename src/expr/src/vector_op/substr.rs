@@ -19,11 +19,7 @@ use crate::{bail, ExprError, Result};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
-    let start = (start
-        .checked_sub(1)
-        .ok_or(ExprError::NumericOutOfRange)?
-        .max(0) as usize)
-        .min(s.len());
+    let start = (start.saturating_sub(1).max(0) as usize).min(s.len());
     writer.write_str(&s[start..]).unwrap();
     Ok(())
 }
@@ -40,14 +36,14 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);
     }
-    let start = start.checked_sub(1).ok_or(ExprError::NumericOutOfRange)?;
+    let start = start.saturating_sub(1);
     // NOTE: we use `s.len()` here as an upper bound.
     // This is so it will return an empty slice if it exceeds
     // the length of `s`.
+    // 0 <= begin <= s.len()
     let begin = min(max(start, 0) as usize, s.len());
     let end = (start
-        .checked_add(count)
-        .ok_or(ExprError::NumericOutOfRange)?
+        .saturating_add(count)
         .max(0) as usize)
         .min(s.len());
     writer.write_str(&s[begin..end]).unwrap();
