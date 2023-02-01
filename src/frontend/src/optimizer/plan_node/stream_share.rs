@@ -69,6 +69,12 @@ impl PlanTreeNodeUnary for StreamShare {
     }
 }
 
+impl StreamShare {
+    pub fn replace_input(&self, plan: PlanRef) {
+        self.logical.replace_input(plan);
+    }
+}
+
 impl_plan_tree_node_for_unary! { StreamShare }
 
 impl StreamNode for StreamShare {
