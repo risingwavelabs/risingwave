@@ -126,6 +126,8 @@ impl SstableStore {
         meta_cache_capacity: usize,
         tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
     ) -> Self {
+        // TODO: We should validate path early. Otherwise object store won't report invalid path
+        // error until first write attempt.
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
