@@ -197,6 +197,10 @@ Then, connect to the playground instance via:
 psql -h localhost -p 4566 -d dev -U root
 ```
 
+## Debug playground using vscode 
+
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
+
 ## Develop the dashboard
 
 Currently, RisingWave has two versions of dashboards. You can use RiseDev config to select which version to use.

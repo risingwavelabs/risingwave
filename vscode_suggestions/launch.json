@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch 'risingwave p' debug",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/debug/risingwave",
+            "args": [
+                "playground"
+            ],
+            "cwd": "${workspaceRoot}",
+            "preLaunchTask": "risedev down"
+        }
+    ]
+}
