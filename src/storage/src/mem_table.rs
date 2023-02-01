@@ -110,7 +110,7 @@ impl MemTable {
             self.buffer.insert(pk, KeyOp::Delete(old_value));
             return Ok(());
         }
-        let entry = self.buffer.entry(pk.clone());
+        let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(KeyOp::Delete(old_value));
@@ -120,7 +120,7 @@ impl MemTable {
                 KeyOp::Insert(original_value) => {
                     if ENABLE_SANITY_CHECK && original_value != &old_value {
                         return Err(Box::new(MemTableError::InconsistentOperation {
-                            key: pk,
+                            key: e.key().clone(),
                             prev: e.get().clone(),
                             new: KeyOp::Delete(old_value),
                         }));
@@ -138,7 +138,7 @@ impl MemTable {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     if ENABLE_SANITY_CHECK && original_new_value != old_value {
                         return Err(Box::new(MemTableError::InconsistentOperation {
-                            key: pk,
+                            key: e.key().clone(),
                             prev: e.get().clone(),
                             new: KeyOp::Delete(old_value),
                         }));
@@ -156,7 +156,7 @@ impl MemTable {
                 .insert(pk, KeyOp::Update((old_value, new_value)));
             return Ok(());
         }
-        let entry = self.buffer.entry(pk.clone());
+        let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
                 e.insert(KeyOp::Update((old_value, new_value)));
@@ -167,7 +167,7 @@ impl MemTable {
                 | KeyOp::Update((_, ref mut original_new_value)) => {
                     if ENABLE_SANITY_CHECK && original_new_value != &old_value {
                         return Err(Box::new(MemTableError::InconsistentOperation {
-                            key: pk,
+                            key: e.key().clone(),
                             prev: e.get().clone(),
                             new: KeyOp::Update((old_value, new_value)),
                         }));
