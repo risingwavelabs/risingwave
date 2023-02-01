@@ -15,7 +15,7 @@
 use std::cmp::{max, min};
 use std::fmt::Write;
 
-use crate::{bail, ExprError, Result};
+use crate::{bail, Result};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
