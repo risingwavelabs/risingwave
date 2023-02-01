@@ -44,7 +44,7 @@ use crate::{
     StateStoreIter,
 };
 
-pub struct HummockStorageCore {
+pub struct LocalHummockStorage {
     /// Mutable memtable.
     // memtable: Memtable,
     instance_guard: LocalInstanceGuard,
@@ -58,31 +58,13 @@ pub struct HummockStorageCore {
     memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
-}
 
-pub struct LocalHummockStorage {
-    stats: Arc<HummockStateStoreMetrics>,
-    core: Arc<HummockStorageCore>,
     tracing: Arc<risingwave_tracing::RwTracingService>,
+
+    stats: Arc<HummockStateStoreMetrics>,
 }
 
-impl HummockStorageCore {
-    pub fn new(
-        instance_guard: LocalInstanceGuard,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        hummock_version_reader: HummockVersionReader,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<MemoryLimiter>,
-    ) -> Self {
-        Self {
-            instance_guard,
-            read_version,
-            event_sender,
-            memory_limiter,
-            hummock_version_reader,
-        }
-    }
-
+impl LocalHummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.read_version.write().update(info)
@@ -141,7 +123,7 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        self.core.get_inner(TableKey(key), epoch, read_options)
+        self.get_inner(TableKey(key), epoch, read_options)
     }
 
     fn iter(
@@ -150,8 +132,7 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        self.core
-            .iter_inner(map_table_key_range(key_range), epoch, read_options)
+        self.iter_inner(map_table_key_range(key_range), epoch, read_options)
             .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
@@ -186,7 +167,7 @@ impl StateStoreWrite for LocalHummockStorage {
 
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-            let limiter = self.core.memory_limiter.as_ref();
+            let limiter = self.memory_limiter.as_ref();
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
                 tracker
             } else {
@@ -195,8 +176,7 @@ impl StateStoreWrite for LocalHummockStorage {
                     size,
                     limiter.get_memory_usage()
                 );
-                self.core
-                    .event_sender
+                self.event_sender
                     .send(HummockEvent::BufferMayFlush)
                     .expect("should be able to send");
                 let tracker = limiter
@@ -220,12 +200,10 @@ impl StateStoreWrite for LocalHummockStorage {
                 Some(tracker),
             );
             let imm_size = imm.size();
-            self.core
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+            self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
-            self.core
-                .event_sender
+            self.event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
 
@@ -250,36 +228,29 @@ impl LocalHummockStorage {
         tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
-        let storage_core = HummockStorageCore::new(
+        Self {
             instance_guard,
             read_version,
-            hummock_version_reader,
             event_sender,
             memory_limiter,
-        );
-
-        Self {
-            stats,
-            core: Arc::new(storage_core),
+            hummock_version_reader,
             tracing,
+            stats,
         }
     }
 
     /// See `HummockReadVersion::update` for more details.
-    pub fn update(&self, info: VersionUpdate) {
-        self.core.update(info)
-    }
 
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
-        self.core.read_version.clone()
+        self.read_version.clone()
     }
 
     pub fn table_id(&self) -> TableId {
-        self.core.instance_guard.table_id
+        self.instance_guard.table_id
     }
 
     pub fn instance_id(&self) -> u64 {
-        self.core.instance_guard.instance_id
+        self.instance_guard.instance_id
     }
 }
 
