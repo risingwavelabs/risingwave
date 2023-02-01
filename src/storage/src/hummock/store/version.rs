@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -714,16 +714,16 @@ impl HummockVersionReader {
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
-                            continue;
-                        }
-                    }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                    }
+                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
+                            continue;
+                        }
                     }
                     sstables.push(sstable);
                 }
@@ -740,17 +740,17 @@ impl HummockVersionReader {
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
-                            continue;
-                        }
-                    }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                    }
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
+                        {
+                            continue;
+                        }
                     }
                     iters.push(SstableIterator::new(
                         sstable,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use futures::future::ready;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
@@ -29,29 +29,40 @@ use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
+use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::SourceColumnDesc;
+
+impl_common_parser_logic!(ProtobufParser);
 
 #[derive(Debug, Clone)]
 pub struct ProtobufParser {
     message_descriptor: MessageDescriptor,
     confluent_wire_type: bool,
+    rw_columns: Vec<SourceColumnDesc>,
 }
 
-impl ProtobufParser {
+#[derive(Debug, Clone)]
+pub struct ProtobufParserConfig {
+    confluent_wire_type: bool,
+    message_descriptor: MessageDescriptor,
+}
+
+impl ProtobufParserConfig {
     pub async fn new(
+        props: &HashMap<String, String>,
         location: &str,
         message_name: &str,
         use_schema_registry: bool,
-        props: HashMap<String, String>,
     ) -> Result<Self> {
         let url = Url::parse(location)
             .map_err(|e| InternalError(format!("failed to parse url ({}): {}", location, e)))?;
 
         let schema_bytes = if use_schema_registry {
-            let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url, &props)?;
+            let kafka_topic = get_kafka_topic(props)?;
+            let client = Client::new(url, props)?;
             compile_file_descriptor_from_schema_registry(
                 format!("{}-value", kafka_topic).as_str(),
                 &client,
@@ -153,8 +164,23 @@ impl ProtobufParser {
             })
         }
     }
+}
 
-    fn parse_inner(
+impl ProtobufParser {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, config: ProtobufParserConfig) -> Result<Self> {
+        let ProtobufParserConfig {
+            confluent_wire_type,
+            message_descriptor,
+        } = config;
+        Ok(Self {
+            message_descriptor,
+            confluent_wire_type,
+            rw_columns,
+        })
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn parse_inner(
         &self,
         mut payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
@@ -304,22 +330,6 @@ pub(crate) fn resolve_pb_header(payload: &[u8]) -> Result<&[u8]> {
     }
 }
 
-impl SourceParser for ProtobufParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
-    }
-}
-
 #[cfg(test)]
 mod test {
 
@@ -350,7 +360,9 @@ mod test {
         let location = schema_dir() + "/simple-schema";
         let message_name = "test.TestRecord";
         println!("location: {}", location);
-        let parser = ProtobufParser::new(&location, message_name, false, HashMap::new()).await?;
+        let conf =
+            ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
+        let parser = ProtobufParser::new(Vec::default(), conf)?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
@@ -386,8 +398,9 @@ mod test {
         let location = schema_dir() + "/complex-schema";
         let message_name = "test.User";
 
-        let parser = ProtobufParser::new(&location, message_name, false, HashMap::new()).await?;
-        let columns = parser.map_to_columns().unwrap();
+        let conf =
+            ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
+        let columns = conf.map_to_columns().unwrap();
 
         assert_eq!(columns[0].name, "id".to_string());
         assert_eq!(columns[1].name, "code".to_string());
