@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,10 +21,12 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::GenericPlanRef;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, StreamNode};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
@@ -50,11 +52,9 @@ impl StreamDeltaJoin {
         if eq_join_predicate.has_non_eq() {
             todo!("non-eq condition not supported for delta join");
         }
-        let dist = StreamHashJoin::derive_dist(
-            logical.left().distribution(),
-            logical.right().distribution(),
-            &logical,
-        );
+
+        // FIXME: delta join could have arbitrary distribution.
+        let dist = Distribution::SomeShard;
 
         let watermark_columns = {
             let from_left = logical
@@ -188,22 +188,28 @@ impl StreamNode for StreamDeltaJoin {
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
+                // TODO: remove it
                 arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                // TODO: remove it
                 column_descs: left_table
                     .logical()
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
+                table_desc: Some(left_table_desc.to_protobuf()),
             }),
             right_info: Some(ArrangementInfo {
+                // TODO: remove it
                 arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                // TODO: remove it
                 column_descs: right_table
                     .logical()
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
                     .collect(),
+                table_desc: Some(right_table_desc.to_protobuf()),
             }),
             output_indices: self
                 .logical

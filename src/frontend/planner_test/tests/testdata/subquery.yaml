@@ -106,11 +106,11 @@
       ) as t0
     );
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(ab.a, bc.b), output: all }
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(ab.a, t.v1), output: all }
     ├─LogicalScan { table: ab, columns: [ab.a, ab.b] }
     └─LogicalJoin { type: Inner, on: true, output: all }
-      ├─LogicalScan { table: bc, columns: [bc.b] }
-      └─LogicalScan { table: t, output_columns: [], required_columns: [t.v1], predicate: IsNotNull(t.v1) }
+      ├─LogicalScan { table: bc, columns: [] }
+      └─LogicalScan { table: t, columns: [t.v1], predicate: IsNotNull(t.v1) }
 - name: We cannot reference columns in left table if not lateral
   sql: |
     create table ab (a int, b int);
@@ -322,21 +322,20 @@
                           └─LogicalFilter { predicate: (b.b1 = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
                             └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1) AND (a.a1 = min(b.b2)), output: [a.a1, a.a2] }
+    LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1) AND (a.a1 = min(b.b1)), output: [a.a1, a.a2] }
     ├─LogicalScan { table: a, columns: [a.a1, a.a2] }
-    └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b2)] }
-      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b2] }
+    └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
+      └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1, b.b1] }
         ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         | └─LogicalScan { table: a, columns: [a.a1] }
-        └─LogicalJoin { type: Inner, on: (b.b2 = min(b.b1)), output: [b.b1, b.b2] }
+        └─LogicalJoin { type: Inner, on: (b.b2 = min(b.b1)), output: [a.a1, b.b1] }
           ├─LogicalScan { table: b, columns: [b.b1, b.b2] }
-          └─LogicalProject { exprs: [min(b.b1)] }
-            └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
-              └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b1] }
-                ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-                | └─LogicalScan { table: a, columns: [a.a1] }
-                └─LogicalProject { exprs: [b.b1, b.b1] }
-                  └─LogicalScan { table: b, columns: [b.b1], predicate: IsNotNull(b.b1) }
+          └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
+            └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b1] }
+              ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+              | └─LogicalScan { table: a, columns: [a.a1] }
+              └─LogicalProject { exprs: [b.b1, b.b1] }
+                └─LogicalScan { table: b, columns: [b.b1], predicate: IsNotNull(b.b1) }
 - name: test subquery in join on condition
   sql: |
     create table a (v1 int, v2 int);

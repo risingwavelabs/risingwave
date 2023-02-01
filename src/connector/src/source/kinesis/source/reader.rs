@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -21,15 +22,19 @@ use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as KinesisClient;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use tokio_retry;
 
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
-use crate::source::kinesis::{build_client, KinesisProperties};
-use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId, SplitImpl, SplitReader,
-};
+use crate::source::kinesis::KinesisProperties;
+use crate::source::monitor::SourceMetrics;
+use crate::source::{Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData};
+
+impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
 
 #[derive(Debug, Clone)]
 pub struct KinesisSplitReader {
@@ -40,21 +45,25 @@ pub struct KinesisSplitReader {
     shard_iter: Option<String>,
     start_position: KinesisOffset,
     end_position: KinesisOffset,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
-#[async_trait]
-impl SplitReader for KinesisSplitReader {
-    type Properties = KinesisProperties;
-
+impl KinesisSplitReader {
     async fn new(
         properties: KinesisProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let split = match state.unwrap().into_iter().next().unwrap() {
-            SplitImpl::Kinesis(ks) => ks,
-            split => return Err(anyhow!("expect KinesisSplit, got {:?}", split)),
-        };
+        assert!(splits.len() == 1);
+
+        let split = splits.into_iter().next().unwrap().into_kinesis().unwrap();
 
         let start_position = match &split.start_position {
             KinesisOffset::None => match &properties.scan_startup_mode {
@@ -79,9 +88,10 @@ impl SplitReader for KinesisSplitReader {
             start_position => start_position.to_owned(),
         };
 
-        let stream_name = properties.stream_name.clone();
-        let client = build_client(properties).await?;
+        let stream_name = properties.common.stream_name.clone();
+        let client = properties.common.build_client().await?;
 
+        let split_id = split.id();
         Ok(Self {
             client,
             stream_name,
@@ -90,17 +100,17 @@ impl SplitReader for KinesisSplitReader {
             latest_offset: None,
             start_position,
             end_position: split.end_position,
+            split_id,
+            parser_config,
+            metrics,
+            source_info,
         })
-    }
-
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
     }
 }
 
 impl KinesisSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(mut self) {
+    pub(crate) async fn into_data_stream(mut self) {
         self.new_shard_iter().await?;
         loop {
             if self.shard_iter.is_none() {
@@ -248,50 +258,60 @@ mod tests {
     use futures::StreamExt;
 
     use super::*;
+    use crate::common::KinesisCommon;
     use crate::source::kinesis::split::KinesisSplit;
 
     #[tokio::test]
     #[ignore]
     async fn test_single_thread_kinesis_reader() -> Result<()> {
         let properties = KinesisProperties {
-            assume_role_arn: None,
-            credentials_access_key: None,
-            credentials_secret_access_key: None,
-            stream_name: "kinesis_debug".to_string(),
-            stream_region: "cn-northwest-1".to_string(),
-            endpoint: None,
-            session_token: None,
-            assume_role_external_id: None,
+            common: KinesisCommon {
+                assume_role_arn: None,
+                credentials_access_key: None,
+                credentials_secret_access_key: None,
+                stream_name: "kinesis_debug".to_string(),
+                stream_region: "cn-northwest-1".to_string(),
+                endpoint: None,
+                session_token: None,
+                assume_role_external_id: None,
+            },
+
             scan_startup_mode: None,
             seq_offset: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(
             properties.clone(),
-            Some(vec![SplitImpl::Kinesis(KinesisSplit {
+            vec![SplitImpl::Kinesis(KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::Earliest,
                 end_position: KinesisOffset::None,
-            })]),
+            })],
+            Default::default(),
+            Default::default(),
+            Default::default(),
             None,
         )
         .await?
-        .into_stream();
+        .into_data_stream();
         println!("{:?}", trim_horizen_reader.next().await.unwrap()?);
 
         let mut offset_reader = KinesisSplitReader::new(
             properties.clone(),
-            Some(vec![SplitImpl::Kinesis(KinesisSplit {
+            vec![SplitImpl::Kinesis(KinesisSplit {
                 shard_id: "shardId-000000000001".to_string().into(),
                 start_position: KinesisOffset::SequenceNumber(
                     "49629139817504901062972448413535783695568426186596941842".to_string(),
                 ),
                 end_position: KinesisOffset::None,
-            })]),
+            })],
+            Default::default(),
+            Default::default(),
+            Default::default(),
             None,
         )
         .await?
-        .into_stream();
+        .into_data_stream();
         println!("{:?}", offset_reader.next().await.unwrap()?);
 
         Ok(())

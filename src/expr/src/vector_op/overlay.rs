@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
@@ -34,7 +34,11 @@ pub fn overlay_for(
 
     // If start is out of range, attach it to the end.
     // Note that indices are 1-based.
-    let start = ((start - 1).max(0) as usize).min(s.len());
+    let start = (start
+        .checked_sub(1)
+        .ok_or(ExprError::NumericOutOfRange)?
+        .max(0) as usize)
+        .min(s.len());
 
     let remaining = start + count;
 

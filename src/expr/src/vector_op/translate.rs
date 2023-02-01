@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,10 +64,10 @@ mod tests {
                 "a之初，b本善cb相近，习相远c",
             ),
             (
-                "奇点无限 Singularity Data",
-                "Data ",
+                "奇点无限 RisingWave Labs",
+                "Labs ",
                 "1234",
-                "奇点无限Singul2ri3y1232",
+                "奇点无限Ri4ingW2ve1234",
             ),
         ];
 

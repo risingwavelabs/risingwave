@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@ mod macros;
 pub mod parser;
 pub mod sink;
 pub mod source;
+
+pub mod common;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
