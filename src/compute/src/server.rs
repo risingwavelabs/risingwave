@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -34,10 +35,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_source::monitor::SourceMetrics;
-use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, Compactor, CompactorContext, Context,
-};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
@@ -154,8 +152,8 @@ pub async fn compute_node_serve(
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            let context = Arc::new(Context {
-                options: storage_config,
+            let compactor_context = Arc::new(CompactorContext {
+                storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
@@ -165,13 +163,12 @@ pub async fn compute_node_serve(
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
+                    CompactorRuntimeConfig {
+                        max_concurrent_task_number: 1,
+                    },
+                )),
             });
-            let compactor_context = Arc::new(CompactorContext::with_config(
-                context,
-                CompactorRuntimeConfig {
-                    max_concurrent_task_number: 1,
-                },
-            ));
 
             let (handle, shutdown_sender) =
                 Compactor::start_compactor(compactor_context, hummock_meta_client);

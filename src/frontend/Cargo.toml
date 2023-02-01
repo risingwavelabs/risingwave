@@ -13,6 +13,7 @@ anyhow = "1"
 arc-swap = "1"
 assert-impl = "0.1"
 async-trait = "0.1"
+bk-tree = "0.4.0"
 byteorder = "1.4"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }

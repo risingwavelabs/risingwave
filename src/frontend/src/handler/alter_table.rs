@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,10 +45,10 @@ pub async fn handle_add_column(
             reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
 
         match table.table_type() {
-            TableType::Table if table.associated_source_id().is_none() => {}
+            TableType::Table if !table.has_associated_source() => {}
             // Do not allow altering a table with a connector. It should be done passively according
             // to the messages from the connector.
-            TableType::Table if table.associated_source_id().is_some() => {
+            TableType::Table if table.has_associated_source() => {
                 Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot alter table \"{table_name}\" because it has a connector"
                 )))?

@@ -217,6 +217,15 @@ export interface ReplaceTablePlanResponse {
   version: number;
 }
 
+export interface JavaGetTableRequest {
+  databaseName: string;
+  tableName: string;
+}
+
+export interface JavaGetTableResponse {
+  table: Table | undefined;
+}
+
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
   return { db: undefined };
 }
@@ -1331,6 +1340,55 @@ export const ReplaceTablePlanResponse = {
       ? Status.fromPartial(object.status)
       : undefined;
     message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseJavaGetTableRequest(): JavaGetTableRequest {
+  return { databaseName: "", tableName: "" };
+}
+
+export const JavaGetTableRequest = {
+  fromJSON(object: any): JavaGetTableRequest {
+    return {
+      databaseName: isSet(object.databaseName) ? String(object.databaseName) : "",
+      tableName: isSet(object.tableName) ? String(object.tableName) : "",
+    };
+  },
+
+  toJSON(message: JavaGetTableRequest): unknown {
+    const obj: any = {};
+    message.databaseName !== undefined && (obj.databaseName = message.databaseName);
+    message.tableName !== undefined && (obj.tableName = message.tableName);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<JavaGetTableRequest>, I>>(object: I): JavaGetTableRequest {
+    const message = createBaseJavaGetTableRequest();
+    message.databaseName = object.databaseName ?? "";
+    message.tableName = object.tableName ?? "";
+    return message;
+  },
+};
+
+function createBaseJavaGetTableResponse(): JavaGetTableResponse {
+  return { table: undefined };
+}
+
+export const JavaGetTableResponse = {
+  fromJSON(object: any): JavaGetTableResponse {
+    return { table: isSet(object.table) ? Table.fromJSON(object.table) : undefined };
+  },
+
+  toJSON(message: JavaGetTableResponse): unknown {
+    const obj: any = {};
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<JavaGetTableResponse>, I>>(object: I): JavaGetTableResponse {
+    const message = createBaseJavaGetTableResponse();
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     return message;
   },
 };

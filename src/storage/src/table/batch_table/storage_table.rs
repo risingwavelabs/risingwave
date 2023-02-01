@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -534,7 +534,6 @@ impl<S: StateStore> StorageTable<S> {
 
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
-            .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
 

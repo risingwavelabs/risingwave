@@ -35,9 +35,9 @@ echo "--- Download connector node jar"
 buildkite-agent artifact download connector-service.jar ./
 
 echo "--- Prepare data"
-cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
-cp src/source/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
-cp src/source/src/test_data/complex-schema ./proto-complex-schema
+cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
+cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
+cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -51,8 +51,7 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
-# install mysql client
-apt-get -y install mysql-client
+
 # import data to mysql
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 

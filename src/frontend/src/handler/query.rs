@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,12 +169,19 @@ pub async fn handle_query(
         | StatementType::INSERT_RETURNING
         | StatementType::DELETE_RETURNING
         | StatementType::UPDATE_RETURNING => None,
+
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let first_row_set = row_stream
-                .next()
-                .await
-                .expect("compute node should return affected rows in output")
-                .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
+            let first_row_set = row_stream.next().await;
+            let first_row_set = match first_row_set {
+                None => {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "no affected rows in output".to_string(),
+                    )))
+                }
+                Some(row) => {
+                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+                }
+            };
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
@@ -197,30 +204,34 @@ pub async fn handle_query(
         _ => unreachable!(),
     };
 
-    // Implicitly flush the writes.
-    // FIXME(bugen): the DMLs with `RETURNING` clause is done only after the `row_stream` is fully
-    // consumed, so implicitly flushing here doesn't work.
-    if session.config().get_implicit_flush() {
-        flush_for_write(&session, stmt_type).await?;
-    }
+    // We need to do some post work after the query is finished and before the `Complete` response
+    // it sent. This is achieved by the `callback` in `PgResponse`.
+    let callback = async move {
+        // Implicitly flush the writes.
+        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+            do_flush(&session).await?;
+        }
 
-    // update some metrics
-    if query_mode == QueryMode::Local {
-        session
-            .env()
-            .frontend_metrics
-            .latency_local_execution
-            .observe(query_start_time.elapsed().as_secs_f64());
+        // update some metrics
+        if query_mode == QueryMode::Local {
+            session
+                .env()
+                .frontend_metrics
+                .latency_local_execution
+                .observe(query_start_time.elapsed().as_secs_f64());
 
-        session
-            .env()
-            .frontend_metrics
-            .query_counter_local_execution
-            .inc();
-    }
+            session
+                .env()
+                .frontend_metrics
+                .query_counter_local_execution
+                .inc();
+        }
 
-    Ok(PgResponse::new_for_stream_with_notice(
-        stmt_type, rows_count, row_stream, pg_descs, notice,
+        Ok(())
+    };
+
+    Ok(PgResponse::new_for_stream_extra(
+        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
     ))
 }
 
@@ -284,14 +295,8 @@ pub async fn local_execute(
         "",
         pinned_snapshot,
         session.auth_context(),
+        session.reset_cancel_query_flag(),
     );
 
     Ok(execution.stream_rows())
-}
-
-pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    if stmt_type.is_dml() {
-        do_flush(session).await?;
-    }
-    Ok(())
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,9 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, BatchProject, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
+    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -536,9 +537,7 @@ impl LogicalJoin {
                 .map(|x| x.as_input_ref().unwrap().index)
                 .collect_vec()
         } else {
-            (0..logical_scan.output_col_idx().len())
-                .into_iter()
-                .collect_vec()
+            (0..logical_scan.output_col_idx().len()).collect_vec()
         };
         let left_schema_len = logical_join.left().schema().len();
 
@@ -782,6 +781,18 @@ impl ColPrunable for LogicalJoin {
             on,
             new_output_indices,
         )
+        .into()
+    }
+}
+
+impl ExprRewritable for LogicalJoin {
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
         .into()
     }
 }
@@ -1083,11 +1094,11 @@ impl LogicalJoin {
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
-        // join is a `Inner` join, we can convert the scalar subquery into a
+        // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
 
-        // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
-        if self.join_type() != JoinType::Inner {
+        // Check if `Inner`/`LeftSemi`
+        if !matches!(self.join_type(), JoinType::Inner | JoinType::LeftSemi) {
             return Ok(None);
         }
 

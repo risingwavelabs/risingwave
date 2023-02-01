@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
@@ -228,6 +229,18 @@ pub fn update_filter_key_extractor_for_table_ids(
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
+        )
+    }
+}
+
+pub fn update_filter_key_extractor_for_tables(
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    tables: &[ProstTable],
+) {
+    for table in tables {
+        filter_key_extractor_manager_ref.update(
+            table.id,
+            Arc::new(FilterKeyExtractorImpl::from_table(table)),
         )
     }
 }

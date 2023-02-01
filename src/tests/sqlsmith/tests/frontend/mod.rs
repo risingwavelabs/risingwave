@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -136,8 +136,9 @@ fn round_trip_parse_test(sql: &str) -> Result<Statement> {
     let round_trip = parse_first_sql_stmt(&unparse(parse_first_sql_stmt(sql)));
     if start != round_trip {
         Err(format!(
-            "Roundtrip test failed\nStart: {}\nRoundtrip: {}",
-            start, round_trip
+            "Roundtrip test failed\nStart: {}\nRoundtrip: {}\n\
+            Start AST: {:?}\nRoundtrip AST: {:?}",
+            sql, round_trip, start, round_trip
         )
         .into())
     } else {

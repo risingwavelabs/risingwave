@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,12 @@ use std::time::{Duration, SystemTime};
 
 use parse_display::Display;
 
-static UNIX_SINGULARITY_DATE_SEC: u64 = 1_617_235_200;
+static UNIX_RISINGWAVE_DATE_SEC: u64 = 1_617_235_200;
 
-/// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch:
+/// [`UNIX_RISINGWAVE_DATE_EPOCH`] represents the risingwave date of the UNIX epoch:
 /// 2021-04-01T00:00:00Z.
-pub static UNIX_SINGULARITY_DATE_EPOCH: LazyLock<SystemTime> =
-    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(UNIX_SINGULARITY_DATE_SEC));
+pub static UNIX_RISINGWAVE_DATE_EPOCH: LazyLock<SystemTime> =
+    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(UNIX_RISINGWAVE_DATE_SEC));
 
 #[derive(Clone, Copy, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);
@@ -68,19 +68,19 @@ impl Epoch {
     }
 
     pub fn physical_now() -> u64 {
-        UNIX_SINGULARITY_DATE_EPOCH
+        UNIX_RISINGWAVE_DATE_EPOCH
             .elapsed()
-            .expect("system clock set earlier than singularity date!")
+            .expect("system clock set earlier than risingwave date!")
             .as_millis() as u64
     }
 
     pub fn as_unix_millis(&self) -> u64 {
-        UNIX_SINGULARITY_DATE_SEC * 1000 + self.physical_time()
+        UNIX_RISINGWAVE_DATE_SEC * 1000 + self.physical_time()
     }
 
     /// Returns the epoch in real system time.
     pub fn as_system_time(&self) -> SystemTime {
-        *UNIX_SINGULARITY_DATE_EPOCH + Duration::from_millis(self.physical_time())
+        *UNIX_RISINGWAVE_DATE_EPOCH + Duration::from_millis(self.physical_time())
     }
 
     /// Returns the epoch subtract `relative_time_ms`, which used for ttl to get epoch corresponding
@@ -131,11 +131,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_singularity_system_time() {
+    fn test_risingwave_system_time() {
         let utc = Utc.with_ymd_and_hms(2021, 4, 1, 0, 0, 0).unwrap();
-        let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
-        let singularity_st = SystemTime::from(singularity_dt);
-        assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);
+        let risingwave_dt = Local.from_utc_datetime(&utc.naive_utc());
+        let risingwave_st = SystemTime::from(risingwave_dt);
+        assert_eq!(risingwave_st, *UNIX_RISINGWAVE_DATE_EPOCH);
     }
 
     #[test]
