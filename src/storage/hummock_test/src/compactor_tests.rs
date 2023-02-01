@@ -663,9 +663,9 @@ pub(crate) mod tests {
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let (table_id, storage) = if index % 2 == 0 {
-                (drop_table_id, storage_1.clone())
+                (drop_table_id, &storage_1)
             } else {
-                (existing_table_ids, storage_2.clone())
+                (existing_table_ids, &storage_2)
             };
             register_table_ids_to_compaction_group(
                 &hummock_manager_ref,

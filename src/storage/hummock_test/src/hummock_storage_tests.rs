@@ -744,7 +744,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
     let test_get = || {
-        let hummock_storage_clone = hummock_storage.clone();
+        let hummock_storage_clone = &hummock_storage;
         async move {
             assert_eq!(
                 hummock_storage_clone
