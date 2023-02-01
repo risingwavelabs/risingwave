@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,14 +21,14 @@ use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::StreamChunkWithState;
+use risingwave_connector::source::StreamChunkWithState;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 
-pub type TableSourceRef = Arc<TableSource>;
+pub type TableDmlHandleRef = Arc<TableDmlHandle>;
 
 #[derive(Debug)]
-struct TableSourceCore {
+struct TableDmlHandleCore {
     /// The senders of the changes channel.
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
@@ -36,24 +36,24 @@ struct TableSourceCore {
     changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<usize>)>>,
 }
 
-/// [`TableSource`] is a special internal source to handle table updates from user,
+/// [`TableDmlHandle`] is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
 ///
 /// Changed rows will be send to the associated "materialize" streaming task, then be written to the
-/// state store. Therefore, [`TableSource`] can be simply be treated as a channel without side
+/// state store. Therefore, [`TableDmlHandle`] can be simply be treated as a channel without side
 /// effects.
 #[derive(Debug)]
-pub struct TableSource {
-    core: RwLock<TableSourceCore>,
+pub struct TableDmlHandle {
+    core: RwLock<TableDmlHandleCore>,
 
     /// All columns in this table.
     #[allow(dead_code)]
     column_descs: Vec<ColumnDesc>,
 }
 
-impl TableSource {
+impl TableDmlHandle {
     pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
-        let core = TableSourceCore {
+        let core = TableDmlHandleCore {
             changes_txs: vec![],
         };
 
@@ -81,7 +81,7 @@ impl TableSource {
             let core = self.core.upgradable_read();
 
             // The `changes_txs` should not be empty normally, since we ensured that the channels
-            // between the `TableSource` and the `SourceExecutor`s are ready before we making the
+            // between the `TableDmlHandle` and the `SourceExecutor`s are ready before we making the
             // table catalog visible to the users. However, when we're recovering, it's possible
             // that the streaming executors are not ready when the frontend is able to schedule DML
             // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
@@ -156,15 +156,15 @@ mod tests {
 
     use super::*;
 
-    fn new_source() -> TableSource {
-        TableSource::new(vec![ColumnDesc::unnamed(
+    fn new_source() -> TableDmlHandle {
+        TableDmlHandle::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),
             DataType::Int64,
         )])
     }
 
     #[tokio::test]
-    async fn test_table_source() -> Result<()> {
+    async fn test_table_dml_handle() -> Result<()> {
         let source = Arc::new(new_source());
         let mut reader = source.stream_reader().into_stream();
 

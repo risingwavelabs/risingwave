@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ pub async fn start_follower_srv(
     let leader_srv = LeaderServiceImpl::new(
         election_client,
         MetaLeaderInfo {
-            node_address: address_info.listen_addr.to_string(),
+            node_address: address_info.meta_endpoint.to_string(),
             lease_id: 0,
         },
     );

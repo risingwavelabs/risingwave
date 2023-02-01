@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,25 +19,22 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::{ConnectorProperties, ConnectorState, SplitReaderV2Impl};
-use risingwave_connector::{SourceColumnDesc, SourceFormat};
-
-use crate::connector_source::SourceContext;
-use crate::monitor::SourceMetrics;
+use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::{
+    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceInfo, SplitReaderV2Impl,
+};
 
 #[derive(Clone, Debug)]
 pub struct FsConnectorSource {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub properties: HashMap<String, String>,
-    pub format: SourceFormat,
     pub parser_config: SpecificParserConfig,
 }
 
 impl FsConnectorSource {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        format: SourceFormat,
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
         connector_node_addr: Option<String>,
@@ -55,7 +52,6 @@ impl FsConnectorSource {
             config,
             columns,
             properties,
-            format,
             parser_config,
         })
     }
@@ -82,8 +78,8 @@ impl FsConnectorSource {
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
-        _metrics: Arc<SourceMetrics>,
-        _context: SourceContext,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
     ) -> Result<SplitReaderV2Impl> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
@@ -91,11 +87,10 @@ impl FsConnectorSource {
         let parser_config = ParserConfig {
             specific: self.parser_config.clone(),
             common: CommonParserConfig {
-                props: self.properties.clone(),
                 rw_columns: columns,
             },
         };
-        SplitReaderV2Impl::create(config, state, parser_config, None)
+        SplitReaderV2Impl::create(config, state, parser_config, metrics, source_info, None)
             .await
             .map_err(RwError::from)
     }

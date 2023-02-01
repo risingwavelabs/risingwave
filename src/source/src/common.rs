@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_connector::SourceColumnDesc;
+use risingwave_connector::source::SourceColumnDesc;
 
 pub(crate) trait SourceChunkBuilder {
     fn build_columns<'a>(

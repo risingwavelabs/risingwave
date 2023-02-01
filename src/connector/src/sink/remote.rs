@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
@@ -48,8 +49,8 @@ use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
 
-pub fn is_valid_remote_sink(sink_type: String) -> bool {
-    return VALID_REMOTE_SINKS.contains(&sink_type.as_str());
+pub fn is_valid_remote_sink(sink_type: &str) -> bool {
+    VALID_REMOTE_SINKS.contains(&sink_type)
 }
 
 #[derive(Clone, Debug)]
@@ -65,8 +66,8 @@ impl RemoteConfig {
             .expect("sink type must be specified")
             .to_string();
 
-        if !is_valid_remote_sink(sink_type.clone()) {
-            return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
+        if !is_valid_remote_sink(sink_type.as_str()) {
+            return Err(SinkError::Config(anyhow!("invalid sink type: {sink_type}")));
         }
 
         Ok(RemoteConfig {

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,13 @@ use async_stack_trace::StackTraceManager;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::config::{
+    load_config, AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
+};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
@@ -34,10 +37,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_source::monitor::SourceMetrics;
-use risingwave_storage::hummock::compactor::{
-    CompactionExecutor, Compactor, CompactorContext, Context,
-};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
@@ -61,7 +61,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeOpts};
+use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -70,7 +70,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, Some(opts.override_config));
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
@@ -118,14 +118,14 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &opts.state_store,
-        &opts.file_cache_dir,
+        &config.storage.state_store,
+        &config.storage.file_cache.dir,
         &config,
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if opts.enable_jaeger_tracing {
+        if config.streaming.enable_jaeger_tracing {
             Arc::new(
                 risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
                     "127.0.0.1:6831".to_string(),
@@ -146,16 +146,16 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
-        if opts.state_store == "hummock+memory"
-            || opts.state_store.starts_with("hummock+disk")
+        if config.storage.state_store == "hummock+memory"
+            || config.storage.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            let context = Arc::new(Context {
-                options: storage_config,
+            let compactor_context = Arc::new(CompactorContext {
+                storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
@@ -165,13 +165,12 @@ pub async fn compute_node_serve(
                 read_memory_limiter,
                 sstable_id_manager: storage.sstable_id_manager().clone(),
                 task_progress_manager: Default::default(),
+                compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
+                    CompactorRuntimeConfig {
+                        max_concurrent_task_number: 1,
+                    },
+                )),
             });
-            let compactor_context = Arc::new(CompactorContext::with_config(
-                context,
-                CompactorRuntimeConfig {
-                    max_concurrent_task_number: 1,
-                },
-            ));
 
             let (handle, shutdown_sender) =
                 Compactor::start_compactor(compactor_context, hummock_meta_client);
@@ -192,7 +191,7 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
-    let async_stack_trace_config = match opts.async_stack_trace {
+    let async_stack_trace_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => Some(async_stack_trace::TraceConfig {
             report_detached: true,
@@ -314,7 +313,7 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.server.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
             registry.clone(),

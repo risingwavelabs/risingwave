@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,15 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, TableId};
-use risingwave_connector::source::{ConnectorState, SplitId, SplitMetaData};
-use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
-use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2, SourceDescV2};
+use risingwave_connector::source::{
+    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
+};
+use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
-use super::SourceStateTableHandler;
+use super::executor_core::StreamSourceCore;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::reader::SourceReaderStream;
 use crate::executor::*;
@@ -34,55 +34,6 @@ use crate::executor::*;
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
-
-/// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
-/// external connector.
-pub struct StreamSourceCore<S: StateStore> {
-    source_id: TableId,
-    source_name: String,
-
-    column_ids: Vec<ColumnId>,
-
-    source_identify: String,
-
-    /// `source_desc_builder` will be taken (`mem::take`) on execution. A `SourceDesc` (currently
-    /// named `SourceDescV2`) will be constructed and used for execution.
-    source_desc_builder: Option<SourceDescBuilderV2>,
-
-    /// Split info for stream source. A source executor might read data from several splits of
-    /// external connector.
-    stream_source_splits: HashMap<SplitId, SplitImpl>,
-
-    /// Stores information of the splits.
-    split_state_store: SourceStateTableHandler<S>,
-
-    /// In-memory cache for the splits.
-    state_cache: HashMap<SplitId, SplitImpl>,
-}
-
-impl<S> StreamSourceCore<S>
-where
-    S: StateStore,
-{
-    pub fn new(
-        source_id: TableId,
-        source_name: String,
-        column_ids: Vec<ColumnId>,
-        source_desc_builder: SourceDescBuilderV2,
-        split_state_store: SourceStateTableHandler<S>,
-    ) -> Self {
-        Self {
-            source_id,
-            source_name,
-            column_ids,
-            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
-            source_desc_builder: Some(source_desc_builder),
-            stream_source_splits: HashMap::new(),
-            split_state_store,
-            state_cache: HashMap::new(),
-        }
-    }
-}
 
 pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -132,7 +83,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn build_stream_source_reader(
         &self,
-        source_desc: &SourceDescV2,
+        source_desc: &SourceDesc,
         state: ConnectorState,
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let column_ids = source_desc
@@ -140,25 +91,24 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        Ok(source_desc
+        source_desc
             .source
             .stream_reader(
                 state,
                 column_ids,
                 source_desc.metrics.clone(),
-                SourceContext::new(
+                SourceInfo::new(
                     self.ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id,
                 ),
             )
             .await
-            .map_err(StreamExecutorError::connector_error)?
-            .into_stream())
+            .map_err(StreamExecutorError::connector_error)
     }
 
     async fn apply_split_change(
         &mut self,
-        source_desc: &SourceDescV2,
+        source_desc: &SourceDesc,
         stream: &mut SourceReaderStream,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
@@ -215,7 +165,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     async fn replace_stream_reader_with_target_state(
         &mut self,
-        source_desc: &SourceDescV2,
+        source_desc: &SourceDesc,
         stream: &mut SourceReaderStream,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
@@ -288,10 +238,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut core = self.stream_source_core.unwrap();
 
         // Build source description from the builder.
-        let source_desc = core
-            .source_desc_builder
-            .take()
-            .unwrap()
+        let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
+        let source_desc = source_desc_builder
             .build()
             .await
             .map_err(StreamExecutorError::connector_error)?;
@@ -533,7 +481,7 @@ mod tests {
 
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};

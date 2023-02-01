@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrat
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
+use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithState};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -145,7 +145,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
-    use risingwave_source::TableSource;
+    use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -154,8 +154,8 @@ mod tests {
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
-        let table_source = TableSource::new(vec![]);
-        let source_stream = table_source.stream_reader().into_stream();
+        let table_dml_handle = TableDmlHandle::new(vec![]);
+        let source_stream = table_dml_handle.stream_reader().into_stream();
 
         let stream = SourceReaderStream::new(barrier_rx, source_stream);
         pin_mut!(stream);
@@ -171,7 +171,9 @@ mod tests {
         }
 
         // Write a chunk, and we should receive it.
-        table_source.write_chunk(StreamChunk::default()).unwrap();
+        table_dml_handle
+            .write_chunk(StreamChunk::default())
+            .unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
         barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
@@ -183,7 +185,9 @@ mod tests {
         // Write a barrier.
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
-        table_source.write_chunk(StreamChunk::default()).unwrap();
+        table_dml_handle
+            .write_chunk(StreamChunk::default())
+            .unwrap();
 
         // We should receive the barrier.
         assert_matches!(next!().unwrap(), Either::Left(_));

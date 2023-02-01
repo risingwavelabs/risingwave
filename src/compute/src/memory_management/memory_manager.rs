@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,12 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-#[cfg(target_os = "linux")]
-use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
 #[cfg(target_os = "linux")]
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
-#[cfg(target_os = "linux")]
-use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
-#[cfg(target_os = "linux")]
-use tracing;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
 /// the memory usage.
@@ -94,6 +88,9 @@ impl GlobalMemoryManager {
         _batch_mgr: Arc<BatchManager>,
         _stream_mgr: Arc<LocalStreamManager>,
     ) {
+        use std::time::Duration;
+
+        use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
         let mem_threshold_graceful =
             (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;
         let mem_threshold_aggressive = (self.total_memory_available_bytes as f64
@@ -180,6 +177,9 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(cur_total_bytes_used as i64);
+            self.metrics
+                .stream_total_mem_usage
+                .set(_stream_mgr.get_total_mem_val().get());
 
             self.set_watermark_time_ms(watermark_time_ms);
         }

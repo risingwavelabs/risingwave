@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper};
-use risingwave_connector::parser::{JsonParser, SourceParser, SourceStreamChunkBuilder};
-use risingwave_connector::SourceColumnDesc;
+use risingwave_connector::parser::{JsonParser, SourceStreamChunkBuilder};
+use risingwave_connector::source::SourceColumnDesc;
 
 const NUM_RECORDS: usize = 1 << 18; // ~ 250,000
 
@@ -130,7 +130,7 @@ fn get_descs() -> Vec<SourceColumnDesc> {
 
 fn bench_json_parser(c: &mut Criterion) {
     let descs = get_descs();
-    let parser = JsonParser {};
+    let parser = JsonParser::new(descs.clone()).unwrap();
     let records = generate_all_json();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -141,7 +141,7 @@ fn bench_json_parser(c: &mut Criterion) {
             let mut builder = SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
             for record in &records {
                 let writer = builder.row_writer();
-                parser.parse(record, writer).await.unwrap();
+                parser.parse_inner(record, writer).await.unwrap();
             }
         })
     });

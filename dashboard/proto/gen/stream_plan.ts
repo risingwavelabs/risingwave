@@ -25,6 +25,8 @@ export const ChainType = {
   REARRANGE: "REARRANGE",
   /** BACKFILL - BACKFILL is corresponding to the backfill executor. */
   BACKFILL: "BACKFILL",
+  /** UPSTREAM_ONLY - UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot. */
+  UPSTREAM_ONLY: "UPSTREAM_ONLY",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -44,6 +46,9 @@ export function chainTypeFromJSON(object: any): ChainType {
     case 3:
     case "BACKFILL":
       return ChainType.BACKFILL;
+    case 4:
+    case "UPSTREAM_ONLY":
+      return ChainType.UPSTREAM_ONLY;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -61,6 +66,8 @@ export function chainTypeToJSON(object: ChainType): string {
       return "REARRANGE";
     case ChainType.BACKFILL:
       return "BACKFILL";
+    case ChainType.UPSTREAM_ONLY:
+      return "UPSTREAM_ONLY";
     case ChainType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -497,6 +504,20 @@ export interface HashJoinNode {
     | undefined;
   /** The output indices of current node */
   outputIndices: number[];
+  /**
+   * Left deduped input pk indices. The pk of the left_table and
+   * left_degree_table is  [left_join_key | left_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
+  leftDedupedInputPkIndices: number[];
+  /**
+   * Right deduped input pk indices. The pk of the right_table and
+   * right_degree_table is  [right_join_key | right_deduped_input_pk_indices]
+   * and is expected to be the shortest key which starts with
+   * the join key and satisfies unique constrain.
+   */
+  rightDedupedInputPkIndices: number[];
   nullSafe: boolean[];
   /**
    * Whether to optimize for append only stream.
@@ -622,6 +643,8 @@ export interface ArrangementInfo {
   arrangeKeyOrders: ColumnOrder[];
   /** Column descs of the arrangement */
   columnDescs: ColumnDesc[];
+  /** Used to build storage table by stream lookup join of delta join. */
+  tableDesc: StorageTableDesc | undefined;
 }
 
 /**
@@ -661,11 +684,7 @@ export interface LookupNode {
     | { $case: "tableId"; tableId: number }
     | { $case: "indexId"; indexId: number };
   /** Info about the arrangement */
-  arrangementTableInfo:
-    | ArrangementInfo
-    | undefined;
-  /** Internal table of arrangement. */
-  arrangementTable: Table | undefined;
+  arrangementTableInfo: ArrangementInfo | undefined;
 }
 
 /** WatermarkFilter needs to filter the upstream data by the water mark. */
@@ -809,6 +828,11 @@ export interface Dispatcher {
   downstreamActorId: number[];
 }
 
+/** Used to place an actor together with another actor in the same worker node. */
+export interface ColocatedActorId {
+  id: number;
+}
+
 /** A StreamActor is a running fragment of the overall stream graph, */
 export interface StreamActor {
   actorId: number;
@@ -822,8 +846,10 @@ export interface StreamActor {
    * We duplicate the information here to ease the parsing logic in stream manager.
    */
   upstreamActorId: number[];
-  /** Placement rule for actor, need to stay on the same node as upstream. */
-  sameWorkerNodeAsUpstream: boolean;
+  /** Placement rule for actor, need to stay on the same node as a specified upstream actor. */
+  colocatedUpstreamActorId:
+    | ColocatedActorId
+    | undefined;
   /**
    * Vnodes that the executors in this actor own.
    * If the fragment is a singleton, this field will not be set and leave a `None`.
@@ -2361,6 +2387,8 @@ function createBaseHashJoinNode(): HashJoinNode {
     leftDegreeTable: undefined,
     rightDegreeTable: undefined,
     outputIndices: [],
+    leftDedupedInputPkIndices: [],
+    rightDedupedInputPkIndices: [],
     nullSafe: [],
     isAppendOnly: false,
   };
@@ -2378,6 +2406,12 @@ export const HashJoinNode = {
       leftDegreeTable: isSet(object.leftDegreeTable) ? Table.fromJSON(object.leftDegreeTable) : undefined,
       rightDegreeTable: isSet(object.rightDegreeTable) ? Table.fromJSON(object.rightDegreeTable) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      leftDedupedInputPkIndices: Array.isArray(object?.leftDedupedInputPkIndices)
+        ? object.leftDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
+      rightDedupedInputPkIndices: Array.isArray(object?.rightDedupedInputPkIndices)
+        ? object.rightDedupedInputPkIndices.map((e: any) => Number(e))
+        : [],
       nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
     };
@@ -2411,6 +2445,16 @@ export const HashJoinNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.leftDedupedInputPkIndices) {
+      obj.leftDedupedInputPkIndices = message.leftDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.leftDedupedInputPkIndices = [];
+    }
+    if (message.rightDedupedInputPkIndices) {
+      obj.rightDedupedInputPkIndices = message.rightDedupedInputPkIndices.map((e) => Math.round(e));
+    } else {
+      obj.rightDedupedInputPkIndices = [];
+    }
     if (message.nullSafe) {
       obj.nullSafe = message.nullSafe.map((e) => e);
     } else {
@@ -2441,6 +2485,8 @@ export const HashJoinNode = {
       ? Table.fromPartial(object.rightDegreeTable)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.leftDedupedInputPkIndices = object.leftDedupedInputPkIndices?.map((e) => e) || [];
+    message.rightDedupedInputPkIndices = object.rightDedupedInputPkIndices?.map((e) => e) || [];
     message.nullSafe = object.nullSafe?.map((e) => e) || [];
     message.isAppendOnly = object.isAppendOnly ?? false;
     return message;
@@ -2782,7 +2828,7 @@ export const BatchPlanNode = {
 };
 
 function createBaseArrangementInfo(): ArrangementInfo {
-  return { arrangeKeyOrders: [], columnDescs: [] };
+  return { arrangeKeyOrders: [], columnDescs: [], tableDesc: undefined };
 }
 
 export const ArrangementInfo = {
@@ -2794,6 +2840,7 @@ export const ArrangementInfo = {
       columnDescs: Array.isArray(object?.columnDescs)
         ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e))
         : [],
+      tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
   },
 
@@ -2809,6 +2856,8 @@ export const ArrangementInfo = {
     } else {
       obj.columnDescs = [];
     }
+    message.tableDesc !== undefined &&
+      (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
     return obj;
   },
 
@@ -2816,6 +2865,9 @@ export const ArrangementInfo = {
     const message = createBaseArrangementInfo();
     message.arrangeKeyOrders = object.arrangeKeyOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
+    message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.tableDesc)
+      : undefined;
     return message;
   },
 };
@@ -2868,7 +2920,6 @@ function createBaseLookupNode(): LookupNode {
     columnMapping: [],
     arrangementTableId: undefined,
     arrangementTableInfo: undefined,
-    arrangementTable: undefined,
   };
 }
 
@@ -2887,7 +2938,6 @@ export const LookupNode = {
       arrangementTableInfo: isSet(object.arrangementTableInfo)
         ? ArrangementInfo.fromJSON(object.arrangementTableInfo)
         : undefined,
-      arrangementTable: isSet(object.arrangementTable) ? Table.fromJSON(object.arrangementTable) : undefined,
     };
   },
 
@@ -2914,8 +2964,6 @@ export const LookupNode = {
     message.arrangementTableInfo !== undefined && (obj.arrangementTableInfo = message.arrangementTableInfo
       ? ArrangementInfo.toJSON(message.arrangementTableInfo)
       : undefined);
-    message.arrangementTable !== undefined &&
-      (obj.arrangementTable = message.arrangementTable ? Table.toJSON(message.arrangementTable) : undefined);
     return obj;
   },
 
@@ -2941,9 +2989,6 @@ export const LookupNode = {
     }
     message.arrangementTableInfo = (object.arrangementTableInfo !== undefined && object.arrangementTableInfo !== null)
       ? ArrangementInfo.fromPartial(object.arrangementTableInfo)
-      : undefined;
-    message.arrangementTable = (object.arrangementTable !== undefined && object.arrangementTable !== null)
-      ? Table.fromPartial(object.arrangementTable)
       : undefined;
     return message;
   },
@@ -3690,6 +3735,28 @@ export const Dispatcher = {
   },
 };
 
+function createBaseColocatedActorId(): ColocatedActorId {
+  return { id: 0 };
+}
+
+export const ColocatedActorId = {
+  fromJSON(object: any): ColocatedActorId {
+    return { id: isSet(object.id) ? Number(object.id) : 0 };
+  },
+
+  toJSON(message: ColocatedActorId): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ColocatedActorId>, I>>(object: I): ColocatedActorId {
+    const message = createBaseColocatedActorId();
+    message.id = object.id ?? 0;
+    return message;
+  },
+};
+
 function createBaseStreamActor(): StreamActor {
   return {
     actorId: 0,
@@ -3697,7 +3764,7 @@ function createBaseStreamActor(): StreamActor {
     nodes: undefined,
     dispatcher: [],
     upstreamActorId: [],
-    sameWorkerNodeAsUpstream: false,
+    colocatedUpstreamActorId: undefined,
     vnodeBitmap: undefined,
     mviewDefinition: "",
   };
@@ -3711,9 +3778,9 @@ export const StreamActor = {
       nodes: isSet(object.nodes) ? StreamNode.fromJSON(object.nodes) : undefined,
       dispatcher: Array.isArray(object?.dispatcher) ? object.dispatcher.map((e: any) => Dispatcher.fromJSON(e)) : [],
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
-      sameWorkerNodeAsUpstream: isSet(object.sameWorkerNodeAsUpstream)
-        ? Boolean(object.sameWorkerNodeAsUpstream)
-        : false,
+      colocatedUpstreamActorId: isSet(object.colocatedUpstreamActorId)
+        ? ColocatedActorId.fromJSON(object.colocatedUpstreamActorId)
+        : undefined,
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       mviewDefinition: isSet(object.mviewDefinition) ? String(object.mviewDefinition) : "",
     };
@@ -3734,7 +3801,9 @@ export const StreamActor = {
     } else {
       obj.upstreamActorId = [];
     }
-    message.sameWorkerNodeAsUpstream !== undefined && (obj.sameWorkerNodeAsUpstream = message.sameWorkerNodeAsUpstream);
+    message.colocatedUpstreamActorId !== undefined && (obj.colocatedUpstreamActorId = message.colocatedUpstreamActorId
+      ? ColocatedActorId.toJSON(message.colocatedUpstreamActorId)
+      : undefined);
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.mviewDefinition !== undefined && (obj.mviewDefinition = message.mviewDefinition);
@@ -3750,7 +3819,10 @@ export const StreamActor = {
       : undefined;
     message.dispatcher = object.dispatcher?.map((e) => Dispatcher.fromPartial(e)) || [];
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
-    message.sameWorkerNodeAsUpstream = object.sameWorkerNodeAsUpstream ?? false;
+    message.colocatedUpstreamActorId =
+      (object.colocatedUpstreamActorId !== undefined && object.colocatedUpstreamActorId !== null)
+        ? ColocatedActorId.fromPartial(object.colocatedUpstreamActorId)
+        : undefined;
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;

@@ -1,8 +1,8 @@
 package com.risingwave.java.binding;
 
 public class KeyedRow implements AutoCloseable {
-    final long pointer;
-    boolean isClosed;
+    private final long pointer;
+    private boolean isClosed;
 
     KeyedRow(long pointer) {
         this.pointer = pointer;

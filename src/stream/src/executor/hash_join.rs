@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,15 +140,15 @@ fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
 pub struct JoinParams {
     /// Indices of the join keys
     pub join_key_indices: Vec<usize>,
-    /// Indices of the distribution keys
-    pub dist_keys: Vec<usize>,
+    /// Indices of the input pk after dedup
+    pub deduped_pk_indices: Vec<usize>,
 }
 
 impl JoinParams {
-    pub fn new(join_key_indices: Vec<usize>, dist_keys: Vec<usize>) -> Self {
+    pub fn new(join_key_indices: Vec<usize>, deduped_pk_indices: Vec<usize>) -> Self {
         Self {
             join_key_indices,
-            dist_keys,
+            deduped_pk_indices,
         }
     }
 }
@@ -158,8 +158,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     ht: JoinHashMap<K, S>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
-    /// The primary key indices of state table on this side
-    pk_indices: Vec<usize>,
+    /// The primary key indices of state table on this side after dedup
+    deduped_pk_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
@@ -175,7 +175,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
-            .field("pk_indices", &self.pk_indices)
+            .field("deduped_pk_indices", &self.deduped_pk_indices)
             .field("col_types", &self.all_data_types)
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
@@ -561,12 +561,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     metrics.clone(),
                     ctx.id,
                     "left",
-                ), // TODO: decide the target cap
+                ),
                 join_key_indices: join_key_indices_l,
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
-                pk_indices: state_pk_indices_l,
+                deduped_pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
             },
@@ -586,10 +586,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     metrics.clone(),
                     ctx.id,
                     "right",
-                ), // TODO: decide the target cap
+                ),
                 join_key_indices: join_key_indices_r,
                 all_data_types: state_all_data_types_r,
-                pk_indices: state_pk_indices_r,
+                deduped_pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
@@ -1088,8 +1088,8 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
-        let params_l = JoinParams::new(vec![0], vec![]);
-        let params_r = JoinParams::new(vec![0], vec![]);
+        let params_l = JoinParams::new(vec![0], vec![1]);
+        let params_r = JoinParams::new(vec![0], vec![1]);
         let cond = with_condition.then(create_cond);
 
         let mem_state = MemoryStateStore::new();

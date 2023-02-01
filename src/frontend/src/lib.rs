@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+use risingwave_common_proc_macro::OverrideConfig;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -65,6 +66,7 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
+/// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     // TODO: rename to listen_address and separate out the port.
@@ -88,12 +90,6 @@ pub struct FrontendOpts {
     #[clap(long, default_value = "127.0.0.1:6786")]
     pub health_check_listener_addr: String,
 
-    /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    #[clap(long, default_value = "0")]
-    pub metrics_level: u32,
-
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -102,6 +98,20 @@ pub struct FrontendOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(flatten)]
+    override_opts: OverrideConfigOpts,
+}
+
+/// Command-line arguments for frontend-node that overrides the config file.
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+struct OverrideConfigOpts {
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    #[clap(long)]
+    #[override_opts(path = server.metrics_level)]
+    pub metrics_level: Option<u32>,
 }
 
 impl Default for FrontendOpts {
@@ -120,8 +130,9 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-        pg_serve(&opts.host, session_mgr, Some(TlsConfig::new_default()))
+        let addr = opts.host.clone();
+        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        pg_serve(&addr, session_mgr, Some(TlsConfig::new_default()))
             .await
             .unwrap();
     })

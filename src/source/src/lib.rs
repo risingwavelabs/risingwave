@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,8 +28,8 @@ pub mod dml_manager;
 
 mod common;
 pub mod connector_source;
-pub use connector_source::test_utils as connector_test_utils;
+pub mod source_desc;
+pub use source_desc::test_utils as connector_test_utils;
 pub mod fs_connector_source;
-pub mod monitor;
 pub mod row_id;
 mod table;

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,8 +85,6 @@ impl ElectionClient for EtcdElectionClient {
         let mut lease_client = self.client.lease_client();
         let mut election_client = self.client.election_client();
         let mut stop = stop;
-
-        self.is_leader_sender.send_replace(false);
 
         tracing::info!("client {} start election", self.id);
 
@@ -200,6 +198,7 @@ impl ElectionClient for EtcdElectionClient {
         let _guard = scopeguard::guard(handle, |handle| handle.abort());
 
         if !restored_leader {
+            self.is_leader_sender.send_replace(false);
             tracing::info!("no restored leader, campaigning");
             tokio::select! {
                 biased;
@@ -216,9 +215,9 @@ impl ElectionClient for EtcdElectionClient {
             };
         }
 
-        let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
-
         self.is_leader_sender.send_replace(true);
+
+        let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
 
         loop {
             tokio::select! {
