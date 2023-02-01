@@ -141,27 +141,22 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let (meta_endpoint, backend) = match config.meta.backend {
-            MetaBackend::Etcd => (
-                opts.meta_endpoint
-                    .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port())),
-                MetaStoreBackend::Etcd {
-                    endpoints: opts
-                        .etcd_endpoints
-                        .split(',')
-                        .map(|x| x.to_string())
-                        .collect(),
-                    credentials: match opts.etcd_auth {
-                        true => Some((opts.etcd_username, opts.etcd_password)),
-                        false => None,
-                    },
+        let meta_endpoint = opts
+            .meta_endpoint
+            .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
+        let backend = match config.meta.backend {
+            MetaBackend::Etcd => MetaStoreBackend::Etcd {
+                endpoints: opts
+                    .etcd_endpoints
+                    .split(',')
+                    .map(|x| x.to_string())
+                    .collect(),
+                credentials: match opts.etcd_auth {
+                    true => Some((opts.etcd_username, opts.etcd_password)),
+                    false => None,
                 },
-            ),
-            MetaBackend::Mem => (
-                opts.meta_endpoint
-                    .unwrap_or_else(|| opts.listen_addr.clone()),
-                MetaStoreBackend::Mem,
-            ),
+            },
+            MetaBackend::Mem => MetaStoreBackend::Mem,
         };
 
         let max_heartbeat_interval =
