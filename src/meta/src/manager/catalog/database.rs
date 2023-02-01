@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -177,6 +177,10 @@ impl DatabaseManager {
         } else {
             Ok(())
         }
+    }
+
+    pub fn list_databases(&self) -> Vec<Database> {
+        self.databases.values().cloned().collect_vec()
     }
 
     pub fn list_creating_tables(&self) -> Vec<Table> {

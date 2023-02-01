@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -136,10 +136,9 @@ impl HummockStorageV1 {
             table_counts += table_count;
         }
 
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+        });
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
@@ -336,7 +335,7 @@ impl HummockStorageV1 {
         let bloom_filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint));
+            .map(|hint| Sstable::hash_for_bloom_filter(hint, read_options.table_id.table_id()));
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
