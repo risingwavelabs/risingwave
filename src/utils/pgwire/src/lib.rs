@@ -16,6 +16,7 @@
 #![feature(lint_reasons, once_cell)]
 #![feature(trait_alias)]
 #![feature(result_option_inspect)]
+#![feature(iterator_try_collect)]
 #![expect(clippy::doc_markdown, reason = "FIXME: later")]
 
 pub mod error;
