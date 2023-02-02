@@ -3590,8 +3590,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "150508f130d4ab8b00ff33bbe7d2f6276a943d8198efddb7c5a69c6b89ee6547"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=4d3dc62#4d3dc62c21ef7a495f2e0b4e9b74033f84c2b736"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3618,8 +3617,7 @@ dependencies = [
 [[package]]
 name = "madsim-etcd-client"
 version = "0.2.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "399abea1dd4b45ed8564c67e400dfac5b65fe8f21356ea5f0cc32c793ea61285"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=4d3dc62#4d3dc62c21ef7a495f2e0b4e9b74033f84c2b736"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3638,8 +3636,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=4d3dc62#4d3dc62c21ef7a495f2e0b4e9b74033f84c2b736"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3674,10 +3671,8 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95122ce38cd63608a480fa7ebd8216f79ba8228cea34744e1a93e9c49f21872"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=4d3dc62#4d3dc62c21ef7a495f2e0b4e9b74033f84c2b736"
 dependencies = [
- "futures-lite",
  "madsim",
  "tokio",
 ]

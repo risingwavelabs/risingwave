@@ -201,4 +201,5 @@ async fn main() {
             })
             .await;
     }
+    cluster.graceful_shutdown().await;
 }
