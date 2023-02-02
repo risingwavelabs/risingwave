@@ -63,7 +63,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
-    /// Total available memory in bytes, used by LRU Manager
+    /// Total available memory for the compute node in bytes. Used by both computing and storage.
     #[clap(long, default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 

@@ -21,7 +21,8 @@ use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, StorageConfig, MAX_CONNECTION_WINDOW_SIZE,
+    STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
@@ -63,6 +64,9 @@ use crate::rpc::service::monitor_service::{
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
 
+/// The minimal memory requirement of computing tasks in megabytes.
+const MIN_COMPUTE_MEMORY_MB: usize = 512;
+
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
@@ -71,11 +75,13 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
+    validate_compute_node_memory_config(opts.total_memory_bytes, &config.storage);
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
+
     // Initialize all the configs
     let storage_config = Arc::new(config.storage.clone());
     let stream_config = Arc::new(config.streaming.clone());
@@ -144,12 +150,8 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
-        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
-        // compactor along with compute node.
-        if config.storage.state_store == "hummock+memory"
-            || config.storage.state_store.starts_with("hummock+disk")
-            || storage_config.disable_remote_compactor
-        {
+
+        if storage_config.embedded_compactor_enabled() {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
@@ -324,4 +326,17 @@ pub async fn compute_node_serve(
     meta_client.activate(&client_addr).await.unwrap();
 
     (join_handle_vec, shutdown_send)
+}
+
+/// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
+/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing. Otherewise, it is not allowed to
+/// start.
+fn validate_compute_node_memory_config(total_memory_bytes: usize, storage_config: &StorageConfig) {
+    if storage_config.total_memory_limit_mb() << 20 > total_memory_bytes {
+        panic!("The total storage memory capacity exceeds the total memory for the compute node. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
+    } else if (storage_config.total_memory_limit_mb() + MIN_COMPUTE_MEMORY_MB) << 20
+        >= total_memory_bytes
+    {
+        panic!("No enough memory for computing. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
+    }
 }
