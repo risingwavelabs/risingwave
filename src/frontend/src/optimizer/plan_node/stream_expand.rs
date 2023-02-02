@@ -38,16 +38,18 @@ impl StreamExpand {
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
+        let schema = logical.schema().clone();
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        watermark_columns &= logical.input().watermark_columns();
 
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
-            logical.schema().clone(),
+            schema,
             logical.base.logical_pk.to_vec(),
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamExpand { base, logical }
     }

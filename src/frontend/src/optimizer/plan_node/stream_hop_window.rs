@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
@@ -37,6 +36,8 @@ impl StreamHopWindow {
         let i2o = logical.i2o_col_mapping();
         let dist = i2o.rewrite_provided_distribution(input.distribution());
 
+        let watermark_columns = i2o.rewrite_bitset(input.watermark_columns());
+
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
@@ -44,8 +45,7 @@ impl StreamHopWindow {
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         Self { base, logical }
     }

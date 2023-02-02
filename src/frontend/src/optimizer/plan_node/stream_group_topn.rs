@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
@@ -43,8 +42,7 @@ impl StreamGroupTopN {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             false,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.input().watermark_columns().clone(),
         );
         StreamGroupTopN {
             base,
