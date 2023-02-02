@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
+use risingwave_sqlparser::ast::{Expr, Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::Binder;
@@ -79,7 +79,7 @@ impl Binder {
             .clone()
             .into_iter()
             .filter(|c| !c.is_hidden())
-            .collect_vec();
+            .collect_vec(); // [v1, v2]
         let row_id_index = table_catalog.row_id_index;
 
         let expected_types: Vec<DataType> = columns_to_insert
@@ -118,7 +118,14 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
+                tracing::error!("values: {:?}", values);
+                let mut values = values.clone();
+                let null_expr = Expr::Value(risingwave_sqlparser::ast::Value::Null);
+                values.0[0].push(null_expr);
+                tracing::error!("values push: {:?}", values);
+
                 let values = self.bind_values(values, Some(expected_types.clone()))?;
+                // values: Actual values I am inserting. We need to change this in bind_values
                 let body = BoundSetExpr::Values(values.into());
                 (
                     BoundQuery {
@@ -228,22 +235,17 @@ impl Binder {
                     .try_collect();
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
-            std::cmp::Ordering::Greater => {
-                let mut exprs_null = exprs;
-                exprs_null.push(ExprImpl::literal_null(DataType::Int32));
-                // Push multiple? Push different types?
-                return exprs_null
-                    .into_iter()
-                    .zip_eq(expected_types)
-                    .map(|(e, t)| e.cast_assign(t.clone()))
-                    .try_collect();
-
-                // add an ExprImpl here? Can I just add null values here?
-                "INSERT has more target columns than expressions" // TODO: Fails here
-            }
+            std::cmp::Ordering::Greater => "INSERT has more target columns than expressions",
         };
         Err(ErrorCode::BindError(msg.into()).into())
     }
 }
 
+// I should not handle this in cast_on_insert, because this function may not get called
+
 // create table t1 (v1 int, v2 int); insert into t1 (v1) values (5);
+// create table t1 (v1 int, v2 int); insert into t1  values (5, 1);
+
+// TODO
+// insert into t1 (v2) values (5);
+// Do not simply push back nil values

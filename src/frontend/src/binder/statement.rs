@@ -37,7 +37,7 @@ impl Binder {
                 returning,
             } => Ok(BoundStatement::Insert(
                 self.bind_insert(table_name, columns, *source, returning)?
-                    .into(),
+                    .into(), // columns: ... insert (columns here)
             )),
 
             Statement::Delete {
