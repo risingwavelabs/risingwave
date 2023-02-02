@@ -535,6 +535,11 @@ export interface RescheduleResponse {
   success: boolean;
 }
 
+export interface SystemParams {
+  barrierIntervalMs: number;
+  checkpointFrequency: number;
+}
+
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
 }
@@ -2299,6 +2304,33 @@ export const RescheduleResponse = {
   fromPartial<I extends Exact<DeepPartial<RescheduleResponse>, I>>(object: I): RescheduleResponse {
     const message = createBaseRescheduleResponse();
     message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return { barrierIntervalMs: 0, checkpointFrequency: 0 };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : 0,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : 0,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? 0;
+    message.checkpointFrequency = object.checkpointFrequency ?? 0;
     return message;
   },
 };

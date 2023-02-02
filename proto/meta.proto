@@ -303,3 +303,8 @@ service ScaleService {
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
 }
+
+message SystemParams {
+  uint32 barrier_interval_ms = 1;
+  uint64 checkpoint_frequency = 2;
+}

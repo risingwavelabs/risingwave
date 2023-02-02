@@ -18,6 +18,7 @@ mod cluster;
 mod error;
 mod notification;
 mod stream;
+mod system_param;
 mod user;
 
 use std::collections::btree_map::{Entry, VacantEntry};
@@ -33,6 +34,7 @@ pub use error::*;
 pub use notification::*;
 use prost::Message;
 pub use stream::*;
+pub use system_param::*;
 pub use user::*;
 
 use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
