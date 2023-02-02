@@ -44,7 +44,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient, VerifyParams};
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -166,11 +166,12 @@ impl FrontendEnv {
         tracing::info!("Client address is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let meta_client = MetaClient::register_new(
+        let (meta_client, _) = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
             0,
+            VerifyParams::for_frontend(),
         )
         .await?;
 

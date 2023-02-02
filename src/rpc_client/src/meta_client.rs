@@ -69,7 +69,7 @@ use tonic::{Code, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
+use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef, VerifyParams};
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -120,12 +120,14 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-    ) -> Result<Self> {
+        verify_params: VerifyParams,
+    ) -> Result<(Self, SystemParams)> {
         let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
+            verify_params: Some(verify_params.inner),
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
@@ -134,12 +136,16 @@ impl MetaClient {
         })
         .await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        Ok(Self {
-            worker_id: worker_node.id,
-            worker_type,
-            host_addr: addr.clone(),
-            inner: grpc_meta_client,
-        })
+        let system_params = resp.system_params.unwrap();
+        Ok((
+            Self {
+                worker_id: worker_node.id,
+                worker_type,
+                host_addr: addr.clone(),
+                inner: grpc_meta_client,
+            },
+            system_params,
+        ))
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.

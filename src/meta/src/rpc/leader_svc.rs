@@ -30,7 +30,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use risingwave_pb::meta::MetaLeaderInfo;
+use risingwave_pb::meta::{MetaLeaderInfo, SystemParams};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::watch::Receiver as WatchReceiver;
 
@@ -44,6 +44,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    SystemParamManager,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::server::{AddressInfo, ElectionClientRef};
@@ -75,6 +76,10 @@ pub async fn start_leader_srv<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
+    let init_system_param = SystemParams {
+        barrier_interval_ms: opts.barrier_interval.as_millis() as u32,
+        checkpoint_frequency: opts.checkpoint_frequency as u64,
+    };
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -205,6 +210,8 @@ pub async fn start_leader_srv<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
+    let system_param_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_param).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -227,7 +234,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         stream_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
+    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone(), system_param_manager);
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),

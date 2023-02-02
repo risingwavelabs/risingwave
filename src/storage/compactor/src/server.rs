@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{MetaClient, VerifyParams};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -56,10 +56,15 @@ pub async fn compactor_serve(
     );
 
     // Register to the cluster.
-    let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
-            .await
-            .unwrap();
+    let (meta_client, _) = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::Compactor,
+        &client_addr,
+        0,
+        VerifyParams::for_compactor(),
+    )
+    .await
+    .unwrap();
     tracing::info!("Assigned compactor id {}", meta_client.worker_id());
     meta_client.activate(&client_addr).await.unwrap();
 

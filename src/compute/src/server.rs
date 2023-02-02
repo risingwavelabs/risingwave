@@ -35,7 +35,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient, VerifyParams};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -82,11 +82,12 @@ pub async fn compute_node_serve(
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
-    let meta_client = MetaClient::register_new(
+    let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
         opts.parallelism,
+        VerifyParams::for_compute_node(stream_config.barrier_interval_ms),
     )
     .await
     .unwrap();
@@ -215,7 +216,7 @@ pub async fn compute_node_serve(
     let stream_mgr_clone = stream_mgr.clone();
     let mgr = GlobalMemoryManager::new(
         opts.total_memory_bytes,
-        config.streaming.barrier_interval_ms,
+        system_params.barrier_interval_ms,
         streaming_metrics.clone(),
     );
     // Run a background memory monitor

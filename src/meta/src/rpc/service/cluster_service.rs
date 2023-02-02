@@ -20,20 +20,27 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::ClusterManagerRef;
+use crate::manager::{ClusterManagerRef, SystemParamManagerRef};
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
 pub struct ClusterServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
+    system_param_manager: SystemParamManagerRef<S>,
 }
 
 impl<S> ClusterServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
-        ClusterServiceImpl { cluster_manager }
+    pub fn new(
+        cluster_manager: ClusterManagerRef<S>,
+        system_param_manager: SystemParamManagerRef<S>,
+    ) -> Self {
+        ClusterServiceImpl {
+            cluster_manager,
+            system_param_manager,
+        }
     }
 }
 
@@ -49,6 +56,12 @@ where
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
         let host = req.get_host()?.clone();
+        // Allow the worker to join only if it's system parameters are consistent with the cluster.
+        // Note that the verification is just for backward compatibility. It may be removed after
+        // we deprecate system param items from the config file.
+        let system_params = self
+            .system_param_manager
+            .verify_params(worker_type, req.verify_params.unwrap())?;
         let worker_node_parallelism = req.worker_node_parallelism as usize;
         let worker_node = self
             .cluster_manager
@@ -57,6 +70,7 @@ where
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,
             node: Some(worker_node),
+            system_params: Some(system_params),
         }))
     }
 
