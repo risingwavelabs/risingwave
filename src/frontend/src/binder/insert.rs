@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Ident, ObjectName, Query, SelectItem, SetExpr};
+use risingwave_sqlparser::ast::{Expr, Ident, ObjectName, Query, SelectItem, SetExpr, Value};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::Binder;
@@ -87,6 +87,51 @@ impl Binder {
             .map(|c| c.data_type().clone())
             .collect();
 
+        // TODO
+        // insert into t1 (v2) values (5);
+        // Do not simply push back nil values
+        let source = match source {
+            Query {
+                with,
+                body: SetExpr::Values(values),
+                order_by,
+                limit,
+                offset,
+                fetch,
+            } => {
+                if values.0[0].len() < expected_types.len() {
+                    tracing::info!("values: {:?}", values); // TODO: remove line
+
+                    // How do I persist this in source?
+                    let mut new_values = values.clone();
+                    for _ in 0..expected_types.len() - new_values.0[0].len() {
+                        let null_expr = Expr::Value(Value::Null);
+                        new_values.0[0].push(null_expr);
+                    }
+                    tracing::info!("values push: {:?}", new_values); // TODO: remove line
+                    Query {
+                        // TODO: Can I do this more elegantly?
+                        with,
+                        body: SetExpr::Values(new_values),
+                        order_by,
+                        limit,
+                        offset,
+                        fetch,
+                    }
+                } else {
+                    Query {
+                        with,
+                        body: SetExpr::Values(values),
+                        order_by,
+                        limit,
+                        offset,
+                        fetch,
+                    }
+                }
+            }
+            _ => source, // Ignore other case?
+        };
+
         // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
         //
@@ -118,12 +163,7 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
-                tracing::error!("values: {:?}", values);
-                let mut values = values.clone();
-                let null_expr = Expr::Value(risingwave_sqlparser::ast::Value::Null);
-                values.0[0].push(null_expr);
-                tracing::error!("values push: {:?}", values);
-
+                tracing::info!("values in match: {:?}", values); // TODO: remove line
                 let values = self.bind_values(values, Some(expected_types.clone()))?;
                 // values: Actual values I am inserting. We need to change this in bind_values
                 let body = BoundSetExpr::Values(values.into());
@@ -179,13 +219,20 @@ impl Binder {
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
         // insert into t1 (v1) values (5, 6);         // ...less target columns than values
-        let (eq_len, msg) = match target_table_col_indices.len().cmp(&expected_types.len()) {
-            std::cmp::Ordering::Equal => (true, ""),
-            std::cmp::Ordering::Greater => (false, "INSERT has more target columns than values"),
-            std::cmp::Ordering::Less => (false, "INSERT has less target columns than values"),
+        let err_msg = match target_table_col_indices.len().cmp(&expected_types.len()) {
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => {
+                // TODO: We have to change the target_table_col_indices
+                // The last couple values are null values pushed against us earlier
+                None
+            }
+            std::cmp::Ordering::Less => Some("INSERT has less target columns than values"),
         };
-        if !eq_len && !target_table_col_indices.is_empty() {
-            return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
+
+        if !err_msg.is_some() && !target_table_col_indices.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(
+                err_msg.unwrap().to_string(),
+            )));
         }
 
         // Check if column was used multiple times in query e.g.
@@ -245,7 +292,3 @@ impl Binder {
 
 // create table t1 (v1 int, v2 int); insert into t1 (v1) values (5);
 // create table t1 (v1 int, v2 int); insert into t1  values (5, 1);
-
-// TODO
-// insert into t1 (v2) values (5);
-// Do not simply push back nil values
