@@ -59,9 +59,9 @@
     select * from t order by 1+1;
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
-    └─BatchExchange { order: [2:Int32 ASC], dist: Single }
-      └─BatchSort { order: [2:Int32 ASC] }
-        └─BatchProject { exprs: [t.v1, t.v2, 2:Int32] }
+    └─BatchExchange { order: [(1:Int32 + 1:Int32) ASC], dist: Single }
+      └─BatchSort { order: [(1:Int32 + 1:Int32) ASC] }
+        └─BatchProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32)] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, (1:Int32 + 1:Int32)(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [(1:Int32 + 1:Int32), t._row_id] }
