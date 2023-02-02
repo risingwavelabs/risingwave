@@ -26,7 +26,7 @@ statement ok
 set streaming_parallelism = 0;
 
 statement ok
-create materialized view v as select * from a join b on a.a1 = b.b1 ;
+create materialized view v as select * from a join b on a.a1 = b.b1;
 
 statement ok
 insert into A values (1,2), (1,3);
