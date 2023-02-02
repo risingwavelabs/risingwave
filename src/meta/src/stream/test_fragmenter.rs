@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(any())]
-
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -36,7 +34,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CompleteStreamFragmentGraph, CreateStreamingJobContext, StreamFragmentGraph};
@@ -404,13 +402,30 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     }
 }
 
-fn make_parallel_units() -> Vec<ParallelUnit> {
-    (0..8)
-        .map(|id| ParallelUnit {
-            id,
-            worker_node_id: 0,
+fn make_cluster_info() -> StreamingClusterInfo {
+    let parallel_units = (0..8)
+        .map(|id| {
+            (
+                id,
+                ParallelUnit {
+                    id,
+                    worker_node_id: 0,
+                },
+            )
         })
-        .collect()
+        .collect();
+    let worker_nodes = std::iter::once((
+        0,
+        WorkerNode {
+            id: 0,
+            ..Default::default()
+        },
+    ))
+    .collect();
+    StreamingClusterInfo {
+        worker_nodes,
+        parallel_units,
+    }
 }
 
 #[tokio::test]
@@ -429,10 +444,10 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
-        make_parallel_units(),
+        make_cluster_info(),
         parallel_degree,
     )?;
-    let graph = actor_graph_builder
+    let (graph, _locations) = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
 
