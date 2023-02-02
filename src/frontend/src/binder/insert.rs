@@ -99,34 +99,24 @@ impl Binder {
                 offset,
                 fetch,
             } => {
-                if values.0[0].len() < expected_types.len() {
+                let new_body = if values.0[0].len() < expected_types.len() {
                     tracing::info!("values: {:?}", values); // TODO: remove line
-
-                    // How do I persist this in source?
                     let mut new_values = values.clone();
                     for _ in 0..expected_types.len() - new_values.0[0].len() {
-                        let null_expr = Expr::Value(Value::Null);
-                        new_values.0[0].push(null_expr);
+                        new_values.0[0].push(Expr::Value(Value::Null));
                     }
                     tracing::info!("values push: {:?}", new_values); // TODO: remove line
-                    Query {
-                        // TODO: Can I do this more elegantly?
-                        with,
-                        body: SetExpr::Values(new_values),
-                        order_by,
-                        limit,
-                        offset,
-                        fetch,
-                    }
+                    SetExpr::Values(new_values)
                 } else {
-                    Query {
-                        with,
-                        body: SetExpr::Values(values),
-                        order_by,
-                        limit,
-                        offset,
-                        fetch,
-                    }
+                    SetExpr::Values(values)
+                };
+                Query {
+                    with,
+                    body: new_body,
+                    order_by,
+                    limit,
+                    offset,
+                    fetch,
                 }
             }
             _ => source, // Ignore other case?
