@@ -578,7 +578,7 @@ fn parse_not_precedence() {
     // NULL)
     let sql = "NOT a IS NULL";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("NOT (a IS NULL)", &ast.to_string());
+    assert_eq!("NOT a IS NULL", &ast.to_string());
     assert_matches!(
         ast,
         Expr::UnaryOp {
