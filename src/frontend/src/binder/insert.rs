@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -87,10 +89,9 @@ impl Binder {
             .map(|c| c.data_type().clone())
             .collect();
 
-        // TODO
-        // insert into t1 (v2) values (5);
-        // Do not simply push back nil values
-        let source = match source {
+        // Adding Null values in case user did not specify all columns
+        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
+        let (source, nulls_inserted) = match source {
             Query {
                 with,
                 body: SetExpr::Values(values),
@@ -99,27 +100,31 @@ impl Binder {
                 offset,
                 fetch,
             } => {
-                let new_body = if values.0[0].len() < expected_types.len() {
+                let (new_body, nulls_inserted) = if values.0[0].len() < expected_types.len() {
                     tracing::info!("values: {:?}", values); // TODO: remove line
                     let mut new_values = values.clone();
-                    for _ in 0..expected_types.len() - new_values.0[0].len() {
+                    let nulls_to_insert = expected_types.len() - new_values.0[0].len();
+                    for _ in 0..nulls_to_insert {
                         new_values.0[0].push(Expr::Value(Value::Null));
                     }
                     tracing::info!("values push: {:?}", new_values); // TODO: remove line
-                    SetExpr::Values(new_values)
+                    (SetExpr::Values(new_values), nulls_to_insert)
                 } else {
-                    SetExpr::Values(values)
+                    (SetExpr::Values(values), 0)
                 };
-                Query {
-                    with,
-                    body: new_body,
-                    order_by,
-                    limit,
-                    offset,
-                    fetch,
-                }
+                (
+                    Query {
+                        with,
+                        body: new_body,
+                        order_by,
+                        limit,
+                        offset,
+                        fetch,
+                    },
+                    nulls_inserted,
+                )
             }
-            _ => source, // Ignore other case?
+            _ => (source, 0), // Ignore other case?
         };
 
         // When the column types of `source` query do not match `expected_types`, casting is
@@ -203,6 +208,37 @@ impl Binder {
             ))));
         }
 
+        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
+        // We added the null values above. Need to make sure that Null is inserted in v1
+        // insert into t1 values (NULL, 5);
+        let target_table_col_indices = if nulls_inserted > 0 {
+            // from example above:
+            // [1]       target_table_col_indices
+            // [5,null]  values that we want to insert
+            // [1,0]     resulting target_table_col_indices. Null inserted in v1
+
+            let provided_insert_cols: HashSet<usize> =
+                target_table_col_indices.iter().cloned().collect();
+            let all_insert_cols: HashSet<usize> = (0..columns_to_insert.len())
+                .collect::<Vec<usize>>()
+                .iter()
+                .cloned()
+                .collect();
+            let missing_cols: HashSet<usize> = (&all_insert_cols - &provided_insert_cols)
+                .iter()
+                .cloned()
+                .collect();
+
+            // missing cols are the ones that are marked as Null
+            let mut result: Vec<usize> = target_table_col_indices.clone();
+            for val in missing_cols {
+                result.push(val);
+            }
+            result
+        } else {
+            target_table_col_indices
+        };
+
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
@@ -211,17 +247,13 @@ impl Binder {
         // insert into t1 (v1) values (5, 6);         // ...less target columns than values
         let err_msg = match target_table_col_indices.len().cmp(&expected_types.len()) {
             std::cmp::Ordering::Equal => None,
-            std::cmp::Ordering::Greater => {
-                // TODO: We have to change the target_table_col_indices
-                // The last couple values are null values pushed against us earlier
-                None
-            }
+            std::cmp::Ordering::Greater => Some("INSERT has more target columns than values"), /* Can this still happen? */
             std::cmp::Ordering::Less => Some("INSERT has less target columns than values"),
         };
 
-        if !err_msg.is_some() && !target_table_col_indices.is_empty() {
+        if let Some(msg) = err_msg && !target_table_col_indices.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(
-                err_msg.unwrap().to_string(),
+                msg.to_string(),
             )));
         }
 
@@ -280,5 +312,5 @@ impl Binder {
 
 // I should not handle this in cast_on_insert, because this function may not get called
 
-// create table t1 (v1 int, v2 int); insert into t1 (v1) values (5);
-// create table t1 (v1 int, v2 int); insert into t1  values (5, 1);
+// create table t1 (v1 int, v2 int); insert into t1 (v1) values (5); insert into t1 (v2) values (6);
+// select * from t1; create table t1 (v1 int, v2 int); insert into t1  values (5, 1);
