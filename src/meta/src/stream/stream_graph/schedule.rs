@@ -228,7 +228,7 @@ impl Scheduler {
         let mut facts = Vec::new();
 
         // Singletons
-        for (&id, fragment) in &graph.graph.fragments {
+        for (&id, fragment) in graph.building_fragments() {
             if fragment.is_singleton {
                 facts.push(Fact::SingletonReq(id));
             }
@@ -257,7 +257,7 @@ impl Scheduler {
         if !failed.is_empty() {
             bail!("Failed to schedule: {:?}", failed);
         }
-        assert_eq!(success.len(), graph.graph.fragments.len());
+        assert_eq!(success.len(), graph.building_fragments().len());
 
         // Extract the results.
         let distributions = success

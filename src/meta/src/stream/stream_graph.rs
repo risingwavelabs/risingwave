@@ -20,6 +20,7 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::Context;
 use assert_matches::assert_matches;
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
@@ -181,7 +182,7 @@ impl StreamActorBuilder {
     fn rewrite_inner(&self, stream_node: &StreamNode, depth: usize) -> MetaResult<StreamNode> {
         match stream_node.get_node_body()? {
             NodeBody::Exchange(exchange) => {
-                if depth > 0 {
+                if depth == 0 {
                     bail!(
                         "there should be no ExchangeNode on the top of the plan node: {:#?}",
                         stream_node
@@ -532,7 +533,7 @@ pub struct ActorGraphBuilder {
     distributions: HashMap<GlobalFragmentId, Distribution>,
 
     /// The stream fragment graph.
-    fragment_graph: StreamFragmentGraph,
+    fragment_graph: CompleteStreamFragmentGraph,
 
     cluster_info: StreamingClusterInfo,
 }
@@ -553,7 +554,7 @@ impl ActorGraphBuilder {
 
         // TODO: directly use the complete graph when building so that we can generalize the
         // processing logic for `Chain`s.
-        let fragment_graph = complete_graph.into_inner();
+        let fragment_graph = complete_graph;
 
         Ok(Self {
             distributions,
@@ -652,8 +653,8 @@ impl ActorGraphBuilder {
         let current_fragment = self
             .fragment_graph
             .get_fragment(fragment_id)
-            .unwrap()
-            .clone();
+            .into_building() // TODO: FIXME
+            .unwrap();
 
         // TODO: remove this after scheduler refactoring.
         let upstream_table_id = current_fragment
@@ -667,7 +668,7 @@ impl ActorGraphBuilder {
                 .insert(fragment_id.as_global_id(), upstream_table_id);
         }
 
-        let node = Arc::new(current_fragment.node.unwrap());
+        let node = Arc::new(current_fragment.node.clone().unwrap());
 
         let distribution = &self.distributions[&fragment_id];
 
@@ -690,7 +691,7 @@ impl ActorGraphBuilder {
             })
             .collect_vec();
 
-        for (&downstream_fragment_id, edge) in self.fragment_graph.get_downstreams(fragment_id) {
+        for (downstream_fragment_id, edge) in self.fragment_graph.get_downstreams(fragment_id) {
             let downstream_actors = state
                 .fragment_actors
                 .get(&downstream_fragment_id)
@@ -945,91 +946,6 @@ impl StreamFragmentGraph {
         })
     }
 
-    /// Generate topological order of the fragments in this graph. Returns error if the graph is not
-    /// a DAG and topological sort can not be done.
-    ///
-    /// The first fragment popped out from the heap will be the top-most node, or the
-    /// `Sink`/`Materialize` in stream graph.
-    fn topo_order(&self) -> MetaResult<Vec<GlobalFragmentId>> {
-        let mut topo = Vec::new();
-        let mut downstream_cnts = HashMap::new();
-
-        // Iterate all fragments
-        for fragment_id in self.fragments.keys() {
-            // Count how many downstreams we have for a given fragment
-            let downstream_cnt = self.get_downstreams(*fragment_id).len();
-            if downstream_cnt == 0 {
-                topo.push(*fragment_id);
-            } else {
-                downstream_cnts.insert(*fragment_id, downstream_cnt);
-            }
-        }
-
-        let mut i = 0;
-        while let Some(&fragment_id) = topo.get(i) {
-            i += 1;
-            // Find if we can process more fragments
-            for upstream_id in self.get_upstreams(fragment_id).keys() {
-                let downstream_cnt = downstream_cnts.get_mut(upstream_id).unwrap();
-                *downstream_cnt -= 1;
-                if *downstream_cnt == 0 {
-                    downstream_cnts.remove(upstream_id);
-                    topo.push(*upstream_id);
-                }
-            }
-        }
-
-        if !downstream_cnts.is_empty() {
-            // There are fragments that are not processed yet.
-            bail!("graph is not a DAG");
-        }
-
-        Ok(topo)
-    }
-
-    /// Seal a [`StreamFragment`] from the graph into a [`Fragment`], which will be further used to
-    /// build actors, schedule, and persist into meta store.
-    fn seal_fragment(
-        &self,
-        id: GlobalFragmentId,
-        actors: Vec<StreamActor>,
-        distribution: Distribution,
-    ) -> Fragment {
-        let BuildingFragment {
-            inner,
-            internal_tables,
-            table_id,
-        } = self.fragments.get(&id).unwrap().to_owned();
-
-        let distribution_type = if inner.is_singleton {
-            FragmentDistributionType::Single
-        } else {
-            FragmentDistributionType::Hash
-        } as i32;
-
-        let state_table_ids = internal_tables
-            .iter()
-            .map(|t| t.id)
-            .chain(table_id)
-            .collect();
-
-        let upstream_fragment_ids = self
-            .get_upstreams(id)
-            .keys()
-            .map(|id| id.as_global_id())
-            .collect();
-
-        Fragment {
-            fragment_id: inner.fragment_id,
-            fragment_type_mask: inner.fragment_type_mask,
-            distribution_type,
-            actors,
-            vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
-            state_table_ids,
-            upstream_fragment_ids,
-        }
-    }
-
     /// Retrieve the internal tables map of the whole graph.
     pub fn internal_tables(&self) -> HashMap<u32, Table> {
         let mut tables = HashMap::new();
@@ -1057,10 +973,6 @@ impl StreamFragmentGraph {
         &self.dependent_relations
     }
 
-    fn get_fragment(&self, fragment_id: GlobalFragmentId) -> Option<&StreamFragment> {
-        self.fragments.get(&fragment_id).map(|b| b.deref())
-    }
-
     fn get_downstreams(
         &self,
         fragment_id: GlobalFragmentId,
@@ -1079,6 +991,12 @@ impl StreamFragmentGraph {
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
     LazyLock::new(HashMap::new);
 
+#[derive(Debug, Clone, EnumAsInner)]
+enum MyFragment {
+    Building(BuildingFragment),
+    Existing(Fragment),
+}
+
 /// A wrapper of [`StreamFragmentGraph`] that contains the information of existing fragments, which
 /// is connected to the graph's top-most or bottom-most fragments.
 ///
@@ -1086,7 +1004,7 @@ static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
 /// containing the `Materialize` node will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of this streaming job.
-    graph: StreamFragmentGraph,
+    building_graph: StreamFragmentGraph,
 
     /// The required information of existing fragments.
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
@@ -1095,7 +1013,6 @@ pub struct CompleteStreamFragmentGraph {
     downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Extra edges between existing fragments and the building fragments.
-    #[expect(dead_code)]
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 }
 
@@ -1105,7 +1022,7 @@ impl CompleteStreamFragmentGraph {
     #[cfg(test)]
     pub fn for_test(graph: StreamFragmentGraph) -> Self {
         Self {
-            graph,
+            building_graph: graph,
             existing_fragments: Default::default(),
             downstreams: Default::default(),
             upstreams: Default::default(),
@@ -1160,11 +1077,19 @@ impl CompleteStreamFragmentGraph {
             .collect();
 
         Ok(Self {
-            graph,
+            building_graph: graph,
             existing_fragments,
             downstreams,
             upstreams,
         })
+    }
+
+    fn all_fragment_ids<'a>(&'a self) -> impl Iterator<Item = GlobalFragmentId> + 'a {
+        self.building_graph
+            .fragments
+            .keys()
+            .chain(self.existing_fragments.keys())
+            .copied()
     }
 
     /// Returns the dispatcher types of all edges in the complete graph.
@@ -1172,7 +1097,7 @@ impl CompleteStreamFragmentGraph {
         &'a self,
     ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, &'a StreamFragmentEdge)> + 'a
     {
-        self.graph
+        self.building_graph
             .downstreams
             .iter()
             .chain(self.downstreams.iter())
@@ -1198,10 +1123,128 @@ impl CompleteStreamFragmentGraph {
             .collect()
     }
 
-    /// Consumes this complete graph and returns the inner graph.
-    // TODO: remove this after scheduler refactoring.
-    pub fn into_inner(self) -> StreamFragmentGraph {
-        self.graph
+    /// Generate topological order of the fragments in this graph. Returns error if the graph is not
+    /// a DAG and topological sort can not be done.
+    ///
+    /// The first fragment popped out from the heap will be the top-most node, or the
+    /// `Sink`/`Materialize` in stream graph.
+    fn topo_order(&self) -> MetaResult<Vec<GlobalFragmentId>> {
+        let mut topo = Vec::new();
+        let mut downstream_cnts = HashMap::new();
+
+        // Iterate all fragments
+        for fragment_id in self.all_fragment_ids() {
+            // Count how many downstreams we have for a given fragment
+            let downstream_cnt = self.get_downstreams(fragment_id).count();
+            if downstream_cnt == 0 {
+                topo.push(fragment_id);
+            } else {
+                downstream_cnts.insert(fragment_id, downstream_cnt);
+            }
+        }
+
+        let mut i = 0;
+        while let Some(&fragment_id) = topo.get(i) {
+            i += 1;
+            // Find if we can process more fragments
+            for (upstream_id, _) in self.get_upstreams(fragment_id) {
+                let downstream_cnt = downstream_cnts.get_mut(&upstream_id).unwrap();
+                *downstream_cnt -= 1;
+                if *downstream_cnt == 0 {
+                    downstream_cnts.remove(&upstream_id);
+                    topo.push(upstream_id);
+                }
+            }
+        }
+
+        if !downstream_cnts.is_empty() {
+            // There are fragments that are not processed yet.
+            bail!("graph is not a DAG");
+        }
+
+        Ok(topo)
+    }
+
+    /// Seal a [`StreamFragment`] from the graph into a [`Fragment`], which will be further used to
+    /// build actors, schedule, and persist into meta store.
+    fn seal_fragment(
+        &self,
+        id: GlobalFragmentId,
+        actors: Vec<StreamActor>,
+        distribution: Distribution,
+    ) -> Fragment {
+        let BuildingFragment {
+            inner,
+            internal_tables,
+            table_id,
+        } = self.get_fragment(id).into_building().unwrap();
+
+        let distribution_type = if inner.is_singleton {
+            FragmentDistributionType::Single
+        } else {
+            FragmentDistributionType::Hash
+        } as i32;
+
+        let state_table_ids = internal_tables
+            .iter()
+            .map(|t| t.id)
+            .chain(table_id)
+            .collect();
+
+        let upstream_fragment_ids = self
+            .get_upstreams(id)
+            .map(|(id, _)| id.as_global_id())
+            .collect();
+
+        Fragment {
+            fragment_id: inner.fragment_id,
+            fragment_type_mask: inner.fragment_type_mask,
+            distribution_type,
+            actors,
+            vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
+            state_table_ids,
+            upstream_fragment_ids,
+        }
+    }
+
+    fn get_fragment(&self, fragment_id: GlobalFragmentId) -> MyFragment {
+        if let Some(fragment) = self.existing_fragments.get(&fragment_id) {
+            MyFragment::Existing(fragment.clone())
+        } else {
+            MyFragment::Building(
+                self.building_graph
+                    .fragments
+                    .get(&fragment_id)
+                    .unwrap()
+                    .clone(),
+            )
+        }
+    }
+
+    fn get_downstreams(
+        &self,
+        fragment_id: GlobalFragmentId,
+    ) -> impl Iterator<Item = (GlobalFragmentId, &StreamFragmentEdge)> {
+        self.building_graph
+            .get_downstreams(fragment_id)
+            .iter()
+            .chain(self.downstreams.get(&fragment_id).into_iter().flatten())
+            .map(|(&id, edge)| (id, edge))
+    }
+
+    fn get_upstreams(
+        &self,
+        fragment_id: GlobalFragmentId,
+    ) -> impl Iterator<Item = (GlobalFragmentId, &StreamFragmentEdge)> {
+        self.building_graph
+            .get_upstreams(fragment_id)
+            .iter()
+            .chain(self.upstreams.get(&fragment_id).into_iter().flatten())
+            .map(|(&id, edge)| (id, edge))
+    }
+
+    fn building_fragments(&self) -> &HashMap<GlobalFragmentId, BuildingFragment> {
+        &self.building_graph.fragments
     }
 }
 
