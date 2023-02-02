@@ -205,26 +205,124 @@ impl StreamActorBuilder {
             .unwrap();
     }
 
+    fn rewrite(&self) -> MetaResult<StreamNode> {
+        self.rewrite_inner(&self.nodes)
+    }
+
+    /// Build stream actor inside, two works will be done:
+    /// 1. replace node's input with [`MergeNode`] if it is `ExchangeNode`, and swallow
+    /// mergeNode's input.
+    /// 2. ignore root node when it's `ExchangeNode`.
+    /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
+    /// ids if it is a `ChainNode`.
+    fn rewrite_inner(&self, stream_node: &StreamNode) -> MetaResult<StreamNode> {
+        match stream_node.get_node_body()? {
+            NodeBody::Exchange(_) => {
+                unreachable!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
+            }
+            NodeBody::Chain(_) => Self::resolve_chain_node(stream_node),
+            _ => {
+                let mut new_stream_node = stream_node.clone();
+
+                for (input, new_input) in stream_node
+                    .input
+                    .iter()
+                    .zip_eq(new_stream_node.input.iter_mut())
+                {
+                    *new_input = match input.get_node_body()? {
+                        NodeBody::Exchange(e) => {
+                            assert!(!input.get_fields().is_empty());
+                            StreamNode {
+                                input: vec![],
+                                stream_key: input.stream_key.clone(),
+                                node_body: Some(NodeBody::Merge(MergeNode {
+                                    upstream_actor_id: self.upstreams[&input.get_operator_id()]
+                                        .actors
+                                        .as_global_ids(),
+                                    upstream_fragment_id: self.upstreams[&input.get_operator_id()]
+                                        .fragment_id
+                                        .as_global_id(),
+                                    upstream_dispatcher_type: e.get_strategy()?.r#type,
+                                    fields: input.get_fields().clone(),
+                                })),
+                                fields: input.get_fields().clone(),
+                                operator_id: input.operator_id,
+                                identity: "MergeExecutor".to_string(),
+                                append_only: input.append_only,
+                            }
+                        }
+                        _ => self.rewrite_inner(input)?,
+                    }
+                }
+                Ok(new_stream_node)
+            }
+        }
+    }
+
+    /// Resolve the chain node, only rewrite the schema of input `MergeNode`.
+    fn resolve_chain_node(stream_node: &StreamNode) -> MetaResult<StreamNode> {
+        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap() else {
+            unreachable!()
+        };
+        let input = stream_node.get_input();
+        assert_eq!(input.len(), 2);
+
+        let merge_node = &input[0];
+        assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+        let batch_plan_node = &input[1];
+        assert_matches!(batch_plan_node.node_body, Some(NodeBody::BatchPlan(_)));
+
+        let chain_input = vec![
+            StreamNode {
+                input: vec![],
+                stream_key: merge_node.stream_key.clone(),
+                node_body: Some(NodeBody::Merge(MergeNode {
+                    upstream_actor_id: vec![],
+                    upstream_fragment_id: 0,
+                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                    fields: chain_node.upstream_fields.clone(),
+                })),
+                fields: chain_node.upstream_fields.clone(),
+                operator_id: merge_node.operator_id,
+                identity: "MergeExecutor".to_string(),
+                append_only: stream_node.append_only,
+            },
+            batch_plan_node.clone(),
+        ];
+
+        Ok(StreamNode {
+            input: chain_input,
+            stream_key: stream_node.stream_key.clone(),
+            node_body: Some(NodeBody::Chain(chain_node.clone())),
+            operator_id: stream_node.operator_id,
+            identity: "ChainExecutor".to_string(),
+            fields: chain_node.upstream_fields.clone(),
+            append_only: stream_node.append_only,
+        })
+    }
+
     /// Build an actor after seal.
-    pub fn build(&self, ctx: &CreateStreamingJobContext) -> StreamActor {
+    pub fn build(self, ctx: &CreateStreamingJobContext) -> MetaResult<StreamActor> {
+        let rewritten_nodes = self.rewrite()?;
+
         // TODO: store each upstream separately
         let upstream_actor_id = self
             .upstreams
-            .iter()
-            .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
+            .into_values()
+            .flat_map(|StreamActorUpstream { actors, .. }| actors.0)
             .map(|x| x.as_global_id())
             .collect();
 
-        StreamActor {
+        Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
-            nodes: Some(self.nodes.deref().clone()),
+            nodes: Some(rewritten_nodes),
             dispatcher: self.new_downstreams.values().cloned().collect(),
             upstream_actor_id,
             colocated_upstream_actor_id: None, // TODO: remove this
             vnode_bitmap: self.vnode_bitmap.as_ref().map(Bitmap::to_protobuf),
             mview_definition: ctx.streaming_definition.clone(),
-        }
+        })
     }
 }
 
@@ -388,122 +486,13 @@ impl StreamGraphBuilder {
     ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
         let mut graph: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
 
-        for builder in self.actor_builders.values() {
-            let mut actor = builder.build(ctx);
-            let upstream_actors = builder
-                .upstreams
-                .iter()
-                .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
-                .collect();
-            let upstream_fragments = builder
-                .upstreams
-                .iter()
-                .map(|(id, StreamActorUpstream { fragment_id, .. })| (*id, *fragment_id))
-                .collect();
-            let stream_node =
-                self.build_inner(actor.get_nodes()?, &upstream_actors, &upstream_fragments)?;
-
-            // TODO: move to build
-            actor.nodes = Some(stream_node);
-
-            graph.entry(builder.fragment_id()).or_default().push(actor);
+        for builder in self.actor_builders.into_values() {
+            let fragment_id = builder.fragment_id();
+            let actor = builder.build(ctx)?;
+            graph.entry(fragment_id).or_default().push(actor);
         }
+
         Ok(graph)
-    }
-
-    /// Build stream actor inside, two works will be done:
-    /// 1. replace node's input with [`MergeNode`] if it is `ExchangeNode`, and swallow
-    /// mergeNode's input.
-    /// 2. ignore root node when it's `ExchangeNode`.
-    /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
-    /// ids if it is a `ChainNode`.
-    fn build_inner(
-        &self,
-        stream_node: &StreamNode,
-        upstream_actors: &HashMap<u64, OrderedActorLink>,
-        upstream_fragments: &HashMap<u64, GlobalFragmentId>,
-    ) -> MetaResult<StreamNode> {
-        match stream_node.get_node_body()? {
-            NodeBody::Exchange(_) => {
-                panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
-            }
-            NodeBody::Chain(_) => Ok(self.resolve_chain_node(stream_node)?),
-            _ => {
-                let mut new_stream_node = stream_node.clone();
-
-                for (input, new_input) in stream_node
-                    .input
-                    .iter()
-                    .zip_eq(new_stream_node.input.iter_mut())
-                {
-                    *new_input = match input.get_node_body()? {
-                        NodeBody::Exchange(e) => {
-                            assert!(!input.get_fields().is_empty());
-                            StreamNode {
-                                input: vec![],
-                                stream_key: input.stream_key.clone(),
-                                node_body: Some(NodeBody::Merge(MergeNode {
-                                    upstream_actor_id: upstream_actors
-                                        .get(&input.get_operator_id())
-                                        .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
-                                    upstream_fragment_id: upstream_fragments.get(&input.get_operator_id()).unwrap().as_global_id(),
-                                    upstream_dispatcher_type: e.get_strategy()?.r#type,
-                                    fields: input.get_fields().clone(),
-                                })),
-                                fields: input.get_fields().clone(),
-                                operator_id: input.operator_id,
-                                identity: "MergeExecutor".to_string(),
-                                append_only: input.append_only,
-                            }
-                        }
-                        _ => self.build_inner(input, upstream_actors, upstream_fragments)?,
-                    }
-                }
-                Ok(new_stream_node)
-            }
-        }
-    }
-
-    /// Resolve the chain node, only rewrite the schema of input `MergeNode`.
-    fn resolve_chain_node(&self, stream_node: &StreamNode) -> MetaResult<StreamNode> {
-        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap() else {
-            unreachable!()
-        };
-        let input = stream_node.get_input();
-        assert_eq!(input.len(), 2);
-
-        let merge_node = &input[0];
-        assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
-        let batch_plan_node = &input[1];
-        assert_matches!(batch_plan_node.node_body, Some(NodeBody::BatchPlan(_)));
-
-        let chain_input = vec![
-            StreamNode {
-                input: vec![],
-                stream_key: merge_node.stream_key.clone(),
-                node_body: Some(NodeBody::Merge(MergeNode {
-                    upstream_actor_id: vec![],
-                    upstream_fragment_id: 0,
-                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                    fields: chain_node.upstream_fields.clone(),
-                })),
-                fields: chain_node.upstream_fields.clone(),
-                operator_id: merge_node.operator_id,
-                identity: "MergeExecutor".to_string(),
-                append_only: stream_node.append_only,
-            },
-            batch_plan_node.clone(),
-        ];
-
-        Ok(StreamNode {
-            input: chain_input,
-            stream_key: stream_node.stream_key.clone(),
-            node_body: Some(NodeBody::Chain(chain_node.clone())),
-            operator_id: stream_node.operator_id,
-            identity: "ChainExecutor".to_string(),
-            fields: chain_node.upstream_fields.clone(),
-            append_only: stream_node.append_only,
-        })
     }
 }
 
