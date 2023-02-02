@@ -102,7 +102,7 @@ pub async fn handle_query(
     let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-    let (query, query_mode, output_schema) = {
+    let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
@@ -115,11 +115,12 @@ pub async fn handle_query(
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
-        );
-        let query = plan_fragmenter.split(plan)?;
+            plan,
+        )?;
         context.append_notice(&mut notice);
-        (query, query_mode, schema)
+        (plan_fragmenter, query_mode, schema)
     };
+    let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let pg_descs = output_schema

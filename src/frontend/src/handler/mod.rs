@@ -160,7 +160,7 @@ pub async fn handle(
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze),
+        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
