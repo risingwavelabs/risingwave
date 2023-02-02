@@ -42,3 +42,6 @@ drop table a;
 
 statement ok
 drop table b;
+
+statement ok
+set rw_streaming_enable_delta_join = false;
