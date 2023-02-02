@@ -25,7 +25,6 @@ impl ExprRewriter for ConstEvalRewriter {
             return expr;
         }
         if expr.is_const() {
-            //} && expr.count_nows() == 0 {
             let data_type = expr.return_type();
             match expr.eval_row_const() {
                 Ok(datum) => Literal::new(datum, data_type).into(),

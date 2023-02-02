@@ -29,7 +29,7 @@ pub trait ExprRewritable {
     }
 
     fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        unimplemented!("{}", self.has_rewritable_expr())
+        unimplemented!()
     }
 }
 
