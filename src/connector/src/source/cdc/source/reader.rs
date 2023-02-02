@@ -28,7 +28,9 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
 use crate::source::monitor::SourceMetrics;
-use crate::source::{Column, SourceInfo, SplitId, SplitImpl, SplitMetaData};
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+};
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 
@@ -43,7 +45,10 @@ pub struct CdcSplitReader {
     source_info: SourceInfo,
 }
 
-impl CdcSplitReader {
+#[async_trait]
+impl SplitReaderV2 for CdcSplitReader {
+    type Properties = CdcProperties;
+
     #[allow(clippy::unused_async)]
     async fn new(
         conn_props: CdcProperties,
@@ -70,6 +75,10 @@ impl CdcSplitReader {
                 "failed to create cdc split reader: invalid splis info"
             )),
         }
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
