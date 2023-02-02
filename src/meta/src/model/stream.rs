@@ -245,6 +245,16 @@ impl TableFragments {
         })
     }
 
+    /// Returns the fragment with the `Mview` type flag.
+    pub fn mview_fragment(&self) -> Option<Fragment> {
+        self.fragments
+            .values()
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
+            })
+            .cloned()
+    }
+
     /// Returns actors that contains Chain node.
     pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
