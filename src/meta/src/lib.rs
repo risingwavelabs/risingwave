@@ -144,7 +144,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             .unwrap_or_else(|| opts.listen_addr.clone());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let meta_endpoint = opts.meta_endpoint.unwrap_or_else(|| meta_addr);
+        let meta_endpoint = opts.meta_endpoint.unwrap_or(meta_addr);
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
