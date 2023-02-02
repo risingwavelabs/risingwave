@@ -298,6 +298,19 @@ type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
 
 pub type StreamGraph = BTreeMap<FragmentId, Fragment>;
 
+#[derive(Default)]
+struct ExternalChange {
+    new_downstreams: HashMap<DispatcherId, Dispatcher>,
+}
+
+impl ExternalChange {
+    pub fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
+        self.new_downstreams
+            .try_insert(dispatcher.dispatcher_id, dispatcher)
+            .unwrap();
+    }
+}
+
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 #[derive(Default)]
@@ -305,6 +318,8 @@ struct StreamGraphBuilder {
     actor_builders: BTreeMap<GlobalActorId, StreamActorBuilder>,
 
     locations: BTreeMap<GlobalActorId, ParallelUnitId>,
+
+    external_changes: BTreeMap<GlobalActorId, ExternalChange>,
 }
 
 impl StreamGraphBuilder {
@@ -324,6 +339,10 @@ impl StreamGraphBuilder {
             )
             .unwrap();
 
+        self.record_location(actor_id, parallel_unit_id);
+    }
+
+    fn record_location(&mut self, actor_id: GlobalActorId, parallel_unit_id: ParallelUnitId) {
         self.locations
             .try_insert(actor_id, parallel_unit_id)
             .unwrap();
@@ -359,6 +378,17 @@ impl StreamGraphBuilder {
         }
     }
 
+    pub fn add_dispatcher(&mut self, actor_id: GlobalActorId, dispatcher: Dispatcher) {
+        if let Some(actor_builder) = self.actor_builders.get_mut(&actor_id) {
+            actor_builder.add_dispatcher(dispatcher);
+        } else {
+            self.external_changes
+                .entry(actor_id)
+                .or_default()
+                .add_dispatcher(dispatcher);
+        }
+    }
+
     /// Add dependency between two connected node in the graph.
     pub fn add_link<'a>(
         &mut self,
@@ -379,14 +409,10 @@ impl StreamGraphBuilder {
                     let downstream_location = self.locations[downstream_id];
                     assert_eq!(upstream_location, downstream_location);
 
-                    self.actor_builders
-                        .get_mut(upstream_id)
-                        .unwrap()
-                        .add_dispatcher(Self::new_normal_dispatcher(
-                            dt,
-                            downstream.fragment_id,
-                            &[*downstream_id],
-                        ));
+                    self.add_dispatcher(
+                        *upstream_id,
+                        Self::new_normal_dispatcher(dt, downstream.fragment_id, &[*downstream_id]),
+                    );
 
                     // TODO: refactor
                     self.actor_builders
@@ -434,10 +460,7 @@ impl StreamGraphBuilder {
                 };
 
                 for upstream_id in upstream.actor_ids {
-                    self.actor_builders
-                        .get_mut(upstream_id)
-                        .unwrap()
-                        .add_dispatcher(dispatcher.clone());
+                    self.add_dispatcher(*upstream_id, dispatcher.clone());
                 }
 
                 for downstream_id in downstream.actor_ids {
@@ -650,46 +673,63 @@ impl ActorGraphBuilder {
         state: &mut BuildActorGraphState,
         ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        let current_fragment = self
-            .fragment_graph
-            .get_fragment(fragment_id)
-            .into_building() // TODO: FIXME
-            .unwrap();
+        let current_fragment = self.fragment_graph.get_fragment(fragment_id);
 
-        // TODO: remove this after scheduler refactoring.
-        let upstream_table_id = current_fragment
-            .upstream_table_ids
-            .iter()
-            .at_most_one()
-            .unwrap()
-            .map(TableId::from);
-        if let Some(upstream_table_id) = upstream_table_id {
-            ctx.chain_fragment_upstream_table_map
-                .insert(fragment_id.as_global_id(), upstream_table_id);
-        }
+        let (distribution, actor_ids) = match current_fragment {
+            MyFragment::Building(current_fragment) => {
+                let node = Arc::new(current_fragment.node.clone().unwrap());
 
-        let node = Arc::new(current_fragment.node.clone().unwrap());
+                let distribution = self.distributions[&fragment_id].clone();
 
-        let distribution = &self.distributions[&fragment_id];
+                let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
 
-        let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
+                let actor_ids = distribution
+                    .parallel_units()
+                    .map(|parallel_unit_id| {
+                        let actor_id = state.next_actor_id();
+                        let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&parallel_unit_id]).cloned();
 
-        let actor_ids = distribution
-            .parallel_units()
-            .map(|parallel_unit_id| {
-                let actor_id = state.next_actor_id();
-                let vnode_bitmap = bitmaps.as_ref().map(|m| &m[&parallel_unit_id]).cloned();
+                        state.stream_graph_builder.add_actor(
+                            actor_id,
+                            fragment_id,
+                            parallel_unit_id,
+                            vnode_bitmap,
+                            node.clone(),
+                        );
 
-                state.stream_graph_builder.add_actor(
-                    actor_id,
-                    fragment_id,
-                    parallel_unit_id,
-                    vnode_bitmap,
-                    node.clone(),
-                );
-                actor_id
-            })
-            .collect_vec();
+                        actor_id
+                    })
+                    .collect_vec();
+
+                (distribution, actor_ids)
+            }
+
+            MyFragment::Existing(existing_fragment) => {
+                let distribution = Distribution::from_fragment(&existing_fragment);
+
+                let actor_ids = existing_fragment
+                    .actors
+                    .iter()
+                    .map(|a| {
+                        let actor_id = GlobalActorId::new(a.actor_id);
+                        let parallel_unit_id = match &distribution {
+                            Distribution::Singleton(parallel_unit_id) => *parallel_unit_id,
+                            Distribution::Hash(mapping) => mapping
+                                .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
+                                .unwrap(),
+                        };
+
+                        state
+                            .stream_graph_builder
+                            .record_location(actor_id, parallel_unit_id);
+
+                        actor_id
+                    })
+                    .collect_vec();
+
+                (distribution, actor_ids)
+            }
+        };
 
         for (downstream_fragment_id, edge) in self.fragment_graph.get_downstreams(fragment_id) {
             let downstream_actors = state
@@ -703,7 +743,7 @@ impl ActorGraphBuilder {
                 Node {
                     fragment_id,
                     actor_ids: &actor_ids,
-                    distribution,
+                    distribution: &distribution,
                 },
                 Node {
                     fragment_id: downstream_fragment_id,
@@ -1108,18 +1148,7 @@ impl CompleteStreamFragmentGraph {
     fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
         self.existing_fragments
             .iter()
-            .map(|(&id, f)| {
-                let mapping = ParallelUnitMapping::from_protobuf(f.get_vnode_mapping().unwrap());
-                let dist = match f.get_distribution_type().unwrap() {
-                    FragmentDistributionType::Unspecified => unreachable!(),
-                    FragmentDistributionType::Single => {
-                        let parallel_unit = mapping.iter_unique().exactly_one().ok().unwrap();
-                        Distribution::Singleton(parallel_unit)
-                    }
-                    FragmentDistributionType::Hash => Distribution::Hash(mapping),
-                };
-                (id, dist)
-            })
+            .map(|(&id, f)| (id, Distribution::from_fragment(f)))
             .collect()
     }
 

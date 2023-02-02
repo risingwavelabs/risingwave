@@ -117,6 +117,14 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self[vnode]
     }
 
+    /// TODO
+    pub fn get_matched(&self, bitmap: &Bitmap) -> Option<T::Item> {
+        bitmap
+            .iter_ones()
+            .next()
+            .map(|i| self.get(VirtualNode::from_index(i)))
+    }
+
     /// Iterate over all items in this mapping, in the order of vnodes.
     pub fn iter(&self) -> impl Iterator<Item = T::Item> + '_ {
         self.data
@@ -142,6 +150,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     pub fn iter_unique(&self) -> impl Iterator<Item = T::Item> + '_ {
         // Note: we can't ensure there's no duplicated items in the `data` after some scaling.
         self.data.iter().copied().sorted().dedup()
+    }
+
+    /// TODO
+    pub fn to_single(&self) -> Option<T::Item> {
+        self.data.iter().copied().dedup().exactly_one().ok()
     }
 
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents

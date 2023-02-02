@@ -29,6 +29,7 @@ use rand::thread_rng;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use super::{CompleteStreamFragmentGraph, GlobalFragmentId as Id};
@@ -136,6 +137,19 @@ impl Distribution {
         match self {
             Distribution::Singleton(p) => ParallelUnitMapping::new_single(p),
             Distribution::Hash(mapping) => mapping,
+        }
+    }
+
+    pub fn from_fragment(fragment: &risingwave_pb::meta::table_fragments::Fragment) -> Self {
+        let mapping = ParallelUnitMapping::from_protobuf(fragment.get_vnode_mapping().unwrap());
+
+        match fragment.get_distribution_type().unwrap() {
+            FragmentDistributionType::Unspecified => unreachable!(),
+            FragmentDistributionType::Single => {
+                let parallel_unit = mapping.to_single().unwrap();
+                Distribution::Singleton(parallel_unit)
+            }
+            FragmentDistributionType::Hash => Distribution::Hash(mapping),
         }
     }
 }
