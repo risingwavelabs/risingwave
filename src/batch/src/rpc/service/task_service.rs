@@ -83,8 +83,6 @@ impl TaskService for BatchServiceImpl {
                 // Will be used for receive task status update.
                 // Note: we introduce this hack cuz `.execute()` do not produce a status stream,
                 // but still share `.async_execute()` and `.try_execute()`.
-                // self.mgr
-                //     .get_task_receiver(&task::TaskId::from(&task_id.unwrap())),
                 state_rx,
             ))),
             Err(e) => {
@@ -138,7 +136,7 @@ impl TaskService for BatchServiceImpl {
 
         let pb_task_output_id = TaskOutputId {
             task_id: Some(task_id.clone()),
-            // Since this is local execution path, the exchange would follo single distribution,
+            // Since this is local execution path, the exchange would follow single distribution,
             // therefore we would only have one data output.
             output_id: 0,
         };
