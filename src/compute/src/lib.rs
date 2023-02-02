@@ -38,37 +38,37 @@ use risingwave_common_proc_macro::OverrideConfig;
 #[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:5688")]
+    #[clap(long, env, default_value = "127.0.0.1:5688")]
     pub host: String,
 
     /// The address of the compute node's meta client.
     ///
     /// Optional, we will use listen_address if not specified.
-    #[clap(long)]
+    #[clap(long, env)]
     pub client_address: Option<String>,
 
-    #[clap(long, default_value = "127.0.0.1:1222")]
+    #[clap(long, env, default_value = "127.0.0.1:1222")]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env, default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Endpoint of the connector node
-    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
+    #[clap(long, env)]
     pub connector_rpc_endpoint: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    #[clap(long, default_value = "")]
+    #[clap(long, env, default_value = "")]
     pub config_path: String,
 
     /// Total available memory in bytes, used by LRU Manager
-    #[clap(long, default_value_t = default_total_memory_bytes())]
+    #[clap(long, env, default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[clap(long, default_value_t = default_parallelism())]
+    #[clap(long, env, default_value_t = default_parallelism())]
     pub parallelism: usize,
 
     #[clap(flatten)]
@@ -84,30 +84,30 @@ struct OverrideConfigOpts {
     /// `memory` or `memory-shared`.
     /// 2. `in-memory`
     /// 3. `sled://{path}`
-    #[clap(long)]
+    #[clap(long, env)]
     #[override_opts(path = storage.state_store)]
     pub state_store: Option<String>,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
-    #[clap(long)]
+    #[clap(long, env)]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.
-    #[clap(long)]
+    #[clap(long, env)]
     #[override_opts(path = storage.file_cache.dir)]
     pub file_cache_dir: Option<String>,
 
     /// Enable reporting tracing information to jaeger.
-    #[clap(parse(from_flag = true_if_present), long)]
+    #[clap(parse(from_flag = true_if_present), long, env)]
     #[override_opts(path = streaming.enable_jaeger_tracing)]
     pub enable_jaeger_tracing: Flag,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, arg_enum)]
+    #[clap(long, env, arg_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }

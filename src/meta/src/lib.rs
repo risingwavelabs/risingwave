@@ -58,57 +58,57 @@ use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:5690")]
+    #[clap(long, env, default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
     /// Deprecated. But we keep it for backward compatibility.
-    #[clap(long)]
+    #[clap(long, env)]
     host: Option<String>,
 
     /// The endpoint for this meta node, which also serves as its unique identifier in cluster
     /// membership and leader election.
-    #[clap(long)]
+    #[clap(long, env)]
     meta_endpoint: Option<String>,
 
-    #[clap(long)]
+    #[clap(long, env)]
     dashboard_host: Option<String>,
 
-    #[clap(long)]
+    #[clap(long, env)]
     prometheus_host: Option<String>,
 
-    #[clap(long, default_value_t = String::from(""))]
+    #[clap(long, env, default_value_t = String::from(""))]
     etcd_endpoints: String,
 
     /// Enable authentication with etcd. By default disabled.
-    #[clap(long)]
+    #[clap(long, env)]
     etcd_auth: bool,
 
     /// Username of etcd, required when --etcd-auth is enabled.
     /// Default value is read from the 'ETCD_USERNAME' environment variable.
-    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
+    #[clap(long, env, default_value = "")]
     etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
     /// Default value is read from the 'ETCD_PASSWORD' environment variable.
-    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
+    #[clap(long, env, default_value = "")]
     etcd_password: String,
 
-    #[clap(long)]
+    #[clap(long, env)]
     dashboard_ui_path: Option<String>,
 
     /// For dashboard service to fetch cluster info.
-    #[clap(long)]
+    #[clap(long, env)]
     prometheus_endpoint: Option<String>,
 
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
-    #[clap(long, env = "META_CONNECTOR_RPC_ENDPOINT")]
+    #[clap(long, env)]
     pub connector_rpc_endpoint: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    #[clap(long, default_value = "")]
+    #[clap(long, env, default_value = "")]
     pub config_path: String,
 
     #[clap(flatten)]
@@ -118,7 +118,7 @@ pub struct MetaNodeOpts {
 /// Command-line arguments for compute-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 pub struct OverrideConfigOpts {
-    #[clap(long, arg_enum)]
+    #[clap(long, env, arg_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
 }
