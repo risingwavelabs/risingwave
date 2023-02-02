@@ -206,7 +206,7 @@ impl StreamActorBuilder {
     }
 
     fn rewrite(&self) -> MetaResult<StreamNode> {
-        self.rewrite_inner(&self.nodes)
+        self.rewrite_inner(&self.nodes, 0)
     }
 
     /// Build stream actor inside, two works will be done:
@@ -215,44 +215,36 @@ impl StreamActorBuilder {
     /// 2. ignore root node when it's `ExchangeNode`.
     /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
     /// ids if it is a `ChainNode`.
-    fn rewrite_inner(&self, stream_node: &StreamNode) -> MetaResult<StreamNode> {
+    fn rewrite_inner(&self, stream_node: &StreamNode, depth: usize) -> MetaResult<StreamNode> {
         match stream_node.get_node_body()? {
-            NodeBody::Exchange(_) => {
-                unreachable!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
+            NodeBody::Exchange(exchange) => {
+                assert!(depth > 0, "ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node);
+                assert!(!stream_node.get_fields().is_empty());
+                assert!(stream_node.input.is_empty());
+
+                Ok(StreamNode {
+                    node_body: Some(NodeBody::Merge(MergeNode {
+                        upstream_actor_id: self.upstreams[&stream_node.get_operator_id()]
+                            .actors
+                            .as_global_ids(),
+                        upstream_fragment_id: self.upstreams[&stream_node.get_operator_id()]
+                            .fragment_id
+                            .as_global_id(),
+                        upstream_dispatcher_type: exchange.get_strategy()?.r#type,
+                        fields: stream_node.get_fields().clone(),
+                    })),
+                    identity: "MergeExecutor".to_string(),
+                    ..stream_node.clone()
+                })
             }
             NodeBody::Chain(_) => Self::resolve_chain_node(stream_node),
+
             _ => {
                 let mut new_stream_node = stream_node.clone();
-
-                for (input, new_input) in stream_node
-                    .input
-                    .iter()
-                    .zip_eq(new_stream_node.input.iter_mut())
+                for (input, new_input) in
+                    stream_node.input.iter().zip_eq(&mut new_stream_node.input)
                 {
-                    *new_input = match input.get_node_body()? {
-                        NodeBody::Exchange(e) => {
-                            assert!(!input.get_fields().is_empty());
-                            StreamNode {
-                                input: vec![],
-                                stream_key: input.stream_key.clone(),
-                                node_body: Some(NodeBody::Merge(MergeNode {
-                                    upstream_actor_id: self.upstreams[&input.get_operator_id()]
-                                        .actors
-                                        .as_global_ids(),
-                                    upstream_fragment_id: self.upstreams[&input.get_operator_id()]
-                                        .fragment_id
-                                        .as_global_id(),
-                                    upstream_dispatcher_type: e.get_strategy()?.r#type,
-                                    fields: input.get_fields().clone(),
-                                })),
-                                fields: input.get_fields().clone(),
-                                operator_id: input.operator_id,
-                                identity: "MergeExecutor".to_string(),
-                                append_only: input.append_only,
-                            }
-                        }
-                        _ => self.rewrite_inner(input)?,
-                    }
+                    *new_input = self.rewrite_inner(input, depth + 1)?;
                 }
                 Ok(new_stream_node)
             }
@@ -317,10 +309,10 @@ impl StreamActorBuilder {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
             nodes: Some(rewritten_nodes),
-            dispatcher: self.new_downstreams.values().cloned().collect(),
+            dispatcher: self.new_downstreams.into_values().collect(),
             upstream_actor_id,
             colocated_upstream_actor_id: None, // TODO: remove this
-            vnode_bitmap: self.vnode_bitmap.as_ref().map(Bitmap::to_protobuf),
+            vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
             mview_definition: ctx.streaming_definition.clone(),
         })
     }
