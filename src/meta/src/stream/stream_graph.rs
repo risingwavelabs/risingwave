@@ -206,7 +206,52 @@ impl StreamActorBuilder {
                     ..stream_node.clone()
                 })
             }
-            NodeBody::Chain(_) => Self::resolve_chain_node(stream_node),
+
+            NodeBody::Chain(chain_node) => {
+                let input = stream_node.get_input();
+                assert_eq!(input.len(), 2);
+
+                let merge_node = &input[0];
+                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+                let batch_plan_node = &input[1];
+                assert_matches!(batch_plan_node.node_body, Some(NodeBody::BatchPlan(_)));
+
+                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
+                    upstream_table_id: chain_node.table_id,
+                    downstream_fragment_id: self.fragment_id,
+                }];
+
+                let upstream_actor_id = upstreams.actors.as_global_ids();
+                assert_eq!(upstream_actor_id.len(), 1);
+
+                let chain_input = vec![
+                    StreamNode {
+                        input: vec![],
+                        stream_key: merge_node.stream_key.clone(),
+                        node_body: Some(NodeBody::Merge(MergeNode {
+                            upstream_actor_id,
+                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
+                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                            fields: chain_node.upstream_fields.clone(),
+                        })),
+                        fields: chain_node.upstream_fields.clone(),
+                        operator_id: merge_node.operator_id,
+                        identity: "MergeExecutor".to_string(),
+                        append_only: stream_node.append_only,
+                    },
+                    batch_plan_node.clone(),
+                ];
+
+                Ok(StreamNode {
+                    input: chain_input,
+                    stream_key: stream_node.stream_key.clone(),
+                    node_body: Some(NodeBody::Chain(chain_node.clone())),
+                    operator_id: stream_node.operator_id,
+                    identity: "ChainExecutor".to_string(),
+                    fields: chain_node.upstream_fields.clone(),
+                    append_only: stream_node.append_only,
+                })
+            }
 
             _ => {
                 let mut new_stream_node = stream_node.clone();
@@ -218,48 +263,6 @@ impl StreamActorBuilder {
                 Ok(new_stream_node)
             }
         }
-    }
-
-    /// Resolve the chain node, only rewrite the schema of input `MergeNode`.
-    fn resolve_chain_node(stream_node: &StreamNode) -> MetaResult<StreamNode> {
-        let NodeBody::Chain(chain_node) = stream_node.get_node_body().unwrap() else {
-            unreachable!()
-        };
-        let input = stream_node.get_input();
-        assert_eq!(input.len(), 2);
-
-        let merge_node = &input[0];
-        assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
-        let batch_plan_node = &input[1];
-        assert_matches!(batch_plan_node.node_body, Some(NodeBody::BatchPlan(_)));
-
-        let chain_input = vec![
-            StreamNode {
-                input: vec![],
-                stream_key: merge_node.stream_key.clone(),
-                node_body: Some(NodeBody::Merge(MergeNode {
-                    upstream_actor_id: vec![],
-                    upstream_fragment_id: 0,
-                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                    fields: chain_node.upstream_fields.clone(),
-                })),
-                fields: chain_node.upstream_fields.clone(),
-                operator_id: merge_node.operator_id,
-                identity: "MergeExecutor".to_string(),
-                append_only: stream_node.append_only,
-            },
-            batch_plan_node.clone(),
-        ];
-
-        Ok(StreamNode {
-            input: chain_input,
-            stream_key: stream_node.stream_key.clone(),
-            node_body: Some(NodeBody::Chain(chain_node.clone())),
-            operator_id: stream_node.operator_id,
-            identity: "ChainExecutor".to_string(),
-            fields: chain_node.upstream_fields.clone(),
-            append_only: stream_node.append_only,
-        })
     }
 
     /// Build an actor after seal.
@@ -876,8 +879,8 @@ enum EdgeId {
         exchange_id: u64,
     },
 
-    External {
-        upstream_fragment_id: GlobalFragmentId,
+    UpstreamExternal {
+        upstream_table_id: u32,
         downstream_fragment_id: GlobalFragmentId,
     },
 }
@@ -1086,8 +1089,8 @@ impl CompleteStreamFragmentGraph {
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
                 let edge = StreamFragmentEdge {
-                    id: EdgeId::External {
-                        upstream_fragment_id: mview_id,
+                    id: EdgeId::UpstreamExternal {
+                        upstream_table_id,
                         downstream_fragment_id: id,
                     },
                     // We always use `NoShuffle` for the exchange between the upstream `Materialize`
