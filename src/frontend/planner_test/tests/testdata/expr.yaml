@@ -542,11 +542,10 @@
     create table t(v1 int);
     select 1 + 2 + v1 from t;
   batch_plan: |
-    LogicalProject { exprs: [((1:Int32 + 2:Int32) + t.v1)] }
-    └─LogicalScan { table: t, columns: [t.v1] }
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [(3:Int32 + t.v1)] }
+      └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: const_eval of division by 0 error
   sql: |
     select 1 / 0 t1;
-  batch_plan: |
-    Feature is not yet implemented: Stream values executor is unimplemented!
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+  batch_error: 'Expr error: Division by zero'
