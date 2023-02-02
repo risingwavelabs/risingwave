@@ -47,6 +47,7 @@ pub struct CreateStreamingJobContext {
     /// Upstream mview actor ids grouped by worker node id.
     pub upstream_worker_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
+    /// TODO: can we remove this?
     pub table_mview_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
     pub dependent_table_ids: HashSet<TableId>,
