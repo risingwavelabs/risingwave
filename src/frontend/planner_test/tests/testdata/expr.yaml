@@ -531,6 +531,12 @@
   binder_error: |-
     Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+- name: regression (#7571) - literal debug display for array with NULL values
+  sql: |
+    select ARRAY[1, null] t;
+  logical_plan: |
+    LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: const_eval of const expr
   sql: |
     create table t(v1 int);

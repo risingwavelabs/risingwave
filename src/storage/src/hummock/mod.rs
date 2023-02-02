@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
-use risingwave_pb::hummock::{pin_version_response, SstableInfo};
+use risingwave_pb::hummock::{version_update_payload, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::watch;
@@ -177,7 +177,7 @@ impl HummockStorage {
         observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
-            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 
@@ -281,7 +281,7 @@ impl HummockStorage {
         let version_id = version.id;
         self.hummock_event_sender
             .send(HummockEvent::VersionUpdate(
-                pin_version_response::Payload::PinnedVersion(version),
+                version_update_payload::Payload::PinnedVersion(version),
             ))
             .unwrap();
 
@@ -417,6 +417,7 @@ pub fn hit_sstable_bloom_filter(
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
+
     let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash);
 
     if surely_not_have {
@@ -435,10 +436,9 @@ pub async fn get_from_order_sorted_uncommitted_data(
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
-    let dist_key_hash = read_options
-        .prefix_hint
-        .as_ref()
-        .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+    let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+        Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+    });
 
     let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 
@@ -554,7 +554,7 @@ impl HummockStorageV1 {
         observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
-            Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
+            Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(version))) => version,
             _ => unreachable!("the hummock observer manager is the first one to take the event tx. Should be full hummock version")
         };
 

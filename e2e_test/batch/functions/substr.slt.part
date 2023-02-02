@@ -1,0 +1,29 @@
+# issue: https://github.com/risingwavelabs/risingwave/issues/7632
+query T
+select substr('W7Jc3Vyufj', (INT '-2147483648'));
+----
+W7Jc3Vyufj
+
+statement error length in substr should be non-negative
+select substr('W7Jc3Vyufj', INT '-2147483648', INT '-2147483648');
+
+query T
+select substr('W7Jc3Vyufj', INT '2147483647', INT '2147483647');
+----
+(empty)
+
+query T
+select substr('W7Jc3Vyufj', INT '-2147483645', INT '2147483647');
+----
+W
+
+query T
+select substr('W7Jc3Vyufj', INT '-2147483648', INT '2147483647');
+----
+(empty)
+
+# issue: https://github.com/risingwavelabs/risingwave/issues/7601
+query T
+select substr('a', 2147483646, 1);
+----
+(empty)

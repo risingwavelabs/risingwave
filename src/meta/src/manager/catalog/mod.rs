@@ -1323,12 +1323,13 @@ where
 
     pub async fn finish_create_sink_procedure(
         &self,
+        internal_tables: Vec<Table>,
         sink: &Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         if !sinks.contains_key(&sink.id)
             && database_core.in_progress_creation_tracker.contains(&key)
@@ -1339,8 +1340,15 @@ where
                 .remove(&sink.id);
 
             sinks.insert(sink.id, sink.clone());
+            for table in &internal_tables {
+                tables.insert(table.id, table.clone());
+            }
+            commit_meta!(self, sinks, tables)?;
 
-            commit_meta!(self, sinks)?;
+            for internal_table in internal_tables {
+                self.notify_frontend(Operation::Add, Info::Table(internal_table))
+                    .await;
+            }
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1372,11 +1380,16 @@ where
         }
     }
 
-    pub async fn drop_sink(&self, sink_id: SinkId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_sink(
+        &self,
+        sink_id: SinkId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
         let sink = sinks.remove(sink_id);
@@ -1386,11 +1399,28 @@ where
                 None => {
                     let dependent_relations = sink.dependent_relations.clone();
 
-                    let objects = &[Object::SinkId(sink.id)];
+                    let objects = &[Object::SinkId(sink.id)]
+                        .into_iter()
+                        .chain(
+                            internal_table_ids
+                                .iter()
+                                .map(|table_id| Object::TableId(*table_id))
+                                .collect_vec(),
+                        )
+                        .collect_vec();
+
+                    let internal_tables = internal_table_ids
+                        .iter()
+                        .map(|internal_table_id| {
+                            tables
+                                .remove(*internal_table_id)
+                                .expect("internal table should exist")
+                        })
+                        .collect_vec();
 
                     let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                    commit_meta!(self, sinks, users)?;
+                    commit_meta!(self, sinks, tables, users)?;
 
                     user_core.decrease_ref(sink.owner);
 
@@ -1403,6 +1433,11 @@ where
                         database_core.decrease_ref_count(dependent_relation_id);
                     }
 
+                    for internal_table in internal_tables {
+                        self.notify_frontend(Operation::Delete, Info::Table(internal_table))
+                            .await;
+                    }
+
                     let version = self
                         .notify_frontend(Operation::Delete, Info::Sink(sink))
                         .await;
@@ -1413,6 +1448,10 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
+    }
+
+    pub async fn list_databases(&self) -> Vec<Database> {
+        self.core.lock().await.database.list_databases()
     }
 
     pub async fn list_tables(&self) -> Vec<Table> {

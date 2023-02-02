@@ -34,7 +34,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, SourceInfo, SourceMessage, SourceMeta, SplitImpl,
+    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SourceMeta, SplitImpl,
     StreamChunkWithState,
 };
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -153,6 +153,7 @@ impl SplitReaderV2 for S3FileReader {
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
         source_info: SourceInfo,
+        _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
         let sdk_config = config.load_config(None).await;
@@ -178,13 +179,13 @@ impl SplitReaderV2 for S3FileReader {
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_stream()
+        self.into_chunk_stream()
     }
 }
 
 impl S3FileReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    pub async fn into_stream(self) {
+    async fn into_chunk_stream(self) {
         for split in self.splits {
             let actor_id = self.source_info.actor_id.to_string();
             let source_id = self.source_info.source_id.to_string();
@@ -198,7 +199,7 @@ impl S3FileReader {
                 self.source_info,
             );
 
-            let parser = ByteStreamSourceParserImpl::create(self.parser_config.clone()).await?;
+            let parser = ByteStreamSourceParserImpl::create(self.parser_config.clone())?;
             let msg_stream = parser.into_stream(Box::pin(data_stream));
             #[for_await]
             for msg in msg_stream {
@@ -251,10 +252,7 @@ mod tests {
         };
 
         let config = ParserConfig {
-            common: CommonParserConfig {
-                props: HashMap::new(),
-                rw_columns: descs,
-            },
+            common: CommonParserConfig { rw_columns: descs },
             specific: SpecificParserConfig::Csv(csv_config),
         };
 
@@ -264,11 +262,12 @@ mod tests {
             config,
             Arc::new(SourceMetrics::default()),
             SourceInfo::default(),
+            None,
         )
         .await
         .unwrap();
 
-        let msg_stream = reader.into_stream();
+        let msg_stream = reader.into_chunk_stream();
         #[for_await]
         for msg in msg_stream {
             println!("msg {:?}", msg);

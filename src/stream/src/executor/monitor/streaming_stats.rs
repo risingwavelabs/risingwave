@@ -43,8 +43,10 @@ pub struct StreamingMetrics {
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
-    pub exchange_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+    pub stream_total_mem_usage: IntGauge,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -132,18 +134,17 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let exchange_recv_size = register_int_counter_vec_with_registry!(
-            "stream_exchange_recv_size",
-            "Total size of messages that have been received from upstream Actor",
-            &["up_actor_id", "down_actor_id"],
-            registry
-        )
-        .unwrap();
-
         let exchange_frag_recv_size = register_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
             "Total size of messages that have been received from upstream Fragment",
             &["up_fragment_id", "down_fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let stream_total_mem_usage = register_int_gauge_with_registry!(
+            "stream_total_mem_usage",
+            "The memory allocated by streaming jobs, get from TaskLocalAlloc",
             registry
         )
         .unwrap();
@@ -451,8 +452,8 @@ impl StreamingMetrics {
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             source_row_per_barrier,
-            exchange_recv_size,
             exchange_frag_recv_size,
+            stream_total_mem_usage,
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,

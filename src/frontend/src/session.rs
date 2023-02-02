@@ -144,12 +144,13 @@ impl FrontendEnv {
     }
 
     pub async fn init(
-        opts: &FrontendOpts,
+        opts: FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(&opts.config_path);
+        let config = load_config(&opts.config_path, Some(opts.override_opts));
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}",
-            config.server
+            "Starting frontend node with config {:?} with debug assertions {}",
+            config,
+            if cfg!(debug_assertions) { "on" } else { "off" }
         );
         let batch_config = config.batch;
 
@@ -232,7 +233,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
-        if opts.metrics_level > 0 {
+        if config.server.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
@@ -624,7 +625,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 }
 
 impl SessionManagerImpl {
-    pub async fn new(opts: &FrontendOpts) -> Result<Self> {
+    pub async fn new(opts: FrontendOpts) -> Result<Self> {
         let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
             FrontendEnv::init(opts).await?;
         Ok(Self {
@@ -693,6 +694,36 @@ impl Session<PgResponseStream> for SessionImpl {
             }
         }
         .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        Ok(rsp)
+    }
+
+    /// A copy of run_statement but exclude the parser part so each run must be at most one
+    /// statement. The str sql use the to_string of AST. Consider Reuse later.
+    async fn run_one_query(
+        self: Arc<Self>,
+        stmt: Statement,
+        format: bool,
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+        let sql_str = stmt.to_string();
+        let rsp = {
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, format));
+            if cfg!(debug_assertions) {
+                // Report the SQL in the log periodically if the query is slow.
+                const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                loop {
+                    match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
+                        Ok(result) => break result,
+                        Err(_) => tracing::warn!(
+                            sql_str,
+                            "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
+                        ),
+                    }
+                }
+            } else {
+                handle_fut.await
+            }
+        }
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql_str, e))?;
         Ok(rsp)
     }
 

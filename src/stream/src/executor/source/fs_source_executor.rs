@@ -24,7 +24,7 @@ use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitId, SplitImpl, SplitMetaData,
     StreamChunkWithState,
 };
-use risingwave_source::source_desc::FsSourceDesc;
+use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -258,12 +258,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 ))
             })?;
 
-        let source_desc = self
-            .stream_source_core
-            .source_desc_builder
-            .take()
-            .unwrap()
+        let source_desc_builder: SourceDescBuilder =
+            self.stream_source_core.source_desc_builder.take().unwrap();
+
+        let source_desc = source_desc_builder
             .build_fs_source_desc()
+            .await
             .map_err(StreamExecutorError::connector_error)?;
 
         // If the first barrier is configuration change, then the source executor must be newly

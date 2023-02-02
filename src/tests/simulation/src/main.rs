@@ -51,6 +51,10 @@ pub struct Args {
     #[clap(long, default_value = "2")]
     compactor_nodes: usize,
 
+    /// The number of meta nodes.
+    #[clap(long, default_value = "3")]
+    meta_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
@@ -140,6 +144,7 @@ async fn main() {
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
+        meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
     };
@@ -162,10 +167,11 @@ async fn main() {
     }
 
     if let Some(count) = args.sqlsmith {
-        let host = cluster.rand_frontend_ip();
         cluster
             .run_on_client(async move {
-                let rw = RisingWave::connect(host, "dev".into()).await.unwrap();
+                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                    .await
+                    .unwrap();
                 risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
             })
             .await;

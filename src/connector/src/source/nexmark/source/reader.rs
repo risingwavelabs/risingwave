@@ -12,63 +12,70 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use tokio::time::Instant;
 
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::data_gen_util::spawn_data_generation_stream;
+use crate::source::monitor::SourceMetrics;
 use crate::source::nexmark::source::message::NexmarkMessage;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, SourceMessage, SplitId,
-    SplitMetaData, SplitReader,
+    BoxSourceStream, BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId,
+    SplitImpl, SplitMetaData, SplitReaderV2,
 };
+
+impl_common_split_reader_logic!(NexmarkSplitReader, NexmarkProperties);
 
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
     generator: EventGenerator,
     assigned_split: NexmarkSplit,
-    split_id: SplitId,
     event_num: u64,
     event_type: Option<EventType>,
     use_real_time: bool,
     min_event_gap_in_ns: u64,
     max_chunk_size: u64,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
 #[async_trait]
-impl SplitReader for NexmarkSplitReader {
+impl SplitReaderV2 for NexmarkSplitReader {
     type Properties = NexmarkProperties;
 
+    #[allow(clippy::unused_async)]
     async fn new(
         properties: NexmarkProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let mut assigned_split = NexmarkSplit::default();
-        let mut split_id = "".into();
-        let mut split_num = 1;
-        let mut offset = 0;
+        tracing::debug!("Splits for nexmark found! {:?}", splits);
+        assert!(splits.len() == 1);
+        // TODO: currently, assume there's only one split in one reader
+        let split = splits.into_iter().next().unwrap().into_nexmark().unwrap();
+        let split_id = split.id();
 
-        if let Some(splits) = state {
-            tracing::debug!("Splits for nexmark found! {:?}", splits);
-            // TODO: currently, assume there's only one split in one reader
-            let split = splits.into_iter().exactly_one().unwrap();
-            split_id = split.id();
-            let split = split.into_nexmark().unwrap();
-
-            let split_index = split.split_index as u64;
-            split_num = split.split_num as u64;
-            offset = split.start_offset.unwrap_or(split_index);
-            assigned_split = split;
-        }
+        let split_index = split.split_index as u64;
+        let split_num = split.split_num as u64;
+        let offset = split.start_offset.unwrap_or(split_index);
+        let assigned_split = split;
 
         let mut generator = EventGenerator::new(NexmarkConfig::from(&*properties))
             .with_offset(offset)
@@ -88,19 +95,26 @@ impl SplitReader for NexmarkSplitReader {
             event_type: properties.table_type,
             use_real_time: properties.use_real_time,
             min_event_gap_in_ns: properties.min_event_gap_in_ns,
+            parser_config,
+            metrics,
+            source_info,
         })
     }
 
-    fn into_stream(self) -> BoxSourceStream {
-        // Will buffer at most 4 event chunks.
-        const BUFFER_SIZE: usize = 4;
-        spawn_data_generation_stream(self.into_stream(), BUFFER_SIZE).boxed()
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
 impl NexmarkSplitReader {
+    fn into_data_stream(self) -> BoxSourceStream {
+        // Will buffer at most 4 event chunks.
+        const BUFFER_SIZE: usize = 4;
+        spawn_data_generation_stream(self.into_data_stream_inner(), BUFFER_SIZE).boxed()
+    }
+
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn into_stream(mut self) {
+    async fn into_data_stream_inner(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
         let start_ts = self.generator.timestamp();
@@ -179,10 +193,17 @@ mod tests {
         assert_eq!(list_splits_resp.len(), 2);
 
         for split in list_splits_resp {
-            let state = Some(vec![split]);
-            let mut reader = NexmarkSplitReader::new(props.clone(), state, None)
-                .await?
-                .into_stream();
+            let state = vec![split];
+            let mut reader = NexmarkSplitReader::new(
+                props.clone(),
+                state,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+                None,
+            )
+            .await?
+            .into_data_stream();
             let _chunk = reader.next().await.unwrap()?;
         }
 
