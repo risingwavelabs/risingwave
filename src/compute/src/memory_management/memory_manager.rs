@@ -177,6 +177,9 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(cur_total_bytes_used as i64);
+            self.metrics
+                .stream_total_mem_usage
+                .set(_stream_mgr.get_total_mem_val().get());
 
             self.set_watermark_time_ms(watermark_time_ms);
         }

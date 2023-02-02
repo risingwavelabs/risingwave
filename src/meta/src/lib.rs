@@ -48,17 +48,12 @@ mod stream;
 
 use std::time::Duration;
 
-use clap::{ArgEnum, Parser};
+use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common_proc_macro::OverrideConfig;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
-
-#[derive(Copy, Clone, Debug, ArgEnum)]
-pub enum Backend {
-    Mem,
-    Etcd,
-}
 
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
@@ -85,9 +80,6 @@ pub struct MetaNodeOpts {
 
     #[clap(long)]
     prometheus_host: Option<String>,
-
-    #[clap(long, arg_enum, default_value_t = Backend::Mem)]
-    backend: Backend,
 
     #[clap(long, default_value_t = String::from(""))]
     etcd_endpoints: String,
@@ -121,27 +113,35 @@ pub struct MetaNodeOpts {
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    ///
-    /// Note that internal system parameters should be defined in the configuration file at
-    /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    #[clap(flatten)]
+    pub override_opts: OverrideConfigOpts,
+}
+
+/// Command-line arguments for compute-node that overrides the config file.
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+pub struct OverrideConfigOpts {
+    #[clap(long, arg_enum)]
+    #[override_opts(path = meta.backend)]
+    backend: Option<MetaBackend>,
 }
 
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
-use risingwave_common::config::load_config;
+use risingwave_common::config::{load_config, MetaBackend};
 
 /// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let config = load_config(&opts.config_path);
-        tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
+        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        tracing::info!("Starting meta node with config {:?}", config);
         let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
         let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -149,8 +149,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let advertise_addr = opts
             .advertise_addr
             .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
-        let backend = match opts.backend {
-            Backend::Etcd => MetaStoreBackend::Etcd {
+        let backend = match config.meta.backend {
+            MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
                     .etcd_endpoints
                     .split(',')
@@ -161,7 +161,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     false => None,
                 },
             },
-            Backend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Mem => MetaStoreBackend::Mem,
         };
 
         let max_heartbeat_interval =

@@ -493,6 +493,7 @@ pub fn to_stream_prost_body(
                         .iter()
                         .map(ColumnDesc::to_protobuf)
                         .collect(),
+                    table_desc: Some(left_table_desc.to_protobuf()),
                 }),
                 right_info: Some(ArrangementInfo {
                     arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
@@ -502,6 +503,7 @@ pub fn to_stream_prost_body(
                         .iter()
                         .map(ColumnDesc::to_protobuf)
                         .collect(),
+                    table_desc: Some(right_table_desc.to_protobuf()),
                 }),
                 output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
             })

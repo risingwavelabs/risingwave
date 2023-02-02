@@ -47,7 +47,7 @@ pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
 /// The representation is compressed as described in [`compress_data`], which is optimized for the
 /// mapping with a small number of items and good locality.
 #[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq)]
+#[derivative(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VnodeMapping<T: VnodeMappingItem> {
     original_indices: Vec<u32>,
     data: Vec<T::Item>,

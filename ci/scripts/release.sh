@@ -4,7 +4,7 @@
 set -euo pipefail
 
 echo "--- Check env"
-if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [[ -z "${BINARY_NAME+x}" ]]; then
+if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
   exit 0
 fi
 

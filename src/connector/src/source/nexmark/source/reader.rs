@@ -31,7 +31,8 @@ use crate::source::monitor::SourceMetrics;
 use crate::source::nexmark::source::message::NexmarkMessage;
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    BoxSourceStream, BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId,
+    SplitImpl, SplitMetaData, SplitReaderV2,
 };
 
 impl_common_split_reader_logic!(NexmarkSplitReader, NexmarkProperties);
@@ -52,7 +53,10 @@ pub struct NexmarkSplitReader {
     source_info: SourceInfo,
 }
 
-impl NexmarkSplitReader {
+#[async_trait]
+impl SplitReaderV2 for NexmarkSplitReader {
+    type Properties = NexmarkProperties;
+
     #[allow(clippy::unused_async)]
     async fn new(
         properties: NexmarkProperties,
@@ -95,6 +99,10 @@ impl NexmarkSplitReader {
             metrics,
             source_info,
         })
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
