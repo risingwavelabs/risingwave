@@ -28,7 +28,9 @@ use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId, ParallelUni
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
+use risingwave_pb::stream_plan::stream_fragment_graph::{
+    StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
@@ -41,7 +43,7 @@ use crate::manager::{
     IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingClusterInfo,
     StreamingJob,
 };
-use crate::model::FragmentId;
+use crate::model::{DispatcherId, FragmentId};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -119,8 +121,6 @@ struct StreamActorUpstream {
     fragment_id: GlobalFragmentId,
 }
 
-type ExchangeId = u64;
-
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
 #[derive(Debug)]
 struct StreamActorBuilder {
@@ -133,10 +133,10 @@ struct StreamActorBuilder {
     /// associated stream node
     nodes: Arc<StreamNode>,
 
-    new_downstreams: HashMap<GlobalFragmentId, Dispatcher>,
+    downstreams: HashMap<DispatcherId, Dispatcher>,
 
     /// upstreams, exchange node operator_id -> upstream actor ids
-    upstreams: HashMap<ExchangeId, StreamActorUpstream>,
+    upstreams: HashMap<EdgeId, StreamActorUpstream>,
 
     vnode_bitmap: Option<Bitmap>,
 }
@@ -152,7 +152,7 @@ impl StreamActorBuilder {
             actor_id,
             fragment_id,
             nodes: node,
-            new_downstreams: HashMap::new(),
+            downstreams: HashMap::new(),
             upstreams: HashMap::new(),
             vnode_bitmap,
         }
@@ -162,47 +162,9 @@ impl StreamActorBuilder {
         self.fragment_id
     }
 
-    pub fn add_dispatcher_hash(
-        &mut self,
-        column_indices: &[u32],
-        downstream_fragment_id: GlobalFragmentId,
-        downstream_actors: &[GlobalActorId],
-        downstream_actor_mapping: ActorMapping,
-    ) {
-        let dispatcher_id = downstream_fragment_id.as_global_id() as u64;
-
-        let dispatcher = Dispatcher {
-            r#type: DispatcherType::Hash as _,
-            column_indices: column_indices.to_vec(),
-            hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
-            dispatcher_id,
-            downstream_actor_id: OrderedActorLink(downstream_actors.to_vec()).as_global_ids(), /* TODO */
-        };
-
-        self.new_downstreams
-            .try_insert(downstream_fragment_id, dispatcher)
-            .unwrap();
-    }
-
-    pub fn add_dispatcher_normal(
-        &mut self,
-        dispatcher_type: DispatcherType,
-        downstream_fragment_id: GlobalFragmentId,
-        downstream_actors: &[GlobalActorId],
-    ) {
-        let dispatcher_id = downstream_fragment_id.as_global_id() as u64;
-
-        assert_ne!(dispatcher_type, DispatcherType::Hash);
-        let dispatcher = Dispatcher {
-            r#type: dispatcher_type as _,
-            column_indices: Vec::new(),
-            hash_mapping: None,
-            dispatcher_id,
-            downstream_actor_id: OrderedActorLink(downstream_actors.to_vec()).as_global_ids(), /* TODO */
-        };
-
-        self.new_downstreams
-            .try_insert(downstream_fragment_id, dispatcher)
+    pub fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
+        self.downstreams
+            .try_insert(dispatcher.dispatcher_id, dispatcher)
             .unwrap();
     }
 
@@ -219,18 +181,23 @@ impl StreamActorBuilder {
     fn rewrite_inner(&self, stream_node: &StreamNode, depth: usize) -> MetaResult<StreamNode> {
         match stream_node.get_node_body()? {
             NodeBody::Exchange(exchange) => {
-                assert!(depth > 0, "ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node);
+                if depth > 0 {
+                    bail!(
+                        "there should be no ExchangeNode on the top of the plan node: {:#?}",
+                        stream_node
+                    )
+                }
                 assert!(!stream_node.get_fields().is_empty());
                 assert!(stream_node.input.is_empty());
 
+                let upstreams = &self.upstreams[&EdgeId::Internal {
+                    exchange_id: stream_node.get_operator_id(),
+                }];
+
                 Ok(StreamNode {
                     node_body: Some(NodeBody::Merge(MergeNode {
-                        upstream_actor_id: self.upstreams[&stream_node.get_operator_id()]
-                            .actors
-                            .as_global_ids(),
-                        upstream_fragment_id: self.upstreams[&stream_node.get_operator_id()]
-                            .fragment_id
-                            .as_global_id(),
+                        upstream_actor_id: upstreams.actors.as_global_ids(),
+                        upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                         upstream_dispatcher_type: exchange.get_strategy()?.r#type,
                         fields: stream_node.get_fields().clone(),
                     })),
@@ -310,7 +277,7 @@ impl StreamActorBuilder {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
             nodes: Some(rewritten_nodes),
-            dispatcher: self.new_downstreams.into_values().collect(),
+            dispatcher: self.downstreams.into_values().collect(),
             upstream_actor_id,
             colocated_upstream_actor_id: None, // TODO: remove this
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
@@ -361,21 +328,45 @@ impl StreamGraphBuilder {
             .unwrap();
     }
 
+    fn new_hash_dispatcher(
+        column_indices: &[u32],
+        downstream_fragment_id: GlobalFragmentId,
+        downstream_actors: &[GlobalActorId],
+        downstream_actor_mapping: ActorMapping,
+    ) -> Dispatcher {
+        Dispatcher {
+            r#type: DispatcherType::Hash as _,
+            column_indices: column_indices.to_vec(),
+            hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
+            dispatcher_id: downstream_fragment_id.as_global_id() as u64,
+            downstream_actor_id: OrderedActorLink(downstream_actors.to_vec()).as_global_ids(), /* TODO */
+        }
+    }
+
+    fn new_normal_dispatcher(
+        dispatcher_type: DispatcherType,
+        downstream_fragment_id: GlobalFragmentId,
+        downstream_actors: &[GlobalActorId],
+    ) -> Dispatcher {
+        assert_ne!(dispatcher_type, DispatcherType::Hash);
+        Dispatcher {
+            r#type: dispatcher_type as _,
+            column_indices: Vec::new(),
+            hash_mapping: None,
+            dispatcher_id: downstream_fragment_id.as_global_id() as u64,
+            downstream_actor_id: OrderedActorLink(downstream_actors.to_vec()).as_global_ids(), /* TODO */
+        }
+    }
+
     /// Add dependency between two connected node in the graph.
     pub fn add_link<'a>(
         &mut self,
         upstream: Node<'a>,
         downstream: Node<'a>,
-        dispatch_strategy: DispatchStrategy,
-        exchange_id: ExchangeId,
+        edge: &'a StreamFragmentEdge,
     ) {
-        // // Since the frontend uses the exchange's operator ID as the `link_id` of the edge, if
-        // // there're multiple downstreams of a fragment, we cannot ensure this is unique. So we
-        // // concat the fragment IDs to a unique link ID.
-        // let link_id = ((upstream.fragment_id.as_global_id() as u64) << 32)
-        //     | downstream.fragment_id.as_global_id() as u64;
+        let dt = edge.dispatch_strategy.r#type();
 
-        let dt = dispatch_strategy.r#type();
         match dt {
             DispatcherType::NoShuffle => {
                 for (upstream_id, downstream_id) in upstream
@@ -390,7 +381,11 @@ impl StreamGraphBuilder {
                     self.actor_builders
                         .get_mut(upstream_id)
                         .unwrap()
-                        .add_dispatcher_normal(dt, downstream.fragment_id, &[*downstream_id]);
+                        .add_dispatcher(Self::new_normal_dispatcher(
+                            dt,
+                            downstream.fragment_id,
+                            &[*downstream_id],
+                        ));
 
                     // TODO: refactor
                     self.actor_builders
@@ -398,7 +393,7 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .upstreams
                         .try_insert(
-                            exchange_id,
+                            edge.id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(vec![*upstream_id]),
                                 fragment_id: upstream.fragment_id,
@@ -406,8 +401,8 @@ impl StreamGraphBuilder {
                         )
                         .unwrap_or_else(|_| {
                             panic!(
-                                "duplicated exchange input {} for no-shuffle actors {:?} -> {:?}",
-                                exchange_id, upstream_id, downstream_id
+                                "duplicated exchange input {:?} for no-shuffle actors {:?} -> {:?}",
+                                edge.id, upstream_id, downstream_id
                             )
                         });
                 }
@@ -415,7 +410,7 @@ impl StreamGraphBuilder {
 
             // Otherwise, make m * n links between actors.
             DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
-                if let DispatcherType::Hash = dt {
+                let dispatcher = if let DispatcherType::Hash = dt {
                     let downstream_locations: HashMap<ParallelUnitId, ActorId> = downstream
                         .actor_ids
                         .iter()
@@ -427,28 +422,21 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .to_actor(&downstream_locations);
 
-                    for upstream_id in upstream.actor_ids {
-                        self.actor_builders
-                            .get_mut(upstream_id)
-                            .unwrap()
-                            .add_dispatcher_hash(
-                                &dispatch_strategy.column_indices,
-                                downstream.fragment_id,
-                                downstream.actor_ids,
-                                actor_mapping.clone(),
-                            );
-                    }
+                    Self::new_hash_dispatcher(
+                        &edge.dispatch_strategy.column_indices,
+                        downstream.fragment_id,
+                        downstream.actor_ids,
+                        actor_mapping.clone(),
+                    )
                 } else {
-                    for upstream_id in upstream.actor_ids {
-                        self.actor_builders
-                            .get_mut(upstream_id)
-                            .unwrap()
-                            .add_dispatcher_normal(
-                                dt,
-                                downstream.fragment_id,
-                                downstream.actor_ids,
-                            );
-                    }
+                    Self::new_normal_dispatcher(dt, downstream.fragment_id, downstream.actor_ids)
+                };
+
+                for upstream_id in upstream.actor_ids {
+                    self.actor_builders
+                        .get_mut(upstream_id)
+                        .unwrap()
+                        .add_dispatcher(dispatcher.clone());
                 }
 
                 for downstream_id in downstream.actor_ids {
@@ -457,7 +445,7 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .upstreams
                         .try_insert(
-                            exchange_id,
+                            edge.id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(upstream.actor_ids.to_vec()),
                                 fragment_id: upstream.fragment_id,
@@ -465,8 +453,8 @@ impl StreamGraphBuilder {
                         )
                         .unwrap_or_else(|_| {
                             panic!(
-                                "duplicated exchange input {} for actors {:?} -> {:?}",
-                                exchange_id, upstream.actor_ids, downstream.actor_ids
+                                "duplicated exchange input {:?} for actors {:?} -> {:?}",
+                                edge.id, upstream.actor_ids, downstream.actor_ids
                             )
                         });
                 }
@@ -702,9 +690,7 @@ impl ActorGraphBuilder {
             })
             .collect_vec();
 
-        for (&downstream_fragment_id, dispatch_edge) in
-            self.fragment_graph.get_downstreams(fragment_id)
-        {
+        for (&downstream_fragment_id, edge) in self.fragment_graph.get_downstreams(fragment_id) {
             let downstream_actors = state
                 .fragment_actors
                 .get(&downstream_fragment_id)
@@ -723,8 +709,7 @@ impl ActorGraphBuilder {
                     actor_ids: downstream_actors,
                     distribution: downstream_distribution,
                 },
-                dispatch_edge.get_dispatch_strategy().unwrap().clone(),
-                dispatch_edge.link_id, // TODO
+                edge,
             );
         }
 
@@ -844,6 +829,36 @@ impl Deref for BuildingFragment {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum EdgeId {
+    Internal {
+        exchange_id: u64,
+    },
+
+    External {
+        upstream_fragment_id: GlobalFragmentId,
+        downstream_fragment_id: GlobalFragmentId,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct StreamFragmentEdge {
+    id: EdgeId,
+
+    dispatch_strategy: DispatchStrategy,
+}
+
+impl StreamFragmentEdge {
+    fn from_protobuf(edge: &StreamFragmentEdgeProto) -> Self {
+        Self {
+            id: EdgeId::Internal {
+                exchange_id: edge.link_id,
+            },
+            dispatch_strategy: edge.get_dispatch_strategy().unwrap().clone(),
+        }
+    }
+}
+
 /// In-memory representation of a **Fragment** Graph, built from the [`StreamFragmentGraphProto`]
 /// from the frontend.
 #[derive(Default)]
@@ -899,30 +914,17 @@ impl StreamFragmentGraph {
         for edge in proto.edges {
             let upstream_id = fragment_id_gen.to_global_id(edge.upstream_id);
             let downstream_id = fragment_id_gen.to_global_id(edge.downstream_id);
+            let edge = StreamFragmentEdge::from_protobuf(&edge);
 
             upstreams
                 .entry(downstream_id)
                 .or_insert_with(HashMap::new)
-                .try_insert(
-                    upstream_id,
-                    StreamFragmentEdge {
-                        upstream_id: upstream_id.as_global_id(),
-                        downstream_id: downstream_id.as_global_id(),
-                        ..edge.clone()
-                    },
-                )
+                .try_insert(upstream_id, edge.clone())
                 .unwrap();
             downstreams
                 .entry(upstream_id)
                 .or_insert_with(HashMap::new)
-                .try_insert(
-                    downstream_id,
-                    StreamFragmentEdge {
-                        upstream_id: upstream_id.as_global_id(),
-                        downstream_id: downstream_id.as_global_id(),
-                        ..edge
-                    },
-                )
+                .try_insert(downstream_id, edge)
                 .unwrap();
         }
 
@@ -1072,14 +1074,6 @@ impl StreamFragmentGraph {
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
     }
-
-    fn edges(
-        &self,
-    ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, &StreamFragmentEdge)> {
-        self.downstreams
-            .iter()
-            .flat_map(|(&from, tos)| tos.iter().map(move |(&to, edge)| (from, to, edge)))
-    }
 }
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
@@ -1098,11 +1092,11 @@ pub struct CompleteStreamFragmentGraph {
     existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
     /// Extra edges between existing fragments and the building fragments.
-    downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
+    downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Extra edges between existing fragments and the building fragments.
     #[expect(dead_code)]
-    upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, DispatcherType>>,
+    upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 }
 
 impl CompleteStreamFragmentGraph {
@@ -1134,19 +1128,28 @@ impl CompleteStreamFragmentGraph {
                     .context("upstream materialized view fragment not found")?;
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
-                // We always use `NoShuffle` for the exchange between the upstream `Materialize` and
-                // the downstream `Chain` of the new materialized view.
-                let dt = DispatcherType::NoShuffle;
+                let edge = StreamFragmentEdge {
+                    id: EdgeId::External {
+                        upstream_fragment_id: mview_id,
+                        downstream_fragment_id: id,
+                    },
+                    // We always use `NoShuffle` for the exchange between the upstream `Materialize`
+                    // and the downstream `Chain` of the new materialized view.
+                    dispatch_strategy: DispatchStrategy {
+                        r#type: DispatcherType::NoShuffle as _,
+                        ..Default::default()
+                    },
+                };
 
                 downstreams
                     .entry(mview_id)
                     .or_insert_with(HashMap::new)
-                    .try_insert(id, dt)
+                    .try_insert(id, edge.clone())
                     .unwrap();
                 upstreams
                     .entry(id)
                     .or_insert_with(HashMap::new)
-                    .try_insert(mview_id, dt)
+                    .try_insert(mview_id, edge)
                     .unwrap();
             }
         }
@@ -1165,20 +1168,15 @@ impl CompleteStreamFragmentGraph {
     }
 
     /// Returns the dispatcher types of all edges in the complete graph.
-    fn dispatch_edges(
-        &self,
-    ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, DispatcherType)> + '_ {
+    fn all_edges<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, &'a StreamFragmentEdge)> + 'a
+    {
         self.graph
-            .edges()
-            .map(|(from, to, edge)| {
-                let dt = edge.get_dispatch_strategy().unwrap().get_type().unwrap();
-                (from, to, dt)
-            })
-            .chain(
-                self.downstreams
-                    .iter()
-                    .flat_map(|(&from, tos)| tos.iter().map(move |(&to, &dt)| (from, to, dt))),
-            )
+            .downstreams
+            .iter()
+            .chain(self.downstreams.iter())
+            .flat_map(|(&from, tos)| tos.iter().map(move |(&to, edge)| (from, to, edge)))
     }
 
     /// Returns the distribution of the existing fragments.

@@ -242,8 +242,12 @@ impl Scheduler {
             facts.push(Fact::ExternalReq { id, dist });
         }
         // Edges
-        for (from, to, dt) in graph.dispatch_edges() {
-            facts.push(Fact::Edge { from, to, dt });
+        for (from, to, edge) in graph.all_edges() {
+            facts.push(Fact::Edge {
+                from,
+                to,
+                dt: edge.dispatch_strategy.r#type(),
+            });
         }
 
         // Run the algorithm.
