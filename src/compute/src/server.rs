@@ -329,7 +329,7 @@ pub async fn compute_node_serve(
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
-/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing. Otherewise, it is not allowed to
+/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing. Otherwise, it is not allowed to
 /// start.
 fn validate_compute_node_memory_config(total_memory_bytes: usize, storage_config: &StorageConfig) {
     if storage_config.total_memory_limit_mb() << 20 > total_memory_bytes {
