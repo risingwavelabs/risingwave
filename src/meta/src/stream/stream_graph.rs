@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
-use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -606,8 +606,24 @@ impl ActorGraphBuilder {
         let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
 
         // Generate actors of the streaming plan
-        let (actor_graph, actor_locations) =
-            self.build_actor_graph(id_gen, ctx)?.finish().build(&*ctx)?;
+        let (actor_graph, actor_locations) = {
+            let builder = self.build_actor_graph(id_gen)?.finish();
+
+            // TODO: do not pass with `ctx`
+            let dispatchers = builder
+                .external_changes
+                .iter()
+                .map(|(actor_id, change)| {
+                    (
+                        actor_id.as_global_id(),
+                        change.new_downstreams.values().cloned().collect(),
+                    )
+                })
+                .collect();
+            ctx.dispatchers = dispatchers;
+
+            builder.build(&*ctx)
+        }?;
 
         let scheduled_location = {
             let actor_locations = actor_locations
@@ -653,18 +669,14 @@ impl ActorGraphBuilder {
 
     /// Build actor graph from fragment graph using topological order. Setup dispatcher in actor and
     /// generate actors by their parallelism.
-    fn build_actor_graph(
-        &self,
-        id_gen: GlobalActorIdGen,
-        ctx: &mut CreateStreamingJobContext,
-    ) -> MetaResult<BuildActorGraphState> {
+    fn build_actor_graph(&self, id_gen: GlobalActorIdGen) -> MetaResult<BuildActorGraphState> {
         let mut state = BuildActorGraphState::new(id_gen);
 
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
         // popped out from the heap will be the top-most node in plan, or the sink in stream graph.)
         for fragment_id in self.fragment_graph.topo_order()? {
             // Build the actors corresponding to the fragment
-            self.build_actor_graph_fragment(fragment_id, &mut state, ctx)?;
+            self.build_actor_graph_fragment(fragment_id, &mut state)?;
         }
 
         Ok(state)
@@ -674,7 +686,6 @@ impl ActorGraphBuilder {
         &self,
         fragment_id: GlobalFragmentId,
         state: &mut BuildActorGraphState,
-        ctx: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let current_fragment = self.fragment_graph.get_fragment(fragment_id);
 
