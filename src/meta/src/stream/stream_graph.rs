@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::HashMap;
 use std::collections::{BTreeMap, HashSet};
+use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
@@ -554,11 +555,11 @@ impl ActorGraphBuilder {
     pub fn new(
         complete_graph: CompleteStreamFragmentGraph,
         cluster_info: StreamingClusterInfo,
-        default_parallelism: u32,
+        default_parallelism: Option<NonZeroUsize>,
     ) -> MetaResult<Self> {
         let distributions = schedule::Scheduler::new(
             cluster_info.parallel_units.values().cloned(),
-            default_parallelism as usize,
+            default_parallelism,
         )?
         .schedule(&complete_graph)?;
 
@@ -719,7 +720,7 @@ impl ActorGraphBuilder {
                 },
                 Node {
                     fragment_id: downstream_fragment_id,
-                    actor_ids: &downstream_actors,
+                    actor_ids: downstream_actors,
                     distribution: downstream_distribution,
                 },
                 dispatch_edge.get_dispatch_strategy().unwrap().clone(),

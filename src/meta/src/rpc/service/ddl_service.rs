@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroUsize;
+
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -583,12 +586,13 @@ where
 
         // 2. Get the env for streaming jobs
         let env = fragment_graph.get_env().unwrap().clone();
-        let default_parallelism =
-            if let Some(Parallelism { parallelism }) = fragment_graph.parallelism {
-                parallelism as usize
-            } else {
-                self.cluster_manager.get_active_parallel_unit_count().await
-            } as u32;
+        let default_parallelism = if let Some(Parallelism { parallelism }) =
+            fragment_graph.parallelism
+        {
+            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
+        } else {
+            None
+        };
 
         // 3. Build fragment graph.
         let fragment_graph =
@@ -630,7 +634,6 @@ where
         let complete_graph =
             CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
 
-        // TODO(bugen): we should merge this step with the `Scheduler`.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;

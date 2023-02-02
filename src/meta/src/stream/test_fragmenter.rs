@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
@@ -445,7 +446,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
         make_cluster_info(),
-        parallel_degree,
+        Some(NonZeroUsize::new(parallel_degree).unwrap()),
     )?;
     let (graph, _locations) = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
