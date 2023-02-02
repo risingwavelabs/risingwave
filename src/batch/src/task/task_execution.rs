@@ -76,8 +76,8 @@ where
                 biased;
                 _ = monitor => unreachable!(),
                 output = future => {
-                    // Report mem usage as 0 after ends immediately.
-                    context.store_mem_usage(0);
+                    // Report bytes allocated when actor ends. Note we should not report 0, cuz actor may allocate memory in block cache and may not be dealloc.
+                    BYTES_ALLOCATED.with(|bytes| context.store_mem_usage(bytes.val()));
                     output
                 },
             };
@@ -593,8 +593,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .expect("The state receivers must have been inited!")
     }
 
-    pub fn get_mem_usage(&self) -> usize {
-        self.context.get_mem_usage()
+    pub fn mem_usage(&self) -> usize {
+        self.context.mem_usage()
     }
 
     /// Check the task status: whether has ended.

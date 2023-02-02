@@ -142,8 +142,7 @@ where
             locations: &'a mut ScheduledLocations,
             /// New dispatchers for this mview.
             dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
-            /// New vnode bitmaps for chain actors.
-            actor_vnode_bitmaps: &'a mut HashMap<ActorId, Option<Buffer>>,
+
             /// Upstream Materialize actor ids grouped by worker id.
             upstream_worker_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
@@ -196,7 +195,8 @@ where
                 self.locations
                     .actor_locations
                     .insert(actor_id, upstream_parallel_unit);
-                self.actor_vnode_bitmaps
+                self.locations
+                    .actor_vnode_bitmaps
                     .insert(actor_id, upstream_vnode_bitmap.clone());
 
                 // fill upstream node-actor info for later use
@@ -273,7 +273,6 @@ where
             tables_worker_actors,
             locations,
             dispatchers,
-            actor_vnode_bitmaps: &mut Default::default(),
             upstream_worker_actors,
         };
 
@@ -314,7 +313,12 @@ where
                 )?;
 
                 // setup actor vnode bitmap.
-                actor.vnode_bitmap = env.actor_vnode_bitmaps.remove(&actor.actor_id).unwrap();
+                actor.vnode_bitmap = env
+                    .locations
+                    .actor_vnode_bitmaps
+                    .get(&actor.actor_id)
+                    .unwrap()
+                    .clone();
 
                 // setup upstream actor id
                 actor.upstream_actor_id.push(upstream_actor_ids[idx]);
@@ -377,40 +381,26 @@ where
     ) -> MetaResult<()> {
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
-        let mut locations = {
-            // List all running worker nodes and the parallel units.
-            //
-            // It's possible that the cluster configuration has been changed after we resolve the
-            // stream graph, so the scheduling is fallible and the client may need to retry.
-            // TODO: refactor to use a consistent snapshot of cluster configuration.
-            let workers = self
-                .cluster_manager
-                .list_worker_node(
-                    WorkerType::ComputeNode,
-                    Some(risingwave_pb::common::worker_node::State::Running),
-                )
-                .await;
-            if workers.is_empty() {
-                bail!("no available compute node in the cluster");
-            }
-            let parallel_units = self.cluster_manager.list_active_parallel_units().await;
 
-            // Create empty locations and the scheduler.
-            let mut locations = ScheduledLocations::with_workers(workers);
-            let scheduler = Scheduler::new(parallel_units);
+        // List all running worker nodes and the parallel units.
+        //
+        // It's possible that the cluster configuration has been changed after we resolve the
+        // stream graph, so the scheduling is fallible and the client may need to retry.
+        // TODO: refactor to use a consistent snapshot of cluster configuration.
+        let workers = self
+            .cluster_manager
+            .list_worker_node(
+                WorkerType::ComputeNode,
+                Some(risingwave_pb::common::worker_node::State::Running),
+            )
+            .await;
+        if workers.is_empty() {
+            bail!("no available compute node in the cluster");
+        }
+        let parallel_units = self.cluster_manager.list_active_parallel_units().await;
 
-            // Schedule each fragment(actors) to nodes except chain, recorded in `locations`.
-            // Vnode mapping in fragment will be filled in as well.
-            let topological_order = table_fragments.generate_topological_order();
-            for fragment_id in topological_order {
-                let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-                if !chain_fragment_upstream_table_map.contains_key(&fragment_id) {
-                    scheduler.schedule(fragment, &mut locations)?;
-                }
-            }
-
-            locations
-        };
+        // Create empty locations and the scheduler.
+        let mut locations = ScheduledLocations::with_workers(workers);
 
         // Resolve chain node infos, including:
         // 1. insert upstream actor id in merge node
@@ -426,6 +416,18 @@ where
         .await?;
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
+
+        let scheduler = Scheduler::new(parallel_units);
+
+        // Schedule each fragment(actors) to nodes except chain, recorded in `locations`.
+        // Vnode mapping in fragment will be filled in as well.
+        let topological_order = table_fragments.generate_topological_order();
+        for fragment_id in topological_order {
+            let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
+            if !chain_fragment_upstream_table_map.contains_key(&fragment_id) {
+                scheduler.schedule(fragment, &mut locations)?;
+            }
+        }
 
         // Record vnode to parallel unit mapping for actors.
         let actor_to_vnode_mapping = {

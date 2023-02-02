@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
+use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
 use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
 use crate::catalog::ColumnId;
@@ -85,12 +85,13 @@ impl StreamTableScan {
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &HashMap<usize, usize>,
+        chain_type: ChainType,
     ) -> StreamIndexScan {
-        StreamIndexScan::new(self.logical.to_index_scan(
-            index_name,
-            index_table_desc,
-            primary_to_secondary_mapping,
-        ))
+        StreamIndexScan::new(
+            self.logical
+                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping),
+            chain_type,
+        )
     }
 }
 
