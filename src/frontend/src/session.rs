@@ -145,12 +145,13 @@ impl FrontendEnv {
     }
 
     pub async fn init(
-        opts: &FrontendOpts,
+        opts: FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(&opts.config_path);
+        let config = load_config(&opts.config_path, Some(opts.override_opts));
         tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}",
-            config.server
+            "Starting frontend node with config {:?} with debug assertions {}",
+            config,
+            if cfg!(debug_assertions) { "on" } else { "off" }
         );
         let batch_config = config.batch;
 
@@ -233,7 +234,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
-        if opts.metrics_level > 0 {
+        if config.server.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
@@ -625,7 +626,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 }
 
 impl SessionManagerImpl {
-    pub async fn new(opts: &FrontendOpts) -> Result<Self> {
+    pub async fn new(opts: FrontendOpts) -> Result<Self> {
         let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
             FrontendEnv::init(opts).await?;
         Ok(Self {

@@ -32,7 +32,10 @@ use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::KinesisProperties;
 use crate::source::monitor::SourceMetrics;
-use crate::source::{Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData};
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReaderV2,
+};
 
 impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
 
@@ -52,7 +55,10 @@ pub struct KinesisSplitReader {
     source_info: SourceInfo,
 }
 
-impl KinesisSplitReader {
+#[async_trait]
+impl SplitReaderV2 for KinesisSplitReader {
+    type Properties = KinesisProperties;
+
     async fn new(
         properties: KinesisProperties,
         splits: Vec<SplitImpl>,
@@ -105,6 +111,10 @@ impl KinesisSplitReader {
             metrics,
             source_info,
         })
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
