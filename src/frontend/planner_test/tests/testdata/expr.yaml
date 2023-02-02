@@ -183,7 +183,7 @@
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Decimal, (t.v1 = 2:Int32), 2:Decimal, 0.0:Decimal), t._row_id] }
+    └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: case searched form without else
   sql: |
@@ -269,7 +269,7 @@
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [ConcatWs(t.v1, '1':Varchar), t._row_id] }
+    └─StreamProject { exprs: [ConcatWs(t.v1, 1:Int32::Varchar), t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar);
@@ -295,7 +295,7 @@
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, '1':Varchar), t._row_id] }
+    └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, 1:Int32::Varchar), t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 float);
@@ -495,7 +495,7 @@
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() or v2 >= now();
-  stream_error: 'Expr error: Expected epoch timestamp bound into Now'
+  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now inside HAVING clause
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -541,10 +541,12 @@
   sql: |
     create table t(v1 int);
     select 1 + 2 + v1 from t;
-  optimized_logical_plan: |
-    LogicalProject { exprs: [(3:Int32 + t.v1)] }
+  batch_plan: |
+    LogicalProject { exprs: [((1:Int32 + 2:Int32) + t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
 - name: const_eval of division by 0 error
   sql: |
     select 1 / 0 t1;
-  stream_error: 'Expr error: Division by zero'
+  batch_plan: |
+    Feature is not yet implemented: Stream values executor is unimplemented!
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

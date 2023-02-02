@@ -243,7 +243,7 @@ impl EqJoinPredicate {
         Self::new(self.other_cond, new_eq_keys, self.left_cols_num)
     }
 
-    pub fn rewrite_exprs(&self, rewriter: &mut impl ExprRewriter) -> Self {
+    pub fn rewrite_exprs(&self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
         let mut new = self.clone();
         new.other_cond = new.other_cond.rewrite_expr(rewriter);
         new

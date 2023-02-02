@@ -64,8 +64,8 @@
         └─BatchProject { exprs: [t.v1, t.v2, 2:Int32] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, 2:Int32(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [2:Int32, t._row_id] }
-    └─StreamProject { exprs: [t.v1, t.v2, 2:Int32, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, (1:Int32 + 1:Int32)(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [(1:Int32 + 1:Int32), t._row_id] }
+    └─StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32), t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);

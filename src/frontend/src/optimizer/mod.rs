@@ -429,9 +429,6 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
         if explain_trace {
             ctx.trace("Const eval exprs:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -460,6 +457,9 @@ impl PlanRoot {
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

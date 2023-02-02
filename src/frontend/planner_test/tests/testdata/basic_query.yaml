@@ -26,7 +26,7 @@
       └─BatchScan { table: t, columns: [], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamFilter { predicate: true:Boolean AND true:Boolean }
+    └─StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
       └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);

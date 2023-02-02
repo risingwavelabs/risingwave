@@ -102,7 +102,7 @@ impl ExprRewritable for BatchFilter {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         Self { 
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_filter().unwrap()
+            logical: self.logical.rewrite_exprs(r).as_logical_filter().unwrap().clone()
         }.into()
     }
 }
