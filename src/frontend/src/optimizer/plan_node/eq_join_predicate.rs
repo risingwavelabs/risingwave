@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use crate::expr::{ExprType, FunctionCall, InputRef, InputRefDisplay, ExprRewriter};
+use crate::expr::{ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer

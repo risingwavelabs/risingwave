@@ -22,8 +22,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanRef;
 use super::{
-    EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
-    ToDistributedBatch, ExprRewritable,
+    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -269,10 +269,16 @@ impl ExprRewritable for BatchHashJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_join().unwrap().clone(),
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
             eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
-        }.into()
+        }
+        .into()
     }
 }

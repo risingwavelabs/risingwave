@@ -18,7 +18,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use super::{
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
+};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -86,9 +88,15 @@ impl ExprRewritable for BatchTableFunction {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_table_function().unwrap().clone()
-        }.into()
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_table_function()
+                .unwrap()
+                .clone(),
+        }
+        .into()
     }
 }

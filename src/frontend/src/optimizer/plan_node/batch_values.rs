@@ -20,7 +20,10 @@ use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
 use super::generic::GenericPlanRef;
-use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use super::{
+    ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst,
+    ToDistributedBatch,
+};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
@@ -111,9 +114,15 @@ impl ExprRewritable for BatchValues {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_values().unwrap().clone()
-        }.into()
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_values()
+                .unwrap()
+                .clone(),
+        }
+        .into()
     }
 }

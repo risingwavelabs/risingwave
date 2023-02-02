@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UnionNode;
 
-use super::{PlanRef, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use super::{ExprRewritable, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 

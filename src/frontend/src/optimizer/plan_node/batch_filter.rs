@@ -19,7 +19,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
 use super::generic::GenericPlanRef;
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use super::{
+    ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::utils::Condition;
@@ -100,9 +102,15 @@ impl ExprRewritable for BatchFilter {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_filter().unwrap().clone()
-        }.into()
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_filter()
+                .unwrap()
+                .clone(),
+        }
+        .into()
     }
 }

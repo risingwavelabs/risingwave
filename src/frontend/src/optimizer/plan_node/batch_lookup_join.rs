@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
-use super::ExprRewritable;
 use super::generic::GenericPlanRef;
+use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -283,18 +283,23 @@ impl ToLocalBatch for BatchLookupJoin {
     }
 }
 
-
 impl ExprRewritable for BatchLookupJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_join().unwrap().clone(),
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
             eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
             ..Self::clone(self)
-        }.into()
+        }
+        .into()
     }
 }

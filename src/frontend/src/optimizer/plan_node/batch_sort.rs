@@ -18,7 +18,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use super::{
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
 

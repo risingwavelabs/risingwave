@@ -21,7 +21,8 @@ use risingwave_pb::expr::ExprNode;
 
 use super::generic::GenericPlanRef;
 use super::{
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable,
+    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -112,9 +113,15 @@ impl ExprRewritable for BatchProject {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_project().unwrap().clone()
-        }.into()
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_project()
+                .unwrap()
+                .clone(),
+        }
+        .into()
     }
 }

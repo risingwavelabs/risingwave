@@ -19,13 +19,12 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectSetNode;
 
+use super::ExprRewritable;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::PlanRef;
-
-use super::ExprRewritable;
 
 #[derive(Debug, Clone)]
 pub struct BatchProjectSet {
@@ -103,9 +102,15 @@ impl ExprRewritable for BatchProjectSet {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self { 
+        Self {
             base: self.base.clone_with_new_plan_id(),
-            logical: self.logical.rewrite_exprs(r).as_logical_project_set().unwrap().clone()
-        }.into()
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_project_set()
+                .unwrap()
+                .clone(),
+        }
+        .into()
     }
 }

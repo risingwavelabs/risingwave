@@ -20,13 +20,12 @@ use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
+use super::ExprRewritable;
 use crate::optimizer::plan_node::{
     LogicalExpand, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;
-
-use super::ExprRewritable;
 
 #[derive(Debug, Clone)]
 pub struct BatchExpand {

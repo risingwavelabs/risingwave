@@ -19,7 +19,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
 use super::{
-    LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable,
+    ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -117,6 +118,5 @@ impl ToLocalBatch for BatchHopWindow {
         Ok(self.clone_with_input(new_input).into())
     }
 }
-
 
 impl ExprRewritable for BatchHopWindow {}
