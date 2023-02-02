@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UnionNode;
 
-use super::{PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{PlanRef, ToBatchProst, ToDistributedBatch, ExprRewritable};
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -100,3 +100,5 @@ impl ToLocalBatch for BatchUnion {
         Ok(self.clone_with_inputs(&new_inputs?))
     }
 }
+
+impl ExprRewritable for BatchUnion {}

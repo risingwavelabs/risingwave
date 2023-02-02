@@ -23,9 +23,9 @@ use risingwave_pb::plan_common::JoinType;
 use super::generic::GenericPlanRef;
 use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
-    ToDistributedBatch,
+    ToDistributedBatch, ExprRewritable,
 };
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicateDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -260,5 +260,19 @@ impl ToLocalBatch for BatchHashJoin {
             .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
+    }
+}
+
+impl ExprRewritable for BatchHashJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self { 
+            base: self.base.clone_with_new_plan_id(),
+            logical: self.logical.rewrite_exprs(r).as_logical_join().unwrap(),
+            eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
+        }.into()
     }
 }

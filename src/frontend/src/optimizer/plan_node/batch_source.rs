@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
-use super::{LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, ToLocalBatch};
+use super::{LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, ToLocalBatch, ExprRewritable};
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
@@ -105,3 +105,4 @@ impl ToBatchProst for BatchSource {
         })
     }
 }
+impl ExprRewritable for BatchSource {}

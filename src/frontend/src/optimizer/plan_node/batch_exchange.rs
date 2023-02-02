@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
@@ -98,3 +98,5 @@ impl ToLocalBatch for BatchExchange {
         unreachable!()
     }
 }
+
+impl ExprRewritable for BatchExchange {}

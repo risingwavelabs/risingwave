@@ -26,6 +26,8 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;
 
+use super::ExprRewritable;
+
 #[derive(Debug, Clone)]
 pub struct BatchExpand {
     pub base: PlanBase,
@@ -99,3 +101,5 @@ impl ToLocalBatch for BatchExpand {
         Ok(self.clone_with_input(new_input).into())
     }
 }
+
+impl ExprRewritable for BatchExpand {}

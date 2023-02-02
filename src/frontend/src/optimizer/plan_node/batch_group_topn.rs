@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GroupTopNNode;
 
-use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 
@@ -95,3 +95,5 @@ impl ToLocalBatch for BatchGroupTopN {
         Ok(self.clone_with_input(input).into())
     }
 }
+
+impl ExprRewritable for BatchGroupTopN {}

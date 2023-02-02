@@ -18,7 +18,7 @@ use paste::paste;
 
 use super::*;
 use crate::expr::ExprRewriter;
-use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
+use crate::for_stream_plan_nodes;
 
 /// Rewrites expressions in a `PlanRef`. Due to `Share` operator,
 /// the `ExprRewriter` needs to be idempotent i.e. applying it more than once
@@ -54,5 +54,4 @@ macro_rules! ban_expr_rewritable {
         }
     }
 }
-for_batch_plan_nodes! {ban_expr_rewritable}
 for_stream_plan_nodes! {ban_expr_rewritable}

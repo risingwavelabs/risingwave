@@ -23,8 +23,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
-use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, BatchProjectSet, ExprRewritable};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
@@ -260,5 +261,19 @@ impl ToLocalBatch for BatchSeqScan {
             Distribution::SomeShard
         };
         Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())
+    }
+}
+
+impl ExprRewritable for BatchSeqScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self { 
+            base: self.base.clone_with_new_plan_id(),
+            logical: self.logical.rewrite_exprs(r).as_logical_scan().unwrap(),
+            ..Self::clone(self)
+        }.into()
     }
 }

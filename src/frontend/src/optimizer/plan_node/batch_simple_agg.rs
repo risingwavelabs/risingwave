@@ -19,7 +19,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
 use super::generic::{GenericPlanRef, PlanAggCall};
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -126,5 +127,18 @@ impl ToLocalBatch for BatchSimpleAgg {
             RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchSimpleAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self { 
+            base: self.base.clone_with_new_plan_id(),
+            logical: self.logical.rewrite_exprs(r).as_logical_agg().unwrap()
+        }.into()
     }
 }

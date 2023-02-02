@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
 use super::{
-    LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -86,3 +86,5 @@ impl ToLocalBatch for BatchDelete {
         Ok(self.clone_with_input(new_input).into())
     }
 }
+
+impl ExprRewritable for BatchDelete {}

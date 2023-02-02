@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ExprRewritable};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
 
@@ -84,3 +84,5 @@ impl ToLocalBatch for BatchSort {
         Ok(self.clone_with_input(new_input).into())
     }
 }
+
+impl ExprRewritable for BatchSort {}

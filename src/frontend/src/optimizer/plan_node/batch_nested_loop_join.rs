@@ -20,8 +20,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
 use super::generic::GenericPlanRef;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch, ExprRewritable};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -153,5 +153,18 @@ impl ToLocalBatch for BatchNestedLoopJoin {
             .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
+    }
+}
+
+impl ExprRewritable for BatchNestedLoopJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self { 
+            base: self.base.clone_with_new_plan_id(),
+            logical: self.logical.rewrite_exprs(r).as_logical_join().unwrap(),
+        }.into()
     }
 }
