@@ -118,6 +118,8 @@ struct StreamActorUpstream {
     fragment_id: GlobalFragmentId,
 }
 
+type ExchangeId = u64;
+
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
 #[derive(Debug)]
 struct StreamActorBuilder {
@@ -130,10 +132,10 @@ struct StreamActorBuilder {
     /// associated stream node
     nodes: Arc<StreamNode>,
 
-    new_downstreams: HashMap<u64, Dispatcher>,
+    new_downstreams: HashMap<GlobalFragmentId, Dispatcher>,
 
     /// upstreams, exchange node operator_id -> upstream actor ids
-    upstreams: HashMap<u64, StreamActorUpstream>,
+    upstreams: HashMap<ExchangeId, StreamActorUpstream>,
 
     vnode_bitmap: Option<Bitmap>,
 }
@@ -162,10 +164,12 @@ impl StreamActorBuilder {
     pub fn add_dispatcher_hash(
         &mut self,
         column_indices: &[u32],
-        dispatcher_id: u64,
+        downstream_fragment_id: GlobalFragmentId,
         downstream_actors: &[GlobalActorId],
         downstream_actor_mapping: ActorMapping,
     ) {
+        let dispatcher_id = downstream_fragment_id.as_global_id() as u64;
+
         let dispatcher = Dispatcher {
             r#type: DispatcherType::Hash as _,
             column_indices: column_indices.to_vec(),
@@ -175,16 +179,18 @@ impl StreamActorBuilder {
         };
 
         self.new_downstreams
-            .try_insert(dispatcher_id, dispatcher)
+            .try_insert(downstream_fragment_id, dispatcher)
             .unwrap();
     }
 
     pub fn add_dispatcher_normal(
         &mut self,
         dispatcher_type: DispatcherType,
-        dispatcher_id: u64,
+        downstream_fragment_id: GlobalFragmentId,
         downstream_actors: &[GlobalActorId],
     ) {
+        let dispatcher_id = downstream_fragment_id.as_global_id() as u64;
+
         assert_ne!(dispatcher_type, DispatcherType::Hash);
         let dispatcher = Dispatcher {
             r#type: dispatcher_type as _,
@@ -195,7 +201,7 @@ impl StreamActorBuilder {
         };
 
         self.new_downstreams
-            .try_insert(dispatcher_id, dispatcher)
+            .try_insert(downstream_fragment_id, dispatcher)
             .unwrap();
     }
 
@@ -265,12 +271,13 @@ impl StreamGraphBuilder {
         upstream: Node<'a>,
         downstream: Node<'a>,
         dispatch_strategy: DispatchStrategy,
+        exchange_id: ExchangeId,
     ) {
-        // Since the frontend uses the exchange's operator ID as the `link_id` of the edge, if
-        // there're multiple downstreams of a fragment, we cannot ensure this is unique. So we
-        // concat the fragment IDs to a unique link ID.
-        let link_id = ((upstream.fragment_id.as_global_id() as u64) << 32)
-            | downstream.fragment_id.as_global_id() as u64;
+        // // Since the frontend uses the exchange's operator ID as the `link_id` of the edge, if
+        // // there're multiple downstreams of a fragment, we cannot ensure this is unique. So we
+        // // concat the fragment IDs to a unique link ID.
+        // let link_id = ((upstream.fragment_id.as_global_id() as u64) << 32)
+        //     | downstream.fragment_id.as_global_id() as u64;
 
         let dt = dispatch_strategy.r#type();
         match dt {
@@ -287,7 +294,7 @@ impl StreamGraphBuilder {
                     self.actor_builders
                         .get_mut(upstream_id)
                         .unwrap()
-                        .add_dispatcher_normal(dt, link_id, &[*downstream_id]);
+                        .add_dispatcher_normal(dt, downstream.fragment_id, &[*downstream_id]);
 
                     // TODO: refactor
                     self.actor_builders
@@ -295,7 +302,7 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .upstreams
                         .try_insert(
-                            link_id,
+                            exchange_id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(vec![*upstream_id]),
                                 fragment_id: upstream.fragment_id,
@@ -304,7 +311,7 @@ impl StreamGraphBuilder {
                         .unwrap_or_else(|_| {
                             panic!(
                                 "duplicated exchange input {} for no-shuffle actors {:?} -> {:?}",
-                                link_id, upstream_id, downstream_id
+                                exchange_id, upstream_id, downstream_id
                             )
                         });
                 }
@@ -330,7 +337,7 @@ impl StreamGraphBuilder {
                             .unwrap()
                             .add_dispatcher_hash(
                                 &dispatch_strategy.column_indices,
-                                link_id,
+                                downstream.fragment_id,
                                 downstream.actor_ids,
                                 actor_mapping.clone(),
                             );
@@ -340,7 +347,11 @@ impl StreamGraphBuilder {
                         self.actor_builders
                             .get_mut(upstream_id)
                             .unwrap()
-                            .add_dispatcher_normal(dt, link_id, downstream.actor_ids);
+                            .add_dispatcher_normal(
+                                dt,
+                                downstream.fragment_id,
+                                downstream.actor_ids,
+                            );
                     }
                 }
 
@@ -350,7 +361,7 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .upstreams
                         .try_insert(
-                            link_id,
+                            exchange_id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(upstream.actor_ids.to_vec()),
                                 fragment_id: upstream.fragment_id,
@@ -359,7 +370,7 @@ impl StreamGraphBuilder {
                         .unwrap_or_else(|_| {
                             panic!(
                                 "duplicated exchange input {} for actors {:?} -> {:?}",
-                                link_id, upstream.actor_ids, downstream.actor_ids
+                                exchange_id, upstream.actor_ids, downstream.actor_ids
                             )
                         });
                 }
@@ -691,6 +702,7 @@ impl ActorGraphBuilder {
                     distribution: downstream_distribution,
                 },
                 dispatch_edge.get_dispatch_strategy().unwrap().clone(),
+                dispatch_edge.link_id, // TODO
             );
         }
 
