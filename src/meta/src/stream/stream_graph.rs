@@ -25,7 +25,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
@@ -36,9 +35,10 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::schedule::Distribution;
-use super::CreateStreamingJobContext;
+use super::{CreateStreamingJobContext, ScheduledLocations};
 use crate::manager::{
-    IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingJob,
+    IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingClusterInfo,
+    StreamingJob,
 };
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
@@ -324,6 +324,11 @@ struct Node<'a> {
     distribution: &'a Distribution,
 }
 
+type StreamActorGraph = HashMap<GlobalFragmentId, Vec<StreamActor>>;
+type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
+
+pub type StreamGraph = BTreeMap<FragmentId, Fragment>;
+
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 #[derive(Default)]
@@ -475,8 +480,8 @@ impl StreamGraphBuilder {
     pub fn build(
         self,
         ctx: &CreateStreamingJobContext,
-    ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
-        let mut graph: HashMap<GlobalFragmentId, Vec<StreamActor>> = HashMap::new();
+    ) -> MetaResult<(StreamActorGraph, ActorLocations)> {
+        let mut graph: StreamActorGraph = HashMap::new();
 
         for builder in self.actor_builders.into_values() {
             let fragment_id = builder.fragment_id();
@@ -484,7 +489,7 @@ impl StreamGraphBuilder {
             graph.entry(fragment_id).or_default().push(actor);
         }
 
-        Ok(graph)
+        Ok((graph, self.locations))
     }
 }
 
@@ -539,6 +544,8 @@ pub struct ActorGraphBuilder {
 
     /// The stream fragment graph.
     fragment_graph: StreamFragmentGraph,
+
+    cluster_info: StreamingClusterInfo,
 }
 
 impl ActorGraphBuilder {
@@ -546,12 +553,14 @@ impl ActorGraphBuilder {
     /// graph is failed to be scheduled.
     pub fn new(
         complete_graph: CompleteStreamFragmentGraph,
-        all_parallel_units: impl IntoIterator<Item = ParallelUnit>,
+        cluster_info: StreamingClusterInfo,
         default_parallelism: u32,
     ) -> MetaResult<Self> {
-        let distributions =
-            schedule::Scheduler::new(all_parallel_units, default_parallelism as usize)?
-                .schedule(&complete_graph)?;
+        let distributions = schedule::Scheduler::new(
+            cluster_info.parallel_units.values().cloned(),
+            default_parallelism as usize,
+        )?
+        .schedule(&complete_graph)?;
 
         // TODO: directly use the complete graph when building so that we can generalize the
         // processing logic for `Chain`s.
@@ -560,15 +569,16 @@ impl ActorGraphBuilder {
         Ok(Self {
             distributions,
             fragment_graph,
+            cluster_info,
         })
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
     pub async fn generate_graph<S>(
-        &self,
+        self,
         id_gen_manager: IdGeneratorManagerRef<S>,
         ctx: &mut CreateStreamingJobContext,
-    ) -> MetaResult<BTreeMap<FragmentId, Fragment>>
+    ) -> MetaResult<(StreamGraph, ScheduledLocations)>
     where
         S: MetaStore,
     {
@@ -580,19 +590,49 @@ impl ActorGraphBuilder {
         let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
 
         // Generate actors of the streaming plan
-        let stream_graph = self.build_actor_graph(id_gen, ctx)?.finish().build(&*ctx)?;
+        let (actor_graph, actor_locations) =
+            self.build_actor_graph(id_gen, ctx)?.finish().build(&*ctx)?;
+
+        let scheduled_location = {
+            let actor_locations = actor_locations
+                .into_iter()
+                .map(|(id, p)| {
+                    (
+                        id.as_global_id(),
+                        self.cluster_info.parallel_units[&p].clone(),
+                    )
+                })
+                .collect();
+
+            let worker_locations = self.cluster_info.worker_nodes;
+
+            let actor_vnode_bitmaps = actor_graph
+                .values()
+                .flatten()
+                .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
+                .collect();
+
+            ScheduledLocations {
+                actor_locations,
+                worker_locations,
+                actor_vnode_bitmaps,
+            }
+        };
 
         // Serialize the graph
-        let stream_graph = stream_graph
+        let stream_graph = actor_graph
             .into_iter()
             .map(|(fragment_id, actors)| {
-                let fragment = self.fragment_graph.seal_fragment(fragment_id, actors);
+                let distribution = self.distributions[&fragment_id].clone();
+                let fragment = self
+                    .fragment_graph
+                    .seal_fragment(fragment_id, actors, distribution);
                 let fragment_id = fragment_id.as_global_id();
                 (fragment_id, fragment)
             })
             .collect();
 
-        Ok(stream_graph)
+        Ok((stream_graph, scheduled_location))
     }
 
     /// Build actor graph from fragment graph using topological order. Setup dispatcher in actor and
@@ -946,7 +986,12 @@ impl StreamFragmentGraph {
 
     /// Seal a [`StreamFragment`] from the graph into a [`Fragment`], which will be further used to
     /// build actors, schedule, and persist into meta store.
-    fn seal_fragment(&self, id: GlobalFragmentId, actors: Vec<StreamActor>) -> Fragment {
+    fn seal_fragment(
+        &self,
+        id: GlobalFragmentId,
+        actors: Vec<StreamActor>,
+        distribution: Distribution,
+    ) -> Fragment {
         let BuildingFragment {
             inner,
             internal_tables,
@@ -976,8 +1021,7 @@ impl StreamFragmentGraph {
             fragment_type_mask: inner.fragment_type_mask,
             distribution_type,
             actors,
-            // Will be filled in `Scheduler::schedule` later.
-            vnode_mapping: None,
+            vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
             state_table_ids,
             upstream_fragment_ids,
         }

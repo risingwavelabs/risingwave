@@ -344,6 +344,11 @@ where
         core.get_active_parallel_unit_count()
     }
 
+    pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
+        let core = self.core.read().await;
+        core.get_streaming_cluster_info()
+    }
+
     /// Generate `parallel_degree` parallel units.
     async fn generate_cn_parallel_units(
         &self,
@@ -367,6 +372,12 @@ where
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamingClusterInfo {
+    pub worker_nodes: HashMap<u32, WorkerNode>,
+    pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
 pub struct ClusterManagerCore {
@@ -465,6 +476,26 @@ impl ClusterManagerCore {
             .filter(|p| active_workers.contains(&p.worker_node_id))
             .cloned()
             .collect()
+    }
+
+    fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
+        let active_workers: HashMap<_, _> = self
+            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .into_iter()
+            .map(|w| (w.id, w))
+            .collect();
+
+        let active_parallel_units = self
+            .parallel_units
+            .iter()
+            .filter(|p| active_workers.contains_key(&p.worker_node_id))
+            .map(|p| (p.id, p.clone()))
+            .collect();
+
+        StreamingClusterInfo {
+            worker_nodes: active_workers,
+            parallel_units: active_parallel_units,
+        }
     }
 
     fn count_worker_node(&self) -> HashMap<WorkerType, u64> {

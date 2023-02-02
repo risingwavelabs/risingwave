@@ -32,7 +32,7 @@ use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuilder, CompleteStreamFragmentGraph, CreateStreamingJobContext,
-    GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
+    GlobalStreamManagerRef, ScheduledLocations, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -546,7 +546,7 @@ where
     ) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
 
-        let (mut ctx, table_fragments) =
+        let (mut ctx, table_fragments, scheduled_locations) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
 
         let result = try {
@@ -554,7 +554,7 @@ where
                 self.source_manager.register_source(source).await?;
             }
             self.stream_manager
-                .create_streaming_job(table_fragments, &mut ctx)
+                .create_streaming_job(table_fragments, scheduled_locations, &mut ctx)
                 .await?;
         };
 
@@ -572,7 +572,11 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
+    ) -> MetaResult<(
+        CreateStreamingJobContext,
+        TableFragments,
+        ScheduledLocations,
+    )> {
         // 1. Assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
@@ -627,11 +631,11 @@ where
             CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
 
         // TODO(bugen): we should merge this step with the `Scheduler`.
-        let all_parallel_units = self.cluster_manager.list_active_parallel_units().await;
+        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
         let actor_graph_builder =
-            ActorGraphBuilder::new(complete_graph, all_parallel_units, default_parallelism)?;
+            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
-        let graph = actor_graph_builder
+        let (graph, scheduled_locations) = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)
             .await?;
 
@@ -647,7 +651,11 @@ where
             .mark_creating_tables(&creating_tables)
             .await;
 
-        Ok((ctx, TableFragments::new(id.into(), graph, env)))
+        Ok((
+            ctx,
+            TableFragments::new(id.into(), graph, env),
+            scheduled_locations,
+        ))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.

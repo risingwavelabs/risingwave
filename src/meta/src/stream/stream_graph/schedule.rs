@@ -108,7 +108,7 @@ crepe::crepe! {
 }
 
 /// The distribution of a fragment.
-#[derive(EnumAsInner)]
+#[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum Distribution {
     Singleton(ParallelUnitId),
     Hash(ParallelUnitMapping),
@@ -124,6 +124,13 @@ impl Distribution {
         match self {
             Distribution::Singleton(p) => Either::Left(std::iter::once(*p)),
             Distribution::Hash(mapping) => Either::Right(mapping.iter_unique()),
+        }
+    }
+
+    pub fn into_mapping(self) -> ParallelUnitMapping {
+        match self {
+            Distribution::Singleton(p) => ParallelUnitMapping::new_single(p),
+            Distribution::Hash(mapping) => mapping,
         }
     }
 }
@@ -156,7 +163,7 @@ impl Scheduler {
         }
         let mut parallel_units: LinkedList<_> = parallel_units_map
             .into_values()
-            .map(|v| v.into_iter())
+            .map(|v| v.into_iter().sorted_by_key(|p| p.id))
             .collect();
 
         // Visit the parallel units in a round-robin manner on each worker.

@@ -17,11 +17,10 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitMapping};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
+use risingwave_pb::common::{ActorInfo, Buffer};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::ActorStatus;
@@ -40,7 +39,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{Scheduler, SourceManagerRef};
+use crate::stream::SourceManagerRef;
 use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
@@ -350,11 +349,17 @@ where
     pub async fn create_streaming_job(
         &self,
         table_fragments: TableFragments,
+        scheduled_locations: ScheduledLocations,
         context: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .create_streaming_job_impl(&mut revert_funcs, table_fragments, context)
+            .create_streaming_job_impl(
+                &mut revert_funcs,
+                table_fragments,
+                scheduled_locations,
+                context,
+            )
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -369,6 +374,7 @@ where
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut table_fragments: TableFragments,
+        scheduled_locations: ScheduledLocations,
         CreateStreamingJobContext {
             dispatchers,
             upstream_worker_actors,
@@ -379,28 +385,8 @@ where
             ..
         }: &mut CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        // Schedule actors to parallel units. `locations` will record the parallel unit that an
-        // actor is scheduled to, and the worker node this parallel unit is on.
-
-        // List all running worker nodes and the parallel units.
-        //
-        // It's possible that the cluster configuration has been changed after we resolve the
-        // stream graph, so the scheduling is fallible and the client may need to retry.
-        // TODO: refactor to use a consistent snapshot of cluster configuration.
-        let workers = self
-            .cluster_manager
-            .list_worker_node(
-                WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Running),
-            )
-            .await;
-        if workers.is_empty() {
-            bail!("no available compute node in the cluster");
-        }
-        let parallel_units = self.cluster_manager.list_active_parallel_units().await;
-
         // Create empty locations and the scheduler.
-        let mut locations = ScheduledLocations::with_workers(workers);
+        let mut locations = scheduled_locations;
 
         // Resolve chain node infos, including:
         // 1. insert upstream actor id in merge node
@@ -416,18 +402,6 @@ where
         .await?;
         let dispatchers = &*dispatchers;
         let upstream_worker_actors = &*upstream_worker_actors;
-
-        let scheduler = Scheduler::new(parallel_units);
-
-        // Schedule each fragment(actors) to nodes except chain, recorded in `locations`.
-        // Vnode mapping in fragment will be filled in as well.
-        let topological_order = table_fragments.generate_topological_order();
-        for fragment_id in topological_order {
-            let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-            if !chain_fragment_upstream_table_map.contains_key(&fragment_id) {
-                scheduler.schedule(fragment, &mut locations)?;
-            }
-        }
 
         // Record vnode to parallel unit mapping for actors.
         let actor_to_vnode_mapping = {
@@ -988,7 +962,7 @@ mod tests {
                 .start_create_table_procedure(&table)
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, &mut ctx)
+                .create_streaming_job(table_fragments, ScheduledLocations::new(), &mut ctx)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], &table)
