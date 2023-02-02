@@ -181,12 +181,7 @@ impl StoreLocalStatistic {
             return;
         }
         // checks SST bloom filters
-        inc_local_metrics!(
-            self,
-            metrics,
-            bloom_filter_check_counts,
-            bloom_filter_true_negative_counts
-        );
+        inc_local_metrics!(self, metrics, bloom_filter_true_negative_counts);
 
         metrics.read_req_check_bloom_filter_counts.inc();
 
@@ -419,7 +414,6 @@ macro_rules! define_bloom_filter_metrics {
 }
 
 define_bloom_filter_metrics!(
-    bloom_filter_check_counts,
     read_req_check_bloom_filter_counts,
     bloom_filter_true_negative_counts,
     read_req_positive_but_non_exist_counts,
