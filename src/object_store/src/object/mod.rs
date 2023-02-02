@@ -826,6 +826,7 @@ pub async fn parse_remote_object_store(
             let (namenode, root) = hdfs.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
+                    .unwrap()
                     .monitored(metrics),
             )
         }
@@ -892,6 +893,7 @@ pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> 
             let (namenode, root) = hdfs.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
+                    .unwrap()
                     .monitored(metrics),
             )
         }

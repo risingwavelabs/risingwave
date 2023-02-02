@@ -16,6 +16,7 @@ use opendal::services::hdfs;
 use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
+use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal hdfs engine.
     pub fn new_hdfs_engine(namenode: String, root: String) -> ObjectResult<Self> {
