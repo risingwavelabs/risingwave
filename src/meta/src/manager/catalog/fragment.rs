@@ -25,7 +25,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::{ActorStatus, State};
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -841,6 +841,7 @@ where
     }
 
     // we will read three things at once, avoiding locking too much.
+    // TODO: remove this after scheduler refactoring
     pub async fn get_build_graph_info(
         &self,
         table_ids: &HashSet<TableId>,
@@ -857,6 +858,26 @@ where
             );
         }
         Ok(info)
+    }
+
+    /// Get the upstream `Materialize` fragments of the specified tables.
+    pub async fn get_upstream_mview_fragments(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<HashMap<TableId, Fragment>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut fragments = HashMap::new();
+
+        for &table_id in table_ids {
+            let table_fragments = map
+                .get(&table_id)
+                .context(format!("table_fragment not exist: id={}", table_id))?;
+            if let Some(fragment) = table_fragments.mview_fragment() {
+                fragments.insert(table_id, fragment);
+            }
+        }
+
+        Ok(fragments)
     }
 
     pub async fn get_mview_vnode_bitmap_info(

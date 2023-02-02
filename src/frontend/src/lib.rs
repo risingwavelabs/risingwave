@@ -47,6 +47,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
+use risingwave_common_proc_macro::OverrideConfig;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -65,34 +66,37 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
+/// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_HOST", default_value = "127.0.0.1:4566")]
     pub host: String,
 
     // Optional, we will use listen_address if not specified.
-    #[clap(long)]
+    #[clap(long, env = "RW_CLIENT_ADDRESS")]
     pub client_address: Option<String>,
 
     // TODO: This is currently unused.
-    #[clap(long)]
+    #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    #[clap(long, default_value = "127.0.0.1:2222")]
+    #[clap(
+        long,
+        env = "RW_PROMETHEUS_LISTENER_ADDR",
+        default_value = "127.0.0.1:2222"
+    )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, default_value = "127.0.0.1:6786")]
+    #[clap(
+        long,
+        env = "RW_HEALTH_CHECK_LISTENER_ADDR",
+        default_value = "127.0.0.1:6786"
+    )]
     pub health_check_listener_addr: String,
-
-    /// Used for control the metrics level, similar to log level.
-    /// 0 = close metrics
-    /// >0 = open metrics
-    #[clap(long, default_value = "0")]
-    pub metrics_level: u32,
 
     /// The path of `risingwave.toml` configuration file.
     ///
@@ -100,8 +104,22 @@ pub struct FrontendOpts {
     ///
     /// Note that internal system parameters should be defined in the configuration file at
     /// [`risingwave_common::config`] instead of command line arguments.
-    #[clap(long, default_value = "")]
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
+
+    #[clap(flatten)]
+    override_opts: OverrideConfigOpts,
+}
+
+/// Command-line arguments for frontend-node that overrides the config file.
+#[derive(Parser, Clone, Debug, OverrideConfig)]
+struct OverrideConfigOpts {
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    #[clap(long, env = "RW_METRICS_LEVEL")]
+    #[override_opts(path = server.metrics_level)]
+    pub metrics_level: Option<u32>,
 }
 
 impl Default for FrontendOpts {
@@ -120,8 +138,9 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
-        pg_serve(&opts.host, session_mgr, Some(TlsConfig::new_default()))
+        let addr = opts.host.clone();
+        let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
+        pg_serve(&addr, session_mgr, Some(TlsConfig::new_default()))
             .await
             .unwrap();
     })
