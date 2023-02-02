@@ -70,24 +70,32 @@ use session::SessionManagerImpl;
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     // TODO: rename to listen_address and separate out the port.
-    #[clap(long, env, default_value = "127.0.0.1:4566")]
+    #[clap(long, env = "RW_HOST", default_value = "127.0.0.1:4566")]
     pub host: String,
 
     // Optional, we will use listen_address if not specified.
-    #[clap(long, env)]
+    #[clap(long, env = "RW_CLIENT_ADDRESS")]
     pub client_address: Option<String>,
 
     // TODO: This is currently unused.
-    #[clap(long, env)]
+    #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
-    #[clap(long, env, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    #[clap(long, env, default_value = "127.0.0.1:2222")]
+    #[clap(
+        long,
+        env = "RW_PROMETHEUS_LISTENER_ADDR",
+        default_value = "127.0.0.1:2222"
+    )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env, default_value = "127.0.0.1:6786")]
+    #[clap(
+        long,
+        env = "RW_HEALTH_CHECK_LISTENER_ADDR",
+        default_value = "127.0.0.1:6786"
+    )]
     pub health_check_listener_addr: String,
 
     /// The path of `risingwave.toml` configuration file.
@@ -96,7 +104,7 @@ pub struct FrontendOpts {
     ///
     /// Note that internal system parameters should be defined in the configuration file at
     /// [`risingwave_common::config`] instead of command line arguments.
-    #[clap(long, env, default_value = "")]
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
     #[clap(flatten)]
@@ -109,7 +117,7 @@ struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
-    #[clap(long, env)]
+    #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 }
