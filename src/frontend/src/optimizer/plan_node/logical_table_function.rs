@@ -72,6 +72,10 @@ impl ColPrunable for LogicalTableFunction {
 }
 
 impl ExprRewritable for LogicalTableFunction {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
         new.table_function.args = new

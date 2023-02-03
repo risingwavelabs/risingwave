@@ -183,7 +183,7 @@ async fn main() {
         .run_on_client(async move {
             let glob = &args.files;
             if let Some(jobs) = args.jobs {
-                run_parallel_slt_task(cluster0, glob, jobs).await.unwrap();
+                run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
                 run_slt_task(cluster0, glob, &kill_opts).await;
             }
