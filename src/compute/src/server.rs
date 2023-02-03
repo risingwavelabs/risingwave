@@ -53,7 +53,9 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
+use crate::memory_management::memory_manager::{
+    GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
+};
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -63,9 +65,6 @@ use crate::rpc::service::monitor_service::{
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
-
-/// The minimal memory requirement of computing tasks in megabytes.
-const MIN_COMPUTE_MEMORY_MB: usize = 512;
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
@@ -329,14 +328,17 @@ pub async fn compute_node_serve(
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
-/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing. Otherwise, it is not allowed to
-/// start.
+/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
+/// for other system usage. Otherwise, it is not allowed to start.
 fn validate_compute_node_memory_config(total_memory_bytes: usize, storage_config: &StorageConfig) {
-    if storage_config.total_memory_limit_mb() << 20 > total_memory_bytes {
+    if storage_config.total_storage_memory_limit_mb() << 20 > total_memory_bytes {
         panic!("The total storage memory capacity exceeds the total memory for the compute node. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
-    } else if (storage_config.total_memory_limit_mb() + MIN_COMPUTE_MEMORY_MB) << 20
+    } else if (storage_config.total_storage_memory_limit_mb()
+        + MIN_COMPUTE_MEMORY_MB
+        + SYSTEM_RESERVED_MEMORY_MB)
+        << 20
         >= total_memory_bytes
     {
-        panic!("No enough memory for computing. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
+        panic!("No enough memory for computing and other system usage. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
     }
 }

@@ -360,7 +360,7 @@ impl StorageConfig {
     }
 
     /// The maximal memory that storage components may use based on the configurations.
-    pub fn total_memory_limit_mb(&self) -> usize {
+    pub fn total_storage_memory_limit_mb(&self) -> usize {
         let total_memory = self.block_cache_capacity_mb
             + self.meta_cache_capacity_mb
             + self.shared_buffer_capacity_mb
