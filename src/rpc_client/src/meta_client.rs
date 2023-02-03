@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
+use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
@@ -85,6 +86,8 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
+    const META_ADDRESS_LOAD_BALANCE_MODE_PREFIX: &'static str = "load-balance+";
+
     pub fn worker_id(&self) -> u32 {
         self.worker_id
     }
@@ -115,31 +118,54 @@ impl MetaClient {
         .await
     }
 
+    pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
+        if meta_addr.starts_with(Self::META_ADDRESS_LOAD_BALANCE_MODE_PREFIX) {
+            let addr = meta_addr
+                .strip_prefix(Self::META_ADDRESS_LOAD_BALANCE_MODE_PREFIX)
+                .unwrap();
+
+            let addr = addr.split(',').exactly_one().map_err(|_| {
+                RpcError::Internal(anyhow!(
+                    "meta address {} in load-balance mode should be exactly one",
+                    addr
+                ))
+            })?;
+
+            let _url = url::Url::parse(addr).map_err(|e| {
+                RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e,))
+            })?;
+
+            Ok(MetaAddressStrategy::LoadBalance(addr.to_string()))
+        } else {
+            let addrs: Vec<_> = meta_addr.split(',').map(str::to_string).collect();
+
+            if addrs.is_empty() {
+                return Err(RpcError::Internal(anyhow!(
+                    "empty meta addresses {:?}",
+                    addrs
+                )));
+            }
+
+            for addr in &addrs {
+                let _url = url::Url::parse(addr).map_err(|e| {
+                    RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e,))
+                })?;
+            }
+
+            Ok(MetaAddressStrategy::List(addrs))
+        }
+    }
+
     /// Register the current node to the cluster and set the corresponding worker id.
     pub async fn register_new(
         meta_addr: &str,
-        meta_addr_mode: MetaAddressMode,
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
-        let strategy = match meta_addr_mode {
-            MetaAddressMode::LoadBalance => MetaAddressStrategy::LoadBalance(meta_addr.to_string()),
-            MetaAddressMode::List => {
-                let addrs: Vec<_> = meta_addr.split(',').map(str::to_string).collect();
+        let addr_strategy = Self::parse_meta_addr(meta_addr)?;
 
-                if addrs.is_empty() {
-                    return Err(RpcError::Internal(anyhow!(
-                        "empty meta addresses {:?}",
-                        addrs
-                    )));
-                }
-
-                MetaAddressStrategy::List(addrs)
-            }
-        };
-
-        let grpc_meta_client = GrpcMetaClient::new(strategy).await?;
+        let grpc_meta_client = GrpcMetaClient::new(addr_strategy).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -856,8 +882,9 @@ impl HummockMetaClient for MetaClient {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
-            table_id, /* if table_id not exist, manual_compaction will include all the sst
-                       * without check internal_table_id */
+            table_id,
+            // if table_id not exist, manual_compaction will include all the sst
+            // without check internal_table_id
             level,
             ..Default::default()
         };
@@ -926,15 +953,7 @@ struct GrpcMetaClient {
     core: Arc<RwLock<GrpcMetaClientCore>>,
 }
 
-/// `LoadBalance` is typically used in Kubernetes environments to update the meta member leader only
-/// when the connection fails, while `List` is typically used in regular environments and is updated
-/// regularly.
-#[derive(Debug, Copy, Clone, clap::clap_derive::ArgEnum)]
-pub enum MetaAddressMode {
-    LoadBalance,
-    List,
-}
-
+#[derive(Debug, Eq, PartialEq)]
 pub enum MetaAddressStrategy {
     LoadBalance(String),
     List(Vec<String>),
@@ -1354,4 +1373,29 @@ impl GrpcMetaClient {
 
 impl GrpcMetaClient {
     for_all_meta_rpc! { meta_rpc_client_method_impl }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::meta_client::MetaAddressStrategy;
+    use crate::MetaClient;
+
+    #[test]
+    fn test_parse_meta_addr() {
+        let results = vec![(
+            "load-balance+http://abc",
+            Some(MetaAddressStrategy::LoadBalance("http://abc".to_string())),
+        )];
+        for (addr, result) in results {
+            let parsed_result = MetaClient::parse_meta_addr(addr);
+            match result {
+                None => {
+                    assert!(parsed_result.is_err());
+                }
+                Some(strategy) => {
+                    assert_eq!(strategy, parsed_result.unwrap())
+                }
+            }
+        }
+    }
 }

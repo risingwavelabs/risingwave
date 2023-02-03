@@ -49,10 +49,6 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "http://127.0.0.1:5790")]
     pub meta_address: String,
 
-    /// for multi-meta node
-    #[clap(long, arg_enum, default_value_t = risingwave_rpc_client::MetaAddressMode::List)]
-    pub meta_address_mode: risingwave_rpc_client::MetaAddressMode,
-
     /// The data of this table will be checked after compaction
     #[clap(short, long, default_value = "0")]
     pub table_id: u32,

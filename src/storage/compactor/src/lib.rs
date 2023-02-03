@@ -56,10 +56,6 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
-    /// for multi-meta node
-    #[clap(long, arg_enum, default_value_t = risingwave_rpc_client::MetaAddressMode::List)]
-    pub meta_address_mode: risingwave_rpc_client::MetaAddressMode,
-
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
 

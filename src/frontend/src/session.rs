@@ -169,7 +169,6 @@ impl FrontendEnv {
         // Register in meta by calling `AddWorkerNode` RPC.
         let meta_client = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
-            opts.meta_addr_mode,
             WorkerType::Frontend,
             &frontend_address,
             0,

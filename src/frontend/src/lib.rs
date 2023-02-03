@@ -95,10 +95,6 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    /// for multi-meta node
-    #[clap(long, arg_enum, default_value_t = risingwave_rpc_client::MetaAddressMode::List)]
-    pub meta_addr_mode: risingwave_rpc_client::MetaAddressMode,
-
     #[clap(
         long,
         env = "RW_PROMETHEUS_LISTENER_ADDR",

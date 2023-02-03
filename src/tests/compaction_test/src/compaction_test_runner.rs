@@ -31,7 +31,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
-use risingwave_rpc_client::{HummockMetaClient, MetaAddressMode, MetaClient};
+use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
@@ -234,7 +234,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, MetaAddressMode::List, WorkerType::RiseCtl, advertise_addr, 0) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0) => {
             meta_client = ret.unwrap();
         },
     }
@@ -245,14 +245,8 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
     let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
-    let new_meta_client = MetaClient::register_new(
-        new_meta_endpoint,
-        MetaAddressMode::List,
-        WorkerType::RiseCtl,
-        advertise_addr,
-        0,
-    )
-    .await?;
+    let new_meta_client =
+        MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
     new_meta_client.activate(advertise_addr).await.unwrap();
 
     if ci_mode {
@@ -279,7 +273,6 @@ async fn pull_version_deltas(
     // We reuse the RiseCtl worker type here
     let meta_client = MetaClient::register_new(
         cluster_meta_endpoint,
-        MetaAddressMode::List,
         WorkerType::RiseCtl,
         advertise_addr,
         0,
@@ -331,14 +324,9 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client = MetaClient::register_new(
-        &opts.meta_address,
-        opts.meta_address_mode,
-        WorkerType::RiseCtl,
-        &advertise_addr,
-        0,
-    )
-    .await?;
+    let meta_client =
+        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
+            .await?;
 
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);

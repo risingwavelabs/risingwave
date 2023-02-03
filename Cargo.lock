@@ -6389,9 +6389,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "async_stack_trace",
- "clap 3.2.23",
  "either",
  "futures",
+ "itertools",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -6404,6 +6404,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tracing",
+ "url",
  "workspace-hack",
 ]
 
