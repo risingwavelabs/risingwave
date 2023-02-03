@@ -139,22 +139,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         tracing::info!("Starting meta node with config {:?}", config);
         let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
-<<<<<<< HEAD
         let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
         let advertise_addr = opts
             .advertise_addr
             .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
-=======
-        let meta_addr = opts
-            .host
-            .map(|host| format!("{}:{}", host, listen_addr.port()))
-            .unwrap_or_else(|| opts.listen_addr.clone());
-        let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
-        let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let meta_endpoint = opts.meta_endpoint.unwrap_or(meta_addr);
->>>>>>> 99ffb71a49c5973fb3a5edf00b86973380fdb082
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
