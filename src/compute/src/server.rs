@@ -20,7 +20,9 @@ use async_stack_trace::StackTraceManager;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::config::{
+    load_config, AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
+};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -59,16 +61,16 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeOpts};
+use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, Some(opts.override_config));
     info!(
         "Starting compute node with config {:?} with debug assertions {}",
         config,
@@ -83,7 +85,7 @@ pub async fn compute_node_serve(
     let meta_client = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
-        &client_addr,
+        &advertise_addr,
         opts.parallelism,
     )
     .await
@@ -116,14 +118,14 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &opts.state_store,
-        &opts.file_cache_dir,
+        &config.storage.state_store,
+        &config.storage.file_cache.dir,
         &config,
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if opts.enable_jaeger_tracing {
+        if config.streaming.enable_jaeger_tracing {
             Arc::new(
                 risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
                     "127.0.0.1:6831".to_string(),
@@ -144,8 +146,8 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
-        if opts.state_store == "hummock+memory"
-            || opts.state_store.starts_with("hummock+disk")
+        if config.storage.state_store == "hummock+memory"
+            || config.storage.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");
@@ -189,7 +191,7 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
-    let async_stack_trace_config = match opts.async_stack_trace {
+    let async_stack_trace_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => Some(async_stack_trace::TraceConfig {
             report_detached: true,
@@ -201,7 +203,7 @@ pub async fn compute_node_serve(
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
     let stream_mgr = Arc::new(LocalStreamManager::new(
-        client_addr.clone(),
+        advertise_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
@@ -232,7 +234,7 @@ pub async fn compute_node_serve(
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
-        client_addr.clone(),
+        advertise_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
@@ -247,7 +249,7 @@ pub async fn compute_node_serve(
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
-        client_addr.clone(),
+        advertise_addr.clone(),
         connector_params,
         stream_config,
         worker_id,
@@ -311,7 +313,7 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.server.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
             registry.clone(),
@@ -319,7 +321,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(&client_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     (join_handle_vec, shutdown_send)
 }

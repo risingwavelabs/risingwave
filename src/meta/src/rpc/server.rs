@@ -41,7 +41,7 @@ pub enum MetaStoreBackend {
 
 #[derive(Clone)]
 pub struct AddressInfo {
-    pub meta_endpoint: String,
+    pub advertise_addr: String,
     pub listen_addr: SocketAddr,
     pub prometheus_addr: Option<SocketAddr>,
     pub dashboard_addr: Option<SocketAddr>,
@@ -51,7 +51,7 @@ pub struct AddressInfo {
 impl Default for AddressInfo {
     fn default() -> Self {
         Self {
-            meta_endpoint: "".to_string(),
+            advertise_addr: "".to_string(),
             listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
             prometheus_addr: None,
             dashboard_addr: None,
@@ -92,7 +92,7 @@ pub async fn rpc_serve(
                 EtcdElectionClient::new(
                     endpoints,
                     Some(options),
-                    address_info.meta_endpoint.clone(),
+                    address_info.advertise_addr.clone(),
                 )
                 .await?,
             );
@@ -192,7 +192,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             election_client.leader().await.unwrap().unwrap().into()
         } else {
             MetaLeaderInfo {
-                node_address: address_info.meta_endpoint.clone(),
+                node_address: address_info.advertise_addr.clone(),
                 lease_id: 0,
             }
         };

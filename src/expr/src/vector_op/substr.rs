@@ -19,7 +19,7 @@ use crate::{bail, Result};
 
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
-    let start = min(max(start - 1, 0) as usize, s.len());
+    let start = (start.saturating_sub(1).max(0) as usize).min(s.len());
     writer.write_str(&s[start..]).unwrap();
     Ok(())
 }
@@ -36,8 +36,13 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);
     }
-    let begin = max(start - 1, 0) as usize;
-    let end = min(max(start - 1 + count, 0) as usize, s.len());
+    let start = start.saturating_sub(1);
+    // NOTE: we use `s.len()` here as an upper bound.
+    // This is so it will return an empty slice if it exceeds
+    // the length of `s`.
+    // 0 <= begin <= s.len()
+    let begin = min(max(start, 0) as usize, s.len());
+    let end = (start.saturating_add(count).max(0) as usize).min(s.len());
     writer.write_str(&s[begin..end]).unwrap();
     Ok(())
 }

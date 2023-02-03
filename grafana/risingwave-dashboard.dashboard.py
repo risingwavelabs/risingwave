@@ -480,6 +480,7 @@ def metric(name, filter=None):
 
 def quantile(f, percentiles):
     quantile_map = {
+        "60": ["0.6", "60"],
         "50": ["0.5", "50"],
         "90": ["0.9", "90"],
         "99": ["0.99", "99"],
@@ -1617,13 +1618,13 @@ def section_hummock(panels):
                 *quantile(
                     lambda quantile, legend: panels.target(
                         f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
-                        f"total_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
+                        f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
                 ),
                 panels.target(
                     f"sum by(le, job, instance)(rate({metric('state_store_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_duration_count')}[$__rate_interval]))",
-                    "total_time avg - {{job}} @ {{instance}}",
+                    "create_iter_time avg - {{job}} @ {{instance}}",
                 ),
                 *quantile(
                     lambda quantile, legend: panels.target(
@@ -2410,6 +2411,16 @@ def section_memory_manager(outer_panels):
                     [
                         panels.target(
                             f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by streaming",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('stream_total_mem_usage')}",
                             "",
                         ),
                     ],

@@ -789,6 +789,10 @@ impl fmt::Display for LogicalAgg {
 }
 
 impl ExprRewritable for LogicalAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);

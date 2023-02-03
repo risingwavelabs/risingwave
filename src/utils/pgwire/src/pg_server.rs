@@ -26,6 +26,7 @@ use tracing::debug;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
 use crate::pg_response::{PgResponse, RowSetResult};
+use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 pub type SessionId = (i32, i32);
@@ -46,10 +47,6 @@ where
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
-///
-/// format:
-/// false: TEXT
-/// true: BINARY
 #[async_trait::async_trait]
 pub trait Session<VS>: Send + Sync
 where
@@ -58,7 +55,7 @@ where
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-        format: bool,
+        formats: Vec<Format>,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
@@ -66,7 +63,7 @@ where
     async fn run_one_query(
         self: Arc<Self>,
         sql: Statement,
-        format: bool,
+        format: Format,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
     async fn infer_return_type(
@@ -179,6 +176,7 @@ mod tests {
     use crate::pg_server::{
         pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
     };
+    use crate::types;
     use crate::types::Row;
 
     struct MockSessionManager {}
@@ -208,7 +206,7 @@ mod tests {
         async fn run_statement(
             self: Arc<Self>,
             sql: &str,
-            _format: bool,
+            _format: Vec<types::Format>,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Box<dyn Error + Send + Sync>>
         {
             // split a statement and trim \' around the input param to construct result.
@@ -246,7 +244,7 @@ mod tests {
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
-            _format: bool,
+            _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             let res: Vec<Option<Bytes>> = vec![Some(Bytes::new())];
             Ok(PgResponse::new_for_stream(

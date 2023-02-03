@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
@@ -151,7 +151,7 @@ pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
@@ -307,7 +307,7 @@ pub async fn handle(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(handler_args, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
             name,

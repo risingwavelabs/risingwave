@@ -521,7 +521,7 @@ dependencies = [
  "http",
  "hyper",
  "ring",
- "time 0.3.15",
+ "time 0.3.17",
  "tokio",
  "tower",
  "tracing",
@@ -707,7 +707,7 @@ dependencies = [
  "percent-encoding",
  "regex",
  "ring",
- "time 0.3.15",
+ "time 0.3.17",
  "tracing",
 ]
 
@@ -843,7 +843,7 @@ dependencies = [
  "itoa",
  "num-integer",
  "ryu",
- "time 0.3.15",
+ "time 0.3.17",
 ]
 
 [[package]]
@@ -934,6 +934,19 @@ dependencies = [
  "miniz_oxide",
  "object",
  "rustc-demangle",
+]
+
+[[package]]
+name = "bae"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33b8de67cc41132507eeece2584804efcb15f85ba516e34c944b7667f480397a"
+dependencies = [
+ "heck 0.3.3",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -1402,7 +1415,7 @@ version = "3.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea0c8bce528c4be4da13ea6fead8965e95b6073585a2f05204bd8f4119f82a65"
 dependencies = [
- "heck",
+ "heck 0.4.0",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -1415,7 +1428,7 @@ version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "684a277d672e91966334af371f1a7b5833f9aa00b07c84e92fbce95e00208ce8"
 dependencies = [
- "heck",
+ "heck 0.4.0",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -1653,6 +1666,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b540bd8bc810d3885c6ea91e2018302f68baba2129ab3e88f32389ee9370880d"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "crepe"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "493fa2eaae544a976a9e60394d012254515885d19015e75f5d7cfb28a5db1069"
+dependencies = [
+ "petgraph",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2062,6 +2088,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "duration-str"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f94be4825ff6a563f1bfbdb786ae10c687333c7524fade954e2271170e7f7e6d"
+dependencies = [
+ "chrono",
+ "nom 7.1.3",
+ "rust_decimal",
+ "serde",
+ "thiserror",
+ "time 0.3.17",
+]
+
+[[package]]
 name = "dyn-clone"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2094,7 +2134,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9720bba047d567ffc8a3cba48bf19126600e249ab7f128e9233e6376976a116"
 dependencies = [
- "heck",
+ "heck 0.4.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -2809,6 +2849,15 @@ dependencies = [
  "flate2",
  "nom 7.1.3",
  "num-traits",
+]
+
+[[package]]
+name = "heck"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d621efb26863f0e9924c6ac577e8275e5e6b77455db64ffa6c65c904e9e132c"
+dependencies = [
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -3939,7 +3988,7 @@ dependencies = [
  "smallvec",
  "subprocess",
  "thiserror",
- "time 0.3.15",
+ "time 0.3.17",
  "uuid",
 ]
 
@@ -4538,7 +4587,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bdbb7b706f2afc610f3853550cdbbf6372fd324824a087806bd4480ea4996e24"
 dependencies = [
- "heck",
+ "heck 0.4.0",
  "itertools",
  "prost 0.11.6",
  "prost-types",
@@ -4981,7 +5030,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "time 0.3.15",
+ "time 0.3.17",
  "url",
 ]
 
@@ -5012,7 +5061,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3f8ad728fb08fe212df3c05169e940fbb6d9d16a877ddde14644a983ba2012e"
 dependencies = [
  "bytes",
- "heck",
+ "heck 0.4.0",
  "itertools",
  "lazy_static",
  "log",
@@ -5696,6 +5745,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz",
+ "clap 3.2.23",
  "comfy-table",
  "crc32fast",
  "criterion",
@@ -5748,6 +5798,18 @@ dependencies = [
  "tracing",
  "twox-hash",
  "url",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_common_proc_macro"
+version = "0.2.0-alpha"
+dependencies = [
+ "bae",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
  "workspace-hack",
 ]
 
@@ -5812,6 +5874,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
+ "risingwave_common_proc_macro",
  "risingwave_common_service",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -5860,6 +5923,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_batch",
  "risingwave_common",
+ "risingwave_common_proc_macro",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
@@ -5907,6 +5971,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "csv-core",
+ "duration-str",
  "either",
  "enum-as-inner",
  "farmhash",
@@ -6077,6 +6142,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_batch",
  "risingwave_common",
+ "risingwave_common_proc_macro",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_expr",
@@ -6180,8 +6246,10 @@ dependencies = [
  "chrono",
  "clap 3.2.23",
  "crc32fast",
+ "crepe",
  "derivative",
  "either",
+ "enum-as-inner",
  "fail",
  "function_name",
  "futures",
@@ -6205,6 +6273,7 @@ dependencies = [
  "reqwest",
  "risingwave_backup",
  "risingwave_common",
+ "risingwave_common_proc_macro",
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
@@ -6577,6 +6646,7 @@ dependencies = [
  "futures-async-stream",
  "gen-iter",
  "hyper",
+ "hytra",
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
@@ -7008,7 +7078,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with_macros",
- "time 0.3.15",
+ "time 0.3.17",
 ]
 
 [[package]]
@@ -7185,7 +7255,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "thiserror",
- "time 0.3.15",
+ "time 0.3.17",
 ]
 
 [[package]]
@@ -7396,7 +7466,7 @@ version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
 dependencies = [
- "heck",
+ "heck 0.4.0",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -7650,22 +7720,32 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.15"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d634a985c4d4238ec39cacaed2e7ae552fbd3c476b552c1deac3021b7d7eaf0c"
+checksum = "a561bf4617eebd33bca6434b988f39ed798e527f51a1e797d0ee4f61c0a38376"
 dependencies = [
  "itoa",
  "libc",
  "num_threads",
  "serde",
+ "time-core",
  "time-macros",
 ]
 
 [[package]]
-name = "time-macros"
-version = "0.2.4"
+name = "time-core"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42657b1a6f4d817cda8e7a0ace261fe0cc946cf3a80314390b22cc61ae080792"
+checksum = "2e153e1f1acaef8acc537e68b44906d2db6436e2b35ac2c6b42640fff91f00fd"
+
+[[package]]
+name = "time-macros"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d967f99f534ca7e495c575c62638eebc2898a8c84c119b89e250477bc4ba16b2"
+dependencies = [
+ "time-core",
+]
 
 [[package]]
 name = "tiny-keccak"
@@ -8077,7 +8157,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
- "time 0.3.15",
+ "time 0.3.17",
  "tracing",
  "tracing-core",
  "tracing-log",
@@ -8200,6 +8280,12 @@ checksum = "5c5713f0fc4b5db668a2ac63cdb7bb4469d8c9fed047b1d0292cc7b0ce2ba921"
 dependencies = [
  "tinyvec",
 ]
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fdbf052a0783de01e944a6ce7a8cb939e295b1e7be835a1112c3b9a7f047a5a"
 
 [[package]]
 name = "unicode-width"
@@ -8679,7 +8765,6 @@ dependencies = [
  "log",
  "madsim-tokio",
  "memchr",
- "minimal-lexical",
  "miniz_oxide",
  "multimap",
  "nom 7.1.3",
@@ -8708,7 +8793,7 @@ dependencies = [
  "stable_deref_trait",
  "strum",
  "syn",
- "time 0.3.15",
+ "time 0.3.17",
  "tokio",
  "tokio-stream",
  "tokio-util",
