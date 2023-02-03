@@ -38,7 +38,10 @@ use risingwave_pb::stream_plan::{
 use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CompleteStreamFragmentGraph, CreateStreamingJobContext, StreamFragmentGraph};
+use crate::stream::{
+    ActorGraphBuildResult, CompleteStreamFragmentGraph, CreateStreamingJobContext,
+    StreamFragmentGraph,
+};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -438,7 +441,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
 
-    let mut ctx = CreateStreamingJobContext {
+    let ctx = CreateStreamingJobContext {
         internal_tables: fragment_graph.internal_tables(),
         ..Default::default()
     };
@@ -448,8 +451,8 @@ async fn test_graph_builder() -> MetaResult<()> {
         make_cluster_info(),
         Some(NonZeroUsize::new(parallel_degree).unwrap()),
     )?;
-    let (graph, _locations) = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &mut ctx)
+    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
+        .generate_graph(env.id_gen_manager_ref(), &job)
         .await?;
 
     let table_fragments =

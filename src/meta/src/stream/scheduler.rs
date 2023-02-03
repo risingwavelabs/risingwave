@@ -15,31 +15,21 @@
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
-use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit};
+use risingwave_pb::common::{ActorInfo, ParallelUnit};
 
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 
 /// [`Locations`] represents the location of scheduled result.
+#[cfg_attr(test, derive(Default))]
 pub struct Locations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
     /// worker location map.
     pub worker_locations: WorkerLocations,
-    /// actor vnode bitmap.
-    pub actor_vnode_bitmaps: HashMap<ActorId, Option<Buffer>>,
 }
 
 impl Locations {
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        Self {
-            actor_locations: BTreeMap::new(),
-            worker_locations: WorkerLocations::new(),
-            actor_vnode_bitmaps: HashMap::new(),
-        }
-    }
-
     /// Returns all actors for every worker node.
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_locations

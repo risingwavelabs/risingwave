@@ -28,7 +28,7 @@ use risingwave_pb::stream_service::{
 };
 use uuid::Uuid;
 
-use super::CompleteLocations;
+use super::Locations;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
@@ -40,19 +40,20 @@ use crate::MetaResult;
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
 /// [`CreateStreamingJobContext`] carries one-time infos.
-#[derive(Default)]
+#[cfg_attr(test, derive(Default))]
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+
     /// Upstream mview actor ids grouped by table id.
-    /// TODO: can we remove this?
+    // TODO: can we remove this?
     pub table_mview_map: HashMap<TableId, Vec<ActorId>>,
-    /// Dependent table ids
-    pub dependent_table_ids: HashSet<TableId>,
+
     /// Internal TableID to Table mapping
     pub internal_tables: HashMap<u32, Table>,
-    /// The SQL definition of this streaming job. Used for debugging only.
-    pub streaming_definition: String,
+
+    pub building_locations: Locations,
+    pub existing_locations: Locations,
 
     pub table_properties: HashMap<String, String>,
 }
@@ -121,12 +122,11 @@ where
     pub async fn create_streaming_job(
         &self,
         table_fragments: TableFragments,
-        locations: CompleteLocations,
-        context: &mut CreateStreamingJobContext,
+        ctx: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut revert_funcs = vec![];
         if let Err(e) = self
-            .create_streaming_job_impl(&mut revert_funcs, table_fragments, locations, context)
+            .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
@@ -141,19 +141,18 @@ where
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut table_fragments: TableFragments,
-        locations: CompleteLocations,
         CreateStreamingJobContext {
             dispatchers,
             table_mview_map,
             table_properties,
+            building_locations,
+            existing_locations,
             ..
-        }: &mut CreateStreamingJobContext,
+        }: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        let dispatchers = &*dispatchers;
-
         // Mark the actors to be built as `ActorState::Inactive`.
-        let actor_status = locations
-            .building
+        // TODO: refactor this
+        let actor_status = building_locations
             .actor_locations
             .iter()
             .map(|(&actor_id, parallel_unit)| {
@@ -175,15 +174,14 @@ where
         // includes such information. It contains:
         // 1. actors in the current create-streaming-job request.
         // 2. all upstream actors.
-        let actor_infos_to_broadcast = locations
-            .building
+        let actor_infos_to_broadcast = building_locations
             .actor_infos()
-            .chain(locations.existing.actor_infos())
+            .chain(existing_locations.actor_infos())
             .collect_vec();
 
-        let actor_host_infos = locations.building.actor_info_map();
-        let worker_actors = locations.building.worker_actors();
-        let existing_worker_actors = locations.existing.worker_actors();
+        let building_actor_infos = building_locations.actor_info_map();
+        let building_worker_actors = building_locations.worker_actors();
+        let existing_worker_actors = existing_locations.worker_actors();
 
         // Hanging channels for each worker node.
         let mut hanging_channels = {
@@ -194,7 +192,7 @@ where
                     let down_infos = dispatchers
                         .iter()
                         .flat_map(|d| d.downstream_actor_id.iter())
-                        .map(|down_id| actor_host_infos[down_id].clone())
+                        .map(|down_id| building_actor_infos[down_id].clone())
                         .collect_vec();
                     (up_id, down_infos)
                 })
@@ -228,8 +226,8 @@ where
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        for (worker_id, actors) in &worker_actors {
-            let worker_node = locations.building.worker_locations.get(worker_id).unwrap();
+        for (worker_id, actors) in &building_worker_actors {
+            let worker_node = building_locations.worker_locations.get(worker_id).unwrap();
             let client = self.env.stream_client_pool().get(worker_node).await?;
 
             client
@@ -238,7 +236,6 @@ where
                 })
                 .await?;
 
-            // TODO: distinguish external and building actors.
             let stream_actors = actors
                 .iter()
                 .flat_map(|actor_id| actor_map.get(actor_id).cloned())
@@ -255,9 +252,9 @@ where
                 .await?;
         }
 
-        // Build remaining hanging channels on compute nodes.
+        // Build **remaining** hanging channels on compute nodes.
         for (worker_id, hanging_channels) in hanging_channels {
-            let worker_node = locations.building.worker_locations.get(&worker_id).unwrap();
+            let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
             let client = self.env.stream_client_pool().get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
@@ -284,8 +281,8 @@ where
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        for (worker_id, actors) in worker_actors {
-            let worker_node = locations.building.worker_locations.get(&worker_id).unwrap();
+        for (worker_id, actors) in building_worker_actors {
+            let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
             let client = self.env.stream_client_pool().get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
@@ -618,7 +615,7 @@ mod tests {
             &self,
             table_fragments: TableFragments,
         ) -> MetaResult<()> {
-            let mut ctx = CreateStreamingJobContext::default();
+            let ctx = CreateStreamingJobContext::default();
             let table = Table {
                 id: table_fragments.table_id().table_id(),
                 ..Default::default()
@@ -627,7 +624,7 @@ mod tests {
                 .start_create_table_procedure(&table)
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, CompleteLocations::for_test(), &mut ctx)
+                .create_streaming_job(table_fragments, &ctx)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], &table)

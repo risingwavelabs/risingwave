@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::schedule::Distribution;
-use super::{CreateStreamingJobContext, Locations};
+use super::Locations;
 use crate::manager::{
     IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingClusterInfo,
     StreamingJob,
@@ -266,7 +266,7 @@ impl StreamActorBuilder {
     }
 
     /// Build an actor after seal.
-    pub fn build(self, ctx: &CreateStreamingJobContext) -> MetaResult<StreamActor> {
+    pub fn build(self, job: &StreamingJob) -> MetaResult<StreamActor> {
         let rewritten_nodes = self.rewrite()?;
 
         // TODO: store each upstream separately
@@ -285,7 +285,7 @@ impl StreamActorBuilder {
             upstream_actor_id,
             colocated_upstream_actor_id: None, // TODO: remove this
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-            mview_definition: ctx.streaming_definition.clone(),
+            mview_definition: job.mview_definition(),
         })
     }
 }
@@ -298,21 +298,6 @@ struct Node<'a> {
 
 type StreamActorGraph = HashMap<GlobalFragmentId, Vec<StreamActor>>;
 type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
-
-pub struct CompleteLocations {
-    pub building: Locations,
-    pub existing: Locations,
-}
-
-impl CompleteLocations {
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        Self {
-            building: Locations::for_test(),
-            existing: Locations::for_test(),
-        }
-    }
-}
 
 pub type StreamGraph = BTreeMap<FragmentId, Fragment>;
 
@@ -521,50 +506,6 @@ impl StreamGraphBuilder {
             DispatcherType::Unspecified => unreachable!(),
         }
     }
-
-    /// Build final stream DAG with dependencies with current actor builders.
-    #[allow(clippy::type_complexity)]
-    pub fn build(
-        self,
-        ctx: &CreateStreamingJobContext,
-        cluster_info: &StreamingClusterInfo,
-    ) -> MetaResult<(StreamActorGraph, CompleteLocations)> {
-        let mut actors: StreamActorGraph = HashMap::new();
-
-        for builder in self.actor_builders.into_values() {
-            let fragment_id = builder.fragment_id();
-            let actor = builder.build(ctx)?;
-            actors.entry(fragment_id).or_default().push(actor);
-        }
-
-        let build_locations = |actor_locations: ActorLocations| {
-            let actor_locations = actor_locations
-                .into_iter()
-                .map(|(id, p)| (id.as_global_id(), cluster_info.parallel_units[&p].clone()))
-                .collect();
-
-            let worker_locations = cluster_info.worker_nodes.clone();
-
-            let actor_vnode_bitmaps = actors
-                .values()
-                .flatten()
-                .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
-                .collect();
-
-            Locations {
-                actor_locations,
-                worker_locations,
-                actor_vnode_bitmaps,
-            }
-        };
-
-        let complete_locations = CompleteLocations {
-            building: build_locations(self.building_locations),
-            existing: build_locations(self.external_locations),
-        };
-
-        Ok((actors, complete_locations))
-    }
 }
 
 /// The mutable state when building actor graph.
@@ -609,6 +550,15 @@ impl BuildActorGraphState {
     }
 }
 
+pub struct ActorGraphBuildResult {
+    pub graph: StreamGraph,
+
+    pub building_locations: Locations,
+    pub existing_locations: Locations,
+
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+}
+
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
     /// The pre-scheduled distribution for each fragment.
@@ -647,12 +597,31 @@ impl ActorGraphBuilder {
         })
     }
 
+    fn generate_locations(&self, actor_locations: ActorLocations) -> Locations {
+        let actor_locations = actor_locations
+            .into_iter()
+            .map(|(id, p)| {
+                (
+                    id.as_global_id(),
+                    self.cluster_info.parallel_units[&p].clone(),
+                )
+            })
+            .collect();
+
+        let worker_locations = self.cluster_info.worker_nodes.clone();
+
+        Locations {
+            actor_locations,
+            worker_locations,
+        }
+    }
+
     /// Build a stream graph by duplicating each fragment as parallel actors.
     pub async fn generate_graph<S>(
         self,
         id_gen_manager: IdGeneratorManagerRef<S>,
-        ctx: &mut CreateStreamingJobContext,
-    ) -> MetaResult<(StreamGraph, CompleteLocations)>
+        job: &StreamingJob,
+    ) -> MetaResult<ActorGraphBuildResult>
     where
         S: MetaStore,
     {
@@ -664,44 +633,60 @@ impl ActorGraphBuilder {
         let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
 
         // Generate actors of the streaming plan
-        let (actor_graph, locations) = {
-            let builder = self.build_actor_graph(id_gen)?.finish();
-
-            // TODO: do not pass with `ctx`
-            let dispatchers = builder
-                .external_changes
-                .iter()
-                .map(|(actor_id, change)| {
-                    (
-                        actor_id.as_global_id(),
-                        change.new_downstreams.values().cloned().collect(),
-                    )
-                })
-                .collect();
-            ctx.dispatchers = dispatchers;
-
-            builder.build(&*ctx, &self.cluster_info)
-        }?;
+        let StreamGraphBuilder {
+            actor_builders,
+            building_locations,
+            external_changes,
+            external_locations,
+        } = self.build_actor_graph(id_gen)?;
 
         // Serialize the graph
-        let stream_graph = actor_graph
-            .into_iter()
-            .map(|(fragment_id, actors)| {
-                let distribution = self.distributions[&fragment_id].clone();
-                let fragment = self
-                    .fragment_graph
-                    .seal_fragment(fragment_id, actors, distribution);
-                let fragment_id = fragment_id.as_global_id();
-                (fragment_id, fragment)
+        let graph = {
+            let mut actors: StreamActorGraph = HashMap::new();
+
+            for builder in actor_builders.into_values() {
+                let fragment_id = builder.fragment_id();
+                let actor = builder.build(job)?;
+                actors.entry(fragment_id).or_default().push(actor);
+            }
+
+            actors
+                .into_iter()
+                .map(|(fragment_id, actors)| {
+                    let distribution = self.distributions[&fragment_id].clone();
+                    let fragment =
+                        self.fragment_graph
+                            .seal_fragment(fragment_id, actors, distribution);
+                    let fragment_id = fragment_id.as_global_id();
+                    (fragment_id, fragment)
+                })
+                .collect()
+        };
+
+        let building_locations = self.generate_locations(building_locations);
+        let existing_locations = self.generate_locations(external_locations);
+
+        let dispatchers = external_changes
+            .iter()
+            .map(|(actor_id, change)| {
+                (
+                    actor_id.as_global_id(),
+                    change.new_downstreams.values().cloned().collect(),
+                )
             })
             .collect();
 
-        Ok((stream_graph, locations))
+        Ok(ActorGraphBuildResult {
+            graph,
+            building_locations,
+            existing_locations,
+            dispatchers,
+        })
     }
 
     /// Build actor graph from fragment graph using topological order. Setup dispatcher in actor and
     /// generate actors by their parallelism.
-    fn build_actor_graph(&self, id_gen: GlobalActorIdGen) -> MetaResult<BuildActorGraphState> {
+    fn build_actor_graph(&self, id_gen: GlobalActorIdGen) -> MetaResult<StreamGraphBuilder> {
         let mut state = BuildActorGraphState::new(id_gen);
 
         // Use topological sort to build the graph from downstream to upstream. (The first fragment
@@ -711,7 +696,7 @@ impl ActorGraphBuilder {
             self.build_actor_graph_fragment(fragment_id, &mut state)?;
         }
 
-        Ok(state)
+        Ok(state.finish())
     }
 
     fn build_actor_graph_fragment(
