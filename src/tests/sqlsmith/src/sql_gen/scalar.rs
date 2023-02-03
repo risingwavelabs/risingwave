@@ -21,7 +21,7 @@ use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
-use crate::sql_gen::expr::{sql_null, typed_null};
+use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::SqlGenerator;
 
