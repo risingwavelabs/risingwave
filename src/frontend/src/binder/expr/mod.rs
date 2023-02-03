@@ -17,7 +17,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    BinaryOperator, DataType as AstDataType, Expr, Function, Ident, ObjectName, Query, StructField,
     TrimWhereField, UnaryOperator,
 };
 
@@ -42,20 +42,20 @@ impl Binder {
             }
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
-            Expr::Identifier(ident) => {
-                if ["session_user", "current_schema"]
-                    .iter()
-                    .any(|e| ident.real_value().as_str() == *e)
-                {
+            Expr::Identifier(ident) => match ident.real_value().as_str() {
+                "session_user" | "current_schema" => {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
                     // allow `session_user()` while we do.
                     self.bind_function(Function::no_arg(ObjectName(vec![ident])))
-                } else {
-                    self.bind_column(&[ident])
                 }
-            }
+                "current_timestamp" => {
+                    // enable sql expr alias: 'select current_timestamp' is equal to 'select now()'
+                    self.bind_function(Function::no_arg(ObjectName(vec![Ident::new("now")])))
+                }
+                _ => self.bind_column(&[ident]),
+            },
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
                 self.bind_single_field_column(*field_expr, &idents)
