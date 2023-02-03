@@ -100,18 +100,20 @@ impl Binder {
                 offset,
                 fetch,
             } => {
-                let (new_body, nulls_inserted) = if values.0[0].len() < expected_types.len() {
-                    tracing::info!("values: {:?}", values); // TODO: remove line
-                    let mut new_values = values.clone();
-                    let nulls_to_insert = expected_types.len() - new_values.0[0].len();
-                    for _ in 0..nulls_to_insert {
-                        new_values.0[0].push(Expr::Value(Value::Null));
-                    }
-                    tracing::info!("values push: {:?}", new_values); // TODO: remove line
-                    (SetExpr::Values(new_values), nulls_to_insert)
-                } else {
-                    (SetExpr::Values(values), 0)
-                };
+                let val00 = values.0.get(0);
+                let (new_body, nulls_inserted) =
+                    if val00.is_some() && val00.unwrap().len() < expected_types.len() {
+                        tracing::info!("values: {:?}", values); // TODO: remove line
+                        let mut new_values = values.clone();
+                        let nulls_to_insert = expected_types.len() - new_values.0[0].len();
+                        for _ in 0..nulls_to_insert {
+                            new_values.0[0].push(Expr::Value(Value::Null));
+                        }
+                        tracing::info!("values push: {:?}", new_values); // TODO: remove line
+                        (SetExpr::Values(new_values), nulls_to_insert)
+                    } else {
+                        (SetExpr::Values(values), 0)
+                    };
                 (
                     Query {
                         with,
