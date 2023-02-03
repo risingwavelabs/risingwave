@@ -287,10 +287,10 @@ impl Binder {
                 None
             },
         };
-
         Ok(insert)
     }
 
+    // TODO: I am assuming that everything is nullable
     // TODO: Write tests
 
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
