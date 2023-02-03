@@ -309,11 +309,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use etcd_client::GetOptions;
     use itertools::Itertools;
     use tokio::sync::watch;
     use tokio::time;
 
-    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
+    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient, META_ELECTION_KEY};
 
     #[tokio::test]
     async fn test_election() {
@@ -400,11 +401,25 @@ mod tests {
 
         assert_eq!(election_leader.id, leader.1.id().unwrap());
 
-        let lease_id = election_leader.lease;
-
         let client = etcd_client::Client::connect(&vec!["localhost:2388"], None)
             .await
             .unwrap();
+
+        let kvs = client
+            .kv_client()
+            .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
+            .await
+            .unwrap();
+
+        let leader_kv = kvs
+            .kvs()
+            .iter()
+            .find(|kv| kv.value() == election_leader.id.as_bytes())
+            .cloned()
+            .unwrap();
+
+        let lease_id = leader_kv.lease();
+
         client.lease_client().revoke(lease_id).await.unwrap();
 
         time::sleep(Duration::from_secs(10)).await;
