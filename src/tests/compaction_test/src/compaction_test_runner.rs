@@ -248,7 +248,6 @@ async fn init_metadata_for_replay(
     let new_meta_client =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
     new_meta_client.activate(advertise_addr).await.unwrap();
-
     if ci_mode {
         let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
         *table_id = table_to_check.id;
@@ -327,7 +326,6 @@ async fn start_replay(
     let meta_client =
         MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
             .await?;
-
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&advertise_addr).await.unwrap();

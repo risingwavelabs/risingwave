@@ -1382,10 +1382,23 @@ mod tests {
 
     #[test]
     fn test_parse_meta_addr() {
-        let results = vec![(
-            "load-balance+http://abc",
-            Some(MetaAddressStrategy::LoadBalance("http://abc".to_string())),
-        )];
+        let results = vec![
+            (
+                "load-balance+http://abc",
+                Some(MetaAddressStrategy::LoadBalance("http://abc".to_string())),
+            ),
+            ("load-balance+http://abc,http://def", None),
+            ("load-balance+http://abc:xxx", None),
+            ("", None),
+            (
+                "http://abc,http://def",
+                Some(MetaAddressStrategy::List(vec![
+                    "http://abc".to_string(),
+                    "http://def".to_string(),
+                ])),
+            ),
+            ("http://abc:xx,http://def", None),
+        ];
         for (addr, result) in results {
             let parsed_result = MetaClient::parse_meta_addr(addr);
             match result {
