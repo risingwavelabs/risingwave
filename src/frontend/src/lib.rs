@@ -72,28 +72,36 @@ pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(long, alias = "host", default_value = "127.0.0.1:4566")]
+    #[clap(long, alias = "host", env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:4566")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, alias = "client-address")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR", alias = "client-address")]
     pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.
-    #[clap(long)]
+    #[clap(long, env = "RW_PORT")]
     pub port: Option<u16>,
 
     /// The address via which we will attempt to connect to a leader meta node.
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    #[clap(long, default_value = "127.0.0.1:2222")]
+    #[clap(
+        long,
+        env = "RW_PROMETHEUS_LISTENER_ADDR",
+        default_value = "127.0.0.1:2222"
+    )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, default_value = "127.0.0.1:6786")]
+    #[clap(
+        long,
+        env = "RW_HEALTH_CHECK_LISTENER_ADDR",
+        default_value = "127.0.0.1:6786"
+    )]
     pub health_check_listener_addr: String,
 
     /// The path of `risingwave.toml` configuration file.
@@ -102,7 +110,7 @@ pub struct FrontendOpts {
     ///
     /// Note that internal system parameters should be defined in the configuration file at
     /// [`risingwave_common::config`] instead of command line arguments.
-    #[clap(long, default_value = "")]
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
     #[clap(flatten)]
@@ -115,7 +123,7 @@ struct OverrideConfigOpts {
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
-    #[clap(long)]
+    #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 }

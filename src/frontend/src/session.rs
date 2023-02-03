@@ -23,6 +23,7 @@ use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::types::Format;
 use rand::RngCore;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
@@ -653,11 +654,7 @@ impl Session<PgResponseStream> for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-
-        // format: indicate the query PgResponse format (Only meaningful for SELECT queries).
-        // false: TEXT
-        // true: BINARY
-        format: bool,
+        formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql)
@@ -675,7 +672,7 @@ impl Session<PgResponseStream> for SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -702,11 +699,11 @@ impl Session<PgResponseStream> for SessionImpl {
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
-        format: bool,
+        format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         let sql_str = stmt.to_string();
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, format));
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
