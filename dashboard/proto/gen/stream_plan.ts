@@ -613,8 +613,6 @@ export interface ChainNode {
    * ChainType is used to decide which implementation for the ChainNode.
    */
   chainType: ChainType;
-  /** Whether to place this chain on the same worker node as upstream actors. */
-  sameWorkerNode: boolean;
   /**
    * Whether the upstream materialize is and this chain should be a singleton.
    * FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
@@ -828,11 +826,6 @@ export interface Dispatcher {
   downstreamActorId: number[];
 }
 
-/** Used to place an actor together with another actor in the same worker node. */
-export interface ColocatedActorId {
-  id: number;
-}
-
 /** A StreamActor is a running fragment of the overall stream graph, */
 export interface StreamActor {
   actorId: number;
@@ -846,10 +839,6 @@ export interface StreamActor {
    * We duplicate the information here to ease the parsing logic in stream manager.
    */
   upstreamActorId: number[];
-  /** Placement rule for actor, need to stay on the same node as a specified upstream actor. */
-  colocatedUpstreamActorId:
-    | ColocatedActorId
-    | undefined;
   /**
    * Vnodes that the executors in this actor own.
    * If the fragment is a singleton, this field will not be set and leave a `None`.
@@ -903,8 +892,6 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   dispatchStrategy:
     | DispatchStrategy
     | undefined;
-  /** Whether the two linked nodes should be placed on the same worker node */
-  sameWorkerNode: boolean;
   /**
    * A unique identifier of this edge. Generally it should be exchange node's operator id. When
    * rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
@@ -2734,7 +2721,6 @@ function createBaseChainNode(): ChainNode {
     upstreamFields: [],
     upstreamColumnIndices: [],
     chainType: ChainType.CHAIN_UNSPECIFIED,
-    sameWorkerNode: false,
     isSingleton: false,
     tableDesc: undefined,
   };
@@ -2751,7 +2737,6 @@ export const ChainNode = {
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
       chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
-      sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
@@ -2771,7 +2756,6 @@ export const ChainNode = {
       obj.upstreamColumnIndices = [];
     }
     message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
-    message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableDesc !== undefined &&
       (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
@@ -2784,7 +2768,6 @@ export const ChainNode = {
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
     message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
-    message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.isSingleton = object.isSingleton ?? false;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
       ? StorageTableDesc.fromPartial(object.tableDesc)
@@ -3735,28 +3718,6 @@ export const Dispatcher = {
   },
 };
 
-function createBaseColocatedActorId(): ColocatedActorId {
-  return { id: 0 };
-}
-
-export const ColocatedActorId = {
-  fromJSON(object: any): ColocatedActorId {
-    return { id: isSet(object.id) ? Number(object.id) : 0 };
-  },
-
-  toJSON(message: ColocatedActorId): unknown {
-    const obj: any = {};
-    message.id !== undefined && (obj.id = Math.round(message.id));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColocatedActorId>, I>>(object: I): ColocatedActorId {
-    const message = createBaseColocatedActorId();
-    message.id = object.id ?? 0;
-    return message;
-  },
-};
-
 function createBaseStreamActor(): StreamActor {
   return {
     actorId: 0,
@@ -3764,7 +3725,6 @@ function createBaseStreamActor(): StreamActor {
     nodes: undefined,
     dispatcher: [],
     upstreamActorId: [],
-    colocatedUpstreamActorId: undefined,
     vnodeBitmap: undefined,
     mviewDefinition: "",
   };
@@ -3778,9 +3738,6 @@ export const StreamActor = {
       nodes: isSet(object.nodes) ? StreamNode.fromJSON(object.nodes) : undefined,
       dispatcher: Array.isArray(object?.dispatcher) ? object.dispatcher.map((e: any) => Dispatcher.fromJSON(e)) : [],
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
-      colocatedUpstreamActorId: isSet(object.colocatedUpstreamActorId)
-        ? ColocatedActorId.fromJSON(object.colocatedUpstreamActorId)
-        : undefined,
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       mviewDefinition: isSet(object.mviewDefinition) ? String(object.mviewDefinition) : "",
     };
@@ -3801,9 +3758,6 @@ export const StreamActor = {
     } else {
       obj.upstreamActorId = [];
     }
-    message.colocatedUpstreamActorId !== undefined && (obj.colocatedUpstreamActorId = message.colocatedUpstreamActorId
-      ? ColocatedActorId.toJSON(message.colocatedUpstreamActorId)
-      : undefined);
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.mviewDefinition !== undefined && (obj.mviewDefinition = message.mviewDefinition);
@@ -3819,10 +3773,6 @@ export const StreamActor = {
       : undefined;
     message.dispatcher = object.dispatcher?.map((e) => Dispatcher.fromPartial(e)) || [];
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
-    message.colocatedUpstreamActorId =
-      (object.colocatedUpstreamActorId !== undefined && object.colocatedUpstreamActorId !== null)
-        ? ColocatedActorId.fromPartial(object.colocatedUpstreamActorId)
-        : undefined;
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
@@ -3986,14 +3936,13 @@ export const StreamFragmentGraph_StreamFragment = {
 };
 
 function createBaseStreamFragmentGraph_StreamFragmentEdge(): StreamFragmentGraph_StreamFragmentEdge {
-  return { dispatchStrategy: undefined, sameWorkerNode: false, linkId: 0, upstreamId: 0, downstreamId: 0 };
+  return { dispatchStrategy: undefined, linkId: 0, upstreamId: 0, downstreamId: 0 };
 }
 
 export const StreamFragmentGraph_StreamFragmentEdge = {
   fromJSON(object: any): StreamFragmentGraph_StreamFragmentEdge {
     return {
       dispatchStrategy: isSet(object.dispatchStrategy) ? DispatchStrategy.fromJSON(object.dispatchStrategy) : undefined,
-      sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       linkId: isSet(object.linkId) ? Number(object.linkId) : 0,
       upstreamId: isSet(object.upstreamId) ? Number(object.upstreamId) : 0,
       downstreamId: isSet(object.downstreamId) ? Number(object.downstreamId) : 0,
@@ -4004,7 +3953,6 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     const obj: any = {};
     message.dispatchStrategy !== undefined &&
       (obj.dispatchStrategy = message.dispatchStrategy ? DispatchStrategy.toJSON(message.dispatchStrategy) : undefined);
-    message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.linkId !== undefined && (obj.linkId = Math.round(message.linkId));
     message.upstreamId !== undefined && (obj.upstreamId = Math.round(message.upstreamId));
     message.downstreamId !== undefined && (obj.downstreamId = Math.round(message.downstreamId));
@@ -4018,7 +3966,6 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.dispatchStrategy = (object.dispatchStrategy !== undefined && object.dispatchStrategy !== null)
       ? DispatchStrategy.fromPartial(object.dispatchStrategy)
       : undefined;
-    message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;

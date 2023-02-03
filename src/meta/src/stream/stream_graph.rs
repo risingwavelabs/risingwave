@@ -314,7 +314,6 @@ impl StreamActorBuilder {
             nodes: Some(rewritten_nodes),
             dispatcher: self.downstreams.into_values().collect(),
             upstream_actor_id,
-            colocated_upstream_actor_id: None, // TODO: remove this
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
             mview_definition: job.mview_definition(),
         })
