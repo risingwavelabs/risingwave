@@ -124,9 +124,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    const BETWEEN_PREC: u8 = 20;
+    const BETWEEN_PREC: u8 = 21;
     const PLUS_MINUS_PREC: u8 = 30;
-    const TIME_ZONE_PREC: u8 = 20;
+    const TIME_ZONE_PREC: u8 = 21;
     const UNARY_NOT_PREC: u8 = 15;
 
     /// Parse the specified tokens
@@ -1843,9 +1843,7 @@ impl Parser {
                 }
             } else {
                 // non-cdc connectors
-                self
-                    .expect_keywords(&[Keyword::ROW, Keyword::FORMAT])
-                    .map_err(|_| ParserError::ParserError("Please specify 'connector' in WITH clause to create a table with a connector".to_string()))?;
+                self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
                 Some(SourceSchema::parse_to(self)?)
             }
         } else {
@@ -2072,9 +2070,18 @@ impl Parser {
     pub fn parse_options(&mut self, keyword: Keyword) -> Result<Vec<SqlOption>, ParserError> {
         if self.parse_keyword(keyword) {
             self.expect_token(&Token::LParen)?;
-            let options = self.parse_comma_separated(Parser::parse_sql_option)?;
-            self.expect_token(&Token::RParen)?;
-            Ok(options)
+            let mut values = vec![];
+            loop {
+                values.push(Parser::parse_sql_option(self)?);
+                let comma = self.consume_token(&Token::Comma);
+                if self.consume_token(&Token::RParen) {
+                    // allow a trailing comma, even though it's not in standard
+                    break;
+                } else if !comma {
+                    return self.expected("',' or ')' after option definition", self.peek_token());
+                }
+            }
+            Ok(values)
         } else {
             Ok(vec![])
         }

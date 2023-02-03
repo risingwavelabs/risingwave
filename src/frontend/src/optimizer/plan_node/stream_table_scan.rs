@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
+use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
 use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
 use crate::catalog::ColumnId;
@@ -36,10 +36,15 @@ pub struct StreamTableScan {
     pub base: PlanBase,
     logical: LogicalScan,
     batch_plan_id: PlanNodeId,
+    chain_type: ChainType,
 }
 
 impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
+        Self::new_with_chain_type(logical, ChainType::Backfill)
+    }
+
+    pub fn new_with_chain_type(logical: LogicalScan, chain_type: ChainType) -> Self {
         let ctx = logical.base.ctx.clone();
 
         let batch_plan_id = ctx.next_plan_node_id();
@@ -69,6 +74,7 @@ impl StreamTableScan {
             base,
             logical,
             batch_plan_id,
+            chain_type,
         }
     }
 
@@ -85,12 +91,17 @@ impl StreamTableScan {
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &HashMap<usize, usize>,
+        chain_type: ChainType,
     ) -> StreamIndexScan {
-        StreamIndexScan::new(self.logical.to_index_scan(
-            index_name,
-            index_table_desc,
-            primary_to_secondary_mapping,
-        ))
+        StreamIndexScan::new(
+            self.logical
+                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping),
+            chain_type,
+        )
+    }
+
+    pub fn chain_type(&self) -> ChainType {
+        self.chain_type
     }
 }
 
@@ -190,7 +201,7 @@ impl StreamTableScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: false,
-                chain_type: ChainType::Backfill as i32,
+                chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
                     .logical

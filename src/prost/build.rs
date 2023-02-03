@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "expr",
         "health",
         "hummock",
-        "leader",
+        "java_binding",
         "meta",
         "monitor_service",
         "plan_common",

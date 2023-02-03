@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
 use crate::pg_protocol::{cstr_to_str, Conn};
 use crate::pg_response::{PgResponse, RowSetResult};
 use crate::pg_server::{Session, SessionManager};
-use crate::types::Row;
+use crate::types::{Format, FormatIterator, Row};
 
 #[derive(Default)]
 pub struct PgStatement {
@@ -78,28 +78,33 @@ impl PgStatement {
         &self,
         portal_name: String,
         params: &[Bytes],
-        result_format: bool,
-        param_format: bool,
+        result_formats: Vec<Format>,
+        param_formats: Vec<Format>,
     ) -> PsqlResult<PgPortal<VS>>
     where
         VS: Stream<Item = RowSetResult> + Unpin + Send,
     {
-        let instance_query_string = self.prepared_statement.instance(params, param_format)?;
+        let instance_query_string = self.prepared_statement.instance(params, &param_formats)?;
 
-        let row_description: Vec<PgFieldDescriptor> = if result_format {
+        let format_iter = FormatIterator::new(&result_formats, self.row_description.len())
+            .map_err(|err| PsqlError::Internal(anyhow!(err)))?;
+        let row_description: Vec<PgFieldDescriptor> = {
             let mut row_description = self.row_description.clone();
             row_description
                 .iter_mut()
-                .for_each(|desc| desc.set_to_binary());
+                .zip_eq(format_iter)
+                .for_each(|(desc, format)| {
+                    if let Format::Binary = format {
+                        desc.set_to_binary();
+                    }
+                });
             row_description
-        } else {
-            self.row_description.clone()
         };
 
         Ok(PgPortal {
             name: portal_name,
             query_string: instance_query_string,
-            result_format,
+            result_formats,
             is_query: self.is_query,
             row_description,
             result: None,
@@ -120,7 +125,7 @@ where
 {
     name: String,
     query_string: String,
-    result_format: bool,
+    result_formats: Vec<Format>,
     is_query: bool,
     row_description: Vec<PgFieldDescriptor>,
     result: Option<PgResponse<VS>>,
@@ -156,7 +161,7 @@ where
             result
         } else {
             let result = session
-                .run_statement(self.query_string.as_str(), self.result_format)
+                .run_statement(self.query_string.as_str(), self.result_formats.clone())
                 .await
                 .map_err(|err| PsqlError::ExecuteError(err))?;
             self.result = Some(result);
@@ -364,150 +369,123 @@ impl PreparedStatement {
         })
     }
 
-    /// parse_params is to parse raw_params:&[Bytes] into params:[String].
-    /// The param produced by this function will be used in the PreparedStatement.
-    ///
-    /// type_description is a list of type oids.
-    /// raw_params is a list of raw params.
-    /// param_format is format code : false for text, true for binary.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let raw_params = vec!["A".into(), "B".into(), "C".into()];
-    /// let type_description = vec![DataType::Varchar; 3];
-    /// let params = parse_params(&type_description, &raw_params,false);
-    /// assert_eq!(params, vec!["'A'", "'B'", "'C'"])
-    ///
-    /// let raw_params = vec!["1".into(), "2".into(), "3.1".into()];
-    /// let type_description = vec![DataType::INT,DataType::INT,DataType::FLOAT4];
-    /// let params = parse_params(&type_description, &raw_params,false);
-    /// assert_eq!(params, vec!["1::INT", "2::INT", "3.1::FLOAT4"])
-    /// ```
     fn parse_params(
         type_description: &[DataType],
         raw_params: &[Bytes],
-        param_format: bool,
+        param_formats: &[Format],
     ) -> PsqlResult<Vec<String>> {
+        // Invariant check
         if type_description.len() != raw_params.len() {
             return Err(PsqlError::Internal(anyhow!(
                 "The number of params doesn't match the number of types"
             )));
         }
-        assert_eq!(type_description.len(), raw_params.len());
+        if raw_params.is_empty() {
+            return Ok(vec![]);
+        }
 
         let mut params = Vec::with_capacity(raw_params.len());
 
-        // BINARY FORMAT PARAMS
         let place_hodler = Type::ANY;
-        for (type_oid, raw_param) in zip_eq(type_description.iter(), raw_params.iter()) {
+        let format_iter = FormatIterator::new(param_formats, raw_params.len())
+            .map_err(|err| PsqlError::Internal(anyhow!(err)))?;
+
+        for ((type_oid, raw_param), param_format) in
+            zip_eq(type_description.iter(), raw_params.iter()).zip_eq(format_iter)
+        {
             let str = match type_oid {
                 DataType::Varchar | DataType::Bytea => {
                     format!("'{}'", cstr_to_str(raw_param).unwrap().replace('\'', "''"))
                 }
-                DataType::Boolean => {
-                    if param_format {
-                        bool::from_sql(&place_hodler, raw_param)
-                            .unwrap()
-                            .to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
-                    }
-                }
-                DataType::Int64 => {
-                    if param_format {
-                        i64::from_sql(&place_hodler, raw_param).unwrap().to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
-                    }
-                }
-                DataType::Int16 => {
-                    if param_format {
-                        i16::from_sql(&place_hodler, raw_param).unwrap().to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
-                    }
-                }
-                DataType::Int32 => {
-                    if param_format {
-                        i32::from_sql(&place_hodler, raw_param).unwrap().to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
-                    }
-                }
+                DataType::Boolean => match param_format {
+                    Format::Binary => bool::from_sql(&place_hodler, raw_param)
+                        .unwrap()
+                        .to_string(),
+                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                },
+                DataType::Int64 => match param_format {
+                    Format::Binary => i64::from_sql(&place_hodler, raw_param).unwrap().to_string(),
+                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                },
+                DataType::Int16 => match param_format {
+                    Format::Binary => i16::from_sql(&place_hodler, raw_param).unwrap().to_string(),
+                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                },
+                DataType::Int32 => match param_format {
+                    Format::Binary => i32::from_sql(&place_hodler, raw_param).unwrap().to_string(),
+                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                },
                 DataType::Float32 => {
-                    let tmp = if param_format {
-                        f32::from_sql(&place_hodler, raw_param).unwrap().to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            f32::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::FLOAT4", tmp)
                 }
                 DataType::Float64 => {
-                    let tmp = if param_format {
-                        f64::from_sql(&place_hodler, raw_param).unwrap().to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            f64::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::FLOAT8", tmp)
                 }
                 DataType::Date => {
-                    let tmp = if param_format {
-                        chrono::NaiveDate::from_sql(&place_hodler, raw_param)
+                    let tmp = match param_format {
+                        Format::Binary => chrono::NaiveDate::from_sql(&place_hodler, raw_param)
                             .unwrap()
-                            .to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                            .to_string(),
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::DATE", tmp)
                 }
                 DataType::Time => {
-                    let tmp = if param_format {
-                        chrono::NaiveTime::from_sql(&place_hodler, raw_param)
+                    let tmp = match param_format {
+                        Format::Binary => chrono::NaiveTime::from_sql(&place_hodler, raw_param)
                             .unwrap()
-                            .to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                            .to_string(),
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::TIME", tmp)
                 }
                 DataType::Timestamp => {
-                    let tmp = if param_format {
-                        chrono::NaiveDateTime::from_sql(&place_hodler, raw_param)
+                    let tmp = match param_format {
+                        Format::Binary => chrono::NaiveDateTime::from_sql(&place_hodler, raw_param)
                             .unwrap()
-                            .to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                            .to_string(),
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::TIMESTAMP", tmp)
                 }
                 DataType::Decimal => {
-                    let tmp = if param_format {
-                        rust_decimal::Decimal::from_sql(&place_hodler, raw_param)
+                    let tmp = match param_format {
+                        Format::Binary => rust_decimal::Decimal::from_sql(&place_hodler, raw_param)
                             .unwrap()
-                            .to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                            .to_string(),
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::DECIMAL", tmp)
                 }
                 DataType::Timestamptz => {
-                    let tmp = if param_format {
-                        chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
-                            .unwrap()
-                            .to_string()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
+                                .unwrap()
+                                .to_string()
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::TIMESTAMPTZ", tmp)
                 }
                 DataType::Interval => {
-                    let tmp = if param_format {
-                        pg_interval::Interval::from_sql(&place_hodler, raw_param)
+                    let tmp = match param_format {
+                        Format::Binary => pg_interval::Interval::from_sql(&place_hodler, raw_param)
                             .unwrap()
-                            .to_postgres()
-                    } else {
-                        cstr_to_str(raw_param).unwrap().to_string()
+                            .to_postgres(),
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                     };
                     format!("'{}'::INTERVAL", tmp)
                 }
@@ -602,8 +580,8 @@ impl PreparedStatement {
         Ok(self.replace_params(&default_params))
     }
 
-    pub fn instance(&self, raw_params: &[Bytes], param_format: bool) -> PsqlResult<String> {
-        let params = Self::parse_params(&self.param_types, raw_params, param_format)?;
+    pub fn instance(&self, raw_params: &[Bytes], param_formats: &[Format]) -> PsqlResult<String> {
+        let params = Self::parse_params(&self.param_types, raw_params, param_formats)?;
         Ok(self.replace_params(&params))
     }
 }
@@ -620,6 +598,7 @@ mod tests {
     use tokio_postgres::types::{ToSql, Type};
 
     use crate::pg_extended::PreparedStatement;
+    use crate::types::Format;
 
     #[test]
     fn test_prepared_statement_without_param() {
@@ -627,7 +606,7 @@ mod tests {
         let prepared_statement = PreparedStatement::parse_statement(raw_statement, vec![]).unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table" == default_sql);
-        let sql = prepared_statement.instance(&[], false).unwrap();
+        let sql = prepared_statement.instance(&[], &[]).unwrap();
         assert!("SELECT * FROM test_table" == sql);
     }
 
@@ -639,7 +618,7 @@ mod tests {
                 .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
-        let sql = prepared_statement.instance(&["1".into()], false).unwrap();
+        let sql = prepared_statement.instance(&["1".into()], &[]).unwrap();
         assert!("SELECT * FROM test_table WHERE id = 1" == sql);
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
@@ -651,7 +630,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("INSERT INTO test (index,data) VALUES (0::INT,'0')" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
@@ -664,7 +643,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("UPDATE COFFEES SET SALES = 0::INT WHERE COF_NAME LIKE '0'" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
 
@@ -681,7 +660,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT AND name = '0'" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into(), "NAME".into()], false)
+            .instance(&["1".into(), "DATA".into(), "NAME".into()], &[])
             .unwrap();
         assert!("SELECT * FROM test_table WHERE id = 1 AND name = 'NAME'" == sql);
     }
@@ -692,7 +671,7 @@ mod tests {
         let prepared_statement = PreparedStatement::parse_statement(raw_statement, vec![]).unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
-        let sql = prepared_statement.instance(&["1".into()], false).unwrap();
+        let sql = prepared_statement.instance(&["1".into()], &[]).unwrap();
         assert!("SELECT * FROM test_table WHERE id = 1" == sql);
 
         let raw_statement =
@@ -701,7 +680,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("INSERT INTO test (index,data) VALUES (0::INT,'0')" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
@@ -711,7 +690,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("UPDATE COFFEES SET SALES = 0::INT WHERE COF_NAME LIKE '0'" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
     }
@@ -726,7 +705,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT AND name = '0'" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("SELECT * FROM test_table WHERE id = 1 AND name = 'DATA'" == sql);
 
@@ -737,7 +716,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("INSERT INTO test (index,data) VALUES (0::INT,'0')" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
 
@@ -749,14 +728,14 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("UPDATE COFFEES SET SALES = 0::INT WHERE COF_NAME LIKE '0'" == default_sql);
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
 
         let raw_statement = "SELECT $1,$2;".to_string();
         let prepared_statement = PreparedStatement::parse_statement(raw_statement, vec![]).unwrap();
         let sql = prepared_statement
-            .instance(&["test$2".into(), "test$1".into()], false)
+            .instance(&["test$2".into(), "test$1".into()], &[])
             .unwrap();
         assert!("SELECT 'test$2','test$1';" == sql);
 
@@ -765,7 +744,7 @@ mod tests {
             PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
                 .unwrap();
         let sql = prepared_statement
-            .instance(&["1".into(), "DATA".into()], false)
+            .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
         assert!("SELECT 1,1,'DATA','DATA';" == sql);
     }
@@ -774,20 +753,17 @@ mod tests {
     fn test_parse_params_text() {
         let raw_params = vec!["A".into(), "B".into(), "C".into()];
         let type_description = vec![DataType::Varchar; 3];
-        let params =
-            PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, &[]).unwrap();
         assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
 
         let raw_params = vec!["false".into(), "true".into()];
         let type_description = vec![DataType::Boolean; 2];
-        let params =
-            PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, &[]).unwrap();
         assert_eq!(params, vec!["false", "true"]);
 
         let raw_params = vec!["1".into(), "2".into(), "3".into()];
         let type_description = vec![DataType::Int16, DataType::Int32, DataType::Int64];
-        let params =
-            PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, &[]).unwrap();
         assert_eq!(params, vec!["1", "2", "3"]);
 
         let raw_params = vec![
@@ -799,8 +775,7 @@ mod tests {
                 .into(),
         ];
         let type_description = vec![DataType::Float32, DataType::Float64, DataType::Decimal];
-        let params =
-            PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, &[]).unwrap();
         assert_eq!(
             params,
             vec!["'1.0'::FLOAT4", "'2.0'::FLOAT8", "'3'::DECIMAL"]
@@ -821,8 +796,7 @@ mod tests {
                 .into(),
         ];
         let type_description = vec![DataType::Date, DataType::Time, DataType::Timestamp];
-        let params =
-            PreparedStatement::parse_params(&type_description, &raw_params, false).unwrap();
+        let params = PreparedStatement::parse_params(&type_description, &raw_params, &[]).unwrap();
         assert_eq!(
             params,
             vec![
@@ -840,7 +814,9 @@ mod tests {
         // Test VACHAR type.
         let raw_params = vec!["A".into(), "B".into(), "C".into()];
         let type_description = vec![DataType::Varchar; 3];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
 
         // Test BOOLEAN type.
@@ -852,7 +828,9 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         let type_description = vec![DataType::Boolean; 2];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(params, vec!["false", "true"]);
 
         // Test SMALLINT, INT, BIGINT type.
@@ -865,7 +843,9 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         let type_description = vec![DataType::Int16, DataType::Int32, DataType::Int64];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(params, vec!["1", "2", "3"]);
 
         // Test FLOAT4, FLOAT8, DECIMAL type.
@@ -881,7 +861,9 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         let type_description = vec![DataType::Float32, DataType::Float64, DataType::Decimal];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(params, vec!["'1'::FLOAT4", "'2'::FLOAT8", "'3'::DECIMAL"]);
 
         let mut raw_params = vec![BytesMut::new(); 3];
@@ -897,7 +879,9 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         let type_description = vec![DataType::Float32, DataType::Float64, DataType::Float64];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(
             params,
             vec!["'NaN'::FLOAT4", "'inf'::FLOAT8", "'-inf'::FLOAT8"]
@@ -922,7 +906,9 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         let type_description = vec![DataType::Date, DataType::Time, DataType::Timestamp];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(
             params,
             vec![
@@ -944,7 +930,9 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         let type_description = vec![DataType::Timestamptz, DataType::Interval];
-        let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
+                .unwrap();
         assert_eq!(
             params,
             vec![
@@ -952,5 +940,68 @@ mod tests {
                 "'1 mons 1 days 00:00:24'::INTERVAL"
             ]
         );
+    }
+
+    #[test]
+    fn test_parse_params_mix_format() {
+        let place_hodler = Type::ANY;
+
+        // Test VACHAR type.
+        let raw_params = vec!["A".into(), "B".into(), "C".into()];
+        let type_description = vec![DataType::Varchar; 3];
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Text; 3])
+                .unwrap();
+        assert_eq!(params, vec!["'A'", "'B'", "'C'"]);
+
+        // Test BOOLEAN type.
+        let mut raw_params = vec![BytesMut::new(); 2];
+        false.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        true.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let type_description = vec![DataType::Boolean; 2];
+        let params =
+            PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary; 2])
+                .unwrap();
+        assert_eq!(params, vec!["false", "true"]);
+
+        // Test SMALLINT, INT, BIGINT type.
+        let mut raw_params = vec![BytesMut::new(); 2];
+        1_i16.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        2_i32.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
+        let mut raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        raw_params.push("3".into());
+        let type_description = vec![DataType::Int16, DataType::Int32, DataType::Int64];
+        let params = PreparedStatement::parse_params(
+            &type_description,
+            &raw_params,
+            &[Format::Binary, Format::Binary, Format::Text],
+        )
+        .unwrap();
+        assert_eq!(params, vec!["1", "2", "3"]);
+
+        // Test FLOAT4, FLOAT8, DECIMAL type.
+        let mut raw_params = vec![BytesMut::new(); 2];
+        1.0_f32.to_sql(&place_hodler, &mut raw_params[0]).unwrap();
+        2.0_f64.to_sql(&place_hodler, &mut raw_params[1]).unwrap();
+        let mut raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        raw_params.push("TEST".into());
+        let type_description = vec![DataType::Float32, DataType::Float64, DataType::VARCHAR];
+        let params = PreparedStatement::parse_params(
+            &type_description,
+            &raw_params,
+            &[Format::Binary, Format::Binary, Format::Text],
+        )
+        .unwrap();
+        assert_eq!(params, vec!["'1'::FLOAT4", "'2'::FLOAT8", "'TEST'"]);
     }
 }

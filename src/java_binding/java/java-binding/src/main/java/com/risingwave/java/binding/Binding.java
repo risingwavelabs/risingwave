@@ -7,7 +7,7 @@ public class Binding {
 
     // iterator method
     // Return a pointer to the iterator
-    static native long iteratorNew();
+    static native long iteratorNew(byte[] readPlan);
 
     // return a pointer to the next row
     static native long iteratorNext(long pointer);

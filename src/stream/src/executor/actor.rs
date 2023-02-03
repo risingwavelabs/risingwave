@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::future::join_all;
 use futures::pin_mut;
+use hytra::TrAdder;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::util::epoch::EpochPair;
@@ -36,6 +38,10 @@ pub struct ActorContext {
 
     // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
+
+    last_mem_val: Arc<AtomicUsize>,
+    cur_mem_val: Arc<AtomicUsize>,
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -45,6 +51,19 @@ impl ActorContext {
         Arc::new(Self {
             id,
             errors: Default::default(),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
+            total_mem_val: Arc::new(TrAdder::new()),
+        })
+    }
+
+    pub fn create_with_counter(id: ActorId, total_mem_val: Arc<TrAdder<i64>>) -> ActorContextRef {
+        Arc::new(Self {
+            id,
+            errors: Default::default(),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
+            total_mem_val,
         })
     }
 
@@ -55,6 +74,23 @@ impl ActorContext {
             .entry(identity.to_owned())
             .or_default()
             .push(err);
+    }
+
+    pub fn store_mem_usage(&self, val: usize) {
+        // Record the last mem val.
+        // Calculate the difference between old val and new value, and apply the diff to total
+        // memory usage value.
+        let old_value = self.cur_mem_val.load(Ordering::Relaxed);
+        self.last_mem_val.store(old_value, Ordering::Relaxed);
+        let diff = val as i64 - old_value as i64;
+
+        self.total_mem_val.inc(diff);
+
+        self.cur_mem_val.store(val, Ordering::Relaxed);
+    }
+
+    pub fn mem_usage(&self) -> usize {
+        self.cur_mem_val.load(Ordering::Relaxed)
     }
 }
 

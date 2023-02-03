@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use std::fmt;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    gen_filter_and_pushdown, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchLimit, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -98,6 +98,8 @@ impl ColPrunable for LogicalLimit {
         self.clone_with_input(new_input).into()
     }
 }
+
+impl ExprRewritable for LogicalLimit {}
 
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(

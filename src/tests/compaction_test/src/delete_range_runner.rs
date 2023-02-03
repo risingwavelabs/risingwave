@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig};
+use risingwave_common::config::{load_config, StorageConfig, NO_OVERRIDE};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -40,7 +40,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroup, TableOption};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::backup_reader::BackupReader;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::{
@@ -83,7 +83,7 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
     })
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, NO_OVERRIDE);
     let mut storage_config = config.storage;
     storage_config.enable_state_store_v1 = false;
     let compaction_config = CompactionConfigBuilder::new().build();
@@ -583,8 +583,8 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let context = Arc::new(Context {
-        options: config,
+    let compactor_context = Arc::new(CompactorContext {
+        storage_config: config,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
         compactor_metrics,
@@ -594,14 +594,10 @@ fn run_compactor_thread(
         read_memory_limiter: MemoryLimiter::unlimit(),
         sstable_id_manager,
         task_progress_manager: Default::default(),
-    });
-    let context = CompactorContext::with_config(
-        context,
-        CompactorRuntimeConfig {
+        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number: 4,
-        },
-    );
-    let compactor_context = Arc::new(context);
+        })),
+    });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,
         meta_client,

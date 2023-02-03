@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ParallelUnitId, VirtualNode};
+use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -31,8 +31,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ActorMapping, DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor,
-    StreamNode,
+    DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor, StreamNode,
 };
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -43,7 +42,6 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::mapping::actor_mapping_from_bitmaps;
 use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
 
@@ -436,6 +434,10 @@ where
             // treatment because the upstream and downstream of NoShuffle are always 1-1
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
+            //
+            // Delta join will introduce a `NoShuffle` edge between index chain node and lookup node
+            // (index_mv --NoShuffle--> index_chain --NoShuffle--> lookup) which will break current
+            // `NoShuffle` scaling assumption. Currently we detect this case and forbid it to scale.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
@@ -451,6 +453,20 @@ where
 
                     if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
+                        // If `NoShuffle` used by other fragment type rather than `ChainNode`, bail.
+                        for downstream_fragment_id in downstream_fragments.keys() {
+                            let downstream_fragment = fragment_map
+                                .get(downstream_fragment_id)
+                                .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
+                            if (downstream_fragment.get_fragment_type_mask()
+                                & (FragmentTypeFlag::ChainNode as u32
+                                    | FragmentTypeFlag::Mview as u32))
+                                == 0
+                            {
+                                bail!("Rescheduling NoShuffle edge only supports ChainNode and Mview. Other usage for e.g. delta join is forbidden currently.");
+                            }
+                        }
+
                         queue.extend(downstream_fragments.keys().cloned());
                     }
 
@@ -993,19 +1009,15 @@ where
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
                     } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                        Some(ActorMapping {
-                            original_indices: vec![VirtualNode::COUNT as u64 - 1],
-                            data: vec![
-                                *parallel_unit_to_actor_after_reschedule
-                                    .first_key_value()
-                                    .unwrap()
-                                    .1,
-                            ],
-                        })
+                        let actor_id = parallel_unit_to_actor_after_reschedule
+                            .into_values()
+                            .next()
+                            .unwrap();
+                        Some(ActorMapping::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution
-                        Some(actor_mapping_from_bitmaps(
-                            fragment_actor_bitmap.get(&fragment_id).unwrap(),
+                        Some(ActorMapping::from_bitmaps(
+                            &fragment_actor_bitmap[&fragment_id],
                         ))
                     }
                 }
@@ -1440,7 +1452,7 @@ where
                     fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
                     // If downstream scale in/out
-                    *mapping = actor_mapping_from_bitmaps(downstream_updated_bitmap)
+                    *mapping = ActorMapping::from_bitmaps(downstream_updated_bitmap).to_protobuf();
                 }
             }
         }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -104,14 +104,6 @@ pub fn handle_explain(
                 distributed_by,
             )?
             .0
-        }
-
-        Statement::CreateSource { .. } => {
-            return Err(ErrorCode::NotImplemented(
-                "explain create source".to_string(),
-                4776.into(),
-            )
-            .into());
         }
 
         stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,

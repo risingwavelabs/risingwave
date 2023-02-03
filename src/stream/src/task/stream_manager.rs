@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use anyhow::{anyhow, Context};
 use async_recursion::async_recursion;
 use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
 use futures::FutureExt;
+use hytra::TrAdder;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
@@ -86,6 +87,8 @@ pub struct LocalStreamManagerCore {
 
     /// Watermark epoch number.
     watermark_epoch: AtomicU64Ref,
+
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -96,6 +99,8 @@ pub struct LocalStreamManager {
     state_store: StateStoreImpl,
     context: Arc<SharedContext>,
     streaming_metrics: Arc<StreamingMetrics>,
+
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 pub struct ExecutorParams {
@@ -152,6 +157,7 @@ impl LocalStreamManager {
             state_store: core.state_store.clone(),
             context: core.context.clone(),
             streaming_metrics: core.streaming_metrics.clone(),
+            total_mem_val: core.total_mem_val.clone(),
             core: Mutex::new(core),
         }
     }
@@ -362,6 +368,10 @@ impl LocalStreamManager {
         let mut guard = self.core.lock().await;
         guard.watermark_epoch = watermark_epoch;
     }
+
+    pub fn get_total_mem_val(&self) -> Arc<TrAdder<i64>> {
+        self.total_mem_val.clone()
+    }
 }
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
@@ -421,6 +431,7 @@ impl LocalStreamManagerCore {
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            total_mem_val: Arc::new(TrAdder::new()),
         }
     }
 
@@ -603,7 +614,8 @@ impl LocalStreamManagerCore {
                 StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
             })?;
             let mview_definition = &actor.mview_definition;
-            let actor_context = ActorContext::create(actor_id);
+            let actor_context =
+                ActorContext::create_with_counter(actor_id, self.total_mem_val.clone());
             let vnode_bitmap = actor
                 .vnode_bitmap
                 .as_ref()
@@ -627,7 +639,7 @@ impl LocalStreamManagerCore {
                 subtasks,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
-                actor_context,
+                actor_context.clone(),
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -659,7 +671,9 @@ impl LocalStreamManagerCore {
                         metrics
                             .actor_memory_usage
                             .with_label_values(&[&actor_id_str])
-                            .set(bytes as i64)
+                            .set(bytes as i64);
+
+                        actor_context.store_mem_usage(bytes);
                     },
                 );
                 self.runtime.spawn(allocation_stated)

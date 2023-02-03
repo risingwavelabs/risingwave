@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,9 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, BatchProject, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
+    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -780,6 +781,22 @@ impl ColPrunable for LogicalJoin {
             on,
             new_output_indices,
         )
+        .into()
+    }
+}
+
+impl ExprRewritable for LogicalJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
         .into()
     }
 }

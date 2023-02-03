@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
+use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
     CompactorMemoryCollector, MemoryLimiter, SstableIdManager, SstableStore,
@@ -45,23 +45,27 @@ use crate::CompactorOpts;
 /// Fetches and runs compaction tasks.
 pub async fn compactor_serve(
     listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, Some(opts.override_config));
     tracing::info!(
-        "Starting compactor with config {:?} and opts {:?}",
+        "Starting compactor node with config {:?} with debug assertions {}",
         config,
-        opts
+        if cfg!(debug_assertions) { "on" } else { "off" }
     );
 
     // Register to the cluster.
-    let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
-            .await
-            .unwrap();
+    let meta_client = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::Compactor,
+        &advertise_addr,
+        0,
+    )
+    .await
+    .unwrap();
     tracing::info!("Assigned compactor id {}", meta_client.worker_id());
-    meta_client.activate(&client_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
     let registry = prometheus::Registry::new();
@@ -80,7 +84,8 @@ pub async fn compactor_serve(
     let storage_config = Arc::new(config.storage);
     let object_store = Arc::new(
         parse_remote_object_store(
-            opts.state_store
+            storage_config
+                .state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
@@ -105,6 +110,7 @@ pub async fn compactor_serve(
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
     let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
+    let max_concurrent_task_number = storage_config.max_concurrent_compaction_task_number;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
         sstable_store.clone(),
@@ -115,8 +121,8 @@ pub async fn compactor_serve(
         hummock_meta_client.clone(),
         storage_config.sstable_id_remote_fetch_number,
     ));
-    let context = Arc::new(Context {
-        options: storage_config,
+    let compactor_context = Arc::new(CompactorContext {
+        storage_config,
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
         compactor_metrics,
@@ -128,13 +134,10 @@ pub async fn compactor_serve(
         read_memory_limiter: memory_limiter,
         sstable_id_manager: sstable_id_manager.clone(),
         task_progress_manager: Default::default(),
+        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
+            max_concurrent_task_number,
+        })),
     });
-    let compactor_context = Arc::new(CompactorContext::with_config(
-        context,
-        CompactorRuntimeConfig {
-            max_concurrent_task_number: opts.max_concurrent_task_number,
-        },
-    ));
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
@@ -176,7 +179,7 @@ pub async fn compactor_serve(
     });
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.server.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
             registry.clone(),

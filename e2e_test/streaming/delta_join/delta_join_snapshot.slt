@@ -1,0 +1,55 @@
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+set rw_streaming_enable_delta_join = true;
+
+statement ok
+set streaming_parallelism = 2;
+
+statement ok
+create table a (a1 int, a2 int);
+
+statement ok
+create index i_a1 on a(a1);
+
+statement ok
+set streaming_parallelism = 3;
+
+statement ok
+create table b (b1 int, b2 int);
+
+statement ok
+create index i_b1 on b(b1);
+
+statement ok
+insert into A values (1,2), (1,3);
+
+statement ok
+insert into B values (1,4), (1,5);
+
+statement ok
+set streaming_parallelism = 0;
+
+statement ok
+create materialized view v as select * from a join b on a.a1 = b.b1;
+
+query IIII rowsort
+select * from v order by a1, a2, b1, b2;
+----
+1  2  1  4
+1  2  1  5
+1  3  1  4
+1  3  1  5
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table a;
+
+statement ok
+drop table b;
+
+statement ok
+set rw_streaming_enable_delta_join = false;

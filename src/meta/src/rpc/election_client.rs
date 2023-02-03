@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use etcd_client::{Client, ConnectOptions, Error, GetOptions};
-use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -28,17 +28,7 @@ const META_ELECTION_KEY: &str = "__meta_election_";
 
 pub struct ElectionMember {
     pub id: String,
-    pub lease: i64,
-}
-
-impl From<ElectionMember> for MetaLeaderInfo {
-    fn from(val: ElectionMember) -> Self {
-        let ElectionMember { id, lease } = val;
-        MetaLeaderInfo {
-            node_address: id,
-            lease_id: lease as u64,
-        }
-    }
+    pub is_leader: bool,
 }
 
 #[async_trait::async_trait]
@@ -76,7 +66,7 @@ impl ElectionClient for EtcdElectionClient {
         Ok(leader.and_then(|leader| {
             leader.kv().map(|leader_kv| ElectionMember {
                 id: String::from_utf8_lossy(leader_kv.value()).to_string(),
-                lease: leader_kv.lease(),
+                is_leader: true,
             })
         }))
     }
@@ -85,8 +75,6 @@ impl ElectionClient for EtcdElectionClient {
         let mut lease_client = self.client.lease_client();
         let mut election_client = self.client.election_client();
         let mut stop = stop;
-
-        self.is_leader_sender.send_replace(false);
 
         tracing::info!("client {} start election", self.id);
 
@@ -200,6 +188,7 @@ impl ElectionClient for EtcdElectionClient {
         let _guard = scopeguard::guard(handle, |handle| handle.abort());
 
         if !restored_leader {
+            self.is_leader_sender.send_replace(false);
             tracing::info!("no restored leader, campaigning");
             tokio::select! {
                 biased;
@@ -216,9 +205,9 @@ impl ElectionClient for EtcdElectionClient {
             };
         }
 
-        let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
-
         self.is_leader_sender.send_replace(true);
+
+        let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
 
         loop {
             tokio::select! {
@@ -262,15 +251,30 @@ impl ElectionClient for EtcdElectionClient {
             .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
             .await?;
 
-        // todo, sort by revision
-        Ok(keys
+        let member_ids: HashSet<_> = keys
             .kvs()
             .iter()
-            .map(|kv| ElectionMember {
-                id: String::from_utf8_lossy(kv.value()).to_string(),
-                lease: kv.lease(),
-            })
-            .collect())
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string())
+            .collect();
+
+        let members = match self.leader().await? {
+            Some(leader) => member_ids
+                .into_iter()
+                .map(|id| {
+                    let is_leader = id == leader.id;
+                    ElectionMember { id, is_leader }
+                })
+                .collect(),
+            None => member_ids
+                .into_iter()
+                .map(|id| ElectionMember {
+                    id,
+                    is_leader: false,
+                })
+                .collect(),
+        };
+
+        Ok(members)
     }
 
     fn id(&self) -> MetaResult<String> {
@@ -305,11 +309,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use etcd_client::GetOptions;
     use itertools::Itertools;
     use tokio::sync::watch;
     use tokio::time;
 
-    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
+    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient, META_ELECTION_KEY};
 
     #[tokio::test]
     async fn test_election() {
@@ -396,11 +401,25 @@ mod tests {
 
         assert_eq!(election_leader.id, leader.1.id().unwrap());
 
-        let lease_id = election_leader.lease;
-
         let client = etcd_client::Client::connect(&vec!["localhost:2388"], None)
             .await
             .unwrap();
+
+        let kvs = client
+            .kv_client()
+            .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
+            .await
+            .unwrap();
+
+        let leader_kv = kvs
+            .kvs()
+            .iter()
+            .find(|kv| kv.value() == election_leader.id.as_bytes())
+            .cloned()
+            .unwrap();
+
+        let lease_id = leader_kv.lease();
+
         client.lease_client().revoke(lease_id).await.unwrap();
 
         time::sleep(Duration::from_secs(10)).await;

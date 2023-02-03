@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,53 +13,67 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
+use futures_async_stream::try_stream;
 use itertools::zip_eq;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 
 use super::generator::DatagenEventGenerator;
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
+use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    spawn_data_generation_stream, BoxSourceStream, Column, ConnectorState, DataType, SplitId,
-    SplitImpl, SplitMetaData, SplitReader,
+    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceInfo, SplitId, SplitImpl,
+    SplitMetaData, SplitReaderV2,
 };
+
+impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
 
 pub struct DatagenSplitReader {
     generator: DatagenEventGenerator,
     assigned_split: DatagenSplit,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
 #[async_trait]
-impl SplitReader for DatagenSplitReader {
+impl SplitReaderV2 for DatagenSplitReader {
     type Properties = DatagenProperties;
 
+    #[allow(clippy::unused_async)]
     async fn new(
         properties: DatagenProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut assigned_split = DatagenSplit::default();
-        let mut split_id: SplitId = "".into();
         let mut events_so_far = u64::default();
-        if let Some(splits) = state {
-            tracing::debug!("Splits for datagen found! {:?}", splits);
-            for split in splits {
-                // TODO: currently, assume there's only on split in one reader
-                split_id = split.id();
-                if let SplitImpl::Datagen(n) = split {
-                    if let Some(s) = n.start_offset {
-                        // start_offset in `SplitImpl` indicates the latest successfully generated
-                        // index, so here we use start_offset+1
-                        events_so_far = s + 1;
-                    };
-                    assigned_split = n;
-                    break;
-                }
-            }
+        tracing::debug!("Splits for datagen found! {:?}", splits);
+
+        assert!(splits.len() == 1);
+        let split = splits.into_iter().next().unwrap();
+        // TODO: currently, assume there's only on split in one reader
+        let split_id = split.id();
+        if let SplitImpl::Datagen(n) = split {
+            if let Some(s) = n.start_offset {
+                // start_offset in `SplitImpl` indicates the latest successfully generated
+                // index, so here we use start_offset+1
+                events_so_far = s + 1;
+            };
+            assigned_split = n;
         }
 
         let split_index = assigned_split.split_index as u64;
@@ -107,7 +121,7 @@ impl SplitReader for DatagenSplitReader {
             fields_map,
             rows_per_second,
             events_so_far,
-            split_id,
+            split_id.clone(),
             split_num,
             split_index,
         )?;
@@ -115,10 +129,20 @@ impl SplitReader for DatagenSplitReader {
         Ok(DatagenSplitReader {
             generator,
             assigned_split,
+            split_id,
+            parser_config,
+            metrics,
+            source_info,
         })
     }
 
-    fn into_stream(self) -> BoxSourceStream {
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
+    }
+}
+
+impl DatagenSplitReader {
+    pub(crate) fn into_data_stream(self) -> BoxSourceStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(self.generator.into_stream(), BUFFER_SIZE).boxed()
@@ -261,11 +285,11 @@ mod tests {
                 })),
             },
         ];
-        let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
+        let state = vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: None,
-        })]);
+        })];
         let properties = DatagenProperties {
             split_num: None,
             rows_per_second: 10,
@@ -288,9 +312,16 @@ mod tests {
             )),
         };
 
-        let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum))
-            .await?
-            .into_stream();
+        let mut reader = DatagenSplitReader::new(
+            properties,
+            state,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Some(mock_datum),
+        )
+        .await?
+        .into_data_stream();
 
         let msg = reader.next().await.unwrap().unwrap();
         assert_eq!(
@@ -313,29 +344,44 @@ mod tests {
                 data_type: DataType::Int32,
             },
         ];
-        let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
+        let state = vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: None,
-        })]);
+        })];
         let properties = DatagenProperties {
             split_num: None,
             rows_per_second: 10,
             fields: HashMap::new(),
         };
-        let stream = DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
-            .await?
-            .into_stream();
+        let stream = DatagenSplitReader::new(
+            properties.clone(),
+            state,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Some(mock_datum.clone()),
+        )
+        .await?
+        .into_data_stream();
+
         let v1 = stream.skip(1).next().await.unwrap()?;
 
-        let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
+        let state = vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
             split_num: 1,
             start_offset: Some(9),
-        })]);
-        let mut stream = DatagenSplitReader::new(properties, state, Some(mock_datum))
-            .await?
-            .into_stream();
+        })];
+        let mut stream = DatagenSplitReader::new(
+            properties,
+            state,
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Some(mock_datum),
+        )
+        .await?
+        .into_data_stream();
         let v2 = stream.next().await.unwrap()?;
 
         assert_eq!(v1, v2);

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
 
@@ -84,3 +86,5 @@ impl ToLocalBatch for BatchSort {
         Ok(self.clone_with_input(new_input).into())
     }
 }
+
+impl ExprRewritable for BatchSort {}

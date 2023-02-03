@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
@@ -49,6 +50,7 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::ViewId;
 use crate::session::{AuthContext, SessionImpl};
 
 pub type ShareId = usize;
@@ -84,6 +86,9 @@ pub struct Binder {
     search_path: SearchPath,
     /// Whether the Binder is binding an MV.
     in_create_mv: bool,
+
+    /// `ShareId`s identifying shared views.
+    shared_views: HashMap<ViewId, ShareId>,
 }
 
 impl Binder {
@@ -107,6 +112,7 @@ impl Binder {
             next_share_id: 0,
             search_path: session.config().get_search_path(),
             in_create_mv,
+            shared_views: HashMap::new(),
         }
     }
 

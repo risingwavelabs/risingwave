@@ -279,6 +279,12 @@ export interface TableFragments_ActorSplitsEntry {
   value: ConnectorSplits | undefined;
 }
 
+/** / Parallel unit mapping with fragment id, used for notification. */
+export interface FragmentParallelUnitMapping {
+  fragmentId: number;
+  mapping: ParallelUnitMapping | undefined;
+}
+
 /** TODO: remove this when dashboard refactored. */
 export interface ActorLocation {
   node: WorkerNode | undefined;
@@ -378,7 +384,7 @@ export interface MetaSnapshot {
   views: View[];
   functions: Function[];
   users: UserInfo[];
-  parallelUnitMappings: ParallelUnitMapping[];
+  parallelUnitMappings: FragmentParallelUnitMapping[];
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
@@ -406,7 +412,7 @@ export interface SubscribeResponse {
     | { $case: "view"; view: View }
     | { $case: "function"; function: Function }
     | { $case: "user"; user: UserInfo }
-    | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
     | { $case: "node"; node: WorkerNode }
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
@@ -467,17 +473,6 @@ export function subscribeResponse_OperationToJSON(object: SubscribeResponse_Oper
   }
 }
 
-export interface MetaLeaderInfo {
-  nodeAddress: string;
-  leaseId: number;
-}
-
-export interface MetaLeaseInfo {
-  leader: MetaLeaderInfo | undefined;
-  leaseRegisterTime: number;
-  leaseExpireTime: number;
-}
-
 export interface PauseRequest {
 }
 
@@ -527,6 +522,18 @@ export interface RescheduleRequest_ReschedulesEntry {
 
 export interface RescheduleResponse {
   success: boolean;
+}
+
+export interface MembersRequest {
+}
+
+export interface MetaMember {
+  address: HostAddress | undefined;
+  isLeader: boolean;
+}
+
+export interface MembersResponse {
+  members: MetaMember[];
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -913,6 +920,36 @@ export const TableFragments_ActorSplitsEntry = {
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
       ? ConnectorSplits.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFragmentParallelUnitMapping(): FragmentParallelUnitMapping {
+  return { fragmentId: 0, mapping: undefined };
+}
+
+export const FragmentParallelUnitMapping = {
+  fromJSON(object: any): FragmentParallelUnitMapping {
+    return {
+      fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
+      mapping: isSet(object.mapping) ? ParallelUnitMapping.fromJSON(object.mapping) : undefined,
+    };
+  },
+
+  toJSON(message: FragmentParallelUnitMapping): unknown {
+    const obj: any = {};
+    message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
+    message.mapping !== undefined &&
+      (obj.mapping = message.mapping ? ParallelUnitMapping.toJSON(message.mapping) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<FragmentParallelUnitMapping>, I>>(object: I): FragmentParallelUnitMapping {
+    const message = createBaseFragmentParallelUnitMapping();
+    message.fragmentId = object.fragmentId ?? 0;
+    message.mapping = (object.mapping !== undefined && object.mapping !== null)
+      ? ParallelUnitMapping.fromPartial(object.mapping)
       : undefined;
     return message;
   },
@@ -1504,7 +1541,7 @@ export const MetaSnapshot = {
       functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => Function.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
-        ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
+        ? object.parallelUnitMappings.map((e: any) => FragmentParallelUnitMapping.fromJSON(e))
         : [],
       nodes: Array.isArray(object?.nodes)
         ? object.nodes.map((e: any) => WorkerNode.fromJSON(e))
@@ -1566,7 +1603,9 @@ export const MetaSnapshot = {
       obj.users = [];
     }
     if (message.parallelUnitMappings) {
-      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
+      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) =>
+        e ? FragmentParallelUnitMapping.toJSON(e) : undefined
+      );
     } else {
       obj.parallelUnitMappings = [];
     }
@@ -1598,7 +1637,8 @@ export const MetaSnapshot = {
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
     message.functions = object.functions?.map((e) => Function.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
-    message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
+    message.parallelUnitMappings =
+      object.parallelUnitMappings?.map((e) => FragmentParallelUnitMapping.fromPartial(e)) || [];
     message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
@@ -1682,7 +1722,7 @@ export const SubscribeResponse = {
         : isSet(object.parallelUnitMapping)
         ? {
           $case: "parallelUnitMapping",
-          parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+          parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
         }
         : isSet(object.node)
         ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
@@ -1725,7 +1765,7 @@ export const SubscribeResponse = {
       (obj.function = message.info?.function ? Function.toJSON(message.info?.function) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
-      ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
+      ? FragmentParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
       : undefined);
     message.info?.$case === "node" &&
       (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
@@ -1784,7 +1824,7 @@ export const SubscribeResponse = {
     ) {
       message.info = {
         $case: "parallelUnitMapping",
-        parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+        parallelUnitMapping: FragmentParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
       };
     }
     if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
@@ -1823,65 +1863,6 @@ export const SubscribeResponse = {
         metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
       };
     }
-    return message;
-  },
-};
-
-function createBaseMetaLeaderInfo(): MetaLeaderInfo {
-  return { nodeAddress: "", leaseId: 0 };
-}
-
-export const MetaLeaderInfo = {
-  fromJSON(object: any): MetaLeaderInfo {
-    return {
-      nodeAddress: isSet(object.nodeAddress) ? String(object.nodeAddress) : "",
-      leaseId: isSet(object.leaseId) ? Number(object.leaseId) : 0,
-    };
-  },
-
-  toJSON(message: MetaLeaderInfo): unknown {
-    const obj: any = {};
-    message.nodeAddress !== undefined && (obj.nodeAddress = message.nodeAddress);
-    message.leaseId !== undefined && (obj.leaseId = Math.round(message.leaseId));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<MetaLeaderInfo>, I>>(object: I): MetaLeaderInfo {
-    const message = createBaseMetaLeaderInfo();
-    message.nodeAddress = object.nodeAddress ?? "";
-    message.leaseId = object.leaseId ?? 0;
-    return message;
-  },
-};
-
-function createBaseMetaLeaseInfo(): MetaLeaseInfo {
-  return { leader: undefined, leaseRegisterTime: 0, leaseExpireTime: 0 };
-}
-
-export const MetaLeaseInfo = {
-  fromJSON(object: any): MetaLeaseInfo {
-    return {
-      leader: isSet(object.leader) ? MetaLeaderInfo.fromJSON(object.leader) : undefined,
-      leaseRegisterTime: isSet(object.leaseRegisterTime) ? Number(object.leaseRegisterTime) : 0,
-      leaseExpireTime: isSet(object.leaseExpireTime) ? Number(object.leaseExpireTime) : 0,
-    };
-  },
-
-  toJSON(message: MetaLeaseInfo): unknown {
-    const obj: any = {};
-    message.leader !== undefined && (obj.leader = message.leader ? MetaLeaderInfo.toJSON(message.leader) : undefined);
-    message.leaseRegisterTime !== undefined && (obj.leaseRegisterTime = Math.round(message.leaseRegisterTime));
-    message.leaseExpireTime !== undefined && (obj.leaseExpireTime = Math.round(message.leaseExpireTime));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<MetaLeaseInfo>, I>>(object: I): MetaLeaseInfo {
-    const message = createBaseMetaLeaseInfo();
-    message.leader = (object.leader !== undefined && object.leader !== null)
-      ? MetaLeaderInfo.fromPartial(object.leader)
-      : undefined;
-    message.leaseRegisterTime = object.leaseRegisterTime ?? 0;
-    message.leaseExpireTime = object.leaseExpireTime ?? 0;
     return message;
   },
 };
@@ -2260,6 +2241,81 @@ export const RescheduleResponse = {
   fromPartial<I extends Exact<DeepPartial<RescheduleResponse>, I>>(object: I): RescheduleResponse {
     const message = createBaseRescheduleResponse();
     message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseMembersRequest(): MembersRequest {
+  return {};
+}
+
+export const MembersRequest = {
+  fromJSON(_: any): MembersRequest {
+    return {};
+  },
+
+  toJSON(_: MembersRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MembersRequest>, I>>(_: I): MembersRequest {
+    const message = createBaseMembersRequest();
+    return message;
+  },
+};
+
+function createBaseMetaMember(): MetaMember {
+  return { address: undefined, isLeader: false };
+}
+
+export const MetaMember = {
+  fromJSON(object: any): MetaMember {
+    return {
+      address: isSet(object.address) ? HostAddress.fromJSON(object.address) : undefined,
+      isLeader: isSet(object.isLeader) ? Boolean(object.isLeader) : false,
+    };
+  },
+
+  toJSON(message: MetaMember): unknown {
+    const obj: any = {};
+    message.address !== undefined && (obj.address = message.address ? HostAddress.toJSON(message.address) : undefined);
+    message.isLeader !== undefined && (obj.isLeader = message.isLeader);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaMember>, I>>(object: I): MetaMember {
+    const message = createBaseMetaMember();
+    message.address = (object.address !== undefined && object.address !== null)
+      ? HostAddress.fromPartial(object.address)
+      : undefined;
+    message.isLeader = object.isLeader ?? false;
+    return message;
+  },
+};
+
+function createBaseMembersResponse(): MembersResponse {
+  return { members: [] };
+}
+
+export const MembersResponse = {
+  fromJSON(object: any): MembersResponse {
+    return { members: Array.isArray(object?.members) ? object.members.map((e: any) => MetaMember.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: MembersResponse): unknown {
+    const obj: any = {};
+    if (message.members) {
+      obj.members = message.members.map((e) => e ? MetaMember.toJSON(e) : undefined);
+    } else {
+      obj.members = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
+    const message = createBaseMembersResponse();
+    message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
     return message;
   },
 };

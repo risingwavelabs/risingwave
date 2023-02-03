@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ use risingwave_connector::source::DataType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
-    generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
@@ -160,6 +160,8 @@ impl ColPrunable for LogicalSource {
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
+
+impl ExprRewritable for LogicalSource {}
 
 /// A util function to extract kafka offset timestamp range.
 ///
