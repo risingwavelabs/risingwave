@@ -25,6 +25,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -71,11 +72,13 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
+    info!("Starting compute node",);
+    info!("> config: {:?}", config);
     info!(
-        "Starting compute node with config {:?} with debug assertions {}",
-        config,
+        "> debug assertions: {}",
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
     // Initialize all the configs
     let storage_config = Arc::new(config.storage.clone());
     let stream_config = Arc::new(config.streaming.clone());

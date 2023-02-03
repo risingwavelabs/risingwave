@@ -50,6 +50,7 @@ use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_proc_macro::OverrideConfig;
 
 use crate::manager::MetaOpts;
@@ -129,15 +130,18 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 
 use risingwave_common::config::{load_config, MetaBackend};
+use tracing::info;
 
 /// Start meta node
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        tracing::info!("Starting meta node with options {:?}", opts);
+        info!("Starting meta node");
+        info!("> options: {:?}", opts);
         let config = load_config(&opts.config_path, Some(opts.override_opts));
-        tracing::info!("Starting meta node with config {:?}", config);
+        info!("> config: {:?}", config);
+        info!("> version: {} ({})", RW_VERSION, GIT_SHA);
         let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
         let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
@@ -167,7 +171,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
         let checkpoint_frequency = config.streaming.checkpoint_frequency;
 
-        tracing::info!("Meta server listening at {}", listen_addr);
+        info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
             advertise_addr,
             listen_addr,
