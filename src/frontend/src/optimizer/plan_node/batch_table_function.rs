@@ -88,15 +88,13 @@ impl ExprRewritable for BatchTableFunction {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self {
-            base: self.base.clone_with_new_plan_id(),
-            logical: self
-                .logical
+        Self::new(
+            self.logical
                 .rewrite_exprs(r)
                 .as_logical_table_function()
                 .unwrap()
                 .clone(),
-        }
+        )
         .into()
     }
 }

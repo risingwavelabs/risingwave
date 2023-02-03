@@ -270,16 +270,14 @@ impl ExprRewritable for BatchSeqScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self {
-            base: self.base.clone_with_new_plan_id(),
-            logical: self
-                .logical
+        Self::new(
+            self.logical
                 .rewrite_exprs(r)
                 .as_logical_scan()
                 .unwrap()
                 .clone(),
-            ..Self::clone(self)
-        }
+            self.scan_ranges.clone(),
+        )
         .into()
     }
 }

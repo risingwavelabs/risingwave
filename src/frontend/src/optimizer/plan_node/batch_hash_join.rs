@@ -269,16 +269,14 @@ impl ExprRewritable for BatchHashJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self {
-            base: self.base.clone_with_new_plan_id(),
-            logical: self
-                .logical
+        Self::new(
+            self.logical
                 .rewrite_exprs(r)
                 .as_logical_join()
                 .unwrap()
                 .clone(),
-            eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
-        }
+            self.eq_join_predicate.rewrite_exprs(r),
+        )
         .into()
     }
 }
