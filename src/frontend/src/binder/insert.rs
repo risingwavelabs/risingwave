@@ -89,7 +89,7 @@ impl Binder {
             .map(|c| c.data_type().clone())
             .collect();
 
-        // Adding Null values in case user did not specify all columns
+        // Adding Null values in case user did not specify all columns. E.g.
         // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
         let (source, nulls_inserted) = match source {
             Query {
@@ -100,20 +100,22 @@ impl Binder {
                 offset,
                 fetch,
             } => {
-                let val00 = values.0.get(0);
-                let (new_body, nulls_inserted) =
-                    if val00.is_some() && val00.unwrap().len() < expected_types.len() {
-                        tracing::info!("values: {:?}", values); // TODO: remove line
-                        let mut new_values = values.clone();
-                        let nulls_to_insert = expected_types.len() - new_values.0[0].len();
-                        for _ in 0..nulls_to_insert {
-                            new_values.0[0].push(Expr::Value(Value::Null));
-                        }
-                        tracing::info!("values push: {:?}", new_values); // TODO: remove line
-                        (SetExpr::Values(new_values), nulls_to_insert)
-                    } else {
-                        (SetExpr::Values(values), 0)
-                    };
+                tracing::info!("values before inserting nulls: {:?}", values);
+                // We only need to insert nulls if user did not define all columns
+                let (new_body, nulls_inserted) = if !values.0.is_empty()
+                    && !values.0.iter().all(|v| v.len() == expected_types.len())
+                {
+                    // all value lists should have same len
+                    // Illegal statement: insert into t values (1, 2), (3, 4, 5);
+                    let mut new_values = values.clone();
+                    let nulls_to_insert = expected_types.len() - new_values.0[0].len();
+                    for new_value in new_values.0.iter_mut() {
+                        new_value.push(Expr::Value(Value::Null));
+                    }
+                    (SetExpr::Values(new_values), nulls_to_insert)
+                } else {
+                    (SetExpr::Values(values), 0)
+                };
                 (
                     Query {
                         with,
@@ -126,7 +128,7 @@ impl Binder {
                     nulls_inserted,
                 )
             }
-            _ => (source, 0), // Ignore other case?
+            _ => (source, 0),
         };
 
         // When the column types of `source` query do not match `expected_types`, casting is
@@ -162,7 +164,6 @@ impl Binder {
             } if order.is_empty() => {
                 tracing::info!("values in match: {:?}", values); // TODO: remove line
                 let values = self.bind_values(values, Some(expected_types.clone()))?;
-                // values: Actual values I am inserting. We need to change this in bind_values
                 let body = BoundSetExpr::Values(values.into());
                 (
                     BoundQuery {
@@ -213,7 +214,8 @@ impl Binder {
         // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
         // We added the null values above. Need to make sure that Null is inserted in v1
         // insert into t1 values (NULL, 5);
-        let target_table_col_indices = if nulls_inserted > 0 {
+        let target_table_col_indices = if !target_table_col_indices.is_empty() && nulls_inserted > 0
+        {
             // from example above:
             // [1]       target_table_col_indices
             // [5,null]  values that we want to insert
