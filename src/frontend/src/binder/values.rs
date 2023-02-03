@@ -82,7 +82,6 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
-        // TODO: have to change bound values here?
         let num_columns = bound[0].len();
         if bound.iter().any(|row| row.len() != num_columns) {
             return Err(
@@ -109,7 +108,7 @@ impl Binder {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..num_columns) // TODO: We need to update number_columns
+                .zip_eq(0..num_columns)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );

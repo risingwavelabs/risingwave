@@ -81,7 +81,7 @@ impl Binder {
             .clone()
             .into_iter()
             .filter(|c| !c.is_hidden())
-            .collect_vec(); // [v1, v2]
+            .collect_vec();
         let row_id_index = table_catalog.row_id_index;
 
         let expected_types: Vec<DataType> = columns_to_insert
@@ -107,8 +107,8 @@ impl Binder {
                 {
                     // all value lists should have same len
                     // Illegal statement: insert into t values (1, 2), (3, 4, 5);
+                    let nulls_to_insert = expected_types.len() - values.0[0].len();
                     let mut new_values = values;
-                    let nulls_to_insert = expected_types.len() - new_values.0[0].len();
                     for new_value in &mut new_values.0 {
                         new_value.push(Expr::Value(Value::Null));
                     }
@@ -162,7 +162,6 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
-                tracing::info!("values in match: {:?}", values); // TODO: remove line
                 let values = self.bind_values(values, Some(expected_types.clone()))?;
                 let body = BoundSetExpr::Values(values.into());
                 (
@@ -290,9 +289,6 @@ impl Binder {
         Ok(insert)
     }
 
-    // TODO: I am assuming that everything is nullable
-    // TODO: Write tests
-
     /// Cast a list of `exprs` to corresponding `expected_types` IN ASSIGNMENT CONTEXT. Make sure
     /// you understand the difference of implicit, assignment and explicit cast before reusing it.
     pub(super) fn cast_on_insert(
@@ -313,8 +309,3 @@ impl Binder {
         Err(ErrorCode::BindError(msg.into()).into())
     }
 }
-
-// I should not handle this in cast_on_insert, because this function may not get called
-
-// create table t1 (v1 int, v2 int); insert into t1 (v1) values (5); insert into t1 (v2) values (6);
-// select * from t1; create table t1 (v1 int, v2 int); insert into t1  values (5, 1);
