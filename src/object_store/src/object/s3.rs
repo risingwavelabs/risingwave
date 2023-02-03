@@ -29,6 +29,7 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
+use random_string::generate;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
@@ -570,18 +571,19 @@ impl S3ObjectStore {
             .unwrap();
 
         // check whether use batch delete
-        let test_path = "test_path";
+        let charset = "1234567890";
+        let test_path = "risingwave_check_batch_delete/".to_string() + &generate(10, charset);
         client
             .put_object()
             .bucket(&bucket)
             .body(aws_sdk_s3::types::ByteStream::from(Bytes::from(
                 "test batch delete",
             )))
-            .key(test_path)
+            .key(&test_path)
             .send()
             .await
             .unwrap();
-        let obj_ids = vec![ObjectIdentifier::builder().key(test_path).build()];
+        let obj_ids = vec![ObjectIdentifier::builder().key(&test_path).build()];
 
         let delete_builder = Delete::builder().set_objects(Some(obj_ids));
         let object_store_use_batch_delete = client
