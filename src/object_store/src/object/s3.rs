@@ -526,6 +526,7 @@ impl S3ObjectStore {
         Self::configure_bucket_lifecycle(&client, &bucket)
             .await
             .unwrap();
+
         Self {
             client,
             bucket,
@@ -535,11 +536,7 @@ impl S3ObjectStore {
         }
     }
 
-    pub async fn new_s3_compatible(
-        bucket: String,
-        metrics: Arc<ObjectStoreMetrics>,
-        object_store_use_batch_delete: bool,
-    ) -> Self {
+    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         // load from env
         let region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
@@ -571,6 +568,30 @@ impl S3ObjectStore {
         Self::configure_bucket_lifecycle(&client, bucket.as_str())
             .await
             .unwrap();
+
+        // check whether use batch delete
+        let test_path = "test_path";
+        client
+            .put_object()
+            .bucket(&bucket)
+            .body(aws_sdk_s3::types::ByteStream::from(Bytes::from(
+                "test batch delete",
+            )))
+            .key(test_path)
+            .send()
+            .await
+            .unwrap();
+        let obj_ids = vec![ObjectIdentifier::builder().key(test_path).build()];
+
+        let delete_builder = Delete::builder().set_objects(Some(obj_ids));
+        let object_store_use_batch_delete = client
+            .delete_objects()
+            .bucket(&bucket)
+            .delete(delete_builder.build())
+            .send()
+            .await
+            .is_ok();
+
         Self {
             client,
             bucket: bucket.to_string(),
