@@ -34,8 +34,8 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    visit_fragment, ActorGraphBuilder, CompleteStreamFragmentGraph, CreateStreamingJobContext,
-    GlobalStreamManagerRef, ScheduledLocations, SourceManagerRef, StreamFragmentGraph,
+    visit_fragment, ActorGraphBuilder, CompleteLocations, CompleteStreamFragmentGraph,
+    CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -549,7 +549,7 @@ where
     ) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
 
-        let (mut ctx, table_fragments, scheduled_locations) =
+        let (mut ctx, table_fragments, locations) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
 
         let result = try {
@@ -557,7 +557,7 @@ where
                 self.source_manager.register_source(source).await?;
             }
             self.stream_manager
-                .create_streaming_job(table_fragments, scheduled_locations, &mut ctx)
+                .create_streaming_job(table_fragments, locations, &mut ctx)
                 .await?;
         };
 
@@ -575,11 +575,7 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<(
-        CreateStreamingJobContext,
-        TableFragments,
-        ScheduledLocations,
-    )> {
+    ) -> MetaResult<(CreateStreamingJobContext, TableFragments, CompleteLocations)> {
         // 1. Assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
@@ -638,7 +634,7 @@ where
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
-        let (graph, scheduled_locations) = actor_graph_builder
+        let (graph, locations) = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)
             .await?;
 
@@ -654,11 +650,7 @@ where
             .mark_creating_tables(&creating_tables)
             .await;
 
-        Ok((
-            ctx,
-            TableFragments::new(id.into(), graph, env),
-            scheduled_locations,
-        ))
+        Ok((ctx, TableFragments::new(id.into(), graph, env), locations))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.

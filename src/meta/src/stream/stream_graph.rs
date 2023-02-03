@@ -39,7 +39,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::schedule::Distribution;
-use super::{CreateStreamingJobContext, ScheduledLocations};
+use super::{CreateStreamingJobContext, Locations};
 use crate::manager::{
     IdCategory, IdCategoryType, IdGeneratorManager, IdGeneratorManagerRef, StreamingClusterInfo,
     StreamingJob,
@@ -299,6 +299,21 @@ struct Node<'a> {
 type StreamActorGraph = HashMap<GlobalFragmentId, Vec<StreamActor>>;
 type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
 
+pub struct CompleteLocations {
+    pub building: Locations,
+    pub existing: Locations,
+}
+
+impl CompleteLocations {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            building: Locations::for_test(),
+            existing: Locations::for_test(),
+        }
+    }
+}
+
 pub type StreamGraph = BTreeMap<FragmentId, Fragment>;
 
 #[derive(Default)]
@@ -320,9 +335,11 @@ impl ExternalChange {
 struct StreamGraphBuilder {
     actor_builders: BTreeMap<GlobalActorId, StreamActorBuilder>,
 
-    locations: BTreeMap<GlobalActorId, ParallelUnitId>,
+    building_locations: ActorLocations,
 
     external_changes: BTreeMap<GlobalActorId, ExternalChange>,
+
+    external_locations: ActorLocations,
 }
 
 impl StreamGraphBuilder {
@@ -342,11 +359,17 @@ impl StreamGraphBuilder {
             )
             .unwrap();
 
-        self.record_location(actor_id, parallel_unit_id);
+        self.building_locations
+            .try_insert(actor_id, parallel_unit_id)
+            .unwrap();
     }
 
-    fn record_location(&mut self, actor_id: GlobalActorId, parallel_unit_id: ParallelUnitId) {
-        self.locations
+    fn record_external_location(
+        &mut self,
+        actor_id: GlobalActorId,
+        parallel_unit_id: ParallelUnitId,
+    ) {
+        self.external_locations
             .try_insert(actor_id, parallel_unit_id)
             .unwrap();
     }
@@ -392,6 +415,14 @@ impl StreamGraphBuilder {
         }
     }
 
+    fn get_location(&self, actor_id: GlobalActorId) -> ParallelUnitId {
+        self.building_locations
+            .get(&actor_id)
+            .copied()
+            .or_else(|| self.external_locations.get(&actor_id).copied())
+            .unwrap()
+    }
+
     /// Add dependency between two connected node in the graph.
     pub fn add_link<'a>(
         &mut self,
@@ -408,8 +439,8 @@ impl StreamGraphBuilder {
                     .iter()
                     .zip_eq(downstream.actor_ids.iter())
                 {
-                    let upstream_location = self.locations[upstream_id];
-                    let downstream_location = self.locations[downstream_id];
+                    let upstream_location = self.get_location(*upstream_id);
+                    let downstream_location = self.get_location(*downstream_id);
                     assert_eq!(upstream_location, downstream_location);
 
                     self.add_dispatcher(
@@ -444,7 +475,7 @@ impl StreamGraphBuilder {
                     let downstream_locations: HashMap<ParallelUnitId, ActorId> = downstream
                         .actor_ids
                         .iter()
-                        .map(|&actor_id| (self.locations[&actor_id], actor_id.as_global_id()))
+                        .map(|&actor_id| (self.get_location(actor_id), actor_id.as_global_id()))
                         .collect();
                     let actor_mapping = downstream
                         .distribution
@@ -496,16 +527,43 @@ impl StreamGraphBuilder {
     pub fn build(
         self,
         ctx: &CreateStreamingJobContext,
-    ) -> MetaResult<(StreamActorGraph, ActorLocations)> {
-        let mut graph: StreamActorGraph = HashMap::new();
+        cluster_info: &StreamingClusterInfo,
+    ) -> MetaResult<(StreamActorGraph, CompleteLocations)> {
+        let mut actors: StreamActorGraph = HashMap::new();
 
         for builder in self.actor_builders.into_values() {
             let fragment_id = builder.fragment_id();
             let actor = builder.build(ctx)?;
-            graph.entry(fragment_id).or_default().push(actor);
+            actors.entry(fragment_id).or_default().push(actor);
         }
 
-        Ok((graph, self.locations))
+        let build_locations = |actor_locations: ActorLocations| {
+            let actor_locations = actor_locations
+                .into_iter()
+                .map(|(id, p)| (id.as_global_id(), cluster_info.parallel_units[&p].clone()))
+                .collect();
+
+            let worker_locations = cluster_info.worker_nodes.clone();
+
+            let actor_vnode_bitmaps = actors
+                .values()
+                .flatten()
+                .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
+                .collect();
+
+            Locations {
+                actor_locations,
+                worker_locations,
+                actor_vnode_bitmaps,
+            }
+        };
+
+        let complete_locations = CompleteLocations {
+            building: build_locations(self.building_locations),
+            existing: build_locations(self.external_locations),
+        };
+
+        Ok((actors, complete_locations))
     }
 }
 
@@ -594,7 +652,7 @@ impl ActorGraphBuilder {
         self,
         id_gen_manager: IdGeneratorManagerRef<S>,
         ctx: &mut CreateStreamingJobContext,
-    ) -> MetaResult<(StreamGraph, ScheduledLocations)>
+    ) -> MetaResult<(StreamGraph, CompleteLocations)>
     where
         S: MetaStore,
     {
@@ -606,7 +664,7 @@ impl ActorGraphBuilder {
         let id_gen = GlobalActorIdGen::new(&id_gen_manager, actor_len).await?;
 
         // Generate actors of the streaming plan
-        let (actor_graph, actor_locations) = {
+        let (actor_graph, locations) = {
             let builder = self.build_actor_graph(id_gen)?.finish();
 
             // TODO: do not pass with `ctx`
@@ -622,34 +680,8 @@ impl ActorGraphBuilder {
                 .collect();
             ctx.dispatchers = dispatchers;
 
-            builder.build(&*ctx)
+            builder.build(&*ctx, &self.cluster_info)
         }?;
-
-        let scheduled_location = {
-            let actor_locations = actor_locations
-                .into_iter()
-                .map(|(id, p)| {
-                    (
-                        id.as_global_id(),
-                        self.cluster_info.parallel_units[&p].clone(),
-                    )
-                })
-                .collect();
-
-            let worker_locations = self.cluster_info.worker_nodes;
-
-            let actor_vnode_bitmaps = actor_graph
-                .values()
-                .flatten()
-                .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
-                .collect();
-
-            ScheduledLocations {
-                actor_locations,
-                worker_locations,
-                actor_vnode_bitmaps,
-            }
-        };
 
         // Serialize the graph
         let stream_graph = actor_graph
@@ -664,7 +696,7 @@ impl ActorGraphBuilder {
             })
             .collect();
 
-        Ok((stream_graph, scheduled_location))
+        Ok((stream_graph, locations))
     }
 
     /// Build actor graph from fragment graph using topological order. Setup dispatcher in actor and
@@ -735,7 +767,7 @@ impl ActorGraphBuilder {
 
                         state
                             .stream_graph_builder
-                            .record_location(actor_id, parallel_unit_id);
+                            .record_external_location(actor_id, parallel_unit_id);
 
                         actor_id
                     })

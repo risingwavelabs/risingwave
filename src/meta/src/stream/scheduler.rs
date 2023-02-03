@@ -14,13 +14,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use itertools::Itertools;
 use risingwave_pb::common::{ActorInfo, Buffer, ParallelUnit};
 
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 
-/// [`ScheduledLocations`] represents the location of scheduled result.
-pub struct ScheduledLocations {
+/// [`Locations`] represents the location of scheduled result.
+pub struct Locations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
     /// worker location map.
@@ -29,9 +30,9 @@ pub struct ScheduledLocations {
     pub actor_vnode_bitmaps: HashMap<ActorId, Option<Buffer>>,
 }
 
-impl ScheduledLocations {
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub fn new() -> Self {
+impl Locations {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
         Self {
             actor_locations: BTreeMap::new(),
             worker_locations: WorkerLocations::new(),
@@ -41,35 +42,17 @@ impl ScheduledLocations {
 
     /// Returns all actors for every worker node.
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
-        let mut worker_actors = HashMap::new();
         self.actor_locations
             .iter()
-            .for_each(|(actor_id, parallel_unit)| {
-                worker_actors
-                    .entry(parallel_unit.worker_node_id)
-                    .or_insert_with(Vec::new)
-                    .push(*actor_id);
-            });
-
-        worker_actors
+            .map(|(actor_id, parallel_unit)| (parallel_unit.worker_node_id, *actor_id))
+            .into_group_map()
     }
 
     /// Returns the `ActorInfo` map for every actor.
     pub fn actor_info_map(&self) -> HashMap<ActorId, ActorInfo> {
-        self.actor_locations
-            .iter()
-            .map(|(actor_id, parallel_unit)| {
-                (
-                    *actor_id,
-                    ActorInfo {
-                        actor_id: *actor_id,
-                        host: self.worker_locations[&parallel_unit.worker_node_id]
-                            .host
-                            .clone(),
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>()
+        self.actor_infos()
+            .map(|info| (info.actor_id, info))
+            .collect()
     }
 
     /// Returns an iterator of `ActorInfo`.
