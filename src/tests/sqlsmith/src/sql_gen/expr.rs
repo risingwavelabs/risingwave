@@ -58,7 +58,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     let (ty, expr) = self.gen_arbitrary_expr(context);
                     let n = self.rng.gen_range(1..=10);
                     Expr::InList {
-                        expr: Box::new(expr),
+                        expr: Box::new(Expr::Nested(Box::new(expr))),
                         list: self.gen_n_exprs_with_type(n, &ty, context),
                         negated: self.flip_coin(),
                     }

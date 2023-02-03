@@ -314,6 +314,7 @@ steps:
           environment:
             - GITHUB_TOKEN
             - BUILDKITE_TAG
+            - BUILDKITE_SOURCE
     timeout_in_minutes: 60
     retry: *auto-retry
 
