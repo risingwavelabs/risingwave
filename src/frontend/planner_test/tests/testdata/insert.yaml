@@ -52,6 +52,30 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [[6:Int32, null:Int32]] }
+- name: implicit null user defined columns (cols of diff type) 1
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    insert into t (v2) values (6);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t1 }
+      └─BatchValues { rows: [[null:Int32 6:Int32, null:Int32]] }
+- name: implicit null user defined columns (cols of diff type) 2
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    insert into t (v1) values (6);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t1 }
+      └─BatchValues { rows: [[6:Int32 null:Int32, null:Int32]] }
+- name: implicit null user defined columns (cols of diff type) 3
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    insert into t (v3) values (6);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t1 }
+      └─BatchValues { rows: [[null:Int32 null:Int32, 6:Int32]] }
 - name: insert values on non-assign-castable types
   sql: |
     create table t (v1 real, v2 int);
