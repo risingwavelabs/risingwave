@@ -247,8 +247,8 @@ impl Binder {
         // validate that query has a value for each target column, if target columns are used
         let err_msg = match target_table_col_indices.len().cmp(&expected_types.len()) {
             std::cmp::Ordering::Equal => None,
-            std::cmp::Ordering::Greater => Some("INSERT has more target columns than values."),
-            std::cmp::Ordering::Less => Some("INSERT has less target columns than values. Unexpected error. Target columns should have been implicitly null"),
+            std::cmp::Ordering::Greater => Some("INSERT has more target columns than values"),
+            std::cmp::Ordering::Less => Some("INSERT has less target columns than values"),
         };
 
         if let Some(msg) = err_msg && !target_table_col_indices.is_empty() {
