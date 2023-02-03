@@ -1278,6 +1278,9 @@ where
             NodeBody::TopN(node) => {
                 always!(node.table, "TopN");
             }
+            NodeBody::AppendOnlyGroupTopN(node) => {
+                always!(node.table, "AppendOnlyGroupTopN");
+            }
             NodeBody::GroupTopN(node) => {
                 always!(node.table, "GroupTopN");
             }
