@@ -359,7 +359,8 @@ impl StorageConfig {
             || self.disable_remote_compactor
     }
 
-    /// The maximal memory that storage components may use based on the configurations.
+    /// The maximal memory that storage components may use based on the configurations. Note that
+    /// this is the total storage memory for one compute node instead of the whole cluster.
     pub fn total_storage_memory_limit_mb(&self) -> usize {
         let total_memory = self.block_cache_capacity_mb
             + self.meta_cache_capacity_mb

@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
+use pretty_bytes::converter::convert;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
@@ -330,15 +331,24 @@ pub async fn compute_node_serve(
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
 /// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
 /// for other system usage. Otherwise, it is not allowed to start.
-fn validate_compute_node_memory_config(total_memory_bytes: usize, storage_config: &StorageConfig) {
-    if storage_config.total_storage_memory_limit_mb() << 20 > total_memory_bytes {
-        panic!("The total storage memory capacity exceeds the total memory for the compute node. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
-    } else if (storage_config.total_storage_memory_limit_mb()
-        + MIN_COMPUTE_MEMORY_MB
-        + SYSTEM_RESERVED_MEMORY_MB)
-        << 20
-        >= total_memory_bytes
+fn validate_compute_node_memory_config(
+    cn_total_memory_bytes: usize,
+    storage_config: &StorageConfig,
+) {
+    let storage_memory_mb = storage_config.total_storage_memory_limit_mb();
+    if storage_memory_mb << 20 > cn_total_memory_bytes {
+        panic!(
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    } else if (storage_memory_mb + MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20
+        >= cn_total_memory_bytes
     {
-        panic!("No enough memory for computing and other system usage. Please increase the total memory for the compute node or decrease the storage memory capacity in configurations and restart the compute node.");
+        panic!(
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
     }
 }
