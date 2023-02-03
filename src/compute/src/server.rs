@@ -338,7 +338,7 @@ fn validate_compute_node_memory_config(
     let storage_memory_mb = storage_config.total_storage_memory_limit_mb();
     if storage_memory_mb << 20 > cn_total_memory_bytes {
         panic!(
-            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
             convert(cn_total_memory_bytes as _),
             convert((storage_memory_mb << 20) as _)
         );
@@ -346,7 +346,7 @@ fn validate_compute_node_memory_config(
         >= cn_total_memory_bytes
     {
         panic!(
-            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
             convert(cn_total_memory_bytes as _),
             convert((storage_memory_mb << 20) as _)
         );
