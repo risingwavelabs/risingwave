@@ -536,6 +536,13 @@
   logical_plan: |
     LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
+- name: regression (#7641) -fuzzing test failed at Bind error,types Boolean and Varchar cannot be matched
+  sql: |
+    select false >= 'LN1O0QP1yi' NOT IN (md5('4SeUPZhUbH'))
+  batch_plan: |
+    BatchProject { exprs: [(false:Boolean >= Not(In('LN1O0QP1yi':Varchar, Md5('4SeUPZhUbH':Varchar))))] }
+    └─BatchValues { rows: [[]] }
 - name: const_eval of const expr
   sql: |
     create table t(v1 int);
