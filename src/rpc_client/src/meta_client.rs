@@ -132,7 +132,7 @@ impl MetaClient {
             })?;
 
             let _url = url::Url::parse(addr).map_err(|e| {
-                RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e,))
+                RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e))
             })?;
 
             Ok(MetaAddressStrategy::LoadBalance(addr.to_string()))
@@ -148,7 +148,7 @@ impl MetaClient {
 
             for addr in &addrs {
                 let _url = url::Url::parse(addr).map_err(|e| {
-                    RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e,))
+                    RpcError::Internal(anyhow!("could not parse meta address {}, {}", addr, e))
                 })?;
             }
 
