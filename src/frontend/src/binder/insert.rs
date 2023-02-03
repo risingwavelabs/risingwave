@@ -104,7 +104,7 @@ impl Binder {
                 let (new_body, nulls_inserted) = if !values.0.is_empty()
                     && !values.0.iter().all(|v| v.len() == expected_types.len())
                 {
-                    // all value lists should have same len
+                    // all value lists should have same length. Always add same num of nulls
                     // Illegal statement: insert into t values (1, 2), (3, 4, 5);
                     let nulls_to_insert = expected_types.len() - values.0[0].len();
                     let mut new_values = values;
@@ -211,15 +211,10 @@ impl Binder {
         }
 
         // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
-        // We added the null values above. Need to make sure that Null is inserted in v1
+        // We added the null values above. Above is equivalent to
         // insert into t1 values (NULL, 5);
         let target_table_col_indices = if !target_table_col_indices.is_empty() && nulls_inserted > 0
         {
-            // from example above:
-            // [1]       target_table_col_indices
-            // [5,null]  values that we want to insert
-            // [1,0]     resulting target_table_col_indices. Null inserted in v1
-
             let provided_insert_cols: HashSet<usize> =
                 target_table_col_indices.iter().cloned().collect();
             let all_insert_cols: HashSet<usize> = (0..columns_to_insert.len())
@@ -227,14 +222,13 @@ impl Binder {
                 .iter()
                 .cloned()
                 .collect();
-            let missing_cols: HashSet<usize> = (&all_insert_cols - &provided_insert_cols)
+            let null_cols: HashSet<usize> = (&all_insert_cols - &provided_insert_cols)
                 .iter()
                 .cloned()
                 .collect();
 
-            // missing cols are the ones that are marked as Null
             let mut result: Vec<usize> = target_table_col_indices.clone();
-            for val in missing_cols {
+            for val in null_cols {
                 result.push(val);
             }
             result
@@ -243,7 +237,7 @@ impl Binder {
         };
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
-        let returning = !returning_list.is_empty();
+        let is_returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
@@ -280,7 +274,7 @@ impl Binder {
             source,
             cast_exprs,
             returning_list,
-            returning_schema: if returning {
+            returning_schema: if is_returning {
                 Some(Schema { fields })
             } else {
                 None
