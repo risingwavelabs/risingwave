@@ -411,16 +411,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Execution failed [{:?}]: {}", &task_id, e);
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
-                    // There will be no more chunks, so send None.
-                    if let Err(_e) = sender.send(None).await {
-                        warn!("failed to send None to annotate end");
-                    }
                     if let Err(_e) = t_1
                         .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
                         .await
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
                         warn!("send task execution error message fail!");
+                    }
+
+                    // There will be no more chunks, so send None.
+                    if let Err(_e) = sender.send(None).await {
+                        warn!("failed to send None to annotate end");
                     }
                 }
             };
