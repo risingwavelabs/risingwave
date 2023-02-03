@@ -84,7 +84,8 @@ echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
 
 echo "--- testing sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sleep 1
 
 # check sink destination postgres
