@@ -339,11 +339,7 @@ where
         core.list_active_parallel_units()
     }
 
-    pub async fn get_active_parallel_unit_count(&self) -> usize {
-        let core = self.core.read().await;
-        core.get_active_parallel_unit_count()
-    }
-
+    /// Get the cluster info used for scheduling a streaming job.
     pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
         core.get_streaming_cluster_info()
@@ -374,9 +370,13 @@ where
     }
 }
 
+/// The cluster info used for scheduling a streaming job.
 #[derive(Debug, Clone)]
 pub struct StreamingClusterInfo {
+    /// All **active** compute nodes in the cluster.
     pub worker_nodes: HashMap<u32, WorkerNode>,
+
+    /// All parallel units of the **active** compute nodes in the cluster.
     pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
@@ -519,10 +519,6 @@ impl ClusterManagerCore {
             ret.entry(wt).or_insert(0);
         }
         ret
-    }
-
-    fn get_active_parallel_unit_count(&self) -> usize {
-        self.list_active_parallel_units().len()
     }
 }
 

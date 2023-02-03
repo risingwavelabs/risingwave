@@ -122,7 +122,7 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Initialized` with env.
+    /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
     pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self::new(
             table_id,
@@ -132,6 +132,8 @@ impl TableFragments {
         )
     }
 
+    /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
+    /// `Inactive` on the given parallel units.
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
@@ -168,7 +170,6 @@ impl TableFragments {
     pub fn fragments(&self) -> Vec<&Fragment> {
         self.fragments.values().collect_vec()
     }
-
 
     /// Returns the table id.
     pub fn table_id(&self) -> TableId {

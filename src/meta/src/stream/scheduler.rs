@@ -20,7 +20,7 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit};
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 
-/// [`Locations`] represents the location of scheduled result.
+/// [`Locations`] represents the parallel unit and worker locations of the actors.
 #[cfg_attr(test, derive(Default))]
 pub struct Locations {
     /// actor location map.

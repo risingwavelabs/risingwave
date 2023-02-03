@@ -82,11 +82,6 @@ pub struct ActorInfos {
     pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
-#[derive(Default)]
-pub struct BuildGraphInfo {
-    pub table_mview_actor_ids: HashMap<TableId, Vec<ActorId>>,
-}
-
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
 
 impl<S: MetaStore> FragmentManager<S>
@@ -821,26 +816,6 @@ where
             .get(table_id)
             .context(format!("table_fragment not exist: id={}", table_id))?
             .mview_actor_ids())
-    }
-
-    // we will read three things at once, avoiding locking too much.
-    // TODO: remove this after scheduler refactoring
-    pub async fn get_build_graph_info(
-        &self,
-        table_ids: &HashSet<TableId>,
-    ) -> MetaResult<BuildGraphInfo> {
-        let map = &self.core.read().await.table_fragments;
-        let mut info: BuildGraphInfo = Default::default();
-
-        for table_id in table_ids {
-            info.table_mview_actor_ids.insert(
-                *table_id,
-                map.get(table_id)
-                    .context(format!("table_fragment not exist: id={}", table_id))?
-                    .mview_actor_ids(),
-            );
-        }
-        Ok(info)
     }
 
     /// Get the upstream `Materialize` fragments of the specified tables.

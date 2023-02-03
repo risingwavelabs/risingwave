@@ -38,21 +38,26 @@ use crate::MetaResult;
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
 /// [`CreateStreamingJobContext`] carries one-time infos.
+///
+/// Note: for better readability, keep this struct complete and immutable once created.
 #[cfg_attr(test, derive(Default))]
 pub struct CreateStreamingJobContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 
     /// Upstream mview actor ids grouped by table id.
-    // TODO: can we remove this?
-    pub table_mview_map: HashMap<TableId, Vec<ActorId>>,
+    pub upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
 
-    /// Internal TableID to Table mapping
+    /// Internal tables in the streaming job.
     pub internal_tables: HashMap<u32, Table>,
 
+    /// The locations of the actors to build in the streaming job.
     pub building_locations: Locations,
+
+    /// The locations of the existing actors, essentially the upstream mview actors to update.
     pub existing_locations: Locations,
 
+    /// The properties of the streaming job.
     pub table_properties: HashMap<String, String>,
 }
 
@@ -108,15 +113,13 @@ where
     }
 
     /// Create streaming job, it works as follows:
-    /// 1. schedule the actors to nodes in the cluster.
-    /// 2. broadcast the actor info table.
-    /// (optional) get the split information of the `StreamSource` via source manager and patch
-    /// actors .
-    /// 3. notify related nodes to update and build the actors.
-    /// 4. store related meta data.
     ///
-    /// Note the `table_fragments` is required to be sorted in topology order. (Downstream first,
-    /// then upstream.)
+    /// 1. Broadcast the actor info based on the scheduling result in the context, build the hanging
+    /// channels in upstream worker nodes.
+    /// 2. (optional) Get the split information of the `StreamSource` via source manager and patch
+    /// actors.
+    /// 3. Notify related worker nodes to update and build the actors.
+    /// 4. Store related meta data.
     pub async fn create_streaming_job(
         &self,
         table_fragments: TableFragments,
@@ -141,7 +144,7 @@ where
         table_fragments: TableFragments,
         CreateStreamingJobContext {
             dispatchers,
-            table_mview_map,
+            upstream_mview_actors: table_mview_map,
             table_properties,
             building_locations,
             existing_locations,

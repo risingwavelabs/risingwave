@@ -117,11 +117,12 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self[vnode]
     }
 
-    /// TODO
+    /// Get the item matched by the virtual nodes indicated by high bits in the given `bitmap`.
+    /// Returns `None` if the no virtual node is set in the bitmap.
     pub fn get_matched(&self, bitmap: &Bitmap) -> Option<T::Item> {
         bitmap
             .iter_ones()
-            .next()
+            .next() // only need to check the first one
             .map(|i| self.get(VirtualNode::from_index(i)))
     }
 
@@ -152,7 +153,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self.data.iter().copied().sorted().dedup()
     }
 
-    /// TODO
+    /// Returns the item if it's the only item in this mapping, otherwise returns `None`.
     pub fn to_single(&self) -> Option<T::Item> {
         self.data.iter().copied().dedup().exactly_one().ok()
     }

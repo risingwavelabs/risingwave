@@ -38,6 +38,8 @@ use crate::MetaResult;
 type HashMappingId = usize;
 
 /// The internal distribution structure for processing in the scheduler.
+///
+/// See [`Distribution`] for the public interface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum DistId {
     Singleton(ParallelUnitId),
@@ -53,16 +55,21 @@ enum Fact {
         to: Id,
         dt: DispatcherType,
     },
-    /// A distribution requirement for an existing fragment.
+    /// A distribution requirement for an external(existing) fragment.
     ExternalReq { id: Id, dist: DistId },
-    /// TODO
+    /// A singleton requirement for a building fragment.
+    /// Note that the physical parallel unit is not determined yet.
     SingletonReq(Id),
 }
 
+/// Results of all building fragments, as the output of the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Result {
+    /// This fragment is requried to be distributed by the given [`DistId`].
     Required(DistId),
+    /// This fragment is singleton, and should be scheduled to the default parallel unit.
     DefaultSingleton,
+    /// This fragment is hash-distributed, and should be scheduled by the default hash mapping.
     DefaultHash,
 }
 
@@ -91,32 +98,35 @@ crepe::crepe! {
     Fragment(x) <- Edge(x, _, _), !ExternalReq(x, _);
     Fragment(y) <- Edge(_, y, _), !ExternalReq(y, _);
 
-    // Requirements in the facts.
+    // Requirements from the facts.
     Requirement(x, d) <- ExternalReq(x, d);
     // Requirements of `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
 
-    // TODO
+    // The downstream fragment of a `Simple` edge must be singleton.
     SingletonReq(y) <- Edge(_, y, Simple);
 
-    // Multiple requirements lead to failure.
+    // Multiple requirements conflict.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
-    // TODO
+    // Singleton requirement conflicts with hash requirement.
     Failed(x) <- SingletonReq(x), Requirement(x, d), let DistId::Hash(_) = d;
 
-    // Take the single requirement as the result.
+    // Take the required distribution as the result.
     Success(x, Result::Required(d)) <- Fragment(x), Requirement(x, d), !Failed(x);
-    // Take the default distribution as the result, if no requirement.
+    // Take the default singleton distribution as the result, if no other requirement.
     Success(x, Result::DefaultSingleton) <- Fragment(x), SingletonReq(x), !Requirement(x, _);
-    // TODO
+    // Take the default hash distribution as the result, if no other requirement.
     Success(x, Result::DefaultHash) <- Fragment(x), !SingletonReq(x), !Requirement(x, _);
 }
 
 /// The distribution of a fragment.
 #[derive(Debug, Clone, EnumAsInner)]
 pub(super) enum Distribution {
+    /// The fragment is singleton and is scheduled to the given parallel unit.
     Singleton(ParallelUnitId),
+
+    /// The fragment is hash-distributed and is scheduled by the given hash mapping.
     Hash(ParallelUnitMapping),
 }
 
@@ -126,6 +136,7 @@ impl Distribution {
         self.parallel_units().count()
     }
 
+    /// All parallel units required by the distribution.
     pub fn parallel_units(&self) -> impl Iterator<Item = ParallelUnitId> + '_ {
         match self {
             Distribution::Singleton(p) => Either::Left(std::iter::once(*p)),
@@ -133,6 +144,10 @@ impl Distribution {
         }
     }
 
+    /// Convert the distribution to a [`ParallelUnitMapping`].
+    ///
+    /// - For singleton distribution, all of the virtual nodes are mapped to the same parallel unit.
+    /// - For hash distribution, the mapping is returned as is.
     pub fn into_mapping(self) -> ParallelUnitMapping {
         match self {
             Distribution::Singleton(p) => ParallelUnitMapping::new_single(p),
@@ -140,6 +155,7 @@ impl Distribution {
         }
     }
 
+    /// Create a distribution from a persisted protobuf `Fragment`.
     pub fn from_fragment(fragment: &risingwave_pb::meta::table_fragments::Fragment) -> Self {
         let mapping = ParallelUnitMapping::from_protobuf(fragment.get_vnode_mapping().unwrap());
 
@@ -156,14 +172,19 @@ impl Distribution {
 
 /// [`Scheduler`] schedules the distribution of fragments in a stream graph.
 pub(super) struct Scheduler {
-    /// The default distribution for fragments, if there's no requirement derived.
+    /// The default hash mapping for hash-distributed fragments, if there's no requirement derived.
     default_hash_mapping: ParallelUnitMapping,
 
+    /// The default parallel unit for singleton fragments, if there's no requirement derived.
     default_singleton_parallel_unit: ParallelUnitId,
 }
 
 impl Scheduler {
-    /// Create a new [`Scheduler`].
+    /// Create a new [`Scheduler`] with the given parallel units and the default parallelism.
+    ///
+    /// Each hash-distributed fragment will be scheduled to at most `default_parallelism` parallel
+    /// units, in a round-robin fashion on all compute nodes. If the `default_parallelism` is
+    /// `None`, all parallel units will be used.
     pub fn new(
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
         default_parallelism: Option<NonZeroUsize>,
@@ -210,7 +231,7 @@ impl Scheduler {
 
         // Build the default hash mapping uniformly.
         let default_hash_mapping = ParallelUnitMapping::build(&round_robin);
-        // TODO
+        // Randomly choose a parallel unit as the default singleton parallel unit.
         let default_singleton_parallel_unit = round_robin.choose(&mut thread_rng()).unwrap().id;
 
         Ok(Self {
@@ -219,7 +240,8 @@ impl Scheduler {
         })
     }
 
-    /// Schedule the given complete graph and returns the distribution of each fragment.
+    /// Schedule the given complete graph and returns the distribution of each **building
+    /// fragment**.
     pub fn schedule(
         &self,
         graph: &CompleteStreamFragmentGraph,
@@ -271,6 +293,7 @@ impl Scheduler {
         if !failed.is_empty() {
             bail!("Failed to schedule: {:?}", failed);
         }
+        // Should not contain any existing fragments.
         assert_eq!(success.len(), graph.building_fragments().len());
 
         // Extract the results.
@@ -278,12 +301,15 @@ impl Scheduler {
             .into_iter()
             .map(|Success(id, result)| {
                 let distribution = match result {
+                    // Required
                     Result::Required(DistId::Singleton(parallel_unit)) => {
                         Distribution::Singleton(parallel_unit)
                     }
                     Result::Required(DistId::Hash(mapping)) => {
                         Distribution::Hash(all_hash_mappings[mapping].clone())
                     }
+
+                    // Default
                     Result::DefaultSingleton => {
                         Distribution::Singleton(self.default_singleton_parallel_unit)
                     }

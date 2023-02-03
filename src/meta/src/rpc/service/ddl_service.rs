@@ -579,7 +579,7 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
-        // 2. Get the env for streaming jobs
+        // 2. Get the env for streaming jobs.
         let env = StreamEnvironment::from_protobuf(&fragment_graph.get_env().unwrap());
         let default_parallelism = if let Some(Parallelism { parallelism }) =
             fragment_graph.parallelism
@@ -607,16 +607,26 @@ where
             .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        // 6. Build actor graph from the fragment graph.
-        // TODO: directly store the freezed `stream_job`.
-
+        // 6. Resolve the upstream fragments, extend the fragment graph to a complete graph that
+        // contains all information needed for building the actor graph.
         let upstream_mview_fragments = self
             .fragment_manager
             .get_upstream_mview_fragments(&dependent_relations)
             .await?;
+        let upstream_mview_actors = upstream_mview_fragments
+            .iter()
+            .map(|(&table_id, fragment)| {
+                (
+                    table_id,
+                    fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
+                )
+            })
+            .collect();
+
         let complete_graph =
             CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
 
+        // 7. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
@@ -630,24 +640,22 @@ where
             .generate_graph(self.env.id_gen_manager_ref(), stream_job)
             .await?;
 
+        // 8. Build the table fragments structure that will be persisted in the stream manager, and
+        // the context that contains all information needed for building the actors on the compute
+        // nodes.
         let table_fragments =
             TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            table_mview_map: self
-                .fragment_manager
-                .get_build_graph_info(&dependent_relations)
-                .await?
-                .table_mview_actor_ids,
-            // dependent_table_ids: dependent_relations,
+            upstream_mview_actors,
             internal_tables,
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
         };
 
-        // 7. Mark creating tables, including internal tables and the table of the stream job.
+        // 9. Mark creating tables, including internal tables and the table of the stream job.
         // Note(bugen): should we take `Sink` into account as well?
         let creating_tables = ctx
             .internal_tables()
