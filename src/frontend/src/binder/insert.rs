@@ -100,7 +100,6 @@ impl Binder {
                 offset,
                 fetch,
             } => {
-                tracing::info!("values before inserting nulls: {:?}", values);
                 // We only need to insert nulls if user did not define all columns
                 let (new_body, nulls_inserted) = if !values.0.is_empty()
                     && !values.0.iter().all(|v| v.len() == expected_types.len())
@@ -110,7 +109,8 @@ impl Binder {
                     let nulls_to_insert = expected_types.len() - values.0[0].len();
                     let mut new_values = values;
                     for new_value in &mut new_values.0 {
-                        new_value.push(Expr::Value(Value::Null));
+                        let mut nulls = vec![Expr::Value(Value::Null); nulls_to_insert];
+                        new_value.append(&mut nulls);
                     }
                     (SetExpr::Values(new_values), nulls_to_insert)
                 } else {
@@ -246,11 +246,10 @@ impl Binder {
         let returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
-        // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
         // insert into t1 (v1) values (5, 6);         // ...less target columns than values
         let err_msg = match target_table_col_indices.len().cmp(&expected_types.len()) {
             std::cmp::Ordering::Equal => None,
-            std::cmp::Ordering::Greater => Some("INSERT has more target columns than values"), /* Can this still happen? */
+            std::cmp::Ordering::Greater => Some("INSERT has more target columns than values. Unexpected error. Target columns should have been implicitly null"),
             std::cmp::Ordering::Less => Some("INSERT has less target columns than values"),
         };
 
