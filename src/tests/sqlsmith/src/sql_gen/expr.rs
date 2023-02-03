@@ -649,6 +649,13 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
     })
 }
 
+pub(crate) fn typed_null(ty: &DataType) -> Expr {
+    Expr::Cast {
+        expr: Box::new(sql_null()),
+        data_type: data_type_to_ast_data_type(ty),
+    }
+}
+
 /// Generates a `NULL` value.
 pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
