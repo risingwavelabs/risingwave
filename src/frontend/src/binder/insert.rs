@@ -107,9 +107,9 @@ impl Binder {
                 {
                     // all value lists should have same len
                     // Illegal statement: insert into t values (1, 2), (3, 4, 5);
-                    let mut new_values = values.clone();
+                    let mut new_values = values;
                     let nulls_to_insert = expected_types.len() - new_values.0[0].len();
-                    for new_value in new_values.0.iter_mut() {
+                    for new_value in &mut new_values.0 {
                         new_value.push(Expr::Value(Value::Null));
                     }
                     (SetExpr::Values(new_values), nulls_to_insert)
