@@ -65,10 +65,13 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_HOST")]
     host: Option<String>,
 
-    /// The endpoint for this meta node, which also serves as its unique identifier in cluster
-    /// membership and leader election.
-    #[clap(long, env = "RW_META_ENDPOINT")]
-    meta_endpoint: Option<String>,
+    /// The address for contacting this instance of the service.
+    /// This would be synonymous with the service's "public address"
+    /// or "identifying address".
+    /// It will serve as a unique identifier in cluster
+    /// membership and leader election. Must be specified for etcd backend.
+    #[clap(long, env = "RW_ADVERTISE_ADDR", required_if_eq("backend", "etcd"))]
+    advertise_addr: Option<String>,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
@@ -106,7 +109,7 @@ pub struct MetaNodeOpts {
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    #[clap(long, env = "RW_CONFIG_PATH", default_value = "RW_CONFIG_PATH")]
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
     #[clap(flatten)]
@@ -136,13 +139,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         tracing::info!("Starting meta node with config {:?}", config);
         let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
-        let meta_addr = opts
-            .host
-            .map(|host| format!("{}:{}", host, listen_addr.port()))
-            .unwrap_or_else(|| opts.listen_addr.clone());
+        let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let meta_endpoint = opts.meta_endpoint.unwrap_or(meta_addr);
+        let advertise_addr = opts
+            .advertise_addr
+            .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
@@ -167,7 +169,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            meta_endpoint,
+            advertise_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
