@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use async_stack_trace::StackTrace;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
@@ -131,6 +132,7 @@ async fn flush_imms(
             .collect(),
         task_info.compaction_group_index,
     )
+    .verbose_stack_trace("shared_buffer_compact")
     .await
 }
 
@@ -209,6 +211,7 @@ impl HummockEventHandler {
         epoch: HummockEpoch,
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
+        info!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
             newly_uploaded_sstables
                 .into_iter()
@@ -280,6 +283,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
+        info!("receive await sync epoch: {}", new_sync_epoch);
         // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
@@ -294,6 +298,11 @@ impl HummockEventHandler {
         }
         // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
+            info!(
+                "epoch {} has been synced. Current max_sync_epoch {}",
+                new_sync_epoch,
+                self.uploader.max_synced_epoch()
+            );
             if let Some(result) = self.uploader.get_synced_data(new_sync_epoch) {
                 let result = to_sync_result(result);
                 send_sync_result(sync_result_sender, result);
@@ -307,6 +316,12 @@ impl HummockEventHandler {
             }
             return;
         }
+
+        info!(
+            "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
+            new_sync_epoch,
+            self.uploader.max_synced_epoch()
+        );
 
         // If the epoch is not synced, we add to the `pending_sync_requests` anyway. If the epoch is
         // not a checkpoint epoch, it will be clear with the max synced epoch bumps up.
@@ -328,6 +343,12 @@ impl HummockEventHandler {
     }
 
     fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
+        info!(
+            "handle clear event. max_committed_epoch: {}, max_synced_epoch: {}, max_sealed_epoch: {}",
+            self.uploader.max_committed_epoch(),
+            self.uploader.max_synced_epoch(),
+            self.uploader.max_sealed_epoch(),
+        );
         self.uploader.clear();
 
         for (epoch, result_sender) in self.pending_sync_requests.drain_filter(|_, _| true) {
@@ -404,6 +425,12 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
+        info!(
+            "update to hummock version: {}, epoch: {}",
+            new_pinned_version.id(),
+            new_pinned_version.max_committed_epoch()
+        );
+
         self.uploader.update_pinned_version(new_pinned_version);
     }
 }
@@ -476,6 +503,11 @@ impl HummockEventHandler {
 
                             let instance_id = self.generate_instance_id();
 
+                            info!(
+                                "new read version registered: table_id: {}, instance_id: {}",
+                                table_id, instance_id
+                            );
+
                             {
                                 let mut read_version_mapping_guard =
                                     self.read_version_mapping.write();
@@ -505,6 +537,10 @@ impl HummockEventHandler {
                             table_id,
                             instance_id,
                         } => {
+                            info!(
+                                "read version deregister: table_id: {}, instance_id: {}",
+                                table_id, instance_id
+                            );
                             let mut read_version_mapping_guard = self.read_version_mapping.write();
                             read_version_mapping_guard
                                 .get_mut(&table_id)

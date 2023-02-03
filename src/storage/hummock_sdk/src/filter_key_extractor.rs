@@ -24,6 +24,7 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
+use tracing::info;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
@@ -307,11 +308,13 @@ pub struct FilterKeyExtractorManager {
 impl FilterKeyExtractorManager {
     /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
     pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        info!("update key extractor of {}", table_id);
         self.inner.update(table_id, filter_key_extractor);
     }
 
     /// Remove a mapping by `table_id`
     pub fn remove(&self, table_id: u32) {
+        info!("remove key extractor of {}", table_id);
         self.inner.remove(table_id);
     }
 

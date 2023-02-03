@@ -29,7 +29,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
-use tracing::{error, warn};
+use tracing::{error, info};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -103,6 +103,7 @@ impl UploadingTask {
             .buffer_tracker
             .global_upload_task_size()
             .fetch_add(task_size, Relaxed);
+        info!("start upload task: {:?}", task_info);
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
@@ -116,14 +117,17 @@ impl UploadingTask {
     /// Poll the result of the uploading task
     fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<StagingSstableInfo>> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
-            Ok(task_result) => task_result.map(|ssts| {
-                StagingSstableInfo::new(
-                    ssts,
-                    self.task_info.epochs.clone(),
-                    self.task_info.imm_ids.clone(),
-                    self.task_info.task_size,
-                )
-            }),
+            Ok(task_result) => task_result
+                .inspect(|_| info!("upload task finish {:?}", self.task_info))
+                .map(|ssts| {
+                    StagingSstableInfo::new(
+                        ssts,
+                        self.task_info.epochs.clone(),
+                        self.task_info.imm_ids.clone(),
+                        self.task_info.task_size,
+                    )
+                }),
+
             Err(err) => Err(HummockError::other(format!(
                 "fail to join upload join handle: {:?}",
                 err
@@ -138,7 +142,10 @@ impl UploadingTask {
             match result {
                 Ok(sstables) => return Poll::Ready(sstables),
                 Err(e) => {
-                    error!("a flush task {:?} failed. {:?}", self.task_info, e);
+                    error!(
+                        "a flush task {:?} failed, start retry. Task info: {:?}",
+                        self.task_info, e
+                    );
                     self.join_handle =
                         (self.spawn_upload_task)(self.payload.clone(), self.task_info.clone());
                     // It is important not to return Poll::pending here immediately, because the new
@@ -402,6 +409,10 @@ impl HummockUploader {
         &self.context.buffer_tracker
     }
 
+    pub(crate) fn max_sealed_epoch(&self) -> HummockEpoch {
+        self.max_sealed_epoch
+    }
+
     pub(crate) fn max_synced_epoch(&self) -> HummockEpoch {
         self.max_synced_epoch
     }
@@ -431,6 +442,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
+        info!("epoch {} is sealed", epoch);
         assert!(
             epoch > self.max_sealed_epoch,
             "sealing a sealed epoch {}. {}",
@@ -452,12 +464,15 @@ impl HummockUploader {
                     .expect("we have checked non-empty");
                 self.sealed_data.seal_new_epoch(epoch, unsealed_data);
             } else {
-                warn!("epoch {} to seal has no data", epoch);
+                info!("epoch {} to seal has no data", epoch);
             }
+        } else {
+            info!("epoch {} to seal has no data", epoch);
         }
     }
 
     pub(crate) fn start_sync_epoch(&mut self, epoch: HummockEpoch) {
+        info!("start sync epoch: {}", epoch);
         assert!(
             epoch > self.max_syncing_epoch,
             "the epoch {} has started syncing already: {}",
