@@ -41,13 +41,9 @@ impl StreamGlobalSimpleAgg {
             _ => panic!(),
         };
 
-        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-        // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key().iter().enumerate() {
-            if input.watermark_columns().contains(*input_idx) {
-                watermark_columns.insert(idx);
-            }
-        }
+        // Empty because watermark column(s) must be in group key and global simple agg have no
+        // group key.
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
 
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(

@@ -31,16 +31,24 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: LogicalExpand) -> Self {
-        let dist = match logical.input().distribution() {
+        let input = logical.input();
+        let schema = logical.schema().clone();
+
+        let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
-        let schema = logical.schema().clone();
+
         let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-        watermark_columns &= logical.input().watermark_columns();
+        watermark_columns.extend(
+            input
+                .watermark_columns()
+                .ones()
+                .map(|idx| idx + input.schema().len()),
+        );
 
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
@@ -48,7 +56,7 @@ impl StreamExpand {
             logical.base.logical_pk.to_vec(),
             logical.functional_dependency().clone(),
             dist,
-            logical.input().append_only(),
+            input.append_only(),
             watermark_columns,
         );
         StreamExpand { base, logical }

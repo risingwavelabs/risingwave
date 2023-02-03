@@ -62,8 +62,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            // NOTE: May modify table catalog & table desc.
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
             FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self {
