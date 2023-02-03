@@ -65,7 +65,7 @@ enum Fact {
 /// Results of all building fragments, as the output of the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Result {
-    /// This fragment is requried to be distributed by the given [`DistId`].
+    /// This fragment is required to be distributed by the given [`DistId`].
     Required(DistId),
     /// This fragment is singleton, and should be scheduled to the default parallel unit.
     DefaultSingleton,
