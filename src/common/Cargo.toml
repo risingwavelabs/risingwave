@@ -87,7 +87,7 @@ tempfile = "3"
 
 [build-dependencies]
 anyhow = "1"
-vergen = { version = "7.5", default-features = false, features = ["git"]}
+vergen = { version = "7.5", default-features = false, features = ["git"] }
 
 [[bench]]
 name = "bench_encoding"
