@@ -6,6 +6,7 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+build = "build.rs"
 
 [dependencies]
 anyhow = "1"
@@ -83,6 +84,10 @@ mach = "0.3.2"
 criterion = "0.4"
 rand = "0.8"
 tempfile = "3"
+
+[build-dependencies]
+anyhow = "1"
+vergen = { version = "7.5", default-features = false, features = ["git"]}
 
 [[bench]]
 name = "bench_encoding"
