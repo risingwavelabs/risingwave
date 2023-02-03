@@ -120,5 +120,5 @@ pub async fn handle_create_as(
         returning: vec![],
     };
 
-    handle_query(handler_args, insert, false).await
+    handle_query(handler_args, insert, vec![]).await
 }
