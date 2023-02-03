@@ -201,10 +201,6 @@ impl StreamGraphFormatter {
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
                 )),
-                stream_node::NodeBody::Lookup(node) => Some(format!(
-                    "arrange table: {}",
-                    self.add_table(node.get_arrangement_table().unwrap())
-                )),
                 stream_node::NodeBody::Arrange(node) => Some(format!(
                     "arrange table: {}",
                     self.add_table(node.get_table().unwrap())
