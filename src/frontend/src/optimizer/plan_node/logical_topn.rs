@@ -24,7 +24,7 @@ use super::{
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
@@ -354,11 +354,7 @@ impl ColPrunable for LogicalTopN {
     }
 }
 
-impl ExprRewritable for LogicalTopN {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalTopN {}
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(
