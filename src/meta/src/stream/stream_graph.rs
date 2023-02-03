@@ -278,13 +278,8 @@ impl StreamActorBuilder {
                 })
             }
 
-            // For non-leaf nodes, visit the children recursively.
+            // For other nodes, visit the children recursively.
             _ => {
-                assert!(
-                    !stream_node.input.is_empty(),
-                    "{stream_node:?} should not be leaf node"
-                );
-
                 let mut new_stream_node = stream_node.clone();
                 for (input, new_input) in
                     stream_node.input.iter().zip_eq(&mut new_stream_node.input)
