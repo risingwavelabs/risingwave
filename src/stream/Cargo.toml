@@ -28,6 +28,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 gen-iter = "0.3"
 hyper = "0.14"
+hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.10"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }

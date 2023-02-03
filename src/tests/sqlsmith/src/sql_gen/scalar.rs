@@ -92,7 +92,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             })),
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
+                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
             }
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934

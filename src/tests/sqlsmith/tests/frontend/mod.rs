@@ -46,7 +46,7 @@ pub struct SqlsmithEnv {
 /// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
 /// Then, we can infer the correct state of the database.
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<bool> {
-    let result = handler::handle(session.clone(), stmt, sql, false)
+    let result = handler::handle(session.clone(), stmt, sql, vec![])
         .await
         .map(|_| ())
         .map_err(|e| format!("Error Reason:\n{}", e).into());
