@@ -23,6 +23,8 @@ use crate::for_stream_plan_nodes;
 /// Rewrites expressions in a `PlanRef`. Due to `Share` operator,
 /// the `ExprRewriter` needs to be idempotent i.e. applying it more than once
 /// to the same `ExprImpl` will be a noop on subsequent applications.
+/// `rewrite_exprs` should only return a plan with the given node modified.
+/// To rewrite recursively, call `rewrite_exprs_recursive` on [`RewriteExprsRecursive`].
 pub trait ExprRewritable {
     fn has_rewritable_expr(&self) -> bool {
         false
