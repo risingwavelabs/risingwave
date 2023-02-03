@@ -245,6 +245,9 @@ impl Binder {
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
+        // create table t1 (v1 int, v2 int);
+        // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
+        // insert into t1 (v1) values (5, 6);         // ...less target columns than values
         let err_msg = match target_table_col_indices.len().cmp(&expected_types.len()) {
             std::cmp::Ordering::Equal => None,
             std::cmp::Ordering::Greater => Some("INSERT has more target columns than values"),
