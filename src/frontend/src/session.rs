@@ -156,15 +156,15 @@ impl FrontendEnv {
         let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
-            .client_address
+            .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
+                &opts.listen_addr
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", frontend_address);
+        tracing::info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let meta_client = MetaClient::register_new(
