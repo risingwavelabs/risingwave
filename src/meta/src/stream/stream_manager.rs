@@ -20,8 +20,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::ActorStatus;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -140,7 +138,7 @@ where
     async fn create_streaming_job_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        mut table_fragments: TableFragments,
+        table_fragments: TableFragments,
         CreateStreamingJobContext {
             dispatchers,
             table_mview_map,
@@ -150,24 +148,6 @@ where
             ..
         }: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        // Mark the actors to be built as `ActorState::Inactive`.
-        // TODO: refactor this
-        let actor_status = building_locations
-            .actor_locations
-            .iter()
-            .map(|(&actor_id, parallel_unit)| {
-                (
-                    actor_id,
-                    ActorStatus {
-                        parallel_unit: Some(parallel_unit.clone()),
-                        state: ActorState::Inactive as i32,
-                    },
-                )
-            })
-            .collect();
-        table_fragments.set_actor_status(actor_status);
-        let table_fragments = table_fragments;
-
         let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
@@ -688,8 +668,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let table_fragments =
-            TableFragments::new(table_id, fragments, StreamEnvironment::default());
+        let table_fragments = TableFragments::for_test(table_id, fragments);
         services.create_materialized_view(table_fragments).await?;
 
         for actor in actors {

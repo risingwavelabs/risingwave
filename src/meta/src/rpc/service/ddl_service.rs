@@ -31,7 +31,7 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
 };
-use crate::model::TableFragments;
+use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -580,7 +580,7 @@ where
         stream_job.set_id(id);
 
         // 2. Get the env for streaming jobs
-        let env = fragment_graph.get_env().unwrap().clone();
+        let env = StreamEnvironment::from_protobuf(&fragment_graph.get_env().unwrap());
         let default_parallelism = if let Some(Parallelism { parallelism }) =
             fragment_graph.parallelism
         {
@@ -630,6 +630,9 @@ where
             .generate_graph(self.env.id_gen_manager_ref(), stream_job)
             .await?;
 
+        let table_fragments =
+            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+
         let ctx = CreateStreamingJobContext {
             dispatchers,
             table_mview_map: self
@@ -656,7 +659,7 @@ where
             .mark_creating_tables(&creating_tables)
             .await;
 
-        Ok((ctx, TableFragments::new(id.into(), graph, env)))
+        Ok((ctx, table_fragments))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.

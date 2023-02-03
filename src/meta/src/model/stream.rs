@@ -61,7 +61,7 @@ pub struct TableFragments {
     pub(crate) env: StreamEnvironment,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StreamEnvironment {
     /// The timezone used to interpret timestamps and dates for conversion
     pub(crate) timezone: Option<String>,
@@ -74,7 +74,7 @@ impl StreamEnvironment {
         }
     }
 
-    fn from_protobuf(prost: ProstStreamEnvironment) -> Self {
+    pub fn from_protobuf(prost: &ProstStreamEnvironment) -> Self {
         Self {
             timezone: if prost.get_timezone().is_empty() {
                 None
@@ -105,7 +105,7 @@ impl MetadataModel for TableFragments {
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap().clone());
+        let env = StreamEnvironment::from_protobuf(&prost.get_env().unwrap());
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
@@ -123,18 +123,41 @@ impl MetadataModel for TableFragments {
 
 impl TableFragments {
     /// Create a new `TableFragments` with state of `Initialized` with env.
+    pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+        Self::new(
+            table_id,
+            fragments,
+            &BTreeMap::new(),
+            StreamEnvironment::default(),
+        )
+    }
+
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        env: ProstStreamEnvironment,
+        actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        env: StreamEnvironment,
     ) -> Self {
+        let actor_status = actor_locations
+            .iter()
+            .map(|(&actor_id, parallel_unit)| {
+                (
+                    actor_id,
+                    ActorStatus {
+                        parallel_unit: Some(parallel_unit.clone()),
+                        state: ActorState::Inactive as i32,
+                    },
+                )
+            })
+            .collect();
+
         Self {
             table_id,
             state: State::Initial,
             fragments,
-            actor_status: BTreeMap::default(),
+            actor_status,
             actor_splits: HashMap::default(),
-            env: StreamEnvironment::from_protobuf(env),
+            env,
         }
     }
 
@@ -146,10 +169,6 @@ impl TableFragments {
         self.fragments.values().collect_vec()
     }
 
-    /// Set the actor locations.
-    pub fn set_actor_status(&mut self, actor_status: BTreeMap<ActorId, ActorStatus>) {
-        self.actor_status = actor_status;
-    }
 
     /// Returns the table id.
     pub fn table_id(&self) -> TableId {

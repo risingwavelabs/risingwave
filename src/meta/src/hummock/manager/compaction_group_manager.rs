@@ -733,7 +733,6 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
-    use risingwave_pb::stream_plan::StreamEnvironment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManagerInner;
     use crate::hummock::manager::versioning::Versioning;
@@ -863,7 +862,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager() {
         let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
-        let table_fragment_1 = TableFragments::new(
+        let table_fragment_1 = TableFragments::for_test(
             TableId::new(10),
             BTreeMap::from([(
                 1,
@@ -873,9 +872,8 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            StreamEnvironment::default(),
         );
-        let table_fragment_2 = TableFragments::new(
+        let table_fragment_2 = TableFragments::for_test(
             TableId::new(20),
             BTreeMap::from([(
                 2,
@@ -885,7 +883,6 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            StreamEnvironment::default(),
         );
 
         // Test register_table_fragments

@@ -455,8 +455,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         .generate_graph(env.id_gen_manager_ref(), &job)
         .await?;
 
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, StreamEnvironment::default());
+    let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
