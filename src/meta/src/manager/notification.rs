@@ -108,6 +108,11 @@ where
         }
     }
 
+    pub async fn abort_all(&self) {
+        let mut guard = self.core.lock().await;
+        *guard = NotificationManagerCore::new();
+    }
+
     #[inline(always)]
     fn notify(
         &self,
