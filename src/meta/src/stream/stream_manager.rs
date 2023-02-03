@@ -757,8 +757,7 @@ mod tests {
             },
         );
 
-        let table_fragments =
-            TableFragments::new(table_id, fragments, StreamEnvironment::default());
+        let table_fragments = TableFragments::for_test(table_id, fragments);
         services
             .create_materialized_view(table_fragments)
             .await

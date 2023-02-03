@@ -105,7 +105,7 @@ impl MetadataModel for TableFragments {
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        let env = StreamEnvironment::from_protobuf(&prost.get_env().unwrap());
+        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap());
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),

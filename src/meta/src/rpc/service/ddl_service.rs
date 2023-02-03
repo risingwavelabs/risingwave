@@ -580,7 +580,7 @@ where
         stream_job.set_id(id);
 
         // 2. Get the env for streaming jobs.
-        let env = StreamEnvironment::from_protobuf(&fragment_graph.get_env().unwrap());
+        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
         let default_parallelism = if let Some(Parallelism { parallelism }) =
             fragment_graph.parallelism
         {
