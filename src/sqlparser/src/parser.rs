@@ -21,7 +21,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
-use std::collections::{HashMap, hash_map};
+use std::collections::{hash_map, HashMap};
 
 use tracing::{debug, instrument};
 
@@ -935,10 +935,11 @@ impl Parser {
     /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
     pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
         self.increase_array_depth(1);
-        if let hash_map::Entry::Vacant(entry) = self.array_named_map.entry(self.peek_array_depth()) {
+        if let hash_map::Entry::Vacant(entry) = self.array_named_map.entry(self.peek_array_depth())
+        {
             entry.insert(named);
-        } else {
-            if let Err(parse_err) = self.check_same_named_array(named) { Err(parse_err)? }
+        } else if let Err(parse_err) = self.check_same_named_array(named) {
+            Err(parse_err)?
         }
 
         if self.peek_token() == Token::RBracket {
