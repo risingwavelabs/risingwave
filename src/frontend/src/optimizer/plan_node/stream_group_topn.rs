@@ -89,14 +89,21 @@ impl StreamNode for StreamGroupTopN {
             table: Some(table.to_internal_table_prost()),
             order_by: self.topn_order().to_protobuf(),
         };
-
-        ProstStreamNode::GroupTopN(group_topn_node)
+        if self.input().append_only() {
+            ProstStreamNode::AppendOnlyGroupTopN(group_topn_node)
+        } else {
+            ProstStreamNode::GroupTopN(group_topn_node)
+        }
     }
 }
 
 impl fmt::Display for StreamGroupTopN {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamGroupTopN");
+        let mut builder = f.debug_struct(if self.input().append_only() {
+            "StreamAppendOnlyGroupTopN"
+        } else {
+            "StreamGroupTopN"
+        });
         let input = self.input();
         let input_schema = input.schema();
         builder.field(

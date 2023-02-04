@@ -38,7 +38,7 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "127.0.0.1:6660")]
     pub host: String,
 
-    // Optional, we will use listen_address if not specified.
+    // Optional, we will use listen_addr if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
@@ -99,8 +99,8 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
                 panic!("Invalid state store");
             }
         }
-        let listen_address = opts.host.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_address);
+        let listen_addr = opts.host.parse().unwrap();
+        tracing::info!("Server Listening at {}", listen_addr);
 
         let client_address = opts
             .client_address
@@ -112,7 +112,7 @@ pub fn start(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output = ()> + Send
             .parse()
             .unwrap();
 
-        let ret = compaction_test_main(listen_address, client_address, opts).await;
+        let ret = compaction_test_main(listen_addr, client_address, opts).await;
         match ret {
             Ok(_) => {
                 tracing::info!("Success");

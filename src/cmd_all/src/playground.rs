@@ -18,7 +18,6 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use clap::StructOpt;
-use risingwave_common::config::load_config;
 use tempfile::TempPath;
 use tokio::signal;
 
@@ -67,7 +66,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
         "playground-3cn" => vec![
             RisingWaveService::Meta(osstrs([])),
             RisingWaveService::Compute(osstrs([
-                "--host",
+                "--listen-addr",
                 "127.0.0.1:5687",
                 "--state-store",
                 "hummock+memory-shared",
@@ -75,7 +74,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "4",
             ])),
             RisingWaveService::Compute(osstrs([
-                "--host",
+                "--listen-addr",
                 "127.0.0.1:5688",
                 "--state-store",
                 "hummock+memory-shared",
@@ -83,7 +82,7 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "4",
             ])),
             RisingWaveService::Compute(osstrs([
-                "--host",
+                "--listen-addr",
                 "127.0.0.1:5689",
                 "--state-store",
                 "hummock+memory-shared",
@@ -97,21 +96,21 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 RisingWaveService::Meta(osstrs([
                     "--listen-addr",
                     "0.0.0.0:5690",
-                    "--meta-endpoint",
+                    "--advertise-addr",
                     "127.0.0.1:5690",
                     "--dashboard-host",
                     "0.0.0.0:5691",
                 ])),
                 RisingWaveService::Compute(osstrs([
-                    "--host",
+                    "--listen-addr",
                     "0.0.0.0:5688",
-                    "--client-address",
+                    "--advertise-addr",
                     "127.0.0.1:5688",
                 ])),
                 RisingWaveService::Frontend(osstrs([
-                    "--host",
+                    "--listen-addr",
                     "0.0.0.0:4566",
-                    "--client-address",
+                    "--advertise-addr",
                     "127.0.0.1:4566",
                 ])),
             ]
@@ -154,9 +153,6 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
-
-                let _config = load_config(&opts.config_path);
-
                 tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {
                     risingwave_meta::start(opts).await;

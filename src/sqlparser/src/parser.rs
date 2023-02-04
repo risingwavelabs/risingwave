@@ -131,9 +131,9 @@ pub struct Parser {
 }
 
 impl Parser {
-    const BETWEEN_PREC: u8 = 20;
+    const BETWEEN_PREC: u8 = 21;
     const PLUS_MINUS_PREC: u8 = 30;
-    const TIME_ZONE_PREC: u8 = 20;
+    const TIME_ZONE_PREC: u8 = 21;
     const UNARY_NOT_PREC: u8 = 15;
 
     /// Parse the specified tokens

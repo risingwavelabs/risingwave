@@ -19,6 +19,7 @@ pub mod remote;
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
@@ -54,7 +55,7 @@ pub trait Sink {
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum SinkConfig {
     Redis(RedisConfig),
-    Kafka(KafkaConfig),
+    Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
     Console(ConsoleConfig),
     BlackHole,
@@ -76,9 +77,11 @@ impl SinkConfig {
         const SINK_TYPE_KEY: &str = "connector";
         let sink_type = properties
             .get(SINK_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(format!("missing config: {}", SINK_TYPE_KEY)))?;
+            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", SINK_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
-            KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
+            KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
+                properties,
+            )?))),
             CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
                 properties,
             )?)),
@@ -116,7 +119,9 @@ impl SinkImpl {
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
+            SinkConfig::Kafka(cfg) => {
+                SinkImpl::Kafka(Box::new(KafkaSink::new(*cfg, schema).await?))
+            }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
                 RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
@@ -180,7 +185,7 @@ pub enum SinkError {
     #[error("Json parse error: {0}")]
     JsonParse(String),
     #[error("config error: {0}")]
-    Config(String),
+    Config(#[from] anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

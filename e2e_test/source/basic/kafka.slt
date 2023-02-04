@@ -77,8 +77,8 @@ statement ok
 create sink si
 from
   s5 with (
-    kafka.brokers = '127.0.0.1:29092',
-    kafka.topic = 'sink_target',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'sink_target',
     format = 'append_only',
     connector = 'kafka'
   )
