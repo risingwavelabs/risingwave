@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -222,11 +222,11 @@ fn infer_struct_cast_target_type(
         }
         (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
             // If only one side is nested type, these two types can never be casted.
-            return Err(ErrorCode::BindError(format!(
+            Err(ErrorCode::BindError(format!(
                 "cannot infer type because unmatched types: left={:?} right={:?}",
                 l, r
             ))
-            .into());
+            .into())
         }
         (NestedType::Type(l), NestedType::Type(r)) => {
             // If both sides are concrete types, try cast in either direction.

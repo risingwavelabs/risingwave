@@ -84,10 +84,6 @@ name = "nested_loop_join"
 harness = false
 
 [[bench]]
-name = "sort_merge_join"
-harness = false
-
-[[bench]]
 name = "hash_join"
 harness = false
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,8 +48,8 @@ use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
 
-pub fn is_valid_remote_sink(sink_type: String) -> bool {
-    return VALID_REMOTE_SINKS.contains(&sink_type.as_str());
+pub fn is_valid_remote_sink(sink_type: &str) -> bool {
+    VALID_REMOTE_SINKS.contains(&sink_type)
 }
 
 #[derive(Clone, Debug)]
@@ -65,7 +65,7 @@ impl RemoteConfig {
             .expect("sink type must be specified")
             .to_string();
 
-        if !is_valid_remote_sink(sink_type.clone()) {
+        if !is_valid_remote_sink(sink_type.as_str()) {
             return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
         }
 
@@ -84,7 +84,7 @@ enum ResponseStreamImpl {
 
 impl ResponseStreamImpl {
     pub async fn next(&mut self) -> Result<SinkResponse> {
-        return match self {
+        match self {
             ResponseStreamImpl::Grpc(ref mut response) => response
                 .next()
                 .await
@@ -95,7 +95,7 @@ impl ResponseStreamImpl {
                     SinkError::Remote("response stream closed unexpectedly".to_string())
                 })
             }
-        };
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,6 +54,9 @@ enum MetaErrorInner {
 
     #[error("Service unavailable: {0}")]
     Unavailable(String),
+
+    #[error("Election failed: {0}")]
+    Election(etcd_client::Error),
 
     #[error(transparent)]
     Internal(anyhow::Error),
@@ -127,6 +130,12 @@ impl From<MetadataModelError> for MetaError {
 impl From<HummockError> for MetaError {
     fn from(e: HummockError) -> Self {
         MetaErrorInner::HummockError(e).into()
+    }
+}
+
+impl From<etcd_client::Error> for MetaError {
+    fn from(e: etcd_client::Error) -> Self {
+        MetaErrorInner::Election(e).into()
     }
 }
 

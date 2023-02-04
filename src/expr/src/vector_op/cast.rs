@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -395,6 +395,40 @@ pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
 pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
     writer.write_str(if input { "t" } else { "f" }).unwrap();
     Ok(())
+}
+
+/// A lite version of casting from string to target type. Used by frontend to handle types that have
+/// to be created by casting.
+///
+/// For example, the user can input `1` or `true` directly, but they have to use
+/// `'2022-01-01'::date`.
+pub fn literal_parsing(
+    t: &DataType,
+    s: &str,
+) -> std::result::Result<ScalarImpl, Option<ExprError>> {
+    let scalar = match t {
+        DataType::Boolean => str_to_bool(s)?.into(),
+        DataType::Int16 => str_parse::<i16>(s)?.into(),
+        DataType::Int32 => str_parse::<i32>(s)?.into(),
+        DataType::Int64 => str_parse::<i64>(s)?.into(),
+        DataType::Decimal => str_parse::<Decimal>(s)?.into(),
+        DataType::Float32 => str_parse::<OrderedF32>(s)?.into(),
+        DataType::Float64 => str_parse::<OrderedF64>(s)?.into(),
+        DataType::Varchar => return Err(None),
+        DataType::Date => str_to_date(s)?.into(),
+        DataType::Timestamp => str_to_timestamp(s)?.into(),
+        // We only handle the case with timezone here, and leave the implicit session timezone case
+        // for later phase.
+        DataType::Timestamptz => str_with_time_zone_to_timestamptz(s)?.into(),
+        DataType::Time => str_to_time(s)?.into(),
+        DataType::Interval => str_parse::<IntervalUnit>(s)?.into(),
+        // Not processing list or struct literal right now. Leave it for later phase (normal backend
+        // evaluation).
+        DataType::List { .. } => return Err(None),
+        DataType::Struct(_) => return Err(None),
+        DataType::Bytea => str_to_bytea(s)?.into(),
+    };
+    Ok(scalar)
 }
 
 /// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples

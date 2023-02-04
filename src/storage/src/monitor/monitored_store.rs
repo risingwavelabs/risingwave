@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -253,6 +253,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
                 self.storage_metrics.clone(),
             )
         }
+    }
+
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        self.inner.validate_read_epoch(epoch)
     }
 }
 

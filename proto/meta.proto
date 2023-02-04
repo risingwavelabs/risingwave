@@ -10,6 +10,7 @@ import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message HeartbeatRequest {
@@ -86,6 +87,12 @@ message TableFragments {
   map<uint32, source.ConnectorSplits> actor_splits = 5;
 
   stream_plan.StreamEnvironment env = 6;
+}
+
+/// Parallel unit mapping with fragment id, used for notification.
+message FragmentParallelUnitMapping {
+  uint32 fragment_id = 1;
+  common.ParallelUnitMapping mapping = 2;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -205,7 +212,7 @@ message MetaSnapshot {
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
   repeated user.UserInfo users = 8;
-  repeated common.ParallelUnitMapping parallel_unit_mappings = 9;
+  repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
@@ -235,7 +242,7 @@ message SubscribeResponse {
     catalog.View view = 10;
     catalog.Function function = 18;
     user.UserInfo user = 11;
-    common.ParallelUnitMapping parallel_unit_mapping = 12;
+    FragmentParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;

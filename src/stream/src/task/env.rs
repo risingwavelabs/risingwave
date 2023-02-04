@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;

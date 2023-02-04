@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -297,7 +297,7 @@ impl FunctionalDependencySet {
         assert!(
             self.is_key_inner(&key),
             "{:?} is not a key!",
-            key.ones().into_iter().collect_vec()
+            key.ones().collect_vec()
         );
         let mut new_key = key.clone();
         for i in key.ones() {

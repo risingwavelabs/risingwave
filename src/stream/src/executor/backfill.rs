@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,10 +20,12 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
@@ -103,6 +105,7 @@ where
     async fn execute_inner(mut self) {
         // Table storage primary key.
         let table_pk_indices = self.table.pk_indices();
+        let pk_order = self.table.pk_serializer().get_order_types();
         let upstream_indices = self.upstream_indices;
 
         let mut upstream = self.upstream.execute();
@@ -203,7 +206,12 @@ where
                                 for chunk in upstream_chunk_buffer.drain(..) {
                                     if let Some(current_pos) = &current_pos {
                                         yield Message::Chunk(Self::mapping_chunk(
-                                            Self::mark_chunk(chunk, current_pos, table_pk_indices),
+                                            Self::mark_chunk(
+                                                chunk,
+                                                current_pos,
+                                                table_pk_indices,
+                                                pk_order,
+                                            ),
                                             &upstream_indices,
                                         ));
                                     }
@@ -337,13 +345,21 @@ where
         chunk: StreamChunk,
         current_pos: &OwnedRow,
         table_pk_indices: PkIndicesRef<'_>,
+        pk_order: &[OrderType],
     ) -> StreamChunk {
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         // Use project to avoid allocation.
         for v in data.rows().map(|row| {
-            match row.project(table_pk_indices).iter().cmp(current_pos.iter()) {
+            match row
+                .project(table_pk_indices)
+                .iter()
+                .zip_eq(pk_order.iter())
+                .cmp_by(current_pos.iter(), |(x, order), y| match order {
+                    OrderType::Ascending => x.cmp(&y),
+                    OrderType::Descending => y.cmp(&x),
+                }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
             }

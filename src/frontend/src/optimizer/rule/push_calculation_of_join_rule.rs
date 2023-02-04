@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,11 +36,26 @@ impl Rule for PushCalculationOfJoinRule {
         let (left_exprs, right_exprs, indices_and_ty_of_func_calls) =
             Self::find_comparison_exprs(left_col_num, right_col_num, &exprs);
 
+        // Store only the expressions that need a new column in the projection
+        let left_exprs_non_input_ref: Vec<_> = left_exprs
+            .iter()
+            .filter(|e| e.as_input_ref().is_none())
+            .cloned()
+            .collect();
+        let right_exprs_non_input_ref: Vec<_> = right_exprs
+            .iter()
+            .filter(|e| e.as_input_ref().is_none())
+            .cloned()
+            .collect();
+
         // used to shift indices of input_refs pointing the right side of `join` with
         // `left_exprs.len`.
         let mut col_index_mapping = {
             let map = (0..left_col_num)
-                .chain((left_col_num..left_col_num + right_col_num).map(|i| i + left_exprs.len()))
+                .chain(
+                    (left_col_num..left_col_num + right_col_num)
+                        .map(|i| i + left_exprs_non_input_ref.len()),
+                )
                 .map(Some)
                 .collect_vec();
             ColIndexMapping::new(map)
@@ -56,21 +71,35 @@ impl Rule for PushCalculationOfJoinRule {
         // `left_index` and `right_index` will scan through `left_exprs` and `right_exprs`
         // respectively.
         let mut left_index = left_col_num;
-        let mut right_index = left_col_num + left_exprs.len() + right_col_num;
+        let mut right_index = left_col_num + left_exprs_non_input_ref.len() + right_col_num;
+        let mut right_exprs_mapping = {
+            let map = (0..right_col_num)
+                .map(|i| i + left_col_num + left_exprs_non_input_ref.len())
+                .map(Some)
+                .collect_vec();
+            ColIndexMapping::new(map)
+        };
         // replace chosen function calls.
         for (((index_of_func_call, ty), left_expr), right_expr) in indices_and_ty_of_func_calls
             .into_iter()
             .zip_eq(&left_exprs)
             .zip_eq(&right_exprs)
         {
-            let left_input = InputRef::new(left_index, left_expr.return_type());
-            let right_input = InputRef::new(right_index, right_expr.return_type());
-            exprs[index_of_func_call] =
-                FunctionCall::new(ty, vec![left_input.into(), right_input.into()])
-                    .unwrap()
-                    .into();
-            left_index += 1;
-            right_index += 1;
+            let left_input = if left_expr.as_input_ref().is_some() {
+                left_expr.clone()
+            } else {
+                left_index += 1;
+                InputRef::new(left_index - 1, left_expr.return_type()).into()
+            };
+            let right_input = if right_expr.as_input_ref().is_some() {
+                right_exprs_mapping.rewrite_expr(right_expr.clone())
+            } else {
+                right_index += 1;
+                InputRef::new(right_index - 1, right_expr.return_type()).into()
+            };
+            exprs[index_of_func_call] = FunctionCall::new(ty, vec![left_input, right_input])
+                .unwrap()
+                .into();
         }
         on = Condition {
             conjunctions: exprs,
@@ -88,10 +117,12 @@ impl Rule for PushCalculationOfJoinRule {
             exprs.extend(appended_exprs);
             LogicalProject::create(input, exprs)
         };
-        if !left_exprs.is_empty() {
-            // avoid unnecessary `project`s.
-            left = new_input(left, left_exprs);
-            right = new_input(right, right_exprs);
+        // avoid unnecessary `project`s.
+        if !left_exprs_non_input_ref.is_empty() {
+            left = new_input(left, left_exprs_non_input_ref);
+        }
+        if !right_exprs_non_input_ref.is_empty() {
+            right = new_input(right, right_exprs_non_input_ref);
         }
 
         Some(LogicalJoin::with_output_indices(left, right, join_type, on, output_indices).into())
@@ -119,6 +150,7 @@ impl PushCalculationOfJoinRule {
                 Type::LessThan
                     | Type::LessThanOrEqual
                     | Type::Equal
+                    | Type::IsNotDistinctFrom
                     | Type::GreaterThan
                     | Type::GreaterThanOrEqual
             )

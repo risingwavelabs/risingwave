@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -429,10 +429,9 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+        });
 
         let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
@@ -447,6 +446,12 @@ impl HummockVersionReader {
             )
             .await?
             {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 return Ok(data.into_user_value());
             }
         }
@@ -480,6 +485,12 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
                             // todo add global stat to report
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
@@ -518,6 +529,12 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
                         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
@@ -525,6 +542,12 @@ impl HummockVersionReader {
             }
         }
 
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
@@ -563,7 +586,7 @@ impl HummockVersionReader {
         let bloom_filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint));
+            .map(|hint| Sstable::hash_for_bloom_filter(hint, read_options.table_id.table_id()));
 
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -691,16 +714,16 @@ impl HummockVersionReader {
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
-                            continue;
-                        }
-                    }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                    }
+                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
+                            continue;
+                        }
                     }
                     sstables.push(sstable);
                 }
@@ -717,17 +740,17 @@ impl HummockVersionReader {
                         flatten_resps.pop().unwrap().unwrap();
                     assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
-                            continue;
-                        }
-                    }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                    }
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
+                        {
+                            continue;
+                        }
                     }
                     iters.push(SstableIterator::new(
                         sstable,
@@ -778,7 +801,16 @@ impl HummockVersionReader {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iter.is_valid(),
+        );
+
         local_stats.report(self.state_store_metrics.deref(), table_id_label);
+
         Ok(HummockStorageIterator::new(
             user_iter,
             self.state_store_metrics.clone(),

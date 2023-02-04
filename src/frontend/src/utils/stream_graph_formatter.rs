@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,10 +200,6 @@ impl StreamGraphFormatter {
                 stream_node::NodeBody::TopN(node) => Some(format!(
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::Lookup(node) => Some(format!(
-                    "arrange table: {}",
-                    self.add_table(node.get_arrangement_table().unwrap())
                 )),
                 stream_node::NodeBody::Arrange(node) => Some(format!(
                     "arrange table: {}",

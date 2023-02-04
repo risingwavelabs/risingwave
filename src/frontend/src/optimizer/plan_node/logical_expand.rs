@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ use risingwave_common::error::Result;
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -154,6 +155,12 @@ impl fmt::Display for LogicalExpand {
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         todo!("prune_col of LogicalExpand is not implemented yet.");
+    }
+}
+
+impl ExprRewritable for LogicalExpand {
+    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
+        self.clone().into()
     }
 }
 

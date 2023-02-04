@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,10 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
+
+use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
@@ -40,6 +43,16 @@ impl StreamingJob {
         }
     }
 
+    /// Set the fragment id where the table is materialized.
+    pub fn set_table_fragment_id(&mut self, id: FragmentId) {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+                table.fragment_id = id;
+            }
+            Self::Sink(_) => {}
+        }
+    }
+
     pub fn id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.id,
@@ -49,12 +62,34 @@ impl StreamingJob {
         }
     }
 
-    pub fn set_dependent_relations(&mut self, dependent_relations: Vec<u32>) {
+    /// Returns the reference to the [`Table`] of the job if it exists.
+    pub fn table(&self) -> Option<&Table> {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+                Some(table)
+            }
+            Self::Sink(_) => None,
+        }
+    }
+
+    /// Set the dependent relations of the job, not including the associated source being created.
+    pub fn set_dependent_relations(
+        &mut self,
+        dependent_relations: impl IntoIterator<Item = TableId>,
+    ) {
+        let dependent_relations = dependent_relations
+            .into_iter()
+            .map(|t| t.table_id())
+            .collect();
+
         match self {
             Self::MaterializedView(table) => table.dependent_relations = dependent_relations,
             Self::Sink(sink) => sink.dependent_relations = dependent_relations,
             Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
-            _ => {}
+
+            // Note: For creating tables with connectors, the associated source (connector) itself
+            // should not be in this list, as it's also in the creating procedure.
+            Self::Table(_, _) => assert!(dependent_relations.is_empty()),
         }
     }
 

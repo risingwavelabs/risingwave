@@ -2,7 +2,7 @@
 
 # invalid username
 statement error
-create materialized source products ( id INT,
+create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
@@ -19,7 +19,7 @@ create materialized source products ( id INT,
 
 # invalid password
 statement error
-create materialized source products ( id INT,
+create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
@@ -36,7 +36,7 @@ create materialized source products ( id INT,
 
 # invalid database name
 statement error
-create materialized source products ( id INT,
+create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
@@ -53,7 +53,7 @@ create materialized source products ( id INT,
 
 # invalid table name
 statement error
-create materialized source products ( id INT,
+create table products ( id INT,
  name STRING,
  description STRING,
  PRIMARY KEY (id)
@@ -70,7 +70,7 @@ create materialized source products ( id INT,
 
 # invalid primary key
 statement error
-create materialized source orders (
+create table orders (
    order_id int,
    order_date timestamp,
    customer_name string,
@@ -91,7 +91,7 @@ create materialized source orders (
 
 # column data type mismatch
 statement error
-create materialized source orders (
+create table orders (
    order_id int,
    order_date timestamp,
    customer_name string,
@@ -112,7 +112,7 @@ create materialized source orders (
 
 # column name mismatch
 statement error
-create materialized source orders (
+create table orders (
    order_id int,
    order_date timestamp,
    cust_name string,

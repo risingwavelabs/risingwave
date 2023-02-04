@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,8 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
         });
     }
 
-    /// Handle a new watermark message. Optionally returns the watermark message to emit.
+    /// Handle a new watermark message. Optionally returns the watermark message to emit and the
+    /// buffer id.
     pub fn handle_watermark(&mut self, buffer_id: ID, watermark: Watermark) -> Option<Watermark> {
         // Note: The staged watermark buffer should be created before handling the watermark.
         let mut staged = self.other_buffered_watermarks.get_mut(&buffer_id).unwrap();
@@ -77,12 +78,11 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
                     watermark == &self.first_buffered_watermarks.peek().unwrap().0 .0
                 }))
         {
-            let Reverse((watermark, actor_id)) = self.first_buffered_watermarks.pop().unwrap();
+            let Reverse((watermark, id)) = self.first_buffered_watermarks.pop().unwrap();
             watermark_to_emit = Some(watermark);
-            let staged = self.other_buffered_watermarks.get_mut(&actor_id).unwrap();
+            let staged = self.other_buffered_watermarks.get_mut(&id).unwrap();
             if let Some(first) = staged.staged.pop_front() {
-                self.first_buffered_watermarks
-                    .push(Reverse((first, actor_id)));
+                self.first_buffered_watermarks.push(Reverse((first, id)));
             } else {
                 staged.in_heap = false;
             }

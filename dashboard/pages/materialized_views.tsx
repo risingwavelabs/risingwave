@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,16 @@
  *
  */
 
-import { Relations } from "../components/Relations"
+import {
+  primaryKeyColumn,
+  Relations,
+  streamingJobColumns,
+} from "../components/Relations"
 import { getMaterializedViews } from "./api/streaming"
 
 export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews)
+  return Relations("Materialized Views", getMaterializedViews, [
+    ...streamingJobColumns,
+    primaryKeyColumn,
+  ])
 }

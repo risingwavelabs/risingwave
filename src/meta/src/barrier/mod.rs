@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -847,7 +847,7 @@ where
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
-                // See https://github.com/singularity-data/risingwave/issues/1251
+                // See https://github.com/risingwave-labs/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
                 let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
                 // hummock_manager commit epoch.

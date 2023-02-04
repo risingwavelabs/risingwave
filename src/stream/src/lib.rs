@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@
 #![feature(provide_any)]
 #![feature(btree_drain_filter)]
 #![feature(bound_map)]
+#![feature(iter_order_by)]
 
 #[macro_use]
 extern crate tracing;

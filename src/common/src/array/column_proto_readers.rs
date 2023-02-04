@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,23 +75,24 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
 
 fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> {
     match cursor.read_i32::<BigEndian>() {
-        Ok(days) => NaiveDateWrapper::from_protobuf(days),
+        Ok(days) => NaiveDateWrapper::with_days(days).map_err(|e| anyhow!(e).into()),
         Err(e) => bail!("Failed to read i32 from NaiveDate buffer: {}", e),
     }
 }
 
 fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
     match cursor.read_u64::<BigEndian>() {
-        Ok(t) => NaiveTimeWrapper::from_protobuf(t),
+        Ok(t) => NaiveTimeWrapper::with_nano(t).map_err(|e| anyhow!(e).into()),
         Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }
 }
 
 fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTimeWrapper> {
-    match cursor.read_i64::<BigEndian>() {
-        Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
-        Err(e) => bail!("Failed to read i64 from NaiveDateTime buffer: {}", e),
-    }
+    cursor
+        .read_i64::<BigEndian>()
+        .map_err(|e| anyhow!("Failed to read i64 from NaiveDateTime buffer: {}", e))
+        .and_then(|t| NaiveDateTimeWrapper::with_macros(t).map_err(|e| anyhow!("{}", e)))
+        .map_err(Into::into)
 }
 
 pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {

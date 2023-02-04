@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -179,13 +179,19 @@ impl TableFragments {
     /// Returns mview fragment vnode mapping.
     /// Note that: the sink fragment is also stored as `TableFragments`, it's possible that
     /// there's no fragment with `FragmentTypeFlag::Mview` exists.
-    pub fn mview_vnode_mapping(&self) -> Option<ParallelUnitMapping> {
+    pub fn mview_vnode_mapping(&self) -> Option<(FragmentId, ParallelUnitMapping)> {
         self.fragments
             .values()
             .find(|fragment| {
                 (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
             })
-            .and_then(|fragment| fragment.vnode_mapping.clone())
+            .map(|fragment| {
+                (
+                    fragment.fragment_id,
+                    // vnode mapping is always `Some`, even for singletons.
+                    fragment.vnode_mapping.clone().unwrap(),
+                )
+            })
     }
 
     /// Update state of all actors

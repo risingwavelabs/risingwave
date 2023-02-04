@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,6 +85,7 @@ impl ToBatchProst for BatchInsert {
                 .logical
                 .row_id_index()
                 .map(|index| ColumnIndex { index: index as _ }),
+            returning: self.logical.has_returning(),
         })
     }
 }

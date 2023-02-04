@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use clap::Parser;
 use futures::future::join_all;
+use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::Rng;
 use sqllogictest::AsyncDB;
@@ -50,6 +51,9 @@ pub struct Configuration {
     /// The number of compute nodes.
     pub compute_nodes: usize,
 
+    /// The number of meta nodes.
+    pub meta_nodes: usize,
+
     /// The number of compactor nodes.
     pub compactor_nodes: usize,
 
@@ -72,6 +76,7 @@ impl Configuration {
             config_path: CONFIG_PATH.as_os_str().to_string_lossy().into(),
             frontend_nodes: 2,
             compute_nodes: 3,
+            meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
@@ -86,7 +91,7 @@ impl Configuration {
 ///
 /// | Name           | IP            |
 /// | -------------- | ------------- |
-/// | meta           | 192.168.1.1   |
+/// | meta-x         | 192.168.1.x   |
 /// | frontend-x     | 192.168.2.x   |
 /// | compute-x      | 192.168.3.x   |
 /// | compactor-x    | 192.168.4.x   |
@@ -107,6 +112,23 @@ impl Cluster {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
+
+        // setup DNS and load balance
+        let net = madsim::net::NetSim::current();
+        net.add_dns_record("etcd", "192.168.10.1".parse().unwrap());
+        net.add_dns_record("meta", "192.168.1.1".parse().unwrap());
+
+        net.add_dns_record("frontend", "192.168.2.0".parse().unwrap());
+        net.global_ipvs().add_service(
+            ServiceAddr::Tcp("192.168.2.0:4566".into()),
+            Scheduler::RoundRobin,
+        );
+        for i in 1..=conf.frontend_nodes {
+            net.global_ipvs().add_server(
+                ServiceAddr::Tcp("192.168.2.0:4566".into()),
+                &format!("192.168.2.{i}:4566"),
+            )
+        }
 
         // etcd node
         let etcd_data = conf
@@ -143,26 +165,30 @@ impl Cluster {
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        std::env::set_var("RW_META_ADDR", "https://192.168.1.1:5690/");
+        std::env::set_var("RW_META_ADDR", "https://meta:5690/");
 
         // meta node
-        let opts = risingwave_meta::MetaNodeOpts::parse_from([
-            "meta-node",
-            "--config-path",
-            &conf.config_path,
-            "--listen-addr",
-            "0.0.0.0:5690",
-            "--backend",
-            "etcd",
-            "--etcd-endpoints",
-            "192.168.10.1:2388",
-        ]);
-        handle
-            .create_node()
-            .name("meta")
-            .ip([192, 168, 1, 1].into())
-            .init(move || risingwave_meta::start(opts.clone()))
-            .build();
+        for i in 1..=conf.meta_nodes {
+            let opts = risingwave_meta::MetaNodeOpts::parse_from([
+                "meta-node",
+                "--config-path",
+                &conf.config_path,
+                "--listen-addr",
+                "0.0.0.0:5690",
+                "--meta-endpoint",
+                &format!("192.168.1.{i}:5690"),
+                "--backend",
+                "etcd",
+                "--etcd-endpoints",
+                "etcd:2388",
+            ]);
+            handle
+                .create_node()
+                .name(format!("meta-{i}"))
+                .ip([192, 168, 1, i as u8].into())
+                .init(move || risingwave_meta::start(opts.clone()))
+                .build();
+        }
 
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(15)).await;
@@ -178,7 +204,7 @@ impl Cluster {
                 "--client-address",
                 &format!("192.168.2.{i}:4566"),
                 "--meta-addr",
-                "192.168.1.1:5690",
+                "meta:5690",
             ]);
             handle
                 .create_node()
@@ -199,7 +225,7 @@ impl Cluster {
                 "--client-address",
                 &format!("192.168.3.{i}:5688"),
                 "--meta-address",
-                "192.168.1.1:5690",
+                "meta:5690",
                 "--state-store",
                 "hummock+memory-shared",
                 "--parallelism",
@@ -225,7 +251,7 @@ impl Cluster {
                 "--client-address",
                 &format!("192.168.4.{i}:6660"),
                 "--meta-address",
-                "192.168.1.1:5690",
+                "meta:5690",
                 "--state-store",
                 "hummock+memory-shared",
             ]);
@@ -264,14 +290,13 @@ impl Cluster {
 
     /// Run a SQL query from the client.
     pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
-        let frontend = self.rand_frontend_ip();
         let sql = sql.into();
 
         let result = self
             .client
             .spawn(async move {
                 // TODO: reuse session
-                let mut session = RisingWave::connect(frontend, "dev".to_string())
+                let mut session = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .expect("failed to connect to RisingWave");
                 let result = session.run(&sql).await?;
@@ -343,8 +368,15 @@ impl Cluster {
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
-            if rand::thread_rng().gen_bool(0.5) {
-                nodes.push("meta".to_string());
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.meta_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("meta-{}", i));
             }
         }
         if opts.kill_frontend {
@@ -420,17 +452,8 @@ impl Cluster {
             .spawn(crate::kafka::create_topics("192.168.11.1:29092", topics));
     }
 
-    /// Return the IP of a random frontend node.
-    pub fn rand_frontend_ip(&self) -> String {
-        let i = rand::thread_rng().gen_range(1..=self.config.frontend_nodes);
-        format!("192.168.2.{i}")
-    }
-
-    /// Return the IP of all frontend nodes.
-    pub fn frontend_ips(&self) -> Vec<String> {
-        (1..=self.config.frontend_nodes)
-            .map(|i| format!("192.168.2.{i}"))
-            .collect()
+    pub fn config(&self) -> Configuration {
+        self.config.clone()
     }
 }
 
