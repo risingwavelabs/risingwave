@@ -21,6 +21,7 @@ use alloc::{
     vec::Vec,
 };
 use core::fmt;
+use std::collections::HashMap;
 
 use tracing::{debug, instrument};
 
@@ -121,7 +122,12 @@ pub struct Parser {
     /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
     /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
     angle_brackets_num: i32,
-    is_in_array_expr: bool,
+    /// It's important that already in named Array or not. so use this field check in or not.
+    /// Consider 0 is you're not in named Array. if more than 0 is you're in named Array
+    array_depth: i32,
+    /// We cannot know current array should be keep named or not, so by using this field store
+    /// every depth of array that should be keep named or not.
+    array_named_map: HashMap<i32, bool>,
 }
 
 impl Parser {
@@ -136,7 +142,8 @@ impl Parser {
             tokens,
             index: 0,
             angle_brackets_num: 0,
-            is_in_array_expr: false,
+            array_depth: 0,
+            array_named_map: HashMap::new(),
         }
     }
 
@@ -239,18 +246,22 @@ impl Parser {
     }
 
     /// Check is enter array expression.
-    pub fn is_array_expr_entered(&mut self) -> bool {
-        self.is_in_array_expr
+    pub fn peek_array_depth(&self) -> i32 {
+        self.array_depth
     }
 
     /// When enter specify ARRAY prefix expression.
-    pub fn enter_array_expr(&mut self) {
-        self.is_in_array_expr = true;
+    pub fn increase_array_depth(&mut self, num: i32) {
+        self.array_depth += num;
     }
 
     /// When exit specify ARRAY prefix expression.
-    pub fn exit_array_expr(&mut self) {
-        self.is_in_array_expr = false;
+    pub fn decrease_array_depth(&mut self, num: i32) {
+        self.array_depth -= num;
+    }
+
+    pub fn is_in_named_array(&self) -> bool {
+        self.peek_array_depth() > 0
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -457,7 +468,7 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY if self.peek_token() == Token::LBracket => {
+                Keyword::ARRAY => {
                     self.expect_token(&Token::LBracket)?;
                     self.parse_array_expr(true)
                 }
@@ -490,7 +501,7 @@ impl Parser {
                 },
             }, // End of Token::Word
 
-            Token::LBracket if self.is_array_expr_entered() => self.parse_array_expr(false),
+            Token::LBracket if self.is_in_named_array() => self.parse_array_expr(false),
 
             tok @ Token::Minus | tok @ Token::Plus => {
                 let op = if tok == Token::Plus {
@@ -946,22 +957,64 @@ impl Parser {
     /// Parses an array expression `[ex1, ex2, ..]`
     /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
     pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
+        self.increase_array_depth(1);
+        if self.array_named_map.contains_key(&self.peek_array_depth()) {
+            match self.check_same_named_array(named) {
+                Err(parse_err) => Err(parse_err)?,
+                _ => (),
+            }
+        } else {
+            self.array_named_map.insert(self.peek_array_depth(), named);
+        }
+
         if self.peek_token() == Token::RBracket {
             let _ = self.next_token(); // consume ]
+            self.decrease_array_depth(1);
             Ok(Expr::Array(Array {
                 elem: vec![],
                 named,
             }))
         } else {
-            if named {
-                self.enter_array_expr();
-            }
             let exprs = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RBracket)?;
-            if named {
-                self.exit_array_expr();
+            let ended_array_depth = self.peek_array_depth() + 1;
+            if self.array_named_map.contains_key(&ended_array_depth) {
+                self.array_named_map.remove(&ended_array_depth);
             }
+            self.decrease_array_depth(1);
             Ok(Expr::Array(Array { elem: exprs, named }))
+        }
+    }
+
+    fn check_same_named_array(&mut self, current_named: bool) -> Result<(), ParserError> {
+        match current_named {
+            true => {
+                if let Some(previous_named) = self.array_named_map.get(&self.peek_array_depth()) {
+                    match previous_named {
+                        true => Ok(()),
+                        false => {
+                            self.prev_token();
+                            self.prev_token();
+                            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
+                        }
+                    }
+                } else {
+                    Ok(())
+                }
+            }
+            false => {
+                if let Some(previous_named) = self.array_named_map.get(&self.peek_array_depth()) {
+                    match previous_named {
+                        true => {
+                            self.prev_token();
+                            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
+                        }
+                        false => Ok(()),
+                    }
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
