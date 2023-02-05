@@ -207,6 +207,7 @@ export interface TableFragments_Fragment {
    */
   vnodeMapping: ParallelUnitMapping | undefined;
   stateTableIds: number[];
+  vnodeVisitedStateTableIds: number[];
   /**
    * Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
    * but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
@@ -768,6 +769,7 @@ function createBaseTableFragments_Fragment(): TableFragments_Fragment {
     actors: [],
     vnodeMapping: undefined,
     stateTableIds: [],
+    vnodeVisitedStateTableIds: [],
     upstreamFragmentIds: [],
   };
 }
@@ -783,6 +785,9 @@ export const TableFragments_Fragment = {
       actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
+      vnodeVisitedStateTableIds: Array.isArray(object?.vnodeVisitedStateTableIds)
+        ? object.vnodeVisitedStateTableIds.map((e: any) => Number(e))
+        : [],
       upstreamFragmentIds: Array.isArray(object?.upstreamFragmentIds)
         ? object.upstreamFragmentIds.map((e: any) => Number(e))
         : [],
@@ -807,6 +812,11 @@ export const TableFragments_Fragment = {
     } else {
       obj.stateTableIds = [];
     }
+    if (message.vnodeVisitedStateTableIds) {
+      obj.vnodeVisitedStateTableIds = message.vnodeVisitedStateTableIds.map((e) => Math.round(e));
+    } else {
+      obj.vnodeVisitedStateTableIds = [];
+    }
     if (message.upstreamFragmentIds) {
       obj.upstreamFragmentIds = message.upstreamFragmentIds.map((e) => Math.round(e));
     } else {
@@ -825,6 +835,7 @@ export const TableFragments_Fragment = {
       ? ParallelUnitMapping.fromPartial(object.vnodeMapping)
       : undefined;
     message.stateTableIds = object.stateTableIds?.map((e) => e) || [];
+    message.vnodeVisitedStateTableIds = object.vnodeVisitedStateTableIds?.map((e) => e) || [];
     message.upstreamFragmentIds = object.upstreamFragmentIds?.map((e) => e) || [];
     return message;
   },
