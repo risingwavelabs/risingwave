@@ -355,6 +355,7 @@ impl TableCatalog {
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            visited_by_vnode_fetch: false,
             version: self.version.as_ref().map(TableVersion::to_prost),
         }
     }
@@ -500,6 +501,7 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
+            visited_by_vnode_fetch: false,
             version: Some(ProstTableVersion {
                 version: 0,
                 next_column_id: 2,

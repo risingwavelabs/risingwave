@@ -133,6 +133,7 @@ async fn compaction_test(
         table_type: 0,
         append_only: false,
         row_id_index: None,
+        visited_by_vnode_fetch: false,
         version: None,
     };
     let mut delete_range_table = delete_key_table.clone();

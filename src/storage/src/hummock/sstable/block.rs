@@ -17,6 +17,8 @@ use std::io::{Read, Write};
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
@@ -223,6 +225,8 @@ pub struct BlockBuilder {
     last_key: Vec<u8>,
     /// Count of entries in current block.
     entry_count: usize,
+    /// Count of entries before current restart point in current block.
+    entry_count_before_current_restart_point: usize,
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
 }
@@ -238,6 +242,7 @@ impl BlockBuilder {
             ),
             last_key: vec![],
             entry_count: 0,
+            entry_count_before_current_restart_point: 0,
             compression_algorithm: options.compression_algorithm,
         }
     }
@@ -255,7 +260,7 @@ impl BlockBuilder {
     /// # Panics
     ///
     /// Panic if key is not added in ASCEND order.
-    pub fn add(&mut self, key: &[u8], value: &[u8]) {
+    pub fn add(&mut self, key: &[u8], value: &[u8], not_only_visited_by_vnode_fetch: bool) {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
@@ -264,7 +269,14 @@ impl BlockBuilder {
             );
         }
         // Update restart point if needed and calculate diff key.
-        let diff_key = if self.entry_count % self.restart_count == 0 {
+        let diff_key = if self.entry_count == 0
+            || key[..TABLE_PREFIX_LEN + VirtualNode::SIZE]
+                != self.last_key[..TABLE_PREFIX_LEN + VirtualNode::SIZE]
+            || (not_only_visited_by_vnode_fetch
+                && self.entry_count - self.entry_count_before_current_restart_point
+                    >= self.restart_count)
+        {
+            self.entry_count_before_current_restart_point = self.entry_count;
             self.restart_points.push(self.buf.len() as u32);
             key
         } else {
@@ -300,6 +312,7 @@ impl BlockBuilder {
         self.restart_points.clear();
         self.last_key.clear();
         self.entry_count = 0;
+        self.entry_count_before_current_restart_point = 0;
     }
 
     /// Calculate block size without compression.
@@ -381,10 +394,10 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v01");
-        builder.add(&full_key(b"k2", 2), b"v02");
-        builder.add(&full_key(b"k3", 3), b"v03");
-        builder.add(&full_key(b"k4", 4), b"v04");
+        builder.add(&full_key(b"k1", 1), b"v01", true);
+        builder.add(&full_key(b"k2", 2), b"v02", true);
+        builder.add(&full_key(b"k3", 3), b"v03", true);
+        builder.add(&full_key(b"k4", 4), b"v04", true);
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
@@ -426,10 +439,10 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v01");
-        builder.add(&full_key(b"k2", 2), b"v02");
-        builder.add(&full_key(b"k3", 3), b"v03");
-        builder.add(&full_key(b"k4", 4), b"v04");
+        builder.add(&full_key(b"k1", 1), b"v01", true);
+        builder.add(&full_key(b"k2", 2), b"v02", true);
+        builder.add(&full_key(b"k3", 3), b"v03", true);
+        builder.add(&full_key(b"k4", 4), b"v04", true);
         let capcitiy = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capcitiy).unwrap());

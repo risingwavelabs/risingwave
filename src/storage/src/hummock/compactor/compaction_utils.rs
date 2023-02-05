@@ -46,6 +46,7 @@ pub struct RemoteBuilderFactory<F: SstableWriterFactory> {
     pub remote_rpc_cost: Arc<AtomicU64>,
     pub filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     pub sstable_writer_factory: F,
+    pub is_visited_by_vnode_fetch: bool,
 }
 
 #[async_trait::async_trait]
@@ -75,6 +76,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
             writer,
             self.options.clone(),
             self.filter_key_extractor.clone(),
+            self.is_visited_by_vnode_fetch,
         );
         Ok(builder)
     }

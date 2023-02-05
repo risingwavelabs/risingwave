@@ -107,6 +107,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     raw_value: BytesMut,
     last_table_id: Option<u32>,
     sstable_id: u64,
+    not_only_visited_by_vnode_fetch: bool,
 
     /// `stale_key_count` counts range_tombstones as well.
     stale_key_count: u64,
@@ -128,6 +129,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
+            false,
         )
     }
 
@@ -136,6 +138,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         writer: W,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        is_visited_by_vnode_fetch: bool,
     ) -> Self {
         Self {
             options: options.clone(),
@@ -156,6 +159,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             range_tombstones: vec![],
             sstable_id,
             filter_key_extractor,
+            not_only_visited_by_vnode_fetch: !is_visited_by_vnode_fetch,
             stale_key_count: 0,
             total_key_count: 0,
             table_stats: Default::default(),
@@ -223,8 +227,11 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;
 
-        self.block_builder
-            .add(self.raw_key.as_ref(), self.raw_value.as_ref());
+        self.block_builder.add(
+            self.raw_key.as_ref(),
+            self.raw_value.as_ref(),
+            self.not_only_visited_by_vnode_fetch,
+        );
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
 

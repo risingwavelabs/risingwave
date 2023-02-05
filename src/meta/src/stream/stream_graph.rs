@@ -993,6 +993,12 @@ impl StreamFragmentGraph {
             .chain(table_id)
             .collect();
 
+        let vnode_visited_state_table_ids = internal_tables
+            .iter()
+            .filter(|table| table.visited_by_vnode_fetch)
+            .map(|t| t.id)
+            .collect();
+
         let upstream_fragment_ids = self
             .get_upstreams(id)
             .keys()
@@ -1007,6 +1013,7 @@ impl StreamFragmentGraph {
             // Will be filled in `Scheduler::schedule` later.
             vnode_mapping: None,
             state_table_ids,
+            vnode_visited_state_table_ids,
             upstream_fragment_ids,
         }
     }
@@ -1266,7 +1273,11 @@ where
                     if let agg_call_state::Inner::MaterializedInputState(s) =
                         state.inner.as_mut().unwrap()
                     {
-                        always!(s.table, "GlobalSimpleAgg");
+                        let table = s.table.as_mut().unwrap_or_else(|| {
+                            panic!("internal table GlobalSimpleAgg should always exist")
+                        });
+                        table.visited_by_vnode_fetch = true;
+                        f(table, "GlobalSimpleAgg");
                     }
                 }
             }

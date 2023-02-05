@@ -570,6 +570,13 @@ impl TableFragments {
             .collect_vec()
     }
 
+    pub fn vnode_visited_internal_table_ids(&self) -> Vec<u32> {
+        self.fragments
+            .values()
+            .flat_map(|f| f.vnode_visited_state_table_ids.clone())
+            .collect_vec()
+    }
+
     /// Returns all internal table ids including the mview table.
     pub fn all_table_ids(&self) -> impl Iterator<Item = u32> + '_ {
         self.fragments

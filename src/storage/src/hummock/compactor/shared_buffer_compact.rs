@@ -328,6 +328,7 @@ impl SharedBufferCompactRunner {
                 del_agg,
                 filter_key_extractor,
                 None,
+                false,
             )
             .await?;
         Ok((self.split_index, ssts, table_stats_map))

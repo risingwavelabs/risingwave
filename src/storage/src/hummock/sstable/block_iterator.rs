@@ -252,10 +252,10 @@ mod tests {
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k01", 1), b"v01");
-        builder.add(&full_key(b"k02", 2), b"v02");
-        builder.add(&full_key(b"k04", 4), b"v04");
-        builder.add(&full_key(b"k05", 5), b"v05");
+        builder.add(&full_key(b"k01", 1), b"v01", true);
+        builder.add(&full_key(b"k02", 2), b"v02", true);
+        builder.add(&full_key(b"k04", 4), b"v04", true);
+        builder.add(&full_key(b"k05", 5), b"v05", true);
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(

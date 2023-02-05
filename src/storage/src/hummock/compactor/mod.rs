@@ -37,11 +37,12 @@ use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse};
@@ -193,6 +194,8 @@ impl Compactor {
         };
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
+            let is_visited_by_vnode_fetch = compact_task.get_compaction_group_id()
+                == StaticCompactionGroupId::StateVnodeVisit as CompactionGroupId;
             let filter = multi_filter.clone();
             let multi_filter_key_extractor = multi_filter_key_extractor.clone();
             let compactor_runner =
@@ -201,7 +204,13 @@ impl Compactor {
             let task_progress = task_progress_guard.progress.clone();
             let handle = tokio::spawn(async move {
                 compactor_runner
-                    .run(filter, multi_filter_key_extractor, del_agg, task_progress)
+                    .run(
+                        filter,
+                        multi_filter_key_extractor,
+                        del_agg,
+                        task_progress,
+                        is_visited_by_vnode_fetch,
+                    )
                     .await
             });
             compaction_futures.push(handle);
@@ -499,7 +508,7 @@ impl Compactor {
         };
         let max_key = max_key.to_ref();
 
-        let mut last_key = FullKey::default();
+        let mut last_key = FullKey::<Vec<u8>>::default();
         let mut watermark_can_see_last_key = false;
         let mut local_stats = StoreLocalStatistic::default();
 
@@ -633,6 +642,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
+        is_visited_by_vnode_fetch: bool,
     ) -> HummockResult<(Vec<LocalSstableInfo>, TableStatsMap)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -660,6 +670,7 @@ impl Compactor {
                 del_agg,
                 filter_key_extractor,
                 task_progress.clone(),
+                is_visited_by_vnode_fetch,
             )
             .await?
         } else {
@@ -670,6 +681,7 @@ impl Compactor {
                 del_agg,
                 filter_key_extractor,
                 task_progress.clone(),
+                is_visited_by_vnode_fetch,
             )
             .await?
         };
@@ -724,6 +736,7 @@ impl Compactor {
         Ok((ssts, table_stats_map))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn compact_key_range_impl<F: SstableWriterFactory>(
         &self,
         writer_factory: F,
@@ -732,6 +745,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
+        is_visited_by_vnode_fetch: bool,
     ) -> HummockResult<(Vec<SplitTableOutput>, TableStatsMap)> {
         let builder_factory = RemoteBuilderFactory {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
@@ -741,6 +755,7 @@ impl Compactor {
             remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
             sstable_writer_factory: writer_factory,
+            is_visited_by_vnode_fetch,
         };
 
         let mut sst_builder = CapacitySplitTableBuilder::new(

@@ -101,6 +101,7 @@ impl CompactorRunner {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         del_agg: Arc<RangeTombstonesCollector>,
         task_progress: Arc<TaskProgress>,
+        is_visited_by_vnode_fetch: bool,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
         let (ssts, table_stats_map) = self
@@ -111,6 +112,7 @@ impl CompactorRunner {
                 del_agg,
                 filter_key_extractor,
                 Some(task_progress),
+                is_visited_by_vnode_fetch,
             )
             .await?;
         Ok((self.split_index, ssts, table_stats_map))

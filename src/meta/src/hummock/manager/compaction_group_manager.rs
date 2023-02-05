@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::DerefMut;
 
 use function_name::named;
@@ -129,12 +129,19 @@ impl<S: MetaStore> HummockManager<S> {
             table_option,
         ));
         // internal states
+        let vnode_visited_internal_table_ids = BTreeSet::from_iter(
+            table_fragments
+                .vnode_visited_internal_table_ids()
+                .into_iter(),
+        );
         for table_id in table_fragments.internal_table_ids() {
             assert_ne!(table_id, table_fragments.table_id().table_id);
             pairs.push((
                 table_id,
                 if is_independent_compaction_group {
                     CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
+                } else if vnode_visited_internal_table_ids.contains(&table_id) {
+                    CompactionGroupId::from(StaticCompactionGroupId::StateVnodeVisit)
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
                 },
@@ -306,6 +313,10 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
             let mut new_compaction_groups = BTreeMapTransaction::new(compaction_groups);
             let static_compaction_groups = vec![
                 CompactionGroup::new(StaticCompactionGroupId::StateDefault.into(), config.clone()),
+                CompactionGroup::new(
+                    StaticCompactionGroupId::StateVnodeVisit.into(),
+                    config.clone(),
+                ),
                 CompactionGroup::new(
                     StaticCompactionGroupId::MaterializedView.into(),
                     config.clone(),

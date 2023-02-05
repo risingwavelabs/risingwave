@@ -32,10 +32,12 @@ pub enum StaticCompactionGroupId {
     SharedBuffer = 1,
     /// All states goes to here by default.
     StateDefault = 2,
+    /// States which we visit them by fetching all KVs of certain vnode(s) goes to here.
+    StateVnodeVisit = 3,
     /// All MVs goes to here.
-    MaterializedView = 3,
+    MaterializedView = 4,
     /// Larger than any `StaticCompactionGroupId`.
-    End = 4,
+    End = 5,
 }
 
 impl From<StaticCompactionGroupId> for CompactionGroupId {
