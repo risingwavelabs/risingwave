@@ -273,17 +273,6 @@ service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
 
-message MetaLeaderInfo {
-  string node_address = 1;
-  uint64 lease_id = 2;
-}
-
-message MetaLeaseInfo {
-  MetaLeaderInfo leader = 1;
-  uint64 lease_register_time = 2;
-  uint64 lease_expire_time = 3;
-}
-
 message PauseRequest {}
 
 message PauseResponse {}
@@ -320,6 +309,21 @@ service ScaleService {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
+}
+
+message MembersRequest {}
+
+message MetaMember {
+  common.HostAddress address = 1;
+  bool is_leader = 2;
+}
+
+message MembersResponse {
+  repeated MetaMember members = 1;
+}
+
+service MetaMemberService {
+  rpc Members(MembersRequest) returns (MembersResponse);
 }
 
 message SystemParams {

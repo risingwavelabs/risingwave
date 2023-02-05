@@ -37,38 +37,50 @@ use risingwave_common_proc_macro::OverrideConfig;
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
-    // TODO: rename to listen_address and separate out the port.
-    #[clap(long, default_value = "127.0.0.1:5688")]
-    pub host: String,
+    // TODO: rename to listen_addr and separate out the port.
+    /// The address that this service listens to.
+    /// Usually the localhost + desired port.
+    #[clap(
+        long,
+        alias = "host",
+        env = "RW_LISTEN_ADDR",
+        default_value = "127.0.0.1:5688"
+    )]
+    pub listen_addr: String,
 
-    /// The address of the compute node's meta client.
-    ///
-    /// Optional, we will use listen_address if not specified.
-    #[clap(long)]
-    pub client_address: Option<String>,
+    /// The address for contacting this instance of the service.
+    /// This would be synonymous with the service's "public address"
+    /// or "identifying address".
+    /// Optional, we will use listen_addr if not specified.
+    #[clap(long, alias = "client_address", env = "RW_ADVERTISE_ADDR", long)]
+    pub advertise_addr: Option<String>,
 
-    #[clap(long, default_value = "127.0.0.1:1222")]
+    #[clap(
+        long,
+        env = "RW_PROMETHEUS_LISTENER_ADDR",
+        default_value = "127.0.0.1:1222"
+    )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Endpoint of the connector node
-    #[clap(long, env = "CONNECTOR_RPC_ENDPOINT")]
+    #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    #[clap(long, default_value = "")]
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    /// Total available memory in bytes, used by LRU Manager
-    #[clap(long, default_value_t = default_total_memory_bytes())]
+    /// Total available memory for the compute node in bytes. Used by both computing and storage.
+    #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[clap(long, default_value_t = default_parallelism())]
+    #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
     #[clap(flatten)]
@@ -84,30 +96,30 @@ struct OverrideConfigOpts {
     /// `memory` or `memory-shared`.
     /// 2. `in-memory`
     /// 3. `sled://{path}`
-    #[clap(long)]
+    #[clap(long, env = "RW_STATE_STORE")]
     #[override_opts(path = storage.state_store)]
     pub state_store: Option<String>,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
-    #[clap(long)]
+    #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
 
     /// Path to file cache data directory.
     /// Left empty to disable file cache.
-    #[clap(long)]
+    #[clap(long, env = "RW_FILE_CACHE_DIR")]
     #[override_opts(path = storage.file_cache.dir)]
     pub file_cache_dir: Option<String>,
 
     /// Enable reporting tracing information to jaeger.
-    #[clap(parse(from_flag = true_if_present), long)]
+    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", parse(from_flag = true_if_present))]
     #[override_opts(path = streaming.enable_jaeger_tracing)]
     pub enable_jaeger_tracing: Flag,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, arg_enum)]
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", arg_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }
@@ -147,22 +159,22 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("Compute node options: {:?}", opts);
         validate_opts(&opts);
 
-        let listen_address = opts.host.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_address);
+        let listen_addr = opts.listen_addr.parse().unwrap();
+        tracing::info!("Server Listening at {}", listen_addr);
 
-        let client_address = opts
-            .client_address
+        let advertise_addr = opts
+            .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
+                &opts.listen_addr
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", client_address);
+        tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_address, client_address, opts).await;
+            compute_node_serve(listen_addr, advertise_addr, opts).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

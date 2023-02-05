@@ -45,7 +45,7 @@ use crate::CompactorOpts;
 /// Fetches and runs compaction tasks.
 pub async fn compactor_serve(
     listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
     let config = load_config(&opts.config_path, Some(opts.override_config));
@@ -59,14 +59,14 @@ pub async fn compactor_serve(
     let (meta_client, _) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::Compactor,
-        &client_addr,
+        &advertise_addr,
         0,
         VerifyParams::for_compactor(),
     )
     .await
     .unwrap();
     tracing::info!("Assigned compactor id {}", meta_client.worker_id());
-    meta_client.activate(&client_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
     let registry = prometheus::Registry::new();
