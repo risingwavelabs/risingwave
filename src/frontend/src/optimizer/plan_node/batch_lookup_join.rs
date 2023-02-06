@@ -178,7 +178,11 @@ impl ToDistributedBatch for BatchLookupJoin {
         let input = self.input().to_distributed_with_required(
             &Order::any(),
             &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
-                self.eq_join_predicate.left_eq_indexes().into_iter().take(self.lookup_prefix_len).collect(),
+                self.eq_join_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .take(self.lookup_prefix_len)
+                    .collect(),
                 self.right_table_desc.table_id,
             )),
         )?;
