@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
     pub base: PlanBase,
-    core: generic::Project<PlanRef>,
+    pub core: generic::Project<PlanRef>,
 }
 
 impl LogicalProject {
@@ -128,6 +128,11 @@ impl LogicalProject {
 
     pub fn is_all_inputref(&self) -> bool {
         self.core.is_all_inputref()
+    }
+
+    // For Optimizing TopN
+    pub fn get_child(&self) -> PlanRef {
+        self.core.input.clone()
     }
 }
 

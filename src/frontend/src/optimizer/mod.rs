@@ -429,6 +429,13 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Agg on Index".to_string(),
+            vec![AggOnIndexRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 

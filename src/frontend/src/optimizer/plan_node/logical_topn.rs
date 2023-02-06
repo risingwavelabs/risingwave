@@ -122,6 +122,11 @@ impl LogicalTopN {
         &self.core.group_key
     }
 
+    // For Optimizing TopN
+    pub fn get_child(&self) -> PlanRef {
+        self.core.input.clone()
+    }
+
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         let input = self.input();

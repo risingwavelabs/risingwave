@@ -81,6 +81,8 @@ mod dag_to_tree_rule;
 pub use dag_to_tree_rule::*;
 mod apply_share_eliminate_rule;
 pub use apply_share_eliminate_rule::*;
+mod agg_on_index_rule;
+pub use agg_on_index_rule::*;
 mod stream;
 pub use stream::filter_with_now_to_join_rule::*;
 
@@ -115,6 +117,7 @@ macro_rules! for_all_rules {
             ,{DagToTreeRule}
             ,{AggDedupGroupKeyRule}
             ,{FilterWithNowToJoinRule}
+            ,{AggOnIndexRule}
         }
     };
 }

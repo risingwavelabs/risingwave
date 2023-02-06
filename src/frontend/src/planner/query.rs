@@ -38,6 +38,8 @@ impl Planner {
 
         let extra_order_exprs_len = extra_order_exprs.len();
         let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
+        let _proj_plan = plan.as_logical_project().unwrap();
+        let _proj_scan = _proj_plan.get_child().as_logical_scan().unwrap();
         let order = Order { field_order: order };
         if limit.is_some() || offset.is_some() {
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
