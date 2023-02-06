@@ -260,7 +260,7 @@ impl Parser {
         self.array_depth -= num;
     }
 
-    pub fn is_in_named_array(&self) -> bool {
+    pub fn is_in_array(&self) -> bool {
         self.peek_array_depth() > 0
     }
 
@@ -501,7 +501,7 @@ impl Parser {
                 },
             }, // End of Token::Word
 
-            Token::LBracket if self.is_in_named_array() => self.parse_array_expr(false),
+            Token::LBracket if self.is_in_array() => self.parse_array_expr(false),
 
             tok @ Token::Minus | tok @ Token::Plus => {
                 let op = if tok == Token::Plus {
@@ -962,34 +962,15 @@ impl Parser {
     }
 
     fn check_same_named_array(&mut self, current_named: bool) -> Result<(), ParserError> {
-        match current_named {
-            true => {
-                if let Some(previous_named) = self.array_named_map.get(&self.peek_array_depth()) {
-                    match previous_named {
-                        true => Ok(()),
-                        false => {
-                            self.prev_token();
-                            self.prev_token();
-                            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
-                        }
-                    }
-                } else {
-                    Ok(())
-                }
+        let previous_named = self.array_named_map.get(&self.peek_array_depth()).unwrap();
+        if current_named != *previous_named {
+            self.prev_token();
+            if current_named {
+                self.prev_token();
             }
-            false => {
-                if let Some(previous_named) = self.array_named_map.get(&self.peek_array_depth()) {
-                    match previous_named {
-                        true => {
-                            self.prev_token();
-                            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
-                        }
-                        false => Ok(()),
-                    }
-                } else {
-                    Ok(())
-                }
-            }
+            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
+        } else {
+            Ok(())
         }
     }
 
