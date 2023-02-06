@@ -52,7 +52,7 @@ fn make_prost_user_info(
     let grant_privileges = vec![GrantPrivilege {
         action_with_opts: vec![ActionWithGrantOption {
             action: Action::Connect as i32,
-            with_grant_option: false,
+            with_grant_option: true,
             granted_by: session_user.id,
         }],
         object: Some(Object::DatabaseId(database_id)),
