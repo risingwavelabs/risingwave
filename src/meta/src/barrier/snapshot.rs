@@ -85,11 +85,7 @@ impl<S: MetaStore> SnapshotManager<S> {
 
     pub async fn unpin_all(&self) -> MetaResult<()> {
         let mut snapshots = self.snapshots.lock().await;
-        if let Some((_last_epoch, last_snapshot)) = snapshots.last_key_value() {
-            self.hummock_manager
-                .unpin_snapshot_before(META_NODE_ID, last_snapshot.clone())
-                .await?;
-        }
+        self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
         snapshots.clear();
         Ok(())
     }
