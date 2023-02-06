@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(registered_number().await, 0);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `register_table_fragments`
-        assert_eq!(group_number().await, 2);
+        assert_eq!(group_number().await, 3);
         table_properties.insert(
             String::from("independent_compaction_group"),
             String::from("1"),
@@ -953,7 +953,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        assert_eq!(group_number().await, 3);
+        assert_eq!(group_number().await, 4);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
@@ -961,6 +961,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registered_number().await, 0);
-        assert_eq!(group_number().await, 2);
+        assert_eq!(group_number().await, 3);
     }
 }
