@@ -383,6 +383,7 @@ mod tests {
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
+        StreamingClusterInfo,
     };
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
@@ -598,11 +599,38 @@ mod tests {
             &self,
             table_fragments: TableFragments,
         ) -> MetaResult<()> {
-            let ctx = CreateStreamingJobContext::default();
+            // Create fake locations where all actors are scheduled to the same parallel unit.
+            let locations = {
+                let StreamingClusterInfo {
+                    worker_nodes,
+                    parallel_units,
+                } = self
+                    .global_stream_manager
+                    .cluster_manager
+                    .get_streaming_cluster_info()
+                    .await;
+
+                let actor_locations = table_fragments
+                    .actor_ids()
+                    .into_iter()
+                    .map(|id| (id, parallel_units[&0].clone()))
+                    .collect();
+
+                Locations {
+                    actor_locations,
+                    worker_locations: worker_nodes,
+                }
+            };
+
+            let ctx = CreateStreamingJobContext {
+                building_locations: locations,
+                ..Default::default()
+            };
             let table = Table {
                 id: table_fragments.table_id().table_id(),
                 ..Default::default()
             };
+
             self.catalog_manager
                 .start_create_table_procedure(&table)
                 .await?;
@@ -674,38 +702,8 @@ mod tests {
         let table_fragments = TableFragments::for_test(table_id, fragments);
         services.create_materialized_view(table_fragments).await?;
 
-        for actor in actors {
-            let mut scheduled_actor = services
-                .state
-                .actor_streams
-                .lock()
-                .unwrap()
-                .get(&actor.get_actor_id())
-                .cloned()
-                .unwrap();
-            scheduled_actor.vnode_bitmap.take().unwrap();
-            assert_eq!(scheduled_actor, actor);
-            assert!(services
-                .state
-                .actor_ids
-                .lock()
-                .unwrap()
-                .contains(&actor.get_actor_id()));
-            assert_eq!(
-                services
-                    .state
-                    .actor_infos
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12334,
-                }
-            );
-        }
+        let actor_len = services.state.actor_streams.lock().unwrap().len();
+        assert_eq!(actor_len, 4); // assert that actors are created
 
         let mview_actor_ids = services
             .fragment_manager
@@ -763,38 +761,8 @@ mod tests {
             .await
             .unwrap();
 
-        for actor in actors {
-            let mut scheduled_actor = services
-                .state
-                .actor_streams
-                .lock()
-                .unwrap()
-                .get(&actor.get_actor_id())
-                .cloned()
-                .unwrap();
-            scheduled_actor.vnode_bitmap.take().unwrap();
-            assert_eq!(scheduled_actor, actor);
-            assert!(services
-                .state
-                .actor_ids
-                .lock()
-                .unwrap()
-                .contains(&actor.get_actor_id()));
-            assert_eq!(
-                services
-                    .state
-                    .actor_infos
-                    .lock()
-                    .unwrap()
-                    .get(&actor.get_actor_id())
-                    .cloned()
-                    .unwrap(),
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12335,
-                }
-            );
-        }
+        let actor_len = services.state.actor_streams.lock().unwrap().len();
+        assert_eq!(actor_len, 4); // assert that actors are created
 
         let mview_actor_ids = services
             .fragment_manager

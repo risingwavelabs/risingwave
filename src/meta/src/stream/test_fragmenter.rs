@@ -38,10 +38,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{
-    ActorGraphBuildResult, CompleteStreamFragmentGraph, CreateStreamingJobContext,
-    StreamFragmentGraph,
-};
+use crate::stream::{ActorGraphBuildResult, CompleteStreamFragmentGraph, StreamFragmentGraph};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -438,11 +435,7 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
-
-    let ctx = CreateStreamingJobContext {
-        internal_tables: fragment_graph.internal_tables(),
-        ..Default::default()
-    };
+    let internal_tables = fragment_graph.internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
         CompleteStreamFragmentGraph::for_test(fragment_graph),
@@ -457,11 +450,11 @@ async fn test_graph_builder() -> MetaResult<()> {
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
-    let internal_table_ids = ctx.internal_table_ids();
+
     assert_eq!(actors.len(), 9);
     assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
-    assert_eq!(internal_table_ids.len(), 3);
+    assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
         .fragments
