@@ -82,4 +82,11 @@ impl<S: MetaStore> SnapshotManager<S> {
 
         Ok(())
     }
+
+    pub async fn unpin_all(&self) -> MetaResult<()> {
+        self.hummock_manager
+            .release_meta_context()
+            .await
+            .map_err(Into::into)
+    }
 }

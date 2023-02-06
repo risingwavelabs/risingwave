@@ -292,7 +292,7 @@ where
         instance.release_invalid_contexts().await?;
         instance.cancel_unassigned_compaction_task().await?;
         // Release snapshots pinned by meta on restarting.
-        instance.release_contexts([META_NODE_ID]).await?;
+        instance.release_meta_context().await?;
         Ok(instance)
     }
 
