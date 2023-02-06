@@ -1614,12 +1614,6 @@ where
                 user.name
             )));
         }
-        if !user.grant_privileges.is_empty() {
-            return Err(MetaError::permission_denied(format!(
-                "Cannot drop user {} with privileges",
-                id
-            )));
-        }
         if user_core
             .user_grant_relation
             .get(&id)
