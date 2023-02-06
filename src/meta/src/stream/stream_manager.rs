@@ -221,7 +221,7 @@ where
 
             let stream_actors = actors
                 .iter()
-                .flat_map(|actor_id| actor_map.get(actor_id).cloned())
+                .map(|actor_id| actor_map[actor_id].clone())
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();

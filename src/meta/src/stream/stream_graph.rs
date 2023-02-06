@@ -412,7 +412,7 @@ impl ActorGraphBuildStateInner {
             column_indices: column_indices.to_vec(),
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
-            downstream_actor_id: GlobalActorIds(downstream_actors.to_vec()).as_global_ids(), // TODO
+            downstream_actor_id: GlobalActorIds(downstream_actors.to_vec()).as_global_ids(),
         }
     }
 
@@ -428,7 +428,7 @@ impl ActorGraphBuildStateInner {
             column_indices: Vec::new(),
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
-            downstream_actor_id: GlobalActorIds(downstream_actors.to_vec()).as_global_ids(), // TODO
+            downstream_actor_id: GlobalActorIds(downstream_actors.to_vec()).as_global_ids(),
         }
     }
 
