@@ -24,6 +24,13 @@ const SYSTEM_PARAM_CF_NAME: &str = "cf/system_params";
 
 const BARRIER_INTERVAL_MS_KEY: &str = "barrier_interval_ms";
 const CHECKPOINT_FREQUENCY_KEY: &str = "checkpoint_interval";
+const SSTABLE_SIZE_MB_KEY: &str = "sstable_size_mb";
+const BLOCK_SIZE_KB_KEY: &str = "block_size_kb";
+const BLOOM_FALSE_POSITIVE_KEY: &str = "bloom_false_positive";
+const STATE_STORE_KEY: &str = "state_store";
+const DATA_DIRECTORY_KEY: &str = "data_directory";
+const BACKUP_STORAGE_URL_KEY: &str = "backup_storage_url";
+const BACKUP_STORAGE_DIRECTORY_KEY: &str = "backup_storage_directory";
 
 #[async_trait]
 impl MetadataModel for SystemParams {
@@ -88,6 +95,41 @@ impl MetadataModel for SystemParams {
             CHECKPOINT_FREQUENCY_KEY.as_bytes().to_vec(),
             self.checkpoint_frequency.to_string().into_bytes(),
         );
+        txn.put(
+            Self::cf_name(),
+            SSTABLE_SIZE_MB_KEY.as_bytes().to_vec(),
+            self.sstable_size_mb.to_string().into_bytes(),
+        );
+        txn.put(
+            Self::cf_name(),
+            BLOCK_SIZE_KB_KEY.as_bytes().to_vec(),
+            self.block_size_kb.to_string().into_bytes(),
+        );
+        txn.put(
+            Self::cf_name(),
+            BLOOM_FALSE_POSITIVE_KEY.as_bytes().to_vec(),
+            self.bloom_false_positive.to_string().into_bytes(),
+        );
+        txn.put(
+            Self::cf_name(),
+            STATE_STORE_KEY.as_bytes().to_vec(),
+            self.state_store.as_bytes().to_vec(),
+        );
+        txn.put(
+            Self::cf_name(),
+            DATA_DIRECTORY_KEY.as_bytes().to_vec(),
+            self.data_directory.as_bytes().to_vec(),
+        );
+        txn.put(
+            Self::cf_name(),
+            BACKUP_STORAGE_URL_KEY.as_bytes().to_vec(),
+            self.backup_storage_url.as_bytes().to_vec(),
+        );
+        txn.put(
+            Self::cf_name(),
+            BACKUP_STORAGE_DIRECTORY_KEY.as_bytes().to_vec(),
+            self.backup_storage_directory.as_bytes().to_vec(),
+        );
         Ok(store.txn(txn).await?)
     }
 
@@ -95,28 +137,39 @@ impl MetadataModel for SystemParams {
     where
         S: MetaStore,
     {
-        let mut txn = Transaction::default();
-        txn.delete(Self::cf_name(), BARRIER_INTERVAL_MS_KEY.as_bytes().to_vec());
-        txn.delete(
-            Self::cf_name(),
-            CHECKPOINT_FREQUENCY_KEY.as_bytes().to_vec(),
-        );
-        Ok(store.txn(txn).await?)
+        unimplemented!()
     }
 }
 
 fn system_param_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> MetadataModelResult<SystemParams> {
     let mut ret = SystemParams::default();
-    let mut expected_keys: HashSet<_> = [BARRIER_INTERVAL_MS_KEY, CHECKPOINT_FREQUENCY_KEY]
-        .iter()
-        .cloned()
-        .collect();
+    let mut expected_keys: HashSet<_> = [
+        BARRIER_INTERVAL_MS_KEY,
+        CHECKPOINT_FREQUENCY_KEY,
+        SSTABLE_SIZE_MB_KEY,
+        BLOCK_SIZE_KB_KEY,
+        BLOOM_FALSE_POSITIVE_KEY,
+        STATE_STORE_KEY,
+        DATA_DIRECTORY_KEY,
+        BACKUP_STORAGE_URL_KEY,
+        BACKUP_STORAGE_DIRECTORY_KEY,
+    ]
+    .iter()
+    .cloned()
+    .collect();
     for (k, v) in kvs {
         let k = String::from_utf8(k).unwrap();
         let v = String::from_utf8(v).unwrap();
         match k.as_str() {
             BARRIER_INTERVAL_MS_KEY => ret.barrier_interval_ms = v.parse().unwrap(),
             CHECKPOINT_FREQUENCY_KEY => ret.checkpoint_frequency = v.parse().unwrap(),
+            SSTABLE_SIZE_MB_KEY => ret.sstable_size_mb = v.parse().unwrap(),
+            BLOCK_SIZE_KB_KEY => ret.block_size_kb = v.parse().unwrap(),
+            BLOOM_FALSE_POSITIVE_KEY => ret.bloom_false_positive = v.parse().unwrap(),
+            STATE_STORE_KEY => ret.state_store = v,
+            DATA_DIRECTORY_KEY => ret.data_directory = v,
+            BACKUP_STORAGE_URL => ret.backup_storage_url = v,
+            BACKUP_STORAGE_DIRECTORY_KEY => ret.backup_storage_directory = v,
             _ => {
                 return Err(MetadataModelError::internal(format!(
                     "unrecognized system param {:?}",

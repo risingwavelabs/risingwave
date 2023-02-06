@@ -558,6 +558,13 @@ export interface MembersResponse {
 export interface SystemParams {
   barrierIntervalMs: number;
   checkpointFrequency: number;
+  sstableSizeMb: number;
+  blockSizeKb: number;
+  bloomFalsePositive: number;
+  stateStore: string;
+  dataDirectory: string;
+  backupStorageUrl: string;
+  backupStorageDirectory: string;
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -2476,7 +2483,17 @@ export const MembersResponse = {
 };
 
 function createBaseSystemParams(): SystemParams {
-  return { barrierIntervalMs: 0, checkpointFrequency: 0 };
+  return {
+    barrierIntervalMs: 0,
+    checkpointFrequency: 0,
+    sstableSizeMb: 0,
+    blockSizeKb: 0,
+    bloomFalsePositive: 0,
+    stateStore: "",
+    dataDirectory: "",
+    backupStorageUrl: "",
+    backupStorageDirectory: "",
+  };
 }
 
 export const SystemParams = {
@@ -2484,6 +2501,13 @@ export const SystemParams = {
     return {
       barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : 0,
       checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : 0,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : 0,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : 0,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : 0,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : "",
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : "",
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : "",
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : "",
     };
   },
 
@@ -2491,6 +2515,13 @@ export const SystemParams = {
     const obj: any = {};
     message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
     message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
     return obj;
   },
 
@@ -2498,6 +2529,13 @@ export const SystemParams = {
     const message = createBaseSystemParams();
     message.barrierIntervalMs = object.barrierIntervalMs ?? 0;
     message.checkpointFrequency = object.checkpointFrequency ?? 0;
+    message.sstableSizeMb = object.sstableSizeMb ?? 0;
+    message.blockSizeKb = object.blockSizeKb ?? 0;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? 0;
+    message.stateStore = object.stateStore ?? "";
+    message.dataDirectory = object.dataDirectory ?? "";
+    message.backupStorageUrl = object.backupStorageUrl ?? "";
+    message.backupStorageDirectory = object.backupStorageDirectory ?? "";
     return message;
   },
 };

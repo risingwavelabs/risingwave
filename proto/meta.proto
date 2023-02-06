@@ -329,4 +329,11 @@ service MetaMemberService {
 message SystemParams {
   uint32 barrier_interval_ms = 1;
   uint64 checkpoint_frequency = 2;
+  uint32 sstable_size_mb = 3;
+  uint32 block_size_kb = 4;
+  double bloom_false_positive = 5;
+  string state_store = 6;
+  string data_directory = 7;
+  string backup_storage_url = 8;
+  string backup_storage_directory = 9;
 }
