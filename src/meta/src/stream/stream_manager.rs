@@ -256,9 +256,13 @@ where
         let registered_table_ids = hummock_manager_ref
             .register_table_fragments(&table_fragments, table_properties)
             .await?;
+        debug_assert_eq!(
+            registered_table_ids.len(),
+            table_fragments.all_table_ids().count()
+        );
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
             }
         }));
 
@@ -333,18 +337,16 @@ where
             .await?;
 
         // Unregister from compaction group afterwards.
-        for table_fragments in table_fragments_vec {
-            if let Err(e) = self
-                .hummock_manager
-                .unregister_table_fragments(&table_fragments)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to unregister compaction group for {}. It will be unregistered eventually.\n{:#?}",
-                    table_fragments.table_id(),
+        if let Err(e) = self
+            .hummock_manager
+            .unregister_table_fragments_vec(&table_fragments_vec)
+            .await
+        {
+            tracing::warn!(
+                    "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
+                    table_fragments_vec,
                     e
                 );
-            }
         }
 
         Ok(())
@@ -703,6 +705,7 @@ mod tests {
                 fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
+                state_table_ids: vec![0],
                 ..Default::default()
             },
         );

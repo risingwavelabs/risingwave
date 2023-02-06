@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
+    CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
@@ -229,10 +229,6 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
         Ok(())
-    }
-
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
-        todo!()
     }
 
     async fn trigger_manual_compaction(

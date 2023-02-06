@@ -58,6 +58,15 @@ message GroupConstruct {
   // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
   uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
+  uint64 group_id = 4;
+  // TODO try to remove `table_id_to_options`
+  map<uint32, TableOption> table_id_to_options = 5;
+}
+
+message GroupMetaChange {
+  repeated uint32 table_ids_add = 1;
+  repeated uint32 table_ids_remove = 2;
+  map<uint32, TableOption> table_id_to_options_add = 3;
 }
 
 message GroupDestroy {}
@@ -67,6 +76,7 @@ message GroupDelta {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
+    GroupMetaChange group_meta_change = 4;
   }
 }
 
@@ -79,6 +89,11 @@ message HummockVersion {
   message Levels {
     repeated Level levels = 1;
     OverlappingLevel l0 = 2;
+    uint64 group_id = 3;
+    uint64 parent_group_id = 4;
+    repeated uint32 member_table_ids = 5;
+    // TODO avoid store it here
+    map<uint32, TableOption> table_id_to_options = 6;
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -264,10 +279,7 @@ message CompactStatus {
 
 message CompactionGroup {
   uint64 id = 1;
-  uint64 parent_id = 2;
-  repeated uint32 member_table_ids = 3;
   CompactionConfig compaction_config = 4;
-  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message CompactTaskAssignment {
@@ -375,13 +387,6 @@ message ReportVacuumTaskRequest {
 
 message ReportVacuumTaskResponse {
   common.Status status = 1;
-}
-
-message GetCompactionGroupsRequest {}
-
-message GetCompactionGroupsResponse {
-  common.Status status = 1;
-  repeated CompactionGroup compaction_groups = 2;
 }
 
 message TriggerManualCompactionRequest {
@@ -534,7 +539,6 @@ service HummockManagerService {
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
-  rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);

@@ -401,7 +401,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     hummock_manager
-        .purge_stale(
+        .purge(
             &fragment_manager
                 .list_table_fragments()
                 .await

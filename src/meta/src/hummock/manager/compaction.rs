@@ -109,16 +109,6 @@ where
             .count() as u64
     }
 
-    pub async fn get_compaction_config(
-        &self,
-        compaction_group_id: CompactionGroupId,
-    ) -> CompactionConfig {
-        self.compaction_group(compaction_group_id)
-            .await
-            .expect("compaction group exists")
-            .compaction_config()
-    }
-
     #[named]
     pub async fn list_all_tasks_ids(&self) -> Vec<HummockCompactionTaskId> {
         let compaction = read_lock!(self, compaction).await;

@@ -20,8 +20,8 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, GroupConstruct, GroupDestroy, HummockVersion, HummockVersionDelta, Level,
-    LevelType, OverlappingLevel, SstableInfo,
+    CompactionConfig, GroupConstruct, GroupDestroy, GroupMetaChange, HummockVersion,
+    HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
 use super::StateTableId;
@@ -37,6 +37,7 @@ pub struct GroupDeltasSummary {
     pub insert_table_infos: Vec<SstableInfo>,
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<GroupDestroy>,
+    pub group_meta_changes: Vec<GroupMetaChange>,
 }
 
 pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
@@ -47,6 +48,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
+    let mut group_meta_changes = vec![];
     for group_delta in &group_deltas.group_deltas {
         match group_delta.get_delta_type().unwrap() {
             DeltaType::IntraLevel(intra_level) => {
@@ -68,6 +70,9 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
                 assert!(group_destroy.is_none());
                 group_destroy = Some(destroy_delta.clone());
             }
+            DeltaType::GroupMetaChange(meta_delta) => {
+                group_meta_changes.push(meta_delta.clone());
+            }
         }
     }
 
@@ -79,6 +84,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         insert_table_infos,
         group_construct,
         group_destroy,
+        group_meta_changes,
     }
 }
 
@@ -107,7 +113,7 @@ pub trait HummockVersionUpdateExt {
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
     ) -> Vec<(HummockSstableId, u64, u32)>;
-    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(
@@ -175,13 +181,21 @@ impl HummockVersionExt for HummockVersion {
     }
 }
 
+pub type SstSplitInfo = (
+    HummockSstableId,
+    // divide version
+    u64,
+    // level idx
+    u32,
+);
+
 impl HummockVersionUpdateExt for HummockVersion {
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64, u32)> {
+    ) -> Vec<SstSplitInfo> {
         let mut split_id_vers = vec![];
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
             || !self.levels.contains_key(&parent_group_id)
@@ -195,20 +209,16 @@ impl HummockVersionUpdateExt for HummockVersion {
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
                 let mut insert_table_infos = vec![];
-                for table_info in &mut sub_level.table_infos {
-                    if table_info
+                for sst_info in &mut sub_level.table_infos {
+                    if sst_info
                         .get_table_ids()
                         .iter()
                         .any(|table_id| member_table_ids.contains(table_id))
                     {
-                        table_info.divide_version += 1;
-                        split_id_vers.push((
-                            table_info.get_id(),
-                            table_info.get_divide_version(),
-                            0,
-                        ));
-                        let mut branch_table_info = table_info.clone();
-                        branch_table_info.table_ids = table_info
+                        sst_info.divide_version += 1;
+                        split_id_vers.push((sst_info.get_id(), sst_info.get_divide_version(), 0));
+                        let mut branch_table_info = sst_info.clone();
+                        branch_table_info.table_ids = sst_info
                             .table_ids
                             .drain_filter(|table_id| member_table_ids.contains(table_id))
                             .collect_vec();
@@ -225,20 +235,20 @@ impl HummockVersionUpdateExt for HummockVersion {
         }
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
             let level_idx = level.get_level_idx();
-            for table_info in &mut level.table_infos {
-                if table_info
+            for sst_info in &mut level.table_infos {
+                if sst_info
                     .get_table_ids()
                     .iter()
                     .any(|table_id| member_table_ids.contains(table_id))
                 {
-                    table_info.divide_version += 1;
+                    sst_info.divide_version += 1;
                     split_id_vers.push((
-                        table_info.get_id(),
-                        table_info.get_divide_version(),
+                        sst_info.get_id(),
+                        sst_info.get_divide_version(),
                         level_idx,
                     ));
-                    let mut branch_table_info = table_info.clone();
-                    branch_table_info.table_ids = table_info
+                    let mut branch_table_info = sst_info.clone();
+                    branch_table_info.table_ids = sst_info
                         .table_ids
                         .drain_filter(|table_id| member_table_ids.contains(table_id))
                         .collect_vec();
@@ -250,28 +260,43 @@ impl HummockVersionUpdateExt for HummockVersion {
         split_id_vers
     }
 
-    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
+        let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
-                self.levels.insert(
+                let mut new_levels = build_initial_compaction_group_levels(
                     *compaction_group_id,
-                    <Levels as HummockLevelsExt>::build_initial_levels(
-                        group_construct.get_group_config().unwrap(),
-                    ),
+                    group_construct.get_group_config().unwrap(),
                 );
-                let parent_group_id = group_construct.get_parent_group_id();
-                self.init_with_parent_group(
+                let parent_group_id = group_construct.parent_group_id;
+                new_levels.parent_group_id = parent_group_id;
+                new_levels.member_table_ids = group_construct.table_ids.clone();
+                new_levels.table_id_to_options = group_construct.table_id_to_options.clone();
+                self.levels.insert(*compaction_group_id, new_levels);
+                sst_split_info.extend(self.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
                     &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
-                );
+                ));
             }
             let has_destroy = summary.group_destroy.is_some();
             let levels = self
                 .levels
                 .get_mut(compaction_group_id)
                 .expect("compaction group should exist");
+
+            for group_meta_delta in &summary.group_meta_changes {
+                levels
+                    .member_table_ids
+                    .extend(group_meta_delta.table_ids_add.clone());
+                levels
+                    .member_table_ids
+                    .drain_filter(|t| group_meta_delta.table_ids_remove.contains(t));
+                levels
+                    .table_id_to_options
+                    .extend(group_meta_delta.table_id_to_options_add.clone());
+            }
 
             assert!(
                 self.max_committed_epoch <= version_delta.max_committed_epoch,
@@ -316,6 +341,7 @@ impl HummockVersionUpdateExt for HummockVersion {
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
         self.safe_epoch = version_delta.safe_epoch;
+        sst_split_info
     }
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId> {
@@ -370,7 +396,6 @@ pub trait HummockLevelsExt {
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
     fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary);
-    fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels;
 }
 
 impl HummockLevelsExt for Levels {
@@ -439,26 +464,59 @@ impl HummockLevelsExt for Levels {
                 .sum::<u64>();
         }
     }
+}
 
-    fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels {
-        let mut levels = vec![];
-        for l in 0..compaction_config.get_max_level() {
-            levels.push(Level {
-                level_idx: (l + 1) as u32,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: vec![],
-                total_file_size: 0,
-                sub_level_id: 0,
-            });
-        }
-        Levels {
-            levels,
-            l0: Some(OverlappingLevel {
-                sub_levels: vec![],
-                total_file_size: 0,
-            }),
+pub fn build_initial_compaction_group_levels(
+    group_id: CompactionGroupId,
+    compaction_config: &CompactionConfig,
+) -> Levels {
+    let mut levels = vec![];
+    for l in 0..compaction_config.get_max_level() {
+        levels.push(Level {
+            level_idx: (l + 1) as u32,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos: vec![],
+            total_file_size: 0,
+            sub_level_id: 0,
+        });
+    }
+    Levels {
+        levels,
+        l0: Some(OverlappingLevel {
+            sub_levels: vec![],
+            total_file_size: 0,
+        }),
+        group_id,
+        parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
+        member_table_ids: vec![],
+        table_id_to_options: Default::default(),
+    }
+}
+
+pub fn try_get_compaction_group_id_by_table_id(
+    version: &HummockVersion,
+    table_id: StateTableId,
+) -> Option<CompactionGroupId> {
+    for (group_id, levels) in &version.levels {
+        if levels.member_table_ids.contains(&table_id) {
+            return Some(*group_id);
         }
     }
+    None
+}
+
+/// Gets all compaction group ids.
+pub fn get_compaction_group_ids(version: &HummockVersion) -> Vec<CompactionGroupId> {
+    version.levels.keys().cloned().collect()
+}
+
+/// Gets all member table ids.
+pub fn get_member_table_ids(version: &HummockVersion) -> Vec<StateTableId> {
+    version
+        .levels
+        .iter()
+        .flat_map(|(_, levels)| levels.member_table_ids.clone())
+        .collect()
 }
 
 pub fn new_sub_level(
