@@ -24,26 +24,29 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 - [ ] I have demonstrated that backward compatibility is not broken by breaking changes and created issues to track deprecated features to be removed in the future. (Please refer to the issue)
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 
+## Documentation
+
+- [ ] My PR **DOES NOT** contain user-facing changes.
+
 <!-- 
 
-You can ignore or delete the section below if your PR doesn't contain user-facing changes
+You can ignore or delete the section below if you ticked the checkbox above.
+
+Otherwise, remove the checkbox above and write a release note below.
 
 -->
 
-## Documentation
-
-- [ ] My PR contains user-facing changes!
-
-<details>
-<summary>Click here for Documentation</summary>
+<details><summary>Click here for Documentation</summary>
 
 ### Types of user-facing changes
 
-- [ ] Installation and deployment
-- [ ] Connector (sources & sinks)
-- [ ] SQL commands, functions, and operators
-- [ ] RisingWave cluster configuration changes
-- [ ] Other (please specify in the release note below)
+Please keep the types that apply to your changes, and remove the others.
+
+- Installation and deployment
+- Connector (sources & sinks)
+- SQL commands, functions, and operators
+- RisingWave cluster configuration changes
+- Other (please specify in the release note below)
 
 ### Release note
 

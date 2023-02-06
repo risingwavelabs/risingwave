@@ -18,6 +18,7 @@ queue_rules:
     conditions:
       - "check-success=buildkite/pull-request"
       - "check-failure!=buildkite/docker"
+      - "check-success=task-list-completed"
       - "label=mergify/can-merge"
 
 pull_request_rules:
@@ -28,6 +29,7 @@ pull_request_rules:
       - "#changes-requested-reviews-by=0"
       - "check-success=buildkite/pull-request"
       - "check-failure!=buildkite/docker"
+      - "check-success=task-list-completed"
       - "label=mergify/can-merge"
     actions:
       queue:
