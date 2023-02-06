@@ -461,7 +461,7 @@ mod tests {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec overwrite user provided value.
+        // min_sst_retention_time_sec override user provided value.
         assert_eq!(
             vacuum.env.opts.min_sst_retention_time_sec,
             full_scan_task.sst_retention_time_sec
@@ -479,7 +479,7 @@ mod tests {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec doesn't overwrite user provided value.
+        // min_sst_retention_time_sec doesn't override user provided value.
         assert_eq!(
             vacuum.env.opts.min_sst_retention_time_sec + 1,
             full_scan_task.sst_retention_time_sec
