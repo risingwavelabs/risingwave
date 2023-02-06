@@ -107,7 +107,6 @@ pub struct SstableBuilder<W: SstableWriter> {
     raw_value: BytesMut,
     last_table_id: Option<u32>,
     sstable_id: u64,
-    not_only_visited_by_vnode_fetch: bool,
 
     /// `stale_key_count` counts range_tombstones as well.
     stale_key_count: u64,
@@ -147,6 +146,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 capacity: options.block_capacity,
                 restart_interval: options.restart_interval,
                 compression_algorithm: options.compression_algorithm,
+                not_only_visited_by_vnode_fetch: !is_visited_by_vnode_fetch,
             }),
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
@@ -159,7 +159,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
             range_tombstones: vec![],
             sstable_id,
             filter_key_extractor,
-            not_only_visited_by_vnode_fetch: !is_visited_by_vnode_fetch,
             stale_key_count: 0,
             total_key_count: 0,
             table_stats: Default::default(),
@@ -227,11 +226,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;
 
-        self.block_builder.add(
-            self.raw_key.as_ref(),
-            self.raw_value.as_ref(),
-            self.not_only_visited_by_vnode_fetch,
-        );
+        self.block_builder
+            .add(self.raw_key.as_ref(), self.raw_value.as_ref());
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
 
