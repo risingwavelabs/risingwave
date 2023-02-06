@@ -12,21 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
-mod utils;
+use anyhow::Result;
+use vergen::{vergen, Config, ShaKind};
 
-mod top_n_cache;
-use top_n_cache::TopNCacheTrait;
-
-// `TopN` variants
-mod group_top_n;
-mod group_top_n_appendonly;
-mod top_n_appendonly;
-mod top_n_plain;
-
-pub use group_top_n::GroupTopNExecutor;
-pub use group_top_n_appendonly::AppendOnlyGroupTopNExecutor;
-pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use top_n_cache::{CacheKey, TopNCache};
-pub use top_n_plain::TopNExecutor;
-pub use utils::{create_cache_key_serde, serialize_pk_to_cache_key, CacheKeySerde};
+fn main() -> Result<()> {
+    // Generate the default 'cargo:' instruction output
+    let mut conf = Config::default();
+    *conf.git_mut().sha_kind_mut() = ShaKind::Both;
+    vergen(conf)
+}
