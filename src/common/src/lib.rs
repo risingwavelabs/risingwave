@@ -31,6 +31,7 @@
 #![feature(portable_simd)]
 #![feature(array_chunks)]
 #![allow(incomplete_features)]
+#![feature(const_option_ext)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -62,4 +63,4 @@ pub mod test_prelude {
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA_SHORT");
+pub const GIT_SHA: &str = option_env!("GIT_SHA").unwrap_or("unknown");
