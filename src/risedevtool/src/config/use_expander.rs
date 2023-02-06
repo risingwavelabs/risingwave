@@ -41,7 +41,7 @@ impl UseExpander {
         Ok(Self { template })
     }
 
-    /// Overwrites values in `default` with values from `provided`.
+    /// Overrides values in `default` with values from `provided`.
     fn merge(use_id: &str, default: &yaml::Hash, provided: &yaml::Hash) -> yaml::Hash {
         let mut result = yaml::Hash::new();
         // put `use` as the first element to make the generated yaml more readable.

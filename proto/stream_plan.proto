@@ -506,6 +506,7 @@ message StreamNode {
     DmlNode dml = 127;
     RowIdGenNode row_id_gen = 128;
     NowNode now = 129;
+    GroupTopNNode append_only_group_top_n = 130;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
