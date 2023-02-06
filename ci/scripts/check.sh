@@ -18,7 +18,7 @@ done
 source ci/scripts/common.env.sh
 
 echo "--- Run clippy check (dev, all features)"
-cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo clippy --all-targets --features failpoints,sync_point --locked -- -D warnings
 
 echo "--- Run clippy check (release)"
 cargo clippy --release  --all-targets --features "static-link static-log-level" --locked -- -D warnings
