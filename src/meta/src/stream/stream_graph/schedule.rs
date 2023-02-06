@@ -211,7 +211,7 @@ impl Scheduler {
 
         // Visit the parallel units in a round-robin manner on each worker.
         let mut round_robin = Vec::new();
-        while !parallel_units.is_empty() && round_robin.len() < default_parallelism {
+        while !parallel_units.is_empty() {
             parallel_units.drain_filter(|ps| {
                 if let Some(p) = ps.next() {
                     round_robin.push(p);
@@ -221,6 +221,7 @@ impl Scheduler {
                 }
             });
         }
+        round_robin.truncate(default_parallelism);
 
         if round_robin.len() < default_parallelism {
             bail!(
