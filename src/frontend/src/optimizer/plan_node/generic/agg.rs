@@ -309,7 +309,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::Table(Box::new(state))
                     }
                 }
-                AggKind::StdDev => todo!("stddev placeholder"),
+                AggKind::Stddev => todo!("stddev placeholder"),
             })
             .collect()
     }
@@ -641,7 +641,7 @@ impl PlanAggCall {
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
             }
-            AggKind::StdDev => todo!("stddev placeholder"),
+            AggKind::Stddev => todo!("stddev placeholder"),
         };
         PlanAggCall {
             agg_kind: total_agg_kind,
