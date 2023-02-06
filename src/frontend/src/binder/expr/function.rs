@@ -24,7 +24,7 @@ use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::RW_VERSION;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -505,8 +505,9 @@ impl Binder {
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RW-{}",
-                    RW_VERSION
+                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    RW_VERSION,
+                    GIT_SHA
                 )))),
                 // non-deterministic
                 ("now", now()),

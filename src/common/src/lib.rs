@@ -61,3 +61,5 @@ pub mod test_prelude {
 }
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA_SHORT");
