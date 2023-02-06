@@ -263,7 +263,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
-            let n = self.rng.gen_range(1..=available.len() / 2);
+            let upper_bound = (available.len() + 1) / 2;
+            let n = self.rng.gen_range(1..=upper_bound);
             let group_by_cols = available.drain(..n).collect_vec();
             self.bound_columns = group_by_cols.clone();
             group_by_cols
