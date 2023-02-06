@@ -672,7 +672,7 @@ template:
     # Whether to enable in-memory pure KV state backend
     enable-in-memory-kv-state-backend: false
 
-    # Total available memory to LRU Manager in bytes
+    # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
 
     # Parallelism of tasks per compute node
