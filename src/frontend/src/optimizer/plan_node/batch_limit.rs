@@ -23,7 +23,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::{RequiredDist};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
@@ -50,7 +50,7 @@ impl BatchLimit {
         let logical_partial_limit = LogicalLimit::new(input, new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
         let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_limit.into(), &Order::any())?;
+            .enforce_if_not_satisfies(batch_partial_limit.into(), &self.order())?;
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_limit.into())
     }
