@@ -71,7 +71,9 @@ pub struct MetaNodeOpts {
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    #[clap(long, env = "RW_ADVERTISE_ADDR", required_if_eq("backend", "etcd"))]
+    /// TODO: After host is removed, we require that this parameter must be provided when using
+    /// etcd
+    #[clap(long, env = "RW_ADVERTISE_ADDR")]
     advertise_addr: Option<String>,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]

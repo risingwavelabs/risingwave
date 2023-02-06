@@ -342,18 +342,6 @@ impl DataType {
         }
     }
 
-    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
-    pub fn mem_cmp_eq_value_enc(&self) -> bool {
-        use DataType::*;
-        match self {
-            Boolean | Int16 | Int32 | Int64 => true,
-            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestamptz
-            | Interval | Bytea => false,
-            Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
-            List { datatype } => datatype.mem_cmp_eq_value_enc(),
-        }
-    }
-
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
         Self::Struct(
             StructType {

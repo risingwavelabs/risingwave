@@ -52,7 +52,7 @@ pub struct ComputeNodeOpts {
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, alias = "client_address", env = "RW_ADVERTISE_ADDR", long)]
+    #[clap(long, alias = "client-address", env = "RW_ADVERTISE_ADDR", long)]
     pub advertise_addr: Option<String>,
 
     #[clap(
