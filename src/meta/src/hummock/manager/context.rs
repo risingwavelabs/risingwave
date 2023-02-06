@@ -55,7 +55,7 @@ where
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let (compact_statuses, compact_task_assignment) =
-            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref())?;
+            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref());
         for context_id in context_ids.as_ref() {
             self.compactor_manager
                 .purge_heartbeats_for_context(*context_id);
