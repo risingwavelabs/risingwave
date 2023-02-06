@@ -33,6 +33,7 @@ impl StreamGlobalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -40,16 +41,19 @@ impl StreamGlobalSimpleAgg {
             _ => panic!(),
         };
 
+        // Empty because watermark column(s) must be in group key and global simple agg have no
+        // group key.
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
+
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             dist,
             false,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamGlobalSimpleAgg { base, logical }
     }

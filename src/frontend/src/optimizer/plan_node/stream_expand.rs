@@ -31,7 +31,10 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: LogicalExpand) -> Self {
-        let dist = match logical.input().distribution() {
+        let input = logical.input();
+        let schema = logical.schema().clone();
+
+        let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
@@ -39,15 +42,22 @@ impl StreamExpand {
             Distribution::Broadcast => unreachable!(),
         };
 
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        watermark_columns.extend(
+            input
+                .watermark_columns()
+                .ones()
+                .map(|idx| idx + input.schema().len()),
+        );
+
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
-            logical.schema().clone(),
+            schema,
             logical.base.logical_pk.to_vec(),
             logical.functional_dependency().clone(),
             dist,
-            logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            input.append_only(),
+            watermark_columns,
         );
         StreamExpand { base, logical }
     }
