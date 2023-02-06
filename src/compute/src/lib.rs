@@ -52,7 +52,7 @@ pub struct ComputeNodeOpts {
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, alias = "client_address", env = "RW_ADVERTISE_ADDR", long)]
+    #[clap(long, alias = "client-address", env = "RW_ADVERTISE_ADDR", long)]
     pub advertise_addr: Option<String>,
 
     #[clap(
@@ -75,7 +75,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    /// Total available memory in bytes, used by LRU Manager
+    /// Total available memory for the compute node in bytes. Used by both computing and storage.
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 

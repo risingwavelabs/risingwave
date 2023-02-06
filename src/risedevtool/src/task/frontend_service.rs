@@ -17,6 +17,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
+use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::FrontendConfig;
@@ -65,14 +66,12 @@ impl FrontendService {
                 "Cannot configure node: no meta node found in this configuration."
             ));
         } else {
-            let meta_node = provide_meta_node.last().unwrap();
-            cmd.arg("--meta-addr")
-                .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            if provide_meta_node.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
-                // According to some heruistics, the last etcd node seems always to be elected as
-                // leader. Therefore we ensure compute node can start by using the last one.
-            }
+            cmd.arg("--meta-addr").arg(
+                provide_meta_node
+                    .iter()
+                    .map(|meta_node| format!("http://{}:{}", meta_node.address, meta_node.port))
+                    .join(","),
+            );
         }
 
         Ok(())
