@@ -5,7 +5,7 @@ services:
     image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - compactor-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:6660"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
@@ -42,11 +42,11 @@ services:
     image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - compute-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:5688"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1222"
-      - "--client-address"
+      - "--advertise-addr"
       - "compute-node-0:5688"
       - "--metrics-level"
       - "1"
@@ -124,7 +124,7 @@ services:
     image: "ghcr.io/risingwavelabs/risingwave:latest"
     command:
       - frontend-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:4566"
       - "--meta-addr"
       - "http://meta-node-0:5690"
@@ -181,8 +181,8 @@ services:
       - meta-node
       - "--listen-addr"
       - "0.0.0.0:5690"
-      - "--host"
-      - meta-node-0
+      - "--advertise-addr"
+      - "meta-node-0:5690"
       - "--dashboard-host"
       - "0.0.0.0:5691"
       - "--prometheus-host"

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,8 +44,8 @@ impl MetaNodeService {
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
-            .arg("--host")
-            .arg(config.address.clone())
+            .arg("--advertise-addr")
+            .arg(format!("{}:{}", config.address, config.port))
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",

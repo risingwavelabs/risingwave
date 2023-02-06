@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
 use super::{LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::try_derive_watermark;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
@@ -33,20 +34,31 @@ impl StreamProjectSet {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
+
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        for (expr_idx, expr) in logical.select_list().iter().enumerate() {
+            if let Some(input_idx) = try_derive_watermark(expr) {
+                if input.watermark_columns().contains(input_idx) {
+                    // The first column of ProjectSet is `projected_row_id`.
+                    watermark_columns.insert(expr_idx + 1);
+                }
+            }
+        }
+
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             distribution,
             logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamProjectSet { base, logical }
     }

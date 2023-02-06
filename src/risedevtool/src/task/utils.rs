@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
+use itertools::Itertools;
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig};
 
@@ -27,16 +28,12 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
             ));
         }
         meta_nodes => {
-            cmd.arg("--meta-address").arg(format!(
-                "http://{}:{}",
-                meta_nodes.last().unwrap().address,
-                meta_nodes.last().unwrap().port
-            ));
-            if meta_nodes.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
-                // According to some heruistics, the last etcd node seems always to be elected as
-                // leader. Therefore we ensure compute node can start by using the last one.
-            }
+            cmd.arg("--meta-address").arg(
+                meta_nodes
+                    .iter()
+                    .map(|meta_node| format!("http://{}:{}", meta_node.address, meta_node.port))
+                    .join(","),
+            );
         }
     };
 

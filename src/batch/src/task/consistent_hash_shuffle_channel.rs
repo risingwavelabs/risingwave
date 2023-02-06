@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
+#[derive(Clone)]
 pub struct ConsistentHashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     consistent_hash_info: ConsistentHashInfo,

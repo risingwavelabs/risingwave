@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ use risingwave_pb::batch_plan::UpdateNode;
 
 use super::generic::GenericPlanRef;
 use super::{
-    LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
 };
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -89,6 +90,7 @@ impl ToBatchProst for BatchUpdate {
         NodeBody::Update(UpdateNode {
             exprs,
             table_id: self.logical.table_id().table_id(),
+            returning: self.logical.has_returning(),
         })
     }
 }
@@ -98,5 +100,22 @@ impl ToLocalBatch for BatchUpdate {
         let new_input = RequiredDist::single()
             .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchUpdate {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_update()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

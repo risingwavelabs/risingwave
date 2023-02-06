@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 // Licensed under the Apache License, Version 2.0 (the "License");
 //
 // you may not use this file except in compliance with the License.
@@ -382,6 +382,7 @@ pub(crate) mod tests {
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -545,7 +546,7 @@ pub(crate) mod tests {
             ),
         )
         .into();
-        let batch_exchange_node3: PlanRef = BatchExchange::new(
+        let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
             Distribution::Single,
@@ -584,13 +585,18 @@ pub(crate) mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        worker_node_manager.insert_fragment_mapping(0, vec![]);
+        worker_node_manager.insert_fragment_mapping(0, ParallelUnitMapping::new_single(0));
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::new(worker_node_manager, catalog_reader);
-        fragmenter.split(batch_exchange_node3.clone()).unwrap()
+        let fragmenter = BatchPlanFragmenter::new(
+            worker_node_manager,
+            catalog_reader,
+            batch_exchange_node.clone(),
+        )
+        .unwrap();
+        fragmenter.generate_complete_query().await.unwrap()
     }
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {

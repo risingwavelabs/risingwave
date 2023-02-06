@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+#[cfg(target_os = "linux")]
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
-#[cfg(target_os = "linux")]
-use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
-use tracing;
+
+/// The minimal memory requirement of computing tasks in megabytes.
+pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
+/// The memory reserved for system usage (stack and code segment of processes, allocation overhead,
+/// network buffer, etc.) in megabytes.
+pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
 /// the memory usage.
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
@@ -39,7 +43,9 @@ pub struct GlobalMemoryManager {
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
 impl GlobalMemoryManager {
+    #[cfg(target_os = "linux")]
     const EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
+    #[cfg(target_os = "linux")]
     const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
     pub fn new(
@@ -63,7 +69,10 @@ impl GlobalMemoryManager {
         self.watermark_epoch.clone()
     }
 
+    #[cfg(target_os = "linux")]
     fn set_watermark_time_ms(&self, time_ms: u64) {
+        use std::sync::atomic::Ordering;
+
         let epoch = Epoch::from_physical_time(time_ms).0;
         let watermark_epoch = self.watermark_epoch.as_ref();
         watermark_epoch.store(epoch, Ordering::Relaxed);
@@ -73,6 +82,7 @@ impl GlobalMemoryManager {
     /// Jemalloc is not supported on Windows, because of tikv-jemalloc's own reasons.
     /// See the comments for the macro `enable_jemalloc_on_linux!()`
     #[cfg(not(target_os = "linux"))]
+    #[expect(clippy::unused_async)]
     pub async fn run(self: Arc<Self>, _: Arc<BatchManager>, _: Arc<LocalStreamManager>) {}
 
     /// Memory manager will get memory usage from batch and streaming, and do some actions.
@@ -84,6 +94,9 @@ impl GlobalMemoryManager {
         _batch_mgr: Arc<BatchManager>,
         _stream_mgr: Arc<LocalStreamManager>,
     ) {
+        use std::time::Duration;
+
+        use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
         let mem_threshold_graceful =
             (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;
         let mem_threshold_aggressive = (self.total_memory_available_bytes as f64
@@ -170,6 +183,9 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(cur_total_bytes_used as i64);
+            self.metrics
+                .stream_total_mem_usage
+                .set(_stream_mgr.get_total_mem_val().get());
 
             self.set_watermark_time_ms(watermark_time_ms);
         }

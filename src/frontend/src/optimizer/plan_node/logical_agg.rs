@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,9 @@ use super::generic::{
     ProjectBuilder,
 };
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
-    ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
+    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -788,6 +788,22 @@ impl fmt::Display for LogicalAgg {
     }
 }
 
+impl ExprRewritable for LogicalAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
+    }
+}
+
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let group_key_required_cols = FixedBitSet::from_iter(self.group_key().iter().copied());
@@ -948,7 +964,7 @@ impl ToStream for LogicalAgg {
         // LogicalAgg.
         // Please note that the index of group key need not be changed.
 
-        let mut output_indices = (0..self.schema().len()).into_iter().collect_vec();
+        let mut output_indices = (0..self.schema().len()).collect_vec();
         output_indices
             .iter_mut()
             .skip(self.group_key().len())

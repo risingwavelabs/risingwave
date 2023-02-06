@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,9 +22,6 @@ use crate::error::{ErrorCode, RwError};
 pub enum ArrayError {
     #[error("Prost decode error: {0}")]
     ProstDecode(#[from] prost::DecodeError),
-
-    #[error("Memcomparable error: {0}")]
-    Memcomparable(#[from] memcomparable::Error),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

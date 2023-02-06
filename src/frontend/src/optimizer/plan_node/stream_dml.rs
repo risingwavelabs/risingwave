@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ impl StreamDml {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             append_only,
-            FixedBitSet::with_capacity(input.schema().len()),
+            FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
         );
 
         Self {

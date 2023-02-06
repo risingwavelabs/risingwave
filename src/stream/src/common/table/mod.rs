@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 pub mod state_table;
 
 #[cfg(test)]
-pub mod test_batch_table;
+pub mod test_state_table;
 #[cfg(test)]
-pub mod test_streaming_table;
+pub mod test_storage_table;
+#[cfg(test)]
+mod test_utils;

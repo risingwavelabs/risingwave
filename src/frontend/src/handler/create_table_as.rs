@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::binder::{BoundSetExpr, BoundStatement};
+use crate::binder::BoundStatement;
 use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
@@ -54,16 +55,6 @@ pub async fn handle_create_as(
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
-            // Check if all expressions have an alias
-            if let BoundSetExpr::Select(select) = &query.body {
-                if select.aliases.iter().any(Option::is_none) {
-                    return Err(ErrorCode::BindError(
-                        "An alias must be specified for an expression".to_string(),
-                    )
-                    .into());
-                }
-            }
-
             let mut col_id_gen = ColumnIdGenerator::new_initial();
 
             // Create ColumnCatelog by Field
@@ -88,6 +79,7 @@ pub async fn handle_create_as(
         .into());
     }
 
+    // Override column name if it specified in creaet statement.
     columns.iter().enumerate().for_each(|(idx, column)| {
         column_descs[idx].name = column.name.real_value();
     });
@@ -103,8 +95,11 @@ pub async fn handle_create_as(
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
             None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
         )?;
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, source, table)
     };
 
@@ -115,9 +110,6 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.env().catalog_writer();
-
-    // TODO(Yuanxin): `source` will contain either an external source or nothing. Rewrite
-    // `create_table` accordingly.
     catalog_writer.create_table(source, table, graph).await?;
 
     // Generate insert
@@ -125,7 +117,8 @@ pub async fn handle_create_as(
         table_name,
         columns: vec![],
         source: query,
+        returning: vec![],
     };
 
-    handle_query(handler_args, insert, false).await
+    handle_query(handler_args, insert, vec![]).await
 }

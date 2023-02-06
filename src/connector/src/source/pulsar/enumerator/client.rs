@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,7 +92,6 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let splits = if topic_metadata.partitions > 0 {
             // partitioned topic
             (0..topic_metadata.partitions as i32)
-                .into_iter()
                 .map(|p| PulsarSplit {
                     topic: self.topic.sub_topic(p).unwrap(),
                     start_offset: offset.clone(),

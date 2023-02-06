@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,38 +24,36 @@ import { Fragment, useCallback, useEffect, useState } from "react"
 import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
 import { ActorPoint } from "../lib/layout"
-import { getStreamingJobs, StreamingJob } from "./api/streaming"
+import { getRelations, Relation, relationIsStreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: StreamingJob[]): ActorPoint[] {
+function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
-    if (!r.name.startsWith("__")) {
-      edges.push({
-        id: r.id.toString(),
-        name: r.name,
-        parentIds: r.dependentRelations
-          .filter((r) => relationSet.has(r))
-          .map((r) => r.toString()),
-        order: r.id,
-      })
-    }
+    edges.push({
+      id: r.id.toString(),
+      name: r.name,
+      parentIds: relationIsStreamingJob(r)
+        ? r.dependentRelations
+            .filter((r) => relationSet.has(r))
+            .map((r) => r.toString())
+        : [],
+      order: r.id,
+    })
   }
   return edges
 }
 
 export default function StreamingGraph() {
   const toast = useToast()
-  const [streamingJobList, setStreamingJobList] = useState<StreamingJob[]>()
+  const [streamingJobList, setStreamingJobList] = useState<Relation[]>()
 
   useEffect(() => {
     async function doFetch() {
       try {
-        setStreamingJobList(
-          (await getStreamingJobs()).filter((x) => !x.name.startsWith("__"))
-        )
+        setStreamingJobList(await getRelations())
       } catch (e: any) {
         toast({
           title: "Error Occurred",

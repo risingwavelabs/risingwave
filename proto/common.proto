@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package common;
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message Status {
@@ -62,9 +63,8 @@ message Buffer {
 
 // Vnode mapping for stream fragments. Stores mapping from virtual node to parallel unit id.
 message ParallelUnitMapping {
-  uint32 fragment_id = 1;
-  repeated uint64 original_indices = 2;
-  repeated uint32 data = 3;
+  repeated uint32 original_indices = 1;
+  repeated uint32 data = 2;
 }
 
 message BatchQueryEpoch {

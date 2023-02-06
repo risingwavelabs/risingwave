@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ where
     !too_left && !too_right
 }
 
-pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
+pub fn validate_safe_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
     if epoch < safe_epoch {
         return Err(HummockError::expired_epoch(safe_epoch, epoch));
     }

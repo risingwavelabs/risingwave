@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ pub mod pg_class;
 pub mod pg_collation;
 pub mod pg_database;
 pub mod pg_description;
+pub mod pg_enum;
 pub mod pg_index;
 pub mod pg_keywords;
 pub mod pg_matviews;
@@ -46,6 +47,7 @@ pub use pg_class::*;
 pub use pg_collation::*;
 pub use pg_database::*;
 pub use pg_description::*;
+pub use pg_enum::*;
 pub use pg_index::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
@@ -247,6 +249,10 @@ impl SysCatalogReaderImpl {
     }
 
     pub(crate) fn read_shdescription_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+    pub(crate) fn read_enum_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 

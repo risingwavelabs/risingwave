@@ -1,0 +1,39 @@
+[tasks.gen-java-binding-header]
+description = "Generate the java binding C header file"
+script = '''
+#!/usr/bin/env bash
+set -ex
+cd src/java_binding/java
+javac -h . -cp java-binding/src/main/java/ java-binding/src/main/java/com/risingwave/java/binding/Binding.java
+'''
+
+[tasks.build-java-binding-rust]
+description = "Build the java binding rust code"
+script = '''
+#!/usr/bin/env bash
+set -ex
+cargo build -p risingwave_java_binding
+'''
+
+[tasks.build-java-binding-java]
+description = "Build the java binding java code"
+script = '''
+#!/usr/bin/env bash
+set -ex
+cd src/java_binding/java
+mvn clean install
+'''
+
+[tasks.run-java-binding-demo]
+description = "Run the java binding demo"
+dependencies = [
+    "build-java-binding-rust",
+    "build-java-binding-java"
+]
+script = '''
+#!/usr/bin/env bash
+set -ex
+RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
+source ${JAVA_BINDING_ROOT}/run_demo.sh
+'''

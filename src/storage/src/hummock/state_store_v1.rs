@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ use tracing::log::warn;
 use super::iterator::{
     ConcatIteratorInner, DirectedUserIterator, DirectionEnum, HummockIteratorUnion,
 };
-use super::utils::validate_epoch;
+use super::utils::validate_safe_epoch;
 use super::{
     get_from_order_sorted_uncommitted_data, get_from_sstable_info, hit_sstable_bloom_filter,
     HummockStorageV1, SstableIteratorType,
@@ -103,6 +103,12 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
@@ -118,16 +124,21 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
         }
 
-        let dist_key_hash = read_options
-            .prefix_hint
-            .as_ref()
-            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+            Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+        });
 
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
@@ -155,6 +166,12 @@ impl HummockStorageV1 {
                         )
                         .await?
                         {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
                         }
@@ -191,6 +208,12 @@ impl HummockStorageV1 {
                     )
                     .await?
                     {
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
                         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
@@ -198,6 +221,12 @@ impl HummockStorageV1 {
             }
         }
 
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
@@ -221,7 +250,7 @@ impl HummockStorageV1 {
                 .read_filter(epoch, read_options.table_id, table_key_range);
 
         // Check epoch validity
-        validate_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
+        validate_safe_epoch(read_version.pinned_version.safe_epoch(), epoch)?;
 
         Ok(read_version)
     }
@@ -306,7 +335,7 @@ impl HummockStorageV1 {
         let bloom_filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint));
+            .map(|hint| Sstable::hash_for_bloom_filter(hint, read_options.table_id.table_id()));
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -409,6 +438,15 @@ impl HummockStorageV1 {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
+        let table_id_string = read_options.table_id.to_string();
+        let table_id_label = table_id_string.as_str();
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iterator.is_valid(),
+        );
 
         local_stats.report(
             self.state_store_metrics.as_ref(),
@@ -596,6 +634,11 @@ impl StateStore for HummockStorageV1 {
 
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
+    }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        // Returns Ok directly, since removal of HummockStorageV1 is planned.
+        Ok(())
     }
 }
 

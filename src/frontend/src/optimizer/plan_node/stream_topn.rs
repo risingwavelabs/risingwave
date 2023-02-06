@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -32,19 +33,22 @@ impl StreamTopN {
         assert!(logical.group_key().is_empty());
         assert!(logical.limit() > 0);
         let ctx = logical.base.ctx.clone();
+        let input = logical.input();
+        let schema = input.schema().clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
 
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
-            logical.input().logical_pk().to_vec(),
+            schema,
+            input.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
             dist,
             false,
-            logical.input().watermark_columns().clone(),
+            watermark_columns,
         );
         StreamTopN { base, logical }
     }

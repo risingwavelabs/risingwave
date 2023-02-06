@@ -1,6 +1,6 @@
 # expect fail with invalid broker address
 statement error
-create materialized source s1 (v1 int, v2 varchar) with (
+create table s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = '127.0.0.1:9092',
@@ -8,7 +8,7 @@ create materialized source s1 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
-create materialized source s1 (v1 int, v2 varchar) with (
+create table s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -19,7 +19,7 @@ statement ok
 select * from s1;
 
 statement ok
-create materialized source s2 (v1 int, v2 varchar) with (
+create table s2 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_2_partition_topic',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -30,7 +30,7 @@ statement ok
 select * from s2;
 
 statement ok
-create materialized source s3 (v1 int, v2 varchar) with (
+create table s3 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_3_partition_topic',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -41,7 +41,7 @@ statement ok
 select * from s3;
 
 statement ok
-create materialized source s4 (v1 int, v2 varchar) with (
+create table s4 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -52,7 +52,7 @@ statement ok
 select * from s4;
 
 statement ok
-create materialized source s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
+create table s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -63,7 +63,7 @@ statement ok
 select * from s5;
 
 statement ok
-create materialized source s6 (v1 int, v2 varchar) with (
+create table s6 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_mv_topic',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -77,8 +77,8 @@ statement ok
 create sink si
 from
   s5 with (
-    kafka.brokers = '127.0.0.1:29092',
-    kafka.topic = 'sink_target',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'sink_target',
     format = 'append_only',
     connector = 'kafka'
   )
@@ -89,7 +89,7 @@ show sinks
 si
 
 statement ok
-create materialized source s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
+create table s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'sink_target',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -101,7 +101,7 @@ select * from s7
 
 # we cannot create debezium source without pk
 statement error
-create materialized source s8 (
+create table s8 (
   id integer,
   first_name varchar,
   last_name varchar,
@@ -113,7 +113,7 @@ create materialized source s8 (
 ) row format debezium_json
 
 statement ok
-create materialized source s8 (
+create table s8 (
   id integer,
   first_name varchar,
   last_name varchar,
@@ -126,7 +126,7 @@ create materialized source s8 (
 ) row format debezium_json
 
 statement ok
-create materialized source s9 with (
+create table s9 with (
   connector = 'kafka', 
   topic = 'avro_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -134,7 +134,7 @@ create materialized source s9 with (
 ) row format avro message 'test_student' row schema location 'file:///risingwave/avro-simple-schema.avsc'
 
 statement ok
-create materialized source s10 with (
+create table s10 with (
   connector = 'kafka', 
   topic = 'avro_c_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -142,7 +142,7 @@ create materialized source s10 with (
 ) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
 statement ok
-create materialized source s11 with (
+create table s11 with (
   connector = 'kafka', 
   topic = 'proto_c_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -151,7 +151,7 @@ create materialized source s11 with (
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
 statement ok
-CREATE materialized SOURCE s12(
+CREATE TABLE s12(
     id int,
     code string, 
     timestamp bigint, 
@@ -166,7 +166,7 @@ ROW format JSON;
 
 # we cannot create debezium source without pk
 statement error
-create materialized source s13 (
+create table s13 (
   id integer,
   name varchar,
   is_adult integer,
@@ -178,7 +178,7 @@ create materialized source s13 (
 ) row format maxwell;
 
 statement ok
-create materialized source s13 (
+create table s13 (
   id integer,
   name varchar,
   is_adult integer,
@@ -191,7 +191,7 @@ create materialized source s13 (
 ) row format maxwell;
 
 statement ok
-create materialized source s14 (
+create table s14 (
   id integer,
   name varchar,
   is_adult bool,
@@ -206,7 +206,7 @@ create materialized source s14 (
 ) row format CANAL_JSON;
 
 statement ok
-create materialized source s15 (
+create table s15 (
   v1 int,
   v2 int,
   PRIMARY KEY (v1)
@@ -217,7 +217,7 @@ create materialized source s15 (
 ) row format CANAL_JSON;
 
 statement ok
-create materialized source s16 (v1 int, v2 varchar) with (
+create table s16 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -256,7 +256,7 @@ select * from s1
 4 4444
 
 statement ok
-drop source s1
+drop table s1
 
 query IT rowsort
 select * from s2
@@ -267,7 +267,7 @@ select * from s2
 4 4444
 
 statement ok
-drop source s2
+drop table s2
 
 query IT rowsort
 select * from s3
@@ -278,7 +278,7 @@ select * from s3
 4 4444
 
 statement ok
-drop source s3
+drop table s3
 
 query IT rowsort
 select * from s4
@@ -289,7 +289,7 @@ select * from s4
 4 4444
 
 statement ok
-drop source s4
+drop table s4
 
 query I
 select count(*) from s5
@@ -305,10 +305,10 @@ statement ok
 drop sink si
 
 statement ok
-drop source s5
+drop table s5
 
 statement ok
-drop source s7
+drop table s7
 
 query I
 select count(*) from s6
@@ -414,34 +414,34 @@ statement ok
 drop materialized view source_mv2
 
 statement ok
-drop source s6
+drop table s6
 
 statement ok
-drop source s8
+drop table s8
 
 statement ok
-drop source s9
+drop table s9
 
 statement ok
-drop source s10
+drop table s10
 
 statement ok
-drop source s11
+drop table s11
 
 statement ok
-drop source s12
+drop table s12
 
 statement ok
-drop source s13
+drop table s13
 
 statement ok
-drop source s14
+drop table s14
 
 statement ok
-drop source s15
+drop table s15
 
 statement ok
-drop source s16
+drop table s16
 
 statement ok
 drop source s17

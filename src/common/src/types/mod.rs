@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use crate::error::BoxedError;
 mod native_type;
 mod ops;
 mod scalar_impl;
+mod successor;
 
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -37,6 +38,7 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
+pub use successor::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
@@ -340,18 +342,6 @@ impl DataType {
         }
     }
 
-    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
-    pub fn mem_cmp_eq_value_enc(&self) -> bool {
-        use DataType::*;
-        match self {
-            Boolean | Int16 | Int32 | Int64 => true,
-            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestamptz
-            | Interval | Bytea => false,
-            Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
-            List { datatype } => datatype.mem_cmp_eq_value_enc(),
-        }
-    }
-
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
         Self::Struct(
             StructType {
@@ -430,11 +420,6 @@ pub trait Scalar:
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
 pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRefType<'_>> {
     scalar.as_ref().map(|x| x.as_scalar_ref())
-}
-
-/// Convert an `Option<ScalarRef>` to corresponding `Option<Scalar>`.
-pub fn option_to_owned_scalar<S: Scalar>(scalar: &Option<S::ScalarRefType<'_>>) -> Option<S> {
-    scalar.map(|x| x.to_owned_scalar())
 }
 
 /// `ScalarRef` is a trait over all possible references in the evaluation
@@ -807,7 +792,6 @@ macro_rules! scalar_impl_hash {
             }
         }
 
-        #[expect(clippy::derive_hash_xor_eq)]
         impl Hash for ScalarImpl {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {
@@ -906,17 +890,20 @@ impl ScalarImpl {
             Ty::Time => Self::NaiveTime({
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
-                NaiveTimeWrapper::with_secs_nano(secs, nano)?
+                NaiveTimeWrapper::with_secs_nano(secs, nano)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Timestamp => Self::NaiveDateTime({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
-                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
+                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = i32::deserialize(de)?;
-                NaiveDateWrapper::with_days(days)?
+                NaiveDateWrapper::with_days(days)
+                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),

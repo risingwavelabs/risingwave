@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
@@ -24,16 +25,27 @@ use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::try_match_expand;
 
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::monitor::SourceMetrics;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceStream, Column, ConnectorState, SourceMessage, SplitImpl, SplitReader, MAX_CHUNK_SIZE,
+    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReaderV2, MAX_CHUNK_SIZE,
 };
+
+impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
 
 pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
     split: PulsarSplit,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -79,15 +91,17 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
 }
 
 #[async_trait]
-impl SplitReader for PulsarSplitReader {
+impl SplitReaderV2 for PulsarSplitReader {
     type Properties = PulsarProperties;
 
     async fn new(
         props: PulsarProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        let splits = state.ok_or_else(|| anyhow!("no default state for reader"))?;
         ensure!(splits.len() == 1, "only support single split");
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
 
@@ -140,18 +154,22 @@ impl SplitReader for PulsarSplitReader {
         Ok(Self {
             pulsar,
             consumer,
+            split_id: split.id(),
             split,
+            parser_config,
+            metrics,
+            source_info,
         })
     }
 
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
 impl PulsarSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(self) {
+    pub(crate) async fn into_data_stream(self) {
         #[for_await]
         for msgs in self.consumer.ready_chunks(MAX_CHUNK_SIZE) {
             let mut res = Vec::with_capacity(msgs.len());

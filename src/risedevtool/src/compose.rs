@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -264,7 +264,11 @@ impl Compose for FrontendConfig {
 impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
-        CompactorService::apply_command_args(&mut command, self)?;
+        CompactorService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");

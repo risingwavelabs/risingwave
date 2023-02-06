@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
-    BatchValues, ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream,
+    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
+    ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -73,6 +73,29 @@ impl fmt::Display for LogicalValues {
             .field("rows", &self.rows)
             .field("schema", &self.schema())
             .finish()
+    }
+}
+
+impl ExprRewritable for LogicalValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.rows = new
+            .rows
+            .iter()
+            .map(|exprs| {
+                exprs
+                    .iter()
+                    .map(|e| r.rewrite_expr(e.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+            .into();
+        new.base = new.base.clone_with_new_plan_id();
+        new.into()
     }
 }
 

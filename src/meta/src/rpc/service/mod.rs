@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ pub mod ddl_service;
 pub mod health_service;
 pub mod heartbeat_service;
 pub mod hummock_service;
-pub mod leader_service;
+pub mod meta_member_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod stream_service;

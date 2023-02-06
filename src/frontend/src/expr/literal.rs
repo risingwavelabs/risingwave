@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{literal_type_match, DataType, Datum, ScalarImpl};
+use risingwave_common::types::{literal_type_match, DataType, Datum};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::expr::expr_node::RexNode;
 
@@ -36,12 +36,28 @@ impl std::fmt::Debug for Literal {
         } else {
             match &self.data {
                 None => write!(f, "null"),
-                // Add single quotation marks for string and interval literals
-                Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
-                Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
-                Some(ScalarImpl::Bool(v)) => write!(f, "{}", v),
-                Some(ScalarImpl::List(v)) => write!(f, "{}", display_for_explain(v)),
-                Some(v) => write!(f, "{}", v.as_scalar_ref_impl().to_text()),
+                Some(v) => match self.data_type {
+                    DataType::Boolean => write!(f, "{}", v.as_bool()),
+                    DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Decimal
+                    | DataType::Float32
+                    | DataType::Float64 => write!(f, "{}", v.as_scalar_ref_impl().to_text()),
+                    DataType::Varchar
+                    | DataType::Bytea
+                    | DataType::Date
+                    | DataType::Timestamp
+                    | DataType::Timestamptz
+                    | DataType::Time
+                    | DataType::Interval
+                    | DataType::Struct(_) => write!(
+                        f,
+                        "'{}'",
+                        v.as_scalar_ref_impl().to_text_with_type(&self.data_type)
+                    ),
+                    DataType::List { .. } => write!(f, "{}", display_for_explain(v.as_list())),
+                },
             }?;
             write!(f, ":{:?}", self.data_type)
         }
