@@ -28,6 +28,7 @@ use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_pb::hummock::{version_update_payload, SstableInfo};
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::watch;
@@ -149,6 +150,7 @@ impl HummockStorage {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         options: Arc<StorageConfig>,
+        system_params: Arc<SystemParams>,
         sstable_store: SstableStoreRef,
         backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -190,6 +192,7 @@ impl HummockStorage {
 
         let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
+            system_params,
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
@@ -319,12 +322,14 @@ impl HummockStorage {
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
         options: Arc<StorageConfig>,
+        system_params: Arc<SystemParams>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
     ) -> HummockResult<Self> {
         Self::new(
             options,
+            system_params,
             sstable_store,
             BackupReader::unused(),
             hummock_meta_client,
@@ -338,6 +343,10 @@ impl HummockStorage {
 
     pub fn storage_config(&self) -> &Arc<StorageConfig> {
         &self.context.storage_config
+    }
+
+    pub fn system_params(&self) -> &Arc<SystemParams> {
+        &self.context.system_params
     }
 
     pub fn version_reader(&self) -> &HummockVersionReader {
@@ -522,8 +531,10 @@ pub struct HummockStorageV1 {
 
 impl HummockStorageV1 {
     /// Creates a [`HummockStorageV1`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         options: Arc<StorageConfig>,
+        system_params: Arc<SystemParams>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
@@ -567,6 +578,7 @@ impl HummockStorageV1 {
 
         let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
+            system_params,
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),

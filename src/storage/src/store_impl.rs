@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
+use risingwave_pb::meta::SystemParams;
 
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
@@ -457,6 +458,7 @@ impl StateStoreImpl {
         s: &str,
         file_cache_dir: &str,
         rw_config: &RwConfig,
+        system_params: &SystemParams,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
@@ -466,6 +468,7 @@ impl StateStoreImpl {
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
         let config = Arc::new(rw_config.storage.clone());
+        let system_params = Arc::new(system_params.clone());
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
 
@@ -531,6 +534,7 @@ impl StateStoreImpl {
                     let backup_reader = BackupReader::new(backup_store);
                     let inner = HummockStorage::new(
                         config.clone(),
+                        system_params,
                         sstable_store,
                         backup_reader,
                         hummock_meta_client.clone(),
@@ -545,6 +549,7 @@ impl StateStoreImpl {
                 } else {
                     let inner = HummockStorageV1::new(
                         config.clone(),
+                        system_params,
                         sstable_store,
                         hummock_meta_client.clone(),
                         notification_client,

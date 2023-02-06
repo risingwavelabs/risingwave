@@ -31,6 +31,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient, VerifyParams};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -330,7 +331,7 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let (meta_client, _) = MetaClient::register_new(
+    let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::RiseCtl,
         &advertise_addr,
@@ -362,8 +363,13 @@ async fn start_replay(
 
     // Creates a hummock state store *after* we reset the hummock version
     let storage_config = Arc::new(config.storage.clone());
-    let hummock =
-        create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
+    let hummock = create_hummock_store_with_metrics(
+        &meta_client,
+        storage_config.clone(),
+        &system_params,
+        &opts,
+    )
+    .await?;
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
@@ -690,6 +696,7 @@ struct StorageMetrics {
 pub async fn create_hummock_store_with_metrics(
     meta_client: &MetaClient,
     storage_config: Arc<StorageConfig>,
+    system_params: &SystemParams,
     opts: &CompactionTestOpts,
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
     let metrics = StorageMetrics {
@@ -708,6 +715,7 @@ pub async fn create_hummock_store_with_metrics(
         &opts.state_store,
         "",
         &rw_config,
+        system_params,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),

@@ -43,6 +43,7 @@ pub(crate) mod tests {
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::{MemStore, MetaStore};
     use risingwave_pb::hummock::{HummockVersion, TableOption};
+    use risingwave_pb::meta::SystemParams;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -73,14 +74,22 @@ pub(crate) mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
+            ..Default::default()
+        });
+        let system_params = Arc::new(SystemParams {
+            sstable_size_mb: 1,
+            block_size_kb: 1,
+            bloom_false_positive: 0.1,
+            data_directory: remote_dir,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
 
         let hummock = GlobalHummockStorage::for_test(
             options,
+            system_params,
             sstable_store,
             hummock_meta_client.clone(),
             notification_client,
@@ -107,14 +116,22 @@ pub(crate) mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
+            ..Default::default()
+        });
+        let system_params = Arc::new(SystemParams {
+            sstable_size_mb: 1,
+            block_size_kb: 1,
+            bloom_false_positive: 0.1,
+            data_directory: remote_dir,
             ..Default::default()
         });
         let sstable_store = mock_sstable_store();
 
         GlobalHummockStorage::for_test(
             options,
+            system_params,
             sstable_store,
             hummock_meta_client.clone(),
             notification_client,
@@ -162,6 +179,7 @@ pub(crate) mod tests {
     ) -> CompactorContext {
         get_compactor_context_with_filter_key_extractor_manager_impl(
             storage.storage_config().clone(),
+            storage.system_params().clone(),
             storage.sstable_store(),
             hummock_meta_client,
             filter_key_extractor_manager,
@@ -170,12 +188,14 @@ pub(crate) mod tests {
 
     fn get_compactor_context_with_filter_key_extractor_manager_impl(
         options: Arc<StorageConfig>,
+        system_params: Arc<SystemParams>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         CompactorContext {
             storage_config: options.clone(),
+            system_params,
             sstable_store,
             hummock_meta_client: hummock_meta_client.clone(),
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
@@ -406,7 +426,7 @@ pub(crate) mod tests {
             .sstable(output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        let target_table_size = storage.storage_config().sstable_size_mb * (1 << 20);
+        let target_table_size = storage.system_params().sstable_size_mb * (1 << 20);
 
         assert!(
             table.value().meta.estimated_size > target_table_size,
@@ -650,6 +670,7 @@ pub(crate) mod tests {
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
             global_storage.storage_config().clone(),
+            global_storage.system_params().clone(),
             global_storage.sstable_store(),
             &hummock_meta_client,
             filter_key_extractor_manager.clone(),

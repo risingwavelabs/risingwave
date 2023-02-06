@@ -30,6 +30,7 @@ use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::HummockVersion;
+use risingwave_pb::meta::SystemParams;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -48,7 +49,8 @@ use risingwave_storage::storage_value::StorageValue;
 use crate::test_utils::prepare_first_valid_version;
 
 pub async fn prepare_local_version_manager(
-    opt: Arc<StorageConfig>,
+    storage_config: Arc<StorageConfig>,
+    system_params: Arc<SystemParams>,
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
@@ -65,15 +67,16 @@ pub async fn prepare_local_version_manager(
 
     let sstable_id_manager = Arc::new(SstableIdManager::new(
         hummock_meta_client.clone(),
-        opt.sstable_id_remote_fetch_number,
+        storage_config.sstable_id_remote_fetch_number,
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     update_filter_key_extractor_for_table_ids(&filter_key_extractor_manager, &[0]);
 
-    let buffer_tracker = BufferTracker::from_storage_config(&opt);
+    let buffer_tracker = BufferTracker::from_storage_config(&storage_config);
     let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
-        opt.clone(),
+        storage_config,
+        system_params,
         sstable_store,
         hummock_meta_client,
         Arc::new(CompactorMetrics::unused()),
@@ -87,10 +90,18 @@ pub async fn prepare_local_version_manager(
 
 #[tokio::test]
 async fn test_update_pinned_version() {
-    let opt = Arc::new(default_config_for_test());
+    let (storage_config, system_params) = default_config_for_test();
+    let storage_config = Arc::new(storage_config);
+    let system_params = Arc::new(system_params);
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager =
-        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
+    let local_version_manager = prepare_local_version_manager(
+        storage_config,
+        system_params,
+        env,
+        hummock_manager_ref,
+        worker_node,
+    )
+    .await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();
@@ -236,13 +247,20 @@ async fn test_update_pinned_version() {
 
 #[tokio::test]
 async fn test_update_uncommitted_ssts() {
-    let mut opt = default_config_for_test();
-    opt.share_buffers_sync_parallelism = 2;
-    opt.sstable_size_mb = 1;
-    let opt = Arc::new(opt);
+    let (mut storage_config, mut system_params) = default_config_for_test();
+    storage_config.share_buffers_sync_parallelism = 2;
+    system_params.sstable_size_mb = 1;
+    let storage_config = Arc::new(storage_config);
+    let system_params = Arc::new(system_params);
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager =
-        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
+    let local_version_manager = prepare_local_version_manager(
+        storage_config,
+        system_params,
+        env,
+        hummock_manager_ref,
+        worker_node,
+    )
+    .await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let max_commit_epoch = pinned_version.max_committed_epoch();
@@ -428,10 +446,18 @@ async fn test_update_uncommitted_ssts() {
 
 #[tokio::test]
 async fn test_clear_shared_buffer() {
-    let opt = Arc::new(default_config_for_test());
+    let (storage_config, system_params) = default_config_for_test();
+    let storage_config = Arc::new(storage_config);
+    let system_params = Arc::new(system_params);
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager =
-        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
+    let local_version_manager = prepare_local_version_manager(
+        storage_config,
+        system_params,
+        env,
+        hummock_manager_ref,
+        worker_node,
+    )
+    .await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_max_commit_epoch = pinned_version.max_committed_epoch();
@@ -470,10 +496,18 @@ async fn test_clear_shared_buffer() {
 
 #[tokio::test]
 async fn test_sst_gc_watermark() {
-    let opt = Arc::new(default_config_for_test());
+    let (storage_config, system_params) = default_config_for_test();
+    let storage_config = Arc::new(storage_config);
+    let system_params = Arc::new(system_params);
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager =
-        prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
+    let local_version_manager = prepare_local_version_manager(
+        storage_config,
+        system_params,
+        env,
+        hummock_manager_ref,
+        worker_node,
+    )
+    .await;
 
     let pinned_version = local_version_manager.get_pinned_version();
     let initial_version_id = pinned_version.id();

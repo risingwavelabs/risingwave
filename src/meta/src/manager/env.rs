@@ -94,6 +94,21 @@ pub struct MetaOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+
+    /// Target size of the Sstable.
+    pub sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    pub block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    pub bloom_false_positive: f64,
+
+    /// State store url.
+    pub state_store: String,
+
+    /// Remote directory for storing data and metadata objects.
+    pub data_directory: String,
 }
 
 impl MetaOpts {
@@ -116,6 +131,11 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
+            sstable_size_mb: 256,
+            block_size_kb: 64,
+            bloom_false_positive: 0.001,
+            state_store: "hummock+memory".to_string(),
+            data_directory: "hummock_001".to_string(),
         }
     }
 }

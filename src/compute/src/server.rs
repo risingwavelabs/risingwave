@@ -98,6 +98,8 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    let system_params = Arc::new(system_params);
+
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
 
@@ -125,9 +127,10 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &config.storage.state_store,
+        &system_params.state_store,
         &config.storage.file_cache.dir,
         &config,
+        &system_params,
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
@@ -159,6 +162,7 @@ pub async fn compute_node_serve(
             ));
             let compactor_context = Arc::new(CompactorContext {
                 storage_config,
+                system_params: system_params.clone(),
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),

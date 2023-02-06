@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
@@ -25,6 +24,7 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::meta::SystemParams;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -51,14 +51,14 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
-impl From<&StorageConfig> for SstableBuilderOptions {
-    fn from(options: &StorageConfig) -> SstableBuilderOptions {
-        let capacity = (options.sstable_size_mb as usize) * (1 << 20);
+impl From<&SystemParams> for SstableBuilderOptions {
+    fn from(params: &SystemParams) -> SstableBuilderOptions {
+        let capacity = (params.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
-            block_capacity: (options.block_size_kb as usize) * (1 << 10),
+            block_capacity: (params.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: options.bloom_false_positive,
+            bloom_false_positive: params.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
         }
     }

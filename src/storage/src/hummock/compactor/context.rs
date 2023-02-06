@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
@@ -28,8 +29,12 @@ use crate::monitor::CompactorMetrics;
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {
-    /// Storage configurations.
+    // TODO: should decouple it from config schema
+    /// Local storage configurations.
     pub storage_config: Arc<StorageConfig>,
+
+    /// Global system parameters.
+    pub system_params: Arc<SystemParams>,
 
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -57,8 +62,10 @@ pub struct CompactorContext {
 }
 
 impl CompactorContext {
+    #[allow(clippy::too_many_arguments)]
     pub fn new_local_compact_context(
         storage_config: Arc<StorageConfig>,
+        system_params: Arc<SystemParams>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
@@ -78,6 +85,7 @@ impl CompactorContext {
         let memory_limiter = MemoryLimiter::unlimit();
         Self {
             storage_config,
+            system_params,
             hummock_meta_client,
             sstable_store,
             compactor_metrics,

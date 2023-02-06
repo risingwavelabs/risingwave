@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::{RwConfig, StorageConfig};
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -101,6 +102,7 @@ For `./risedev apply-compose-deploy` users,
             storage: config.clone(),
             ..Default::default()
         };
+        let system_params = SystemParams::default();
 
         tracing::info!("using Hummock config: {:#?}", config);
 
@@ -116,6 +118,7 @@ For `./risedev apply-compose-deploy` users,
             &self.hummock_url,
             "",
             &rw_config,
+            &system_params,
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
                 metrics.hummock_metrics.clone(),

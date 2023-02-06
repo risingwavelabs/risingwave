@@ -39,7 +39,9 @@ async fn test_failpoints_state_store_read_upload() {
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let (storage_config, system_params) = default_config_for_test();
+    let storage_config = Arc::new(storage_config);
+    let system_params = Arc::new(system_params);
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -48,7 +50,8 @@ async fn test_failpoints_state_store_read_upload() {
     ));
 
     let hummock_storage = HummockStorage::for_test(
-        hummock_options.clone(),
+        storage_config,
+        system_params,
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),

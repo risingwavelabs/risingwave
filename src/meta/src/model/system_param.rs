@@ -133,7 +133,7 @@ impl MetadataModel for SystemParams {
         Ok(store.txn(txn).await?)
     }
 
-    async fn delete<S>(store: &S, _key: &Self::KeyType) -> MetadataModelResult<()>
+    async fn delete<S>(_store: &S, _key: &Self::KeyType) -> MetadataModelResult<()>
     where
         S: MetaStore,
     {
@@ -168,7 +168,7 @@ fn system_param_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> MetadataModelResult<Sys
             BLOOM_FALSE_POSITIVE_KEY => ret.bloom_false_positive = v.parse().unwrap(),
             STATE_STORE_KEY => ret.state_store = v,
             DATA_DIRECTORY_KEY => ret.data_directory = v,
-            BACKUP_STORAGE_URL => ret.backup_storage_url = v,
+            BACKUP_STORAGE_URL_KEY => ret.backup_storage_url = v,
             BACKUP_STORAGE_DIRECTORY_KEY => ret.backup_storage_directory = v,
             _ => {
                 return Err(MetadataModelError::internal(format!(

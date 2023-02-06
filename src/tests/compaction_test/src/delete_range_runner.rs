@@ -38,6 +38,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroup, TableOption};
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
@@ -172,7 +173,13 @@ async fn compaction_test(
         .await?;
 
     let config = Arc::new(storage_config);
-
+    let system_params = Arc::new(SystemParams {
+        sstable_size_mb: 256,
+        block_size_kb: 1024,
+        bloom_false_positive: 0.001,
+        data_directory: "hummock_001".to_string(),
+        ..Default::default()
+    });
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
@@ -185,7 +192,7 @@ async fn compaction_test(
     .await;
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
-        config.data_directory.to_string(),
+        system_params.data_directory.to_string(),
         config.block_cache_capacity_mb * (1 << 20),
         config.meta_cache_capacity_mb * (1 << 20),
         TieredCache::none(),
@@ -193,6 +200,7 @@ async fn compaction_test(
 
     let store = HummockStorage::new(
         config.clone(),
+        system_params.clone(),
         sstable_store.clone(),
         BackupReader::unused(),
         meta_client.clone(),
@@ -219,6 +227,7 @@ async fn compaction_test(
 
     let (compactor_thrd, compactor_shutdown_tx) = run_compactor_thread(
         config,
+        system_params,
         sstable_store,
         meta_client.clone(),
         filter_key_extractor_manager,
@@ -574,6 +583,7 @@ impl CheckState for DeleteRangeState {
 
 fn run_compactor_thread(
     config: Arc<StorageConfig>,
+    system_params: Arc<SystemParams>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
@@ -585,6 +595,7 @@ fn run_compactor_thread(
 ) {
     let compactor_context = Arc::new(CompactorContext {
         storage_config: config,
+        system_params,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
         compactor_metrics,

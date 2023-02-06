@@ -443,10 +443,6 @@ async fn test_state_store_sync_inner(
     hummock_storage: impl HummockStateStoreTestTrait,
     _meta_client: Arc<MockHummockMetaClient>,
 ) {
-    let mut config = default_config_for_test();
-    config.shared_buffer_capacity_mb = 64;
-    config.write_conflict_detection_enabled = false;
-
     let mut epoch: HummockEpoch = hummock_storage.get_pinned_version().max_committed_epoch() + 1;
 
     // ingest 16B batch
@@ -539,7 +535,9 @@ async fn test_state_store_sync_inner(
 #[ignore]
 async fn test_reload_storage() {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let (storage_config, system_params) = default_config_for_test();
+    let storage_config = Arc::new(storage_config);
+    let system_params = Arc::new(system_params);
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -549,7 +547,8 @@ async fn test_reload_storage() {
 
     // TODO: may also test for v2 when the unit test is enabled.
     let hummock_storage = HummockStorageV1::new(
-        hummock_options.clone(),
+        storage_config.clone(),
+        system_params.clone(),
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(
@@ -602,7 +601,8 @@ async fn test_reload_storage() {
     // Mock something happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
     let hummock_storage = HummockStorage::for_test(
-        hummock_options.clone(),
+        storage_config,
+        system_params,
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),

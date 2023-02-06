@@ -56,7 +56,7 @@ pub async fn compactor_serve(
     );
 
     // Register to the cluster.
-    let (meta_client, _) = MetaClient::register_new(
+    let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
@@ -85,7 +85,7 @@ pub async fn compactor_serve(
     let storage_config = Arc::new(config.storage);
     let object_store = Arc::new(
         parse_remote_object_store(
-            storage_config
+            system_params
                 .state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
@@ -97,7 +97,7 @@ pub async fn compactor_serve(
     );
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
-        storage_config.data_directory.to_string(),
+        system_params.data_directory.to_string(),
         1 << 20, // set 1MB memory to avoid panic.
         storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
@@ -124,6 +124,7 @@ pub async fn compactor_serve(
     ));
     let compactor_context = Arc::new(CompactorContext {
         storage_config,
+        system_params: Arc::new(system_params),
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
         compactor_metrics,

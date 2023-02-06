@@ -174,7 +174,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
 
-    let sstable_size = (context.storage_config.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.system_params.sstable_size_mb as u64) << 20;
     if compaction_size > sstable_size * 2 {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
