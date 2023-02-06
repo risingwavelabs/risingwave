@@ -122,6 +122,41 @@ pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKEND", arg_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
+
+    /// Target size of the Sstable.
+    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
+    #[override_opts(path = storage.sstable_size_mb)]
+    sstable_size_mb: Option<u32>,
+
+    /// Size of each block in bytes in SST.
+    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
+    #[override_opts(path = storage.block_size_kb)]
+    block_size_kb: Option<u32>,
+
+    /// False positive probability of bloom filter.
+    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
+    #[override_opts(path = storage.bloom_false_positive)]
+    bloom_false_positive: Option<f64>,
+
+    /// State store url.
+    #[clap(long, env = "RW_STATE_STORE")]
+    #[override_opts(path = storage.state_store)]
+    state_store: Option<String>,
+
+    /// Remote directory for storing data and metadata objects.
+    #[clap(long, env = "RW_DATA_DIRECTORY")]
+    #[override_opts(path = storage.data_directory)]
+    data_directory: Option<String>,
+
+    /// Remote storage url for storing snapshots.
+    #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
+    #[override_opts(path = backup.storage_url)]
+    backup_storage_url: Option<String>,
+
+    /// Remote directory for storing snapshots.
+    #[clap(long, env = "RW_STORAGE_DIRECTORY")]
+    #[override_opts(path = backup.storage_directory)]
+    backup_storage_directory: Option<String>,
 }
 
 use std::future::Future;
