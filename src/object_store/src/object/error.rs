@@ -18,6 +18,7 @@ use std::marker::{Send, Sync};
 
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
+use tokio::sync::oneshot::error::RecvError;
 
 #[derive(Error, Debug)]
 enum ObjectErrorInner {
@@ -102,6 +103,12 @@ impl From<opendal::Error> for ObjectError {
 impl From<io::Error> for ObjectError {
     fn from(e: io::Error) -> Self {
         ObjectErrorInner::Opendal(e.into()).into()
+    }
+}
+
+impl From<RecvError> for ObjectError {
+    fn from(e: RecvError) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
     }
 }
 

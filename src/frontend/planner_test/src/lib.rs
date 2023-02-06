@@ -441,7 +441,8 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp = explain::handle_explain(handler_args, *statement, options, analyze)?;
+                    let rsp =
+                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
 
                     let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {

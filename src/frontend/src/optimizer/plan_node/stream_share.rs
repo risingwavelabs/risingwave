@@ -46,7 +46,6 @@ impl StreamShare {
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
             logical.input().watermark_columns().clone(),
         );
         StreamShare { base, logical }
@@ -66,6 +65,12 @@ impl PlanTreeNodeUnary for StreamShare {
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.logical.clone_with_input(input))
+    }
+}
+
+impl StreamShare {
+    pub fn replace_input(&self, plan: PlanRef) {
+        self.logical.replace_input(plan);
     }
 }
 

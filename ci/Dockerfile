@@ -10,6 +10,7 @@ RUN apt-get update -yy && \
     maven -yy \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
+RUN export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 SHELL ["/bin/bash", "-c"]
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
