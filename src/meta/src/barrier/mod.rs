@@ -822,6 +822,10 @@ where
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             *tracker = CreateMviewProgressTracker::new();
+            self.snapshot_manager
+                .unpin_all()
+                .await
+                .expect("unpin meta's snapshots");
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state

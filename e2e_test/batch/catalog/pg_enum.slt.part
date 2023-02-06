@@ -1,0 +1,3 @@
+query IIIT
+SELECT * FROM pg_catalog.pg_enum;
+----
