@@ -546,6 +546,16 @@ profile:
     steps:
       - use: minio
 
+  ci-iceberg-test:
+    config-path: src/config/ci-iceberg-test.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -662,7 +672,7 @@ template:
     # Whether to enable in-memory pure KV state backend
     enable-in-memory-kv-state-backend: false
 
-    # Total available memory to LRU Manager in bytes
+    # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
 
     # Parallelism of tasks per compute node

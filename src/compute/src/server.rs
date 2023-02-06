@@ -17,14 +17,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
+use pretty_bytes::converter::convert;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, StorageConfig, MAX_CONNECTION_WINDOW_SIZE,
+    STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -52,7 +55,9 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
+use crate::memory_management::memory_manager::{
+    GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
+};
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -66,16 +71,21 @@ use crate::ComputeNodeOpts;
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
+    validate_compute_node_memory_config(opts.total_memory_bytes, &config.storage);
+
+    info!("Starting compute node",);
+    info!("> config: {:?}", config);
     info!(
-        "Starting compute node with config {:?} with debug assertions {}",
-        config,
+        "> debug assertions: {}",
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
     // Initialize all the configs
     let storage_config = Arc::new(config.storage.clone());
     let stream_config = Arc::new(config.streaming.clone());
@@ -85,7 +95,7 @@ pub async fn compute_node_serve(
     let meta_client = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
-        &client_addr,
+        &advertise_addr,
         opts.parallelism,
     )
     .await
@@ -144,12 +154,8 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
-        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
-        // compactor along with compute node.
-        if config.storage.state_store == "hummock+memory"
-            || config.storage.state_store.starts_with("hummock+disk")
-            || storage_config.disable_remote_compactor
-        {
+
+        if storage_config.embedded_compactor_enabled() {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
@@ -203,7 +209,7 @@ pub async fn compute_node_serve(
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
     let stream_mgr = Arc::new(LocalStreamManager::new(
-        client_addr.clone(),
+        advertise_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
@@ -234,7 +240,7 @@ pub async fn compute_node_serve(
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
-        client_addr.clone(),
+        advertise_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
@@ -249,7 +255,7 @@ pub async fn compute_node_serve(
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
-        client_addr.clone(),
+        advertise_addr.clone(),
         connector_params,
         stream_config,
         worker_id,
@@ -321,7 +327,32 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(&client_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     (join_handle_vec, shutdown_send)
+}
+
+/// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
+/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
+/// for other system usage. Otherwise, it is not allowed to start.
+fn validate_compute_node_memory_config(
+    cn_total_memory_bytes: usize,
+    storage_config: &StorageConfig,
+) {
+    let storage_memory_mb = storage_config.total_storage_memory_limit_mb();
+    if storage_memory_mb << 20 > cn_total_memory_bytes {
+        panic!(
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    } else if (storage_memory_mb + MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20
+        >= cn_total_memory_bytes
+    {
+        panic!(
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    }
 }

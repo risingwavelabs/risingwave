@@ -37,7 +37,7 @@ pub async fn start_follower_srv(
     let leader_srv = LeaderServiceImpl::new(
         election_client,
         MetaLeaderInfo {
-            node_address: address_info.meta_endpoint.to_string(),
+            node_address: address_info.advertise_addr.to_string(),
             lease_id: 0,
         },
     );

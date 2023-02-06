@@ -37,15 +37,23 @@ use risingwave_common_proc_macro::OverrideConfig;
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
 pub struct ComputeNodeOpts {
-    // TODO: rename to listen_address and separate out the port.
-    #[clap(long, env = "RW_HOST", default_value = "127.0.0.1:5688")]
-    pub host: String,
+    // TODO: rename to listen_addr and separate out the port.
+    /// The address that this service listens to.
+    /// Usually the localhost + desired port.
+    #[clap(
+        long,
+        alias = "host",
+        env = "RW_LISTEN_ADDR",
+        default_value = "127.0.0.1:5688"
+    )]
+    pub listen_addr: String,
 
-    /// The address of the compute node's meta client.
-    ///
-    /// Optional, we will use listen_address if not specified.
-    #[clap(long, env = "RW_CLIENT_ADDRESS")]
-    pub client_address: Option<String>,
+    /// The address for contacting this instance of the service.
+    /// This would be synonymous with the service's "public address"
+    /// or "identifying address".
+    /// Optional, we will use listen_addr if not specified.
+    #[clap(long, alias = "client-address", env = "RW_ADVERTISE_ADDR", long)]
+    pub advertise_addr: Option<String>,
 
     #[clap(
         long,
@@ -67,7 +75,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
-    /// Total available memory in bytes, used by LRU Manager
+    /// Total available memory for the compute node in bytes. Used by both computing and storage.
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
@@ -148,25 +156,25 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
-        tracing::info!("Compute node options: {:?}", opts);
+        tracing::info!("options: {:?}", opts);
         validate_opts(&opts);
 
-        let listen_address = opts.host.parse().unwrap();
-        tracing::info!("Server Listening at {}", listen_address);
+        let listen_addr = opts.listen_addr.parse().unwrap();
+        tracing::info!("Server Listening at {}", listen_addr);
 
-        let client_address = opts
-            .client_address
+        let advertise_addr = opts
+            .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
+                &opts.listen_addr
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", client_address);
+        tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_address, client_address, opts).await;
+            compute_node_serve(listen_addr, advertise_addr, opts).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

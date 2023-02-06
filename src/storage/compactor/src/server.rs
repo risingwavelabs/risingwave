@@ -19,6 +19,7 @@ use std::time::Duration;
 use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -37,6 +38,7 @@ use risingwave_storage::monitor::{
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::CompactorServiceImpl;
@@ -45,23 +47,29 @@ use crate::CompactorOpts;
 /// Fetches and runs compaction tasks.
 pub async fn compactor_serve(
     listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: CompactorOpts,
 ) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
     let config = load_config(&opts.config_path, Some(opts.override_config));
-    tracing::info!(
-        "Starting compactor node with config {:?} with debug assertions {}",
-        config,
+    info!("Starting compactor node",);
+    info!("> config: {:?}", config);
+    info!(
+        "> debug assertions: {}",
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Register to the cluster.
-    let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
-            .await
-            .unwrap();
-    tracing::info!("Assigned compactor id {}", meta_client.worker_id());
-    meta_client.activate(&client_addr).await.unwrap();
+    let meta_client = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::Compactor,
+        &advertise_addr,
+        0,
+    )
+    .await
+    .unwrap();
+    info!("Assigned compactor id {}", meta_client.worker_id());
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     // Boot compactor
     let registry = prometheus::Registry::new();
