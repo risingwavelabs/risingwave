@@ -46,7 +46,6 @@ use risingwave_pb::hummock::{
     HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
@@ -128,7 +127,7 @@ macro_rules! commit_multi_var {
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
                 // Commit to state store
-                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id, $hummock_mgr.env.get_leader_info())
+                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id)
                 .await?;
                 // Upon successful commit, commit the change to local in-mem state
                 $(
@@ -491,7 +490,6 @@ where
         meta_store: &S,
         trx: Transaction,
         context_id: Option<HummockContextId>,
-        _info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {

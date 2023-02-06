@@ -110,7 +110,7 @@ pub struct MetaNodeOpts {
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
-    #[clap(long, env = "RW_CONFIG_PATH", default_value = "RW_CONFIG_PATH")]
+    #[clap(long, env = "RW_CONFIG_PATH", default_value = "")]
     pub config_path: String,
 
     #[clap(flatten)]

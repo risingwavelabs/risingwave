@@ -17,11 +17,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
+use pretty_bytes::converter::convert;
 use risingwave_batch::executor::BatchTaskMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
-    load_config, AsyncStackTraceOption, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
+    load_config, AsyncStackTraceOption, StorageConfig, MAX_CONNECTION_WINDOW_SIZE,
+    STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
@@ -53,7 +55,9 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
+use crate::memory_management::memory_manager::{
+    GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
+};
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -72,6 +76,8 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
+    validate_compute_node_memory_config(opts.total_memory_bytes, &config.storage);
+
     info!("Starting compute node",);
     info!("> config: {:?}", config);
     info!(
@@ -79,6 +85,7 @@ pub async fn compute_node_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
     // Initialize all the configs
     let storage_config = Arc::new(config.storage.clone());
     let stream_config = Arc::new(config.streaming.clone());
@@ -147,12 +154,8 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
-        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
-        // compactor along with compute node.
-        if config.storage.state_store == "hummock+memory"
-            || config.storage.state_store.starts_with("hummock+disk")
-            || storage_config.disable_remote_compactor
-        {
+
+        if storage_config.embedded_compactor_enabled() {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
@@ -327,4 +330,29 @@ pub async fn compute_node_serve(
     meta_client.activate(&advertise_addr).await.unwrap();
 
     (join_handle_vec, shutdown_send)
+}
+
+/// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
+/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
+/// for other system usage. Otherwise, it is not allowed to start.
+fn validate_compute_node_memory_config(
+    cn_total_memory_bytes: usize,
+    storage_config: &StorageConfig,
+) {
+    let storage_memory_mb = storage_config.total_storage_memory_limit_mb();
+    if storage_memory_mb << 20 > cn_total_memory_bytes {
+        panic!(
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    } else if (storage_memory_mb + MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20
+        >= cn_total_memory_bytes
+    {
+        panic!(
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    }
 }
