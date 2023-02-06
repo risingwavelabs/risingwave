@@ -259,9 +259,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
+    /// GROUP BY will constrain the generated columns.
     fn gen_group_by(&mut self) -> Vec<Expr> {
         let mut available = self.bound_columns.clone();
-        if !available.is_empty() && self.flip_coin() {
+        if !available.is_empty() {
             available.shuffle(self.rng);
             let upper_bound = (available.len() + 1) / 2;
             let n = self.rng.gen_range(1..=upper_bound);
