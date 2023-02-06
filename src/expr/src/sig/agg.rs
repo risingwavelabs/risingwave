@@ -165,6 +165,9 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             datatype: Box::new(input.clone()),
         },
         (AggKind::ArrayAgg, _) => return None,
+
+        // StdDev
+        (AggKind::StdDev, _) => todo!("stddev placeholder"),
     };
 
     Some(return_type)
