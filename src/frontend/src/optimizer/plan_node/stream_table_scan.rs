@@ -36,10 +36,15 @@ pub struct StreamTableScan {
     pub base: PlanBase,
     logical: LogicalScan,
     batch_plan_id: PlanNodeId,
+    chain_type: ChainType,
 }
 
 impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
+        Self::new_with_chain_type(logical, ChainType::Backfill)
+    }
+
+    pub fn new_with_chain_type(logical: LogicalScan, chain_type: ChainType) -> Self {
         let ctx = logical.base.ctx.clone();
 
         let batch_plan_id = ctx.next_plan_node_id();
@@ -69,6 +74,7 @@ impl StreamTableScan {
             base,
             logical,
             batch_plan_id,
+            chain_type,
         }
     }
 
@@ -92,6 +98,10 @@ impl StreamTableScan {
                 .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping),
             chain_type,
         )
+    }
+
+    pub fn chain_type(&self) -> ChainType {
+        self.chain_type
     }
 }
 
@@ -190,7 +200,7 @@ impl StreamTableScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                chain_type: ChainType::Backfill as i32,
+                chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
                     .logical

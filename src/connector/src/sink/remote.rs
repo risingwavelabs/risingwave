@@ -47,7 +47,7 @@ use tonic::{Request, Status, Streaming};
 use crate::sink::{Result, Sink, SinkError};
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
+pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
 
 pub fn is_valid_remote_sink(sink_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&sink_type)

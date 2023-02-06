@@ -22,6 +22,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Configure system variables](#configure-system-variables)
   * [Start the playground with RiseDev](#start-the-playground-with-risedev)
   * [Start the playground with cargo](#start-the-playground-with-cargo)
+- [Debug playground using vscode](#debug-playground-using-vscode)
 - [Develop the dashboard](#develop-the-dashboard)
   * [Dashboard v1](#dashboard-v1)
   * [Dashboard v2](#dashboard-v2)
@@ -196,6 +197,10 @@ Then, connect to the playground instance via:
 ```shell
 psql -h localhost -p 4566 -d dev -U root
 ```
+
+## Debug playground using vscode 
+
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
 
 ## Develop the dashboard
 

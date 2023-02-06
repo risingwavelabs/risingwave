@@ -776,7 +776,8 @@ export interface StreamNode {
     | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
     | { $case: "dml"; dml: DmlNode }
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
-    | { $case: "now"; now: NowNode };
+    | { $case: "now"; now: NowNode }
+    | { $case: "appendOnlyGroupTopN"; appendOnlyGroupTopN: GroupTopNNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -3319,6 +3320,8 @@ export const StreamNode = {
         ? { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromJSON(object.rowIdGen) }
         : isSet(object.now)
         ? { $case: "now", now: NowNode.fromJSON(object.now) }
+        : isSet(object.appendOnlyGroupTopN)
+        ? { $case: "appendOnlyGroupTopN", appendOnlyGroupTopN: GroupTopNNode.fromJSON(object.appendOnlyGroupTopN) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3401,6 +3404,10 @@ export const StreamNode = {
       (obj.rowIdGen = message.nodeBody?.rowIdGen ? RowIdGenNode.toJSON(message.nodeBody?.rowIdGen) : undefined);
     message.nodeBody?.$case === "now" &&
       (obj.now = message.nodeBody?.now ? NowNode.toJSON(message.nodeBody?.now) : undefined);
+    message.nodeBody?.$case === "appendOnlyGroupTopN" &&
+      (obj.appendOnlyGroupTopN = message.nodeBody?.appendOnlyGroupTopN
+        ? GroupTopNNode.toJSON(message.nodeBody?.appendOnlyGroupTopN)
+        : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3621,6 +3628,16 @@ export const StreamNode = {
     }
     if (object.nodeBody?.$case === "now" && object.nodeBody?.now !== undefined && object.nodeBody?.now !== null) {
       message.nodeBody = { $case: "now", now: NowNode.fromPartial(object.nodeBody.now) };
+    }
+    if (
+      object.nodeBody?.$case === "appendOnlyGroupTopN" &&
+      object.nodeBody?.appendOnlyGroupTopN !== undefined &&
+      object.nodeBody?.appendOnlyGroupTopN !== null
+    ) {
+      message.nodeBody = {
+        $case: "appendOnlyGroupTopN",
+        appendOnlyGroupTopN: GroupTopNNode.fromPartial(object.nodeBody.appendOnlyGroupTopN),
+      };
     }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];

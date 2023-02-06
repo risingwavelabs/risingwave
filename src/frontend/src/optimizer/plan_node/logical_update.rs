@@ -136,6 +136,10 @@ impl fmt::Display for LogicalUpdate {
 }
 
 impl ExprRewritable for LogicalUpdate {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
         new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
