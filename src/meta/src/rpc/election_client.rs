@@ -289,18 +289,14 @@ impl ElectionClient for EtcdElectionClient {
 }
 
 impl EtcdElectionClient {
-    pub(crate) async fn new(
-        endpoints: Vec<String>,
-        options: Option<ConnectOptions>,
-        id: String,
-    ) -> MetaResult<Self> {
+    pub(crate) fn new(endpoints: Vec<String>, options: Option<ConnectOptions>, id: String) -> Self {
         let (sender, _) = watch::channel(false);
-        Ok(Self {
+        Self {
             endpoints,
             options,
             id,
             is_leader_sender: sender,
-        })
+        }
     }
 
     async fn client(&self) -> MetaResult<Client> {
@@ -336,15 +332,11 @@ mod tests {
             let (stop_sender, stop_receiver) = watch::channel(());
             clients.push((
                 stop_sender,
-                Arc::new(
-                    EtcdElectionClient::new(
-                        vec!["localhost:2388".to_string()],
-                        None,
-                        format!("client_{}", i).to_string(),
-                    )
-                    .await
-                    .unwrap(),
-                ),
+                Arc::new(EtcdElectionClient::new(
+                    vec!["localhost:2388".to_string()],
+                    None,
+                    format!("client_{}", i).to_string(),
+                )),
             ));
         }
 
