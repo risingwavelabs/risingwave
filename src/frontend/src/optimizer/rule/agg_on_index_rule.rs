@@ -1,5 +1,5 @@
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, LogicalLimit};
+use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, Order};
 use crate::optimizer::PlanRef;
@@ -43,9 +43,13 @@ impl Rule for AggOnIndexRule {
         } else {
             None
         }?;
-        
-        let logical_limit = LogicalLimit::create(index_scan.into(), logical_topn.limit(), logical_topn.offset());
-        Some(logical_limit.into())
+
+        let logical_limit = LogicalLimit::create(
+            index_scan.into(),
+            logical_topn.limit(),
+            logical_topn.offset(),
+        );
+        Some(logical_limit)
     }
 }
 
