@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::panic;
 use std::borrow::{Borrow, BorrowMut};
+use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
@@ -51,8 +53,8 @@ use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactStatus, DynamicLevelSelector, LevelSelector,
-    LocalSelectorStatistic, ManualCompactionOption,
+    create_overlap_strategy, selector_option, CompactStatus, DynamicLevelSelector, LevelSelector,
+    LocalSelectorStatistic, ManualCompactionOption, SelectorOption,
 };
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
@@ -194,7 +196,9 @@ macro_rules! start_measure_real_process_timer {
 pub(crate) use start_measure_real_process_timer;
 
 use self::compaction_group_manager::CompactionGroupManagerInner;
-use super::compaction::{ManualCompactionSelector, SpaceReclaimCompactionSelector};
+use super::compaction::{
+    ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
+};
 use super::Compactor;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -227,7 +231,7 @@ pub struct CompactionPickParma {
 impl CompactionPickParma {
     pub fn new_base_parma() -> Self {
         Self {
-            task_type: compact_task::TaskType::Base,
+            task_type: compact_task::TaskType::Dynamic,
             manual_compaction_option: None,
         }
     }
@@ -759,11 +763,14 @@ where
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
-        // manual_compaction_option: Option<ManualCompactionOption>,
-        selector: Box<dyn LevelSelector>,
+        task_type: compact_task::TaskType,
+        selector_option: SelectorOption,
     ) -> Result<Option<CompactTask>> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
+        let compaction_selectors = &mut compaction.compaction_selectors;
+        let compaction_statuses = &mut compaction.compaction_statuses;
+
         let start_time = Instant::now();
         // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
         let task_id = self
@@ -776,21 +783,22 @@ where
             .await
             .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
         let all_table_ids = self.all_table_ids().await;
-        if !compaction
-            .compaction_statuses
-            .contains_key(&compaction_group_id)
-        {
-            let mut compact_statuses =
-                BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-            let new_compact_status = compact_statuses.new_entry_insert_txn(
-                compaction_group_id,
-                CompactStatus::new(
-                    compaction_group_id,
-                    group_config.compaction_config().max_level,
-                ),
-            );
-            commit_multi_var!(self, None, Transaction::default(), new_compact_status)?;
-        }
+
+        self.precheck_compaction_group(
+            compaction_group_id,
+            compaction_statuses,
+            &group_config.compaction_config,
+        )
+        .await?;
+
+        // get selector
+        let selector = Self::fetch_selector(
+            compaction_selectors,
+            compaction_group_id,
+            task_type,
+            selector_option,
+        );
+
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
             Some(c) => VarTransaction::new(c),
@@ -814,7 +822,7 @@ where
             return Ok(None);
         }
 
-        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Base);
+        let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
         let compact_task = compact_status.get_compact_task(
@@ -926,6 +934,102 @@ where
             .await
     }
 
+    // need mutex protect
+    async fn precheck_compaction_group(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        compaction_statuses: &mut BTreeMap<CompactionGroupId, CompactStatus>,
+        compaction_config: &CompactionConfig,
+    ) -> Result<()> {
+        if !compaction_statuses.contains_key(&compaction_group_id) {
+            let mut compact_statuses = BTreeMapTransaction::new(compaction_statuses);
+            let new_compact_status = compact_statuses.new_entry_insert_txn(
+                compaction_group_id,
+                CompactStatus::new(compaction_group_id, compaction_config.max_level),
+            );
+            commit_multi_var!(self, None, Transaction::default(), new_compact_status)?;
+
+            // init compaction selector for new group
+        }
+
+        Ok(())
+    }
+
+    fn fetch_selector(
+        compaction_selectors: &mut HashMap<
+            CompactionGroupId,
+            HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
+        >,
+        compaction_group_id: CompactionGroupId,
+        task_type: compact_task::TaskType,
+        selector_option: SelectorOption,
+    ) -> &mut Box<dyn LevelSelector> {
+        match compaction_selectors
+            .entry(compaction_group_id)
+            .or_default()
+            .entry(task_type)
+        {
+            Occupied(mut selector) => selector.get_mut().try_update(selector_option),
+
+            Vacant(entry) => {
+                let new_selector: Box<dyn LevelSelector> = match task_type {
+                    compact_task::TaskType::Dynamic => {
+                        let selector_option =
+                            selector_option.as_dynamic().expect("tried to as_dynamic");
+                        Box::new(DynamicLevelSelector::new(
+                            selector_option.compaction_config.clone(),
+                            create_overlap_strategy(
+                                selector_option.compaction_config.compaction_mode(),
+                            ),
+                        ))
+                    }
+
+                    compact_task::TaskType::Manual => {
+                        let selector_option =
+                            selector_option.as_manual().expect("tried to as_dynamic");
+                        Box::new(ManualCompactionSelector::new(
+                            selector_option.compaction_config.clone(),
+                            create_overlap_strategy(
+                                selector_option.compaction_config.compaction_mode(),
+                            ),
+                            selector_option.option,
+                        ))
+                    }
+
+                    compact_task::TaskType::SpaceReclaim => {
+                        let selector_option = selector_option
+                            .as_space_reclaim()
+                            .expect("tried to as_space_reclaim");
+                        Box::new(SpaceReclaimCompactionSelector::new(
+                            selector_option.compaction_config,
+                        ))
+                    }
+
+                    compact_task::TaskType::Ttl => {
+                        let selector_option = selector_option
+                            .as_space_reclaim()
+                            .expect("tried to as_space_reclaim");
+                        Box::new(TtlCompactionSelector::new(
+                            selector_option.compaction_config,
+                        ))
+                    }
+
+                    _ => {
+                        panic!()
+                    }
+                };
+
+                entry.insert(new_selector);
+            }
+        }
+
+        compaction_selectors
+            .get_mut(&compaction_group_id)
+            .unwrap()
+            .get_mut(&task_type)
+            .unwrap()
+    }
+
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -941,18 +1045,18 @@ where
             .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
 
         let compaction_config = group_config.compaction_config();
-        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
-
         // dispatch
         match compaction_pick_parma.task_type {
-            compact_task::TaskType::Base => {
+            compact_task::TaskType::Dynamic => {
+                let selector_option = selector_option::DynamicLevelSelectorOption {
+                    compaction_config: Arc::new(compaction_config),
+                };
+
                 while let Some(task) = self
                     .get_compact_task_impl(
                         compaction_group_id,
-                        Box::new(DynamicLevelSelector::new(
-                            Arc::new(compaction_config.clone()),
-                            overlap_strategy.clone(),
-                        )),
+                        compaction_pick_parma.task_type,
+                        SelectorOption::Dynamic(selector_option.clone()),
                     )
                     .await?
                 {
@@ -966,23 +1070,42 @@ where
             }
 
             compact_task::TaskType::SpaceReclaim => {
-                let selector = Box::new(SpaceReclaimCompactionSelector::new(Arc::new(
-                    compaction_config,
-                )));
+                let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
+                    compaction_config: Arc::new(compaction_config),
+                };
 
-                self.get_compact_task_impl(compaction_group_id, selector)
-                    .await
+                self.get_compact_task_impl(
+                    compaction_group_id,
+                    compaction_pick_parma.task_type,
+                    SelectorOption::SpaceReclaim(selector_option),
+                )
+                .await
+            }
+
+            compact_task::TaskType::Ttl => {
+                let selector_option = selector_option::TtlCompactionSelectorOption {
+                    compaction_config: Arc::new(compaction_config),
+                };
+
+                self.get_compact_task_impl(
+                    compaction_group_id,
+                    compaction_pick_parma.task_type,
+                    SelectorOption::Ttl(selector_option),
+                )
+                .await
             }
 
             compact_task::TaskType::Manual => {
-                let selector = Box::new(ManualCompactionSelector::new(
-                    Arc::new(compaction_config),
-                    overlap_strategy,
-                    compaction_pick_parma.manual_compaction_option.unwrap(),
-                ));
-
-                self.get_compact_task_impl(compaction_group_id, selector)
-                    .await
+                let selector_option = selector_option::ManualCompactionSelectorOption {
+                    compaction_config: Arc::new(compaction_config),
+                    option: compaction_pick_parma.manual_compaction_option.unwrap(),
+                };
+                self.get_compact_task_impl(
+                    compaction_group_id,
+                    compaction_pick_parma.task_type,
+                    SelectorOption::Manual(selector_option),
+                )
+                .await
             }
 
             _ => {
@@ -1141,6 +1264,7 @@ where
         for group_id in original_keys {
             if !compaction_groups.contains(&group_id) {
                 compact_statuses.remove(group_id);
+                compaction.compaction_selectors.remove(&group_id);
             }
         }
         let assigned_task_num = compaction.compact_task_assignment.len();
@@ -1329,7 +1453,9 @@ where
             compact_task.compaction_group_id,
         );
 
-        if !deterministic_mode && matches!(compact_task.task_type(), compact_task::TaskType::Base) {
+        if !deterministic_mode
+            && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+        {
             self.try_send_compaction_request(
                 compact_task.compaction_group_id,
                 compact_task.task_type(),
@@ -1782,7 +1908,7 @@ where
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
             for id in modified_compaction_groups {
-                self.try_send_compaction_request(id, compact_task::TaskType::Base);
+                self.try_send_compaction_request(id, compact_task::TaskType::Dynamic);
             }
         }
         #[cfg(test)]
@@ -2028,7 +2154,7 @@ where
             return Ok(());
         }
         for compaction_group in compaction_groups {
-            self.try_send_compaction_request(compaction_group, compact_task::TaskType::Base);
+            self.try_send_compaction_request(compaction_group, compact_task::TaskType::Dynamic);
         }
         Ok(())
     }

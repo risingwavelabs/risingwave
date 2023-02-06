@@ -18,24 +18,24 @@ use risingwave_pb::hummock::InputLevel;
 use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
-pub struct SpaceReclaimCompactionPicker {
-    // config
-    max_space_reclaim_file_count: usize,
+pub struct TtlReclaimCompactionPicker {
+    max_reclaim_file_counts: usize,
 
     // state
     last_select_index: usize,
+    // todo: filter table option
 }
 
-impl SpaceReclaimCompactionPicker {
-    pub fn new(max_space_reclaim_file_count: usize) -> Self {
+impl TtlReclaimCompactionPicker {
+    pub fn new(max_reclaim_file_counts: usize) -> Self {
         Self {
-            max_space_reclaim_file_count,
+            max_reclaim_file_counts,
             last_select_index: 0,
         }
     }
 }
 
-impl CompactionPicker for SpaceReclaimCompactionPicker {
+impl CompactionPicker for TtlReclaimCompactionPicker {
     fn pick_compaction(
         &mut self,
         levels: &Levels,
@@ -60,7 +60,7 @@ impl CompactionPicker for SpaceReclaimCompactionPicker {
             }
 
             select_input_ssts.push(sst.clone());
-            if select_input_ssts.len() == self.max_space_reclaim_file_count {
+            if select_input_ssts.len() == self.max_reclaim_file_counts {
                 break;
             }
         }
@@ -103,13 +103,11 @@ mod test {
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
         generate_table,
     };
-    use crate::hummock::compaction::level_selector::{
-        LevelSelector, SpaceReclaimCompactionSelector,
-    };
+    use crate::hummock::compaction::level_selector::{LevelSelector, TtlCompactionSelector};
     use crate::hummock::compaction::LocalSelectorStatistic;
 
     #[test]
-    fn test_space_reclaim_compaction_selector() {
+    fn test_ttl_reclaim_compaction_selector() {
         let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
@@ -148,8 +146,8 @@ mod test {
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
-        let mut selector = SpaceReclaimCompactionSelector::new(config);
-        let max_space_reclaim_file_count = 5;
+        let mut selector = TtlCompactionSelector::new(config);
+        let max_ttl_file_count = 5;
 
         {
             // pick space reclaim
@@ -161,7 +159,7 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
             assert_eq!(
                 task.input.input_levels[0].table_infos.len(),
-                max_space_reclaim_file_count
+                max_ttl_file_count
             );
 
             let mut start_id = 2;
@@ -175,7 +173,7 @@ mod test {
             assert_eq!(task.input.target_level, 4);
             assert!(matches!(
                 task.compaction_task_type,
-                compact_task::TaskType::SpaceReclaim
+                compact_task::TaskType::Ttl
             ));
         }
 
@@ -198,7 +196,7 @@ mod test {
             let all_file_count = levels.get_levels().last().unwrap().get_table_infos().len();
             assert_eq!(
                 task.input.input_levels[0].table_infos.len(),
-                all_file_count - max_space_reclaim_file_count
+                all_file_count - max_ttl_file_count
             );
 
             let mut start_id = 7;
@@ -212,7 +210,7 @@ mod test {
             assert_eq!(task.input.target_level, 4);
             assert!(matches!(
                 task.compaction_task_type,
-                compact_task::TaskType::SpaceReclaim
+                compact_task::TaskType::Ttl
             ));
         }
     }

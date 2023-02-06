@@ -209,7 +209,7 @@ impl ManualCompactionPicker {
 
 impl CompactionPicker for ManualCompactionPicker {
     fn pick_compaction(
-        &self,
+        &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
         _stats: &mut LocalPickerStatistic,
@@ -421,7 +421,7 @@ pub mod tests {
             };
 
             let target_level = option.level + 1;
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -442,7 +442,7 @@ pub mod tests {
             // test all key range
             let option = ManualCompactionOption::default();
             let target_level = option.level + 1;
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -474,7 +474,7 @@ pub mod tests {
             };
 
             let target_level = option.level + 1;
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -514,7 +514,7 @@ pub mod tests {
             };
 
             let target_level = option.level + 1;
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -643,7 +643,7 @@ pub mod tests {
             },
             internal_table_id: HashSet::default(),
         };
-        let picker =
+        let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 0);
         assert!(picker
             .pick_compaction(
@@ -669,7 +669,7 @@ pub mod tests {
             },
             internal_table_id: HashSet::default(),
         };
-        let picker = ManualCompactionPicker::new(
+        let mut picker = ManualCompactionPicker::new(
             Arc::new(RangeOverlapStrategy::default()),
             option.clone(),
             0,
@@ -680,7 +680,7 @@ pub mod tests {
             .is_none());
 
         // pick_l0_to_base_level
-        let picker =
+        let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
         let mut expected = vec![vec![5, 6], vec![7, 8], vec![9, 10]];
         expected.reverse();
@@ -716,7 +716,7 @@ pub mod tests {
             },
             internal_table_id: HashSet::default(),
         };
-        let picker =
+        let mut picker =
             ManualCompactionPicker::new(Arc::new(RangeOverlapStrategy::default()), option, 1);
         let mut expected = vec![vec![5, 6], vec![7, 8]];
         expected.reverse();
@@ -767,7 +767,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option.clone(),
                 // l0 to l0 will ignore target_level
@@ -809,7 +809,7 @@ pub mod tests {
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -831,7 +831,7 @@ pub mod tests {
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1, 2, 3]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -875,7 +875,7 @@ pub mod tests {
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -919,7 +919,7 @@ pub mod tests {
                 // picked.
                 internal_table_id: HashSet::from([1]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -962,7 +962,7 @@ pub mod tests {
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -995,7 +995,7 @@ pub mod tests {
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -1018,7 +1018,7 @@ pub mod tests {
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1]),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
                 target_level,
@@ -1069,7 +1069,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option.clone(),
                 input_level + 1,
@@ -1115,7 +1115,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
             };
-            let picker = ManualCompactionPicker::new(
+            let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
                 option.clone(),
                 *input_level as _,
@@ -1185,7 +1185,7 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 0,
             };
-            let selector = ManualCompactionSelector::new(
+            let mut selector = ManualCompactionSelector::new(
                 config.clone(),
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
@@ -1218,7 +1218,7 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 0,
             };
-            let selector = ManualCompactionSelector::new(
+            let mut selector = ManualCompactionSelector::new(
                 config,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
@@ -1286,7 +1286,7 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 3,
             };
-            let selector = ManualCompactionSelector::new(
+            let mut selector = ManualCompactionSelector::new(
                 config.clone(),
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
@@ -1321,12 +1321,11 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 4,
             };
-            let selector = ManualCompactionSelector::new(
+            let mut selector = ManualCompactionSelector::new(
                 config,
                 Arc::new(RangeOverlapStrategy::default()),
                 option,
             );
-
             let task = selector
                 .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
                 .unwrap();

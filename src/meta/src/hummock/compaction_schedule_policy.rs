@@ -438,7 +438,7 @@ mod tests {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: 0,
-            task_type: compact_task::TaskType::Base as i32,
+            task_type: compact_task::TaskType::Dynamic as i32,
         }
     }
 

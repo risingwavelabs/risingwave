@@ -156,7 +156,7 @@ where
                     }
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
-                        if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::Base) {
+                        if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::Dynamic) {
                             tracing::warn!("Failed to schedule base compaction for compaction group {}. {}", cg_id, e);
                         }
                     }
@@ -203,7 +203,7 @@ where
 
             // Pick a task and assign it to this compactor.
             let compaction_pick_param = match task_type {
-                compact_task::TaskType::Base => CompactionPickParma::new_base_parma(),
+                compact_task::TaskType::Dynamic => CompactionPickParma::new_base_parma(),
                 compact_task::TaskType::SpaceReclaim => {
                     CompactionPickParma::new_space_reclaim_parma()
                 }
@@ -352,7 +352,7 @@ where
 
         // 4. Reschedule it with best effort, in case there are more tasks.
         if let Err(e) =
-            sched_channel.try_sched_compaction(compaction_group, compact_task::TaskType::Base)
+            sched_channel.try_sched_compaction(compaction_group, compact_task::TaskType::Dynamic)
         {
             tracing::error!(
                 "Failed to reschedule compaction group {} after sending new task {}. {:#?}",

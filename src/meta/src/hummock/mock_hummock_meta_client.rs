@@ -203,7 +203,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sched_channel.unschedule(group);
 
                 let compaction_pick_param = match task_type {
-                    compact_task::TaskType::Base => CompactionPickParma::new_base_parma(),
+                    compact_task::TaskType::Dynamic => CompactionPickParma::new_base_parma(),
                     compact_task::TaskType::SpaceReclaim => {
                         CompactionPickParma::new_space_reclaim_parma()
                     }

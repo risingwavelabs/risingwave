@@ -33,7 +33,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
-    DynamicLevelSelector, LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector,
+    selector_option, DynamicLevelSelector, LevelSelector, ManualCompactionSelector, SelectorOption,
+    SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
@@ -119,8 +120,7 @@ impl CompactStatus {
         task_id: HummockCompactionTaskId,
         compaction_group_id: CompactionGroupId,
         stats: &mut LocalSelectorStatistic,
-
-        selector: Box<dyn LevelSelector>,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -206,7 +206,7 @@ impl CompactStatus {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ManualCompactionOption {
     /// Filters out SSTs to pick. Has no effect if empty.
     pub sst_ids: Vec<u64>,
@@ -284,7 +284,7 @@ impl LocalSelectorStatistic {
 
 pub trait CompactionPicker {
     fn pick_compaction(
-        &self,
+        &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,

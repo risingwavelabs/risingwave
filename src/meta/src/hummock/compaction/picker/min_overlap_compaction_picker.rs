@@ -96,7 +96,7 @@ impl MinOverlappingPicker {
 
 impl CompactionPicker for MinOverlappingPicker {
     fn pick_compaction(
-        &self,
+        &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
@@ -142,7 +142,7 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let picker =
+        let mut picker =
             MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
@@ -218,7 +218,7 @@ pub mod tests {
 
     #[test]
     fn test_expand_l1_files() {
-        let picker =
+        let mut picker =
             MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {

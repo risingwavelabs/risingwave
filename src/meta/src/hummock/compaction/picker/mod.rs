@@ -17,9 +17,11 @@ mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
+mod ttl_reclaim_compaction_picker;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 pub use space_reclaim_compaction_picker::SpaceReclaimCompactionPicker;
 pub use tier_compaction_picker::TierCompactionPicker;
+pub use ttl_reclaim_compaction_picker::TtlReclaimCompactionPicker;
