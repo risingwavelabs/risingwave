@@ -57,10 +57,11 @@ use risingwave_pb::batch_plan::exchange_info::{
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::scheduler::BatchPlanFragmenter;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +109,12 @@ pub enum RequiredDist {
 }
 
 impl Distribution {
-    pub fn to_prost(&self, output_count: u32, fragmenter: &BatchPlanFragmenter) -> ExchangeInfo {
+    pub fn to_prost(
+        &self,
+        output_count: u32,
+        catalog_reader: &CatalogReader,
+        worker_node_manager: &WorkerNodeManagerRef,
+    ) -> ExchangeInfo {
         ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
@@ -139,8 +145,9 @@ impl Distribution {
                         "hash key should not be empty, use `Single` instead"
                     );
 
-                    let vnode_mapping = Self::get_vnode_mapping(fragmenter, table_id)
-                        .expect("vnode_mapping of UpstreamHashShard should not be none");
+                    let vnode_mapping =
+                        Self::get_vnode_mapping(catalog_reader, worker_node_manager, table_id)
+                            .expect("vnode_mapping of UpstreamHashShard should not be none");
 
                     let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
                         .iter_unique()
@@ -194,18 +201,14 @@ impl Distribution {
 
     #[inline(always)]
     fn get_vnode_mapping(
-        fragmenter: &BatchPlanFragmenter,
+        catalog_reader: &CatalogReader,
+        worker_node_manager: &WorkerNodeManagerRef,
         table_id: &TableId,
     ) -> Option<ParallelUnitMapping> {
-        fragmenter
-            .catalog_reader()
+        catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
-            .map(|table| {
-                fragmenter
-                    .worker_node_manager()
-                    .get_fragment_mapping(&table.fragment_id)
-            })
+            .map(|table| worker_node_manager.get_fragment_mapping(&table.fragment_id))
             .ok()
             .flatten()
     }

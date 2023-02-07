@@ -21,6 +21,12 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 
+/// The minimal memory requirement of computing tasks in megabytes.
+pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
+/// The memory reserved for system usage (stack and code segment of processes, allocation overhead,
+/// network buffer, etc.) in megabytes.
+pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
+
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
 /// the memory usage.
 #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
@@ -177,6 +183,9 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(cur_total_bytes_used as i64);
+            self.metrics
+                .stream_total_mem_usage
+                .set(_stream_mgr.get_total_mem_val().get());
 
             self.set_watermark_time_ms(watermark_time_ms);
         }

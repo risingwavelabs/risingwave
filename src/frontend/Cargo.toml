@@ -12,6 +12,7 @@ repository = { workspace = true }
 anyhow = "1"
 arc-swap = "1"
 assert-impl = "0.1"
+async-recursion = "1.0.2"
 async-trait = "0.1"
 bk-tree = "0.4.0"
 byteorder = "1.4"
@@ -40,6 +41,7 @@ prost = "0.11"
 rand = "0.8"
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
+risingwave_common_proc_macro = { path = "../common/proc_macro" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }

@@ -23,6 +23,7 @@ mod expand;
 mod filter;
 mod global_simple_agg;
 mod group_top_n;
+mod group_top_n_appendonly;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
@@ -57,6 +58,7 @@ use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
 use self::group_top_n::GroupTopNExecutorBuilder;
+use self::group_top_n_appendonly::AppendOnlyGroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
@@ -141,6 +143,7 @@ pub async fn create_executor(
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
         NodeBody::GroupTopN => GroupTopNExecutorBuilder,
+        NodeBody::AppendOnlyGroupTopN => AppendOnlyGroupTopNExecutorBuilder,
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
         NodeBody::Dml => DmlExecutorBuilder,

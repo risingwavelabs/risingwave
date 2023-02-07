@@ -11,7 +11,9 @@ repository = { workspace = true }
 anyhow = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
+either = "1.8.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+itertools = "0.10.5"
 paste = "1"
 rand = "0.8"
 risingwave_common = { path = "../common" }
@@ -30,6 +32,7 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+url = "2.3.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 moka = { version = "0.9", features = ["future"] }

@@ -25,7 +25,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::{ExprRewriter, InputRef};
+use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -327,11 +327,7 @@ impl ColPrunable for LogicalHopWindow {
     }
 }
 
-impl ExprRewritable for LogicalHopWindow {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalHopWindow {}
 
 impl PredicatePushdown for LogicalHopWindow {
     /// Keep predicate on time window parameters (`window_start`, `window_end`),

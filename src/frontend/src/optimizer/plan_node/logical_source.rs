@@ -30,7 +30,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -162,11 +162,7 @@ impl ColPrunable for LogicalSource {
     }
 }
 
-impl ExprRewritable for LogicalSource {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalSource {}
 
 /// A util function to extract kafka offset timestamp range.
 ///

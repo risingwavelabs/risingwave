@@ -67,58 +67,8 @@ impl NexmarkCluster {
         };
 
         self.run(format!(
-            r#"
-create source auction (
-    id INTEGER,
-    item_name VARCHAR,
-    description VARCHAR,
-    initial_bid INTEGER,
-    reserve INTEGER,
-    date_time TIMESTAMP,
-    expires TIMESTAMP,
-    seller INTEGER,
-    category INTEGER)
-with (
-    connector = 'nexmark',
-    nexmark.table.type = 'Auction'
-    {extra_args}
-) row format JSON;
-"#,
-        ))
-        .await?;
-
-        self.run(format!(
-            r#"
-create source bid (
-    auction INTEGER,
-    bidder INTEGER,
-    price INTEGER,
-    "date_time" TIMESTAMP)
-with (
-    connector = 'nexmark',
-    nexmark.table.type = 'Bid'
-    {extra_args}
-) row format JSON;
-"#,
-        ))
-        .await?;
-
-        self.run(format!(
-            r#"
-create source person (
-    id INTEGER,
-    name VARCHAR,
-    email_address VARCHAR,
-    credit_card VARCHAR,
-    city VARCHAR,
-    state VARCHAR,
-    date_time TIMESTAMP)
-with (
-    connector = 'nexmark',
-    nexmark.table.type = 'Person'
-    {extra_args}
-) row format JSON;
-"#,
+            include_str!("nexmark/create_source.sql"),
+            extra_args = extra_args
         ))
         .await?;
 
@@ -141,7 +91,6 @@ impl DerefMut for NexmarkCluster {
 }
 
 /// Nexmark queries.
-// TODO: import the query from external files and avoid duplicating the queries in the code.
 pub mod queries {
     use std::time::Duration;
 
@@ -149,372 +98,100 @@ pub mod queries {
     const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(20);
 
     pub mod q3 {
-        //! Covers hash inner join.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q3
-AS
-SELECT
-    P.name, P.city, P.state, A.id
-FROM
-    auction AS A INNER JOIN person AS P on A.seller = P.id
-WHERE
-    A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q3 ORDER BY id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q3;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q3.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q3 ORDER BY id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q3;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q4 {
-        //! Covers hash inner join and hash aggregation.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q4
-AS
-SELECT
-    Q.category,
-    AVG(Q.final) as avg
-FROM (
-    SELECT
-        MAX(B.price) AS final,A.category
-    FROM
-        auction A,
-        bid B
-    WHERE
-        A.id = B.auction AND
-        B.date_time BETWEEN A.date_time AND A.expires
-    GROUP BY
-        A.id,A.category
-    ) Q
-GROUP BY
-    Q.category;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q4 ORDER BY category;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q4;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q4.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q4 ORDER BY category;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q4;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q5 {
-        //! Covers self-join.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q5
-AS
-SELECT AuctionBids.auction, AuctionBids.num FROM (
-  SELECT
-    bid.auction,
-    count(*) AS num,
-    window_start AS starttime
-  FROM
-    HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-  GROUP BY
-    window_start,
-    bid.auction
-) AS AuctionBids
-JOIN (
-  SELECT
-    max(CountBids.num) AS maxn,
-    CountBids.starttime_c
-  FROM (
-    SELECT
-      count(*) AS num,
-      window_start AS starttime_c
-    FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
-    GROUP BY
-      bid.auction,
-      window_start
-  ) AS CountBids
-  GROUP BY
-    CountBids.starttime_c
-) AS MaxBids
-ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q5 ORDER BY auction;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q5;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q5.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q5 ORDER BY auction;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q5;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q7 {
-        //! Covers self-join.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q7
-AS
-SELECT
-  B.auction,
-  B.price,
-  B.bidder,
-  B.date_time
-FROM
-  bid B
-JOIN (
-  SELECT
-    MAX(price) AS maxprice,
-    window_end as date_time
-  FROM
-    TUMBLE(bid, date_time, INTERVAL '10' SECOND)
-  GROUP BY
-    window_end
-) B1 ON B.price = B1.maxprice
-WHERE
-  B.date_time BETWEEN B1.date_time - INTERVAL '10' SECOND
-  AND B1.date_time;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q7 ORDER BY date_time;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q7;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q7.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q7 ORDER BY date_time;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q7;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q8 {
-        //! Covers self-join.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q8
-AS
-SELECT
-  P.id,
-  P.name,
-  P.starttime
-FROM (
-  SELECT
-    id,
-    name,
-    window_start AS starttime,
-    window_end AS endtime
-  FROM
-    TUMBLE(person, date_time, INTERVAL '10' SECOND)
-  GROUP BY
-    id,
-    name,
-    window_start,
-    window_end
-) P
-JOIN (
-  SELECT
-    seller,
-    window_start AS starttime,
-    window_end AS endtime
-  FROM
-    TUMBLE(auction, date_time, INTERVAL '10' SECOND)
-  GROUP BY
-    seller,
-    window_start,
-    window_end
-) A ON P.id = A.seller
-  AND P.starttime = A.starttime
-  AND P.endtime = A.endtime;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q8 ORDER BY id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q8;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q8.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q8 ORDER BY id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q8;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q9 {
-        //! Covers group top-n.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q9
-AS
-SELECT
-  id, item_name, description, initial_bid, reserve, date_time, expires, seller, category,
-  auction, bidder, price, bid_date_time
-FROM (
-  SELECT A.*, B.auction, B.bidder, B.price, B.date_time AS bid_date_time,
-    ROW_NUMBER() OVER (PARTITION BY A.id ORDER BY B.price DESC, B.date_time ASC) AS rownum
-  FROM auction A, bid B
-  WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
-)
-WHERE rownum <= 1;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q9 ORDER BY id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q9;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q9.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q9 ORDER BY id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q9;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q101 {
-        //! A self-made query that covers outer join.
-        //!
-        //! Monitor ongoing auctions and track the current highest bid for each one in real-time. If
-        //! the auction has no bids, the highest bid will be NULL.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q101
-AS
-SELECT
-    a.id AS auction_id,
-    a.item_name AS auction_item_name,
-    b.max_price AS current_highest_bid
-FROM auction a
-LEFT OUTER JOIN (
-    SELECT
-        b1.auction,
-        MAX(b1.price) max_price
-    FROM bid b1
-    GROUP BY b1.auction
-) b ON a.id = b.auction;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q101 ORDER BY auction_id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q101;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q101.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q101 ORDER BY auction_id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q101;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q102 {
-        //! A self-made query that covers dynamic filter and simple aggregation.
-        //!
-        //! Show the auctions whose count of bids is greater than the overall average count of bids
-        //! per auction.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q102
-AS
-SELECT
-    a.id AS auction_id,
-    a.item_name AS auction_item_name,
-    COUNT(b.auction) AS bid_count
-FROM auction a
-JOIN bid b ON a.id = b.auction
-GROUP BY a.id, a.item_name
-HAVING COUNT(b.auction) >= (
-    SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
-);
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q102 ORDER BY auction_id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q102;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q102.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q102 ORDER BY auction_id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q102;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q103 {
-        //! A self-made query that covers semi join.
-        //!
-        //! Show the auctions that have at least 20 bids.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q103
-AS
-SELECT
-    a.id AS auction_id,
-    a.item_name AS auction_item_name
-FROM auction a
-WHERE a.id IN (
-    SELECT b.auction FROM bid b
-    GROUP BY b.auction
-    HAVING COUNT(*) >= 20
-);
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q103 ORDER BY auction_id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q103;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q103.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q103 ORDER BY auction_id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q103;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q104 {
-        //! A self-made query that covers anti join.
-        //!
-        //! This is the same as q103, which shows the auctions that have at least 20 bids.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q104
-AS
-SELECT
-    a.id AS auction_id,
-    a.item_name AS auction_item_name
-FROM auction a
-WHERE a.id NOT IN (
-    SELECT b.auction FROM bid b
-    GROUP BY b.auction
-    HAVING COUNT(*) < 20
-);
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q104 ORDER BY auction_id;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q104;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q104.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q104 ORDER BY auction_id;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q104;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
     pub mod q105 {
-        //! A self-made query that covers singleton top-n (and local-phase group top-n).
-        //!
-        //! Show the top 1000 auctions by the number of bids.
-
         use super::*;
-        pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q105
-AS
-SELECT
-    a.id AS auction_id,
-    a.item_name AS auction_item_name,
-    COUNT(b.auction) AS bid_count
-FROM auction a
-JOIN bid b ON a.id = b.auction
-GROUP BY a.id, a.item_name
-ORDER BY bid_count DESC
-LIMIT 1000;
-"#;
-        pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q105;
-"#;
-        pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q105;
-"#;
+        pub const CREATE: &str = include_str!("nexmark/q105.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q105;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q105;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }

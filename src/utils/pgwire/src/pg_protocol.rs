@@ -24,10 +24,11 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use futures::Stream;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
+use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
@@ -39,6 +40,7 @@ use crate::pg_message::{
 };
 use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
+use crate::types::Format;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -165,9 +167,14 @@ where
                         }
                     }
 
-                    PsqlError::StartupError(_)
-                    | PsqlError::PasswordError(_)
-                    | PsqlError::SslError(_) => {
+                    PsqlError::SslError(e) => {
+                        // For ssl error, because the stream has already been consumed, so there is
+                        // no way to write more message.
+                        error!("SSL connection setup error: {}", e);
+                        return true;
+                    }
+
+                    PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
                         // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
@@ -317,52 +324,66 @@ where
             "(simple query)receive query: {}", sql);
 
         let session = self.session.clone().unwrap();
-        // execute query
-        let mut res = session
-            .run_statement(sql, false)
-            .await
-            .map_err(|err| PsqlError::QueryError(err))?;
 
-        if let Some(notice) = res.get_notice() {
-            self.stream
-                .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
-        }
+        // Parse sql.
+        let stmts = Parser::parse_sql(sql)
+            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+            .map_err(|err| PsqlError::QueryError(err.into()))?;
 
-        if res.is_query() {
-            self.stream
-                .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
+        // Execute multiple statements in simple query. KISS later.
+        for stmt in stmts {
+            let session = session.clone();
 
-            let mut rows_cnt = 0;
+            // execute query
+            let mut res = session
+                .run_one_query(stmt, Format::Text)
+                .await
+                .map_err(|err| PsqlError::QueryError(err))?;
 
-            while let Some(row_set) = res.values_stream().next().await {
-                let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
-                for row in row_set {
-                    self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
-                    rows_cnt += 1;
-                }
+            if let Some(notice) = res.get_notice() {
+                self.stream
+                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
             }
 
-            // Run the callback before sending the `CommandComplete` message.
-            res.run_callback().await?;
+            if res.is_query() {
+                self.stream
+                    .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
 
-            self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                    stmt_type: res.get_stmt_type(),
-                    rows_cnt,
-                }))?;
-        } else {
-            // Run the callback before sending the `CommandComplete` message.
-            res.run_callback().await?;
+                let mut rows_cnt = 0;
 
-            self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                    stmt_type: res.get_stmt_type(),
-                    rows_cnt: res
-                        .get_effected_rows_cnt()
-                        .expect("row count should be set"),
-                }))?;
+                while let Some(row_set) = res.values_stream().next().await {
+                    let row_set = row_set.map_err(|err| PsqlError::QueryError(err))?;
+                    for row in row_set {
+                        self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                        rows_cnt += 1;
+                    }
+                }
+
+                // Run the callback before sending the `CommandComplete` message.
+                res.run_callback().await?;
+
+                self.stream.write_no_flush(&BeMessage::CommandComplete(
+                    BeCommandCompleteMessage {
+                        stmt_type: res.get_stmt_type(),
+                        rows_cnt,
+                    },
+                ))?;
+            } else {
+                // Run the callback before sending the `CommandComplete` message.
+                res.run_callback().await?;
+
+                self.stream.write_no_flush(&BeMessage::CommandComplete(
+                    BeCommandCompleteMessage {
+                        stmt_type: res.get_stmt_type(),
+                        rows_cnt: res
+                            .get_effected_rows_cnt()
+                            .expect("row count should be set"),
+                    },
+                ))?;
+            }
         }
-
+        // Put this line inside the for loop above will lead to unfinished/stuck regress test...Not
+        // sure the reason.
         self.stream.write_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }
@@ -439,13 +460,24 @@ where
                 .ok_or_else(PsqlError::no_statement)?
         };
 
+        let result_formats = msg
+            .result_format_codes
+            .iter()
+            .map(|&format_code| Format::from_i16(format_code))
+            .try_collect()?;
+        let param_formats = msg
+            .param_format_codes
+            .iter()
+            .map(|&format_code| Format::from_i16(format_code))
+            .try_collect()?;
+
         // 2. Instance the statement to get the portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = statement.instance(
             portal_name.clone(),
             &msg.params,
-            msg.result_format_code,
-            msg.param_format_code,
+            result_formats,
+            param_formats,
         )?;
 
         // 3. Insert the Portal.
