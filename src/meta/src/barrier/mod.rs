@@ -748,9 +748,9 @@ where
         });
 
         let result = try_join_all(collect_futures).await;
-        barrier_complete_tx
+        let _ = barrier_complete_tx
             .send((prev_epoch, result.map_err(Into::into)))
-            .unwrap();
+            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
     }
 
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
