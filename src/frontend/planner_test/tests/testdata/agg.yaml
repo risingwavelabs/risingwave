@@ -696,6 +696,40 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v2) filter((t.v2 < 5:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: enable two phase aggregation
+  sql: |
+    SET RW_ENABLE_TWO_PHASE_AGG=true;
+    create table t(v1 int, v2 int);
+    select min(v1), sum(v2) from t group by v1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [min(t.v1), sum(t.v2)] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v1), sum(t.v2)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [min, sum, t.v1(hidden)], pk_columns: [t.v1] }
+    └─StreamProject { exprs: [min(t.v1), sum(t.v2), t.v1] }
+      └─StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v1), sum(t.v2)] }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: disable two phase aggregation
+  sql: |
+    SET RW_ENABLE_TWO_PHASE_AGG=false;
+    create table t(v1 int, v2 int);
+    select min(v1), sum(v2) from t group by v1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [min(t.v1), sum(t.v2)] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v1), sum(t.v2)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [min, sum, t.v1(hidden)], pk_columns: [t.v1] }
+    └─StreamProject { exprs: [min(t.v1), sum(t.v2), t.v1] }
+      └─StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v1), sum(t.v2)] }
+        └─StreamExchange { dist: HashShard(t.v1) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
