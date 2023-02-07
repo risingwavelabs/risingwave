@@ -101,6 +101,10 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
+    /// State store url.
+    #[clap(long, env = "RW_STATE_STORE")]
+    state_store: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
@@ -137,11 +141,6 @@ pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = storage.bloom_false_positive)]
     bloom_false_positive: Option<f64>,
-
-    /// State store url.
-    #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = storage.state_store)]
-    state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
@@ -237,7 +236,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 sstable_size_mb: config.storage.sstable_size_mb,
                 block_size_kb: config.storage.block_size_kb,
                 bloom_false_positive: config.storage.bloom_false_positive,
-                state_store: config.storage.state_store,
+                state_store: opts.state_store,
                 data_directory: config.storage.data_directory,
             },
         )

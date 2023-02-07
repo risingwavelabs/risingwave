@@ -83,10 +83,19 @@ pub async fn compactor_serve(
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
     let storage_config = Arc::new(config.storage);
+    // TODO(zhidong): Only read from system params in v0.1.18.
+    let state_store_url = if system_params.state_store.is_empty() {
+        if let Some(s) = opts.state_store.as_ref() {
+            s
+        } else {
+            panic!("State store url is neither specified from CLI args nor on meta node");
+        }
+    } else {
+        &system_params.state_store
+    };
     let object_store = Arc::new(
         parse_remote_object_store(
-            storage_config
-                .state_store
+            state_store_url
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,

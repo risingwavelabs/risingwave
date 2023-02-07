@@ -105,7 +105,7 @@ pub struct MetaOpts {
     pub bloom_false_positive: f64,
 
     /// State store url.
-    pub state_store: String,
+    pub state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
@@ -134,7 +134,7 @@ impl MetaOpts {
             sstable_size_mb: 256,
             block_size_kb: 64,
             bloom_false_positive: 0.001,
-            state_store: "hummock+memory".to_string(),
+            state_store: None,
             data_directory: "hummock_001".to_string(),
         }
     }

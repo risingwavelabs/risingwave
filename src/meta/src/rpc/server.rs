@@ -300,7 +300,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         sstable_size_mb: opts.sstable_size_mb,
         bloom_false_positive: opts.bloom_false_positive,
         block_size_kb: opts.block_size_kb,
-        state_store: opts.state_store.clone(),
+        state_store: opts.state_store.clone().unwrap_or_default(),
         data_directory: opts.data_directory.clone(),
         backup_storage_url: opts.backup_storage_url.clone(),
         backup_storage_directory: opts.backup_storage_directory.clone(),

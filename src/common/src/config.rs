@@ -286,12 +286,6 @@ pub struct StorageConfig {
 
     // TODO: Remove in 0.1.18 release
     // NOTE: It is now a system parameter and should not be used directly.
-    /// State store url.
-    #[serde(default = "default::storage::state_store")]
-    pub state_store: String,
-
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
     pub data_directory: String,
@@ -355,32 +349,6 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
-    }
-}
-
-impl StorageConfig {
-    /// Checks whether an embedded compactor starts with a compute node.
-    #[inline(always)]
-    pub fn embedded_compactor_enabled(&self) -> bool {
-        // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-        // along with the compute node.
-        self.state_store == "hummock+memory"
-            || self.state_store.starts_with("hummock+disk")
-            || self.disable_remote_compactor
-    }
-
-    /// The maximal memory that storage components may use based on the configurations. Note that
-    /// this is the total storage memory for one compute node instead of the whole cluster.
-    pub fn total_storage_memory_limit_mb(&self) -> usize {
-        let total_memory = self.block_cache_capacity_mb
-            + self.meta_cache_capacity_mb
-            + self.shared_buffer_capacity_mb
-            + self.file_cache.total_buffer_capacity_mb;
-        if self.embedded_compactor_enabled() {
-            total_memory + self.compactor_memory_limit_mb
-        } else {
-            total_memory
-        }
     }
 }
 
@@ -575,12 +543,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn state_store() -> String {
-            // May be problematic for multi-node deployment, but since we override it with CLI and
-            // it will be removed soon, it won't be a problem.
-            "hummock+memory".to_string()
         }
 
         pub fn data_directory() -> String {

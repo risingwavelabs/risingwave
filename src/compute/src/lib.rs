@@ -69,6 +69,15 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
+    /// One of:
+    /// 1. `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
+    /// 2. `in-memory`
+    /// 3. `sled://{path}`
+    #[clap(long, env = "RW_STATE_STORE")]
+    pub state_store: Option<String>,
+
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -90,16 +99,6 @@ pub struct ComputeNodeOpts {
 /// Command-line arguments for compute-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 struct OverrideConfigOpts {
-    /// One of:
-    /// 1. `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    /// 2. `in-memory`
-    /// 3. `sled://{path}`
-    #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = storage.state_store)]
-    pub state_store: Option<String>,
-
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics

@@ -56,6 +56,12 @@ pub struct CompactorOpts {
     #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
+    /// Of the form `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
+    #[clap(long, env = "RW_STATE_STORE")]
+    pub state_store: Option<String>,
+
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
 
@@ -72,13 +78,6 @@ pub struct CompactorOpts {
 /// Command-line arguments for compactor-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 struct OverrideConfigOpts {
-    /// Of the form `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = storage.state_store)]
-    pub state_store: Option<String>,
-
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
