@@ -521,6 +521,23 @@ where
             Ok(Response::new(JavaGetTableResponse { table: None }))
         }
     }
+
+    async fn alter_table_name(
+        &self,
+        request: Request<AlterTableNameRequest>,
+    ) -> Result<Response<AlterTableNameResponse>, Status> {
+        let req = request.into_inner();
+        let table_id = req.get_table_id();
+        let new_table_name = req.get_new_table_name();
+        let version = self
+            .catalog_manager
+            .alter_table_name(table_id, new_table_name)
+            .await?;
+        Ok(Response::new(AlterTableNameResponse {
+            status: None,
+            version,
+        }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>

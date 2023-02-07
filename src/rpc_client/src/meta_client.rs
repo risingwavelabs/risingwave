@@ -309,6 +309,15 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
+    pub async fn alter_table_name(&self, table_id: u32, name: &str) -> Result<CatalogVersion> {
+        let request = AlterTableNameRequest {
+            table_id,
+            new_table_name: name.to_string(),
+        };
+        let resp = self.inner.alter_table_name(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
@@ -1289,6 +1298,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
+             ,{ ddl_client, alter_table_name, AlterTableNameRequest, AlterTableNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

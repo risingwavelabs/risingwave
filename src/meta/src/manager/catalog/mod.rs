@@ -850,6 +850,39 @@ where
         }
     }
 
+    pub async fn alter_table_name(
+        &self,
+        table_id: TableId,
+        table_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_table_id(table_id)?;
+        let views = database_core
+            .views
+            .values()
+            .filter(|view| view.dependent_relations.iter().any(|&r| r == table_id))
+            .map(|view| view.name.clone())
+            .collect_vec();
+        if !views.is_empty() {
+            return Err(MetaError::permission_denied(format!(
+                "Fail to alter table with new name `{}` because views {:?} depend on it",
+                table_name, views
+            )));
+        };
+
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut table = tables.get_mut(table_id).unwrap();
+        table.name = table_name.to_string();
+        let new_table = table.clone();
+        commit_meta!(self, tables)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Table(new_table))
+            .await;
+        Ok(version)
+    }
+
     pub async fn start_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;

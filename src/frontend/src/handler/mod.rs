@@ -367,6 +367,10 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::AddColumn { column_def },
         } => alter_table::handle_add_column(handler_args, name, column_def).await,
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RenameTable { table_name },
+        } => alter_table::handle_rename_table(handler_args, name, table_name).await,
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

@@ -139,6 +139,16 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
+message AlterTableNameRequest {
+  uint32 table_id = 1;
+  string new_table_name = 2;
+}
+
+message AlterTableNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateFunctionRequest {
   catalog.Function function = 1;
 }
@@ -235,6 +245,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc AlterTableName(AlterTableNameRequest) returns (AlterTableNameResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

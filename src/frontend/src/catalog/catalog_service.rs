@@ -78,6 +78,8 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
+
     async fn create_index(
         &self,
         index: ProstIndex,
@@ -243,6 +245,14 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {
         let version = self.meta_client.drop_database(database_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_table_name(table_id, table_name)
+            .await?;
         self.wait_version(version).await
     }
 }

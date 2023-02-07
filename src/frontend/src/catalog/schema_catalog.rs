@@ -84,6 +84,11 @@ impl SchemaCatalog {
         let table: TableCatalog = prost.into();
         let table_ref = Arc::new(table);
 
+        let old_table = self.table_by_id.get(&id).unwrap();
+        // check if table name get updated.
+        if old_table.name() != name {
+            self.table_by_name.remove(old_table.name());
+        }
         self.table_by_name.insert(name, table_ref.clone());
         self.table_by_id.insert(id, table_ref);
     }

@@ -182,6 +182,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "index name")
     }
 
+    /// return the `table_name`
+    pub fn resolve_table_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "table name")
+    }
+
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")

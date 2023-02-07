@@ -380,6 +380,13 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog.write().drop_schema(database_id, schema_id);
         Ok(())
     }
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
+        self.catalog
+            .write()
+            .alter_table_name_by_id(&table_id.into(), table_name);
+        Ok(())
+    }
 }
 
 impl MockCatalogWriter {

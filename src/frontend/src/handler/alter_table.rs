@@ -135,6 +135,44 @@ pub async fn handle_add_column(
     }
 }
 
+pub async fn handle_rename_table(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+    new_table_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let db_name = session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let new_table_name = Binder::resolve_table_name(new_table_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let table_id = {
+        let reader = session.env().catalog_reader().read_guard();
+        let (table, schema_name) =
+            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+        match table.table_type {
+            TableType::Table => {}
+            _ => Err(ErrorCode::InvalidInputSyntax(format!(
+                "\"{table_name}\" is not a table or cannot be altered"
+            )))?,
+        }
+
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
+        table.id
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .alter_table_name(table_id.table_id, &new_table_name)
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -205,5 +243,36 @@ mod tests {
             table.version.as_ref().unwrap().next_column_id.next(),
             altered_table.version.as_ref().unwrap().next_column_id
         );
+    }
+
+    #[tokio::test]
+    async fn test_alter_table_name_handler() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        let sql = "create table t (i int, r real);";
+        frontend.run_sql(sql).await.unwrap();
+
+        let table_id = {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            catalog_reader
+                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+                .unwrap()
+                .0
+                .id
+        };
+
+        // Alter table name.
+        let sql = "alter table t rename to t1;";
+        frontend.run_sql(sql).await.unwrap();
+
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let altered_table_name = catalog_reader
+            .get_table_by_id(&table_id)
+            .unwrap()
+            .name()
+            .to_string();
+        assert_eq!(altered_table_name, "t1");
     }
 }
