@@ -20,6 +20,8 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
+use sha2::digest::typenum::Exp;
+use risingwave_pb::expr::expr_node::Type::InputRef;
 
 use super::generic::{
     self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
@@ -530,58 +532,154 @@ impl LogicalAggBuilder {
                 )
             })?;
 
-        if agg_kind == AggKind::Avg {
-            assert_eq!(inputs.len(), 1);
+        match agg_kind {
+            AggKind::Avg => {
+                assert_eq!(inputs.len(), 1);
 
-            let left_return_type =
-                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+                let left_return_type =
+                    AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]).unwrap();
 
-            // Rewrite avg to cast(sum as avg_return_type) / count.
-            self.agg_calls.push(PlanAggCall {
-                agg_kind: AggKind::Sum,
-                return_type: left_return_type.clone(),
-                inputs: inputs.clone(),
-                distinct,
-                order_by_fields: order_by_fields.clone(),
-                filter: filter.clone(),
-            });
-            let left = ExprImpl::from(InputRef::new(
-                self.group_key.len() + self.agg_calls.len() - 1,
-                left_return_type,
-            ))
-            .cast_implicit(return_type)
-            .unwrap();
+                // Rewrite avg to cast(sum as avg_return_type) / count.
+                self.agg_calls.push(PlanAggCall {
+                    agg_kind: AggKind::Sum,
+                    return_type: left_return_type.clone(),
+                    inputs: inputs.clone(),
+                    distinct,
+                    order_by_fields: order_by_fields.clone(),
+                    filter: filter.clone(),
+                });
+                let left = ExprImpl::from(InputRef::new(
+                    self.group_key.len() + self.agg_calls.len() - 1,
+                    left_return_type,
+                ))
+                .cast_implicit(return_type)
+                .unwrap();
 
-            let right_return_type =
-                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]).unwrap();
+                let right_return_type =
+                    AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()])
+                        .unwrap();
 
-            self.agg_calls.push(PlanAggCall {
-                agg_kind: AggKind::Count,
-                return_type: right_return_type.clone(),
-                inputs,
-                distinct,
-                order_by_fields,
-                filter,
-            });
+                self.agg_calls.push(PlanAggCall {
+                    agg_kind: AggKind::Count,
+                    return_type: right_return_type.clone(),
+                    inputs,
+                    distinct,
+                    order_by_fields,
+                    filter,
+                });
 
-            let right = InputRef::new(
-                self.group_key.len() + self.agg_calls.len() - 1,
-                right_return_type,
-            );
+                let right = InputRef::new(
+                    self.group_key.len() + self.agg_calls.len() - 1,
+                    right_return_type,
+                );
 
-            Ok(ExprImpl::from(
-                FunctionCall::new(ExprType::Divide, vec![left, right.into()]).unwrap(),
-            ))
-        } else {
-            self.agg_calls.push(PlanAggCall {
-                agg_kind,
-                return_type: return_type.clone(),
-                inputs,
-                distinct,
-                order_by_fields,
-                filter,
-            });
-            Ok(InputRef::new(self.group_key.len() + self.agg_calls.len() - 1, return_type).into())
+                Ok(ExprImpl::from(
+                    FunctionCall::new(ExprType::Divide, vec![left, right.into()]).unwrap(),
+                ))
+            }
+
+            // (sum(sq) - sum * sum / count) / (count - 1)
+            AggKind::Stddev => {
+                let input = inputs.iter().exactly_one().unwrap();
+
+                println!("input idx {} data {} return {} s {}", input.index, input.data_type, input.return_type(), input.to_string());
+
+                // sq_sum
+                let sq_expr = ExprImpl::from(
+                    FunctionCall::new(
+                        ExprType::Multiply,
+                        vec![ExprImpl::from(input.clone()), ExprImpl::from(input.clone())],
+                    )
+                    .unwrap(),
+                );
+
+
+                let sq_sum_return_type =
+                    AggCall::infer_return_type(&AggKind::Sum, &[sq_expr.return_type()]).unwrap();
+
+                self.agg_calls.push(PlanAggCall {
+                    agg_kind: AggKind::Sum,
+                    return_type: sq_sum_return_type.clone(),
+                    inputs: inputs.clone(),
+                    distinct,
+                    order_by_fields: order_by_fields.clone(),
+                    filter: filter.clone(),
+                });
+
+                let sq_sum = ExprImpl::from(InputRef::new(
+                    self.group_key.len() + self.agg_calls.len() - 1,
+                    sq_sum_return_type,
+                ))
+                .cast_implicit(return_type.clone())
+                .unwrap();
+
+                // sum_sq
+                let left_return_type =
+                    AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+
+                // Rewrite avg to cast(sum as avg_return_type) / count.
+                self.agg_calls.push(PlanAggCall {
+                    agg_kind: AggKind::Sum,
+                    return_type: left_return_type.clone(),
+                    inputs: inputs.clone(),
+                    distinct,
+                    order_by_fields: order_by_fields.clone(),
+                    filter: filter.clone(),
+                });
+                let left = ExprImpl::from(InputRef::new(
+                    self.group_key.len() + self.agg_calls.len() - 1,
+                    left_return_type,
+                ))
+                    .cast_implicit(return_type)
+                    .unwrap();
+
+                // n - 1
+                let right_return_type =
+                    AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()])
+                        .unwrap();
+
+                self.agg_calls.push(PlanAggCall {
+                    agg_kind: AggKind::Count,
+                    return_type: right_return_type.clone(),
+                    inputs,
+                    distinct,
+                    order_by_fields,
+                    filter,
+                });
+
+                let right = InputRef::new(
+                    self.group_key.len() + self.agg_calls.len() - 1,
+                    right_return_type,
+                );
+
+                //   ExprImpl::from(FunctionCall::new(ExprType::Add, vec![]).unwrap())
+
+                // let left = ExprImpl::from(
+                //     FunctionCall::new(ExprType::Add, vec![sq_sum.clone(), sq_sum.clone()])
+                //         .unwrap(),
+                // );
+
+                let expr_impl = ExprImpl::from(
+                    FunctionCall::new(ExprType::Divide, vec![sq_sum, right.into()]).unwrap(),
+                );
+
+                Ok(expr_impl)
+            }
+
+            _ => {
+                self.agg_calls.push(PlanAggCall {
+                    agg_kind,
+                    return_type: return_type.clone(),
+                    inputs,
+                    distinct,
+                    order_by_fields,
+                    filter,
+                });
+                Ok(
+                    InputRef::new(self.group_key.len() + self.agg_calls.len() - 1, return_type)
+                        .into(),
+                )
+            }
         }
     }
 }
