@@ -13,7 +13,7 @@ RUN apt-get update -yy && \
 SHELL ["/bin/bash", "-c"]
 
 RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64>>~/.bashrc
-RUN echo source ~/.bashrc
+RUN echo source ~/.bashrc>>~/.bashrc
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 
