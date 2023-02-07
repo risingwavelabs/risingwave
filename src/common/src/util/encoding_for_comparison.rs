@@ -17,23 +17,8 @@ use itertools::Itertools;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::OwnedRow;
-use crate::types::{memcmp_serialize_datum_into, DataType, ScalarRefImpl};
+use crate::types::{memcmp_serialize_datum_into, ScalarRefImpl};
 use crate::util::sort_util::{OrderPair, OrderType};
-
-/// This function is used to check whether we can perform encoding on this type.
-/// TODO: based on `memcomparable`, we may support more data type in the future.
-pub fn is_type_encodable(t: DataType) -> bool {
-    matches!(
-        t,
-        DataType::Boolean
-            | DataType::Int16
-            | DataType::Int32
-            | DataType::Int64
-            | DataType::Float32
-            | DataType::Float64
-            | DataType::Varchar
-    )
-}
 
 fn encode_value(value: Option<ScalarRefImpl<'_>>, order: &OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);

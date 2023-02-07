@@ -276,7 +276,7 @@ pub struct StorageConfig {
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
-    pub shared_buffer_capacity_mb: u32,
+    pub shared_buffer_capacity_mb: usize,
 
     /// State store url.
     #[serde(default = "default::storage::state_store")]
@@ -342,6 +342,32 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl StorageConfig {
+    /// Checks whether an embedded compactor starts with a compute node.
+    #[inline(always)]
+    pub fn embedded_compactor_enabled(&self) -> bool {
+        // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
+        // along with the compute node.
+        self.state_store == "hummock+memory"
+            || self.state_store.starts_with("hummock+disk")
+            || self.disable_remote_compactor
+    }
+
+    /// The maximal memory that storage components may use based on the configurations. Note that
+    /// this is the total storage memory for one compute node instead of the whole cluster.
+    pub fn total_storage_memory_limit_mb(&self) -> usize {
+        let total_memory = self.block_cache_capacity_mb
+            + self.meta_cache_capacity_mb
+            + self.shared_buffer_capacity_mb
+            + self.file_cache.total_buffer_capacity_mb;
+        if self.embedded_compactor_enabled() {
+            total_memory + self.compactor_memory_limit_mb
+        } else {
+            total_memory
+        }
     }
 }
 
@@ -530,7 +556,7 @@ mod default {
             4
         }
 
-        pub fn shared_buffer_capacity_mb() -> u32 {
+        pub fn shared_buffer_capacity_mb() -> usize {
             1024
         }
 

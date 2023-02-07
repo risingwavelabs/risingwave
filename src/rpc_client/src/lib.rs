@@ -21,6 +21,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(generators)]
+#![feature(iterator_try_collect)]
+#![feature(hash_drain_filter)]
 
 #[cfg(madsim)]
 use std::collections::HashMap;
