@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table } from "./catalog";
+import { ColumnIndex, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
 import { Buffer } from "./common";
 import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
@@ -687,12 +687,10 @@ export interface LookupNode {
 
 /** WatermarkFilter needs to filter the upstream data by the water mark. */
 export interface WatermarkFilterNode {
-  /** The expression to calculate the watermark value. */
-  watermarkExpr:
-    | ExprNode
+  /** The watermark desc */
+  watermarkDesc:
+    | WatermarkDesc
     | undefined;
-  /** The column the event time belongs. */
-  eventTimeColIdx: number;
   /** The table used to persist watermark, the key is vnode. */
   table: Table | undefined;
 }
@@ -2979,33 +2977,30 @@ export const LookupNode = {
 };
 
 function createBaseWatermarkFilterNode(): WatermarkFilterNode {
-  return { watermarkExpr: undefined, eventTimeColIdx: 0, table: undefined };
+  return { watermarkDesc: undefined, table: undefined };
 }
 
 export const WatermarkFilterNode = {
   fromJSON(object: any): WatermarkFilterNode {
     return {
-      watermarkExpr: isSet(object.watermarkExpr) ? ExprNode.fromJSON(object.watermarkExpr) : undefined,
-      eventTimeColIdx: isSet(object.eventTimeColIdx) ? Number(object.eventTimeColIdx) : 0,
+      watermarkDesc: isSet(object.watermarkDesc) ? WatermarkDesc.fromJSON(object.watermarkDesc) : undefined,
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
     };
   },
 
   toJSON(message: WatermarkFilterNode): unknown {
     const obj: any = {};
-    message.watermarkExpr !== undefined &&
-      (obj.watermarkExpr = message.watermarkExpr ? ExprNode.toJSON(message.watermarkExpr) : undefined);
-    message.eventTimeColIdx !== undefined && (obj.eventTimeColIdx = Math.round(message.eventTimeColIdx));
+    message.watermarkDesc !== undefined &&
+      (obj.watermarkDesc = message.watermarkDesc ? WatermarkDesc.toJSON(message.watermarkDesc) : undefined);
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<WatermarkFilterNode>, I>>(object: I): WatermarkFilterNode {
     const message = createBaseWatermarkFilterNode();
-    message.watermarkExpr = (object.watermarkExpr !== undefined && object.watermarkExpr !== null)
-      ? ExprNode.fromPartial(object.watermarkExpr)
+    message.watermarkDesc = (object.watermarkDesc !== undefined && object.watermarkDesc !== null)
+      ? WatermarkDesc.fromPartial(object.watermarkDesc)
       : undefined;
-    message.eventTimeColIdx = object.eventTimeColIdx ?? 0;
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     return message;
   },

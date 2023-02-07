@@ -21,6 +21,15 @@ export interface ColumnIndex {
   index: number;
 }
 
+export interface WatermarkDesc {
+  /** The column idx the watermark is on */
+  watermarkIdx:
+    | ColumnIndex
+    | undefined;
+  /** The expression to calculate the watermark value. */
+  expr: ExprNode | undefined;
+}
+
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
@@ -52,7 +61,11 @@ export interface Source {
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
   owner: number;
-  info: StreamSourceInfo | undefined;
+  info:
+    | StreamSourceInfo
+    | undefined;
+  /** Define watermarks on source. */
+  watermarkDescs: WatermarkDesc[];
 }
 
 export interface Source_PropertiesEntry {
@@ -282,6 +295,36 @@ export const ColumnIndex = {
   },
 };
 
+function createBaseWatermarkDesc(): WatermarkDesc {
+  return { watermarkIdx: undefined, expr: undefined };
+}
+
+export const WatermarkDesc = {
+  fromJSON(object: any): WatermarkDesc {
+    return {
+      watermarkIdx: isSet(object.watermarkIdx) ? ColumnIndex.fromJSON(object.watermarkIdx) : undefined,
+      expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined,
+    };
+  },
+
+  toJSON(message: WatermarkDesc): unknown {
+    const obj: any = {};
+    message.watermarkIdx !== undefined &&
+      (obj.watermarkIdx = message.watermarkIdx ? ColumnIndex.toJSON(message.watermarkIdx) : undefined);
+    message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WatermarkDesc>, I>>(object: I): WatermarkDesc {
+    const message = createBaseWatermarkDesc();
+    message.watermarkIdx = (object.watermarkIdx !== undefined && object.watermarkIdx !== null)
+      ? ColumnIndex.fromPartial(object.watermarkIdx)
+      : undefined;
+    message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
+    return message;
+  },
+};
+
 function createBaseStreamSourceInfo(): StreamSourceInfo {
   return {
     rowFormat: RowFormatType.ROW_UNSPECIFIED,
@@ -340,6 +383,7 @@ function createBaseSource(): Source {
     properties: {},
     owner: 0,
     info: undefined,
+    watermarkDescs: [],
   };
 }
 
@@ -361,6 +405,9 @@ export const Source = {
         : {},
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
     };
   },
 
@@ -390,6 +437,11 @@ export const Source = {
     }
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
     return obj;
   },
 
@@ -417,6 +469,7 @@ export const Source = {
     message.info = (object.info !== undefined && object.info !== null)
       ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
     return message;
   },
 };
