@@ -296,6 +296,7 @@ impl TableCatalog {
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
             value_indices: self.value_indices.clone(),
             read_prefix_len_hint: self.read_prefix_len_hint,
+            watermark_columns: self.watermark_columns.clone(),
         }
     }
 
