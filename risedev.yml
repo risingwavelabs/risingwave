@@ -30,7 +30,7 @@ profile:
 
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
-      # unsafe-no-fsync: true
+      #   unsafe-no-fsync: true
       - use: meta-node
       - use: compute-node
       - use: frontend
