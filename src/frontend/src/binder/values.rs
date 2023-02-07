@@ -67,11 +67,12 @@ fn values_column_name(values_id: usize, col_id: usize) -> String {
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
+    /// Returns true if null values were inserted
     pub(super) fn bind_values(
         &mut self,
         values: Values,
         expected_types: Option<Vec<DataType>>,
-    ) -> Result<BoundValues> {
+    ) -> Result<(BoundValues, bool)> {
         assert!(!values.0.is_empty());
 
         self.context.clause = Some(Clause::Values);
@@ -81,6 +82,26 @@ impl Binder {
             .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
+
+        // Adding Null values in case user did not specify all columns. E.g.
+        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
+        let vec_len = match bound.get(0) {
+            None => 0,
+            Some(row) => row.len(),
+        };
+        let et_clone = expected_types.clone().unwrap_or_default();
+        let nulls_to_insert = if et_clone.len() > vec_len {
+            let nulls_to_insert = et_clone.len() - vec_len;
+            for row in &mut bound {
+                for i in 0..nulls_to_insert {
+                    let t = et_clone[vec_len + i].clone();
+                    row.push(ExprImpl::literal_null(t));
+                }
+            }
+            nulls_to_insert
+        } else {
+            0
+        };
 
         let num_columns = bound[0].len();
         if bound.iter().any(|row| row.len() != num_columns) {
@@ -132,7 +153,7 @@ impl Binder {
             )
             .into());
         }
-        Ok(bound_values)
+        Ok((bound_values, nulls_to_insert > 0))
     }
 }
 
@@ -166,8 +187,8 @@ mod tests {
                 .collect(),
         );
 
-        assert_eq!(res.schema, schema);
-        for vec in res.rows {
+        assert_eq!(res.0.schema, schema);
+        for vec in res.0.rows {
             for (expr, ty) in zip_eq(vec, schema.data_types()) {
                 assert_eq!(expr.return_type(), ty);
             }

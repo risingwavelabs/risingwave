@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Ident, ObjectName, Query, SelectItem, SetExpr, Value};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::Binder;
@@ -89,48 +89,6 @@ impl Binder {
             .map(|c| c.data_type().clone())
             .collect();
 
-        // Adding Null values in case user did not specify all columns. E.g.
-        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
-        let (source, nulls_inserted) = match source {
-            Query {
-                with,
-                body: SetExpr::Values(values),
-                order_by,
-                limit,
-                offset,
-                fetch,
-            } => {
-                // We only need to insert nulls if user did not define all columns
-                let (new_body, nulls_inserted) = if !values.0.is_empty()
-                    && !values.0.iter().all(|v| v.len() == expected_types.len())
-                {
-                    // all value lists should have same length. Always add same num of nulls
-                    // Illegal statement: insert into t values (1, 2), (3, 4, 5);
-                    let nulls_to_insert = expected_types.len() - values.0[0].len();
-                    let mut new_values = values;
-                    for new_value in &mut new_values.0 {
-                        let mut nulls = vec![Expr::Value(Value::Null); nulls_to_insert];
-                        new_value.append(&mut nulls);
-                    }
-                    (SetExpr::Values(new_values), true)
-                } else {
-                    (SetExpr::Values(values), false)
-                };
-                (
-                    Query {
-                        with,
-                        body: new_body,
-                        order_by,
-                        limit,
-                        offset,
-                        fetch,
-                    },
-                    nulls_inserted,
-                )
-            }
-            _ => (source, false),
-        };
-
         // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
         //
@@ -153,7 +111,7 @@ impl Binder {
         // internal implicit cast.
         // In other cases, the `source` query is handled on its own and assignment cast is done
         // afterwards.
-        let (source, cast_exprs) = match source {
+        let (source, cast_exprs, nulls_inserted) = match source {
             Query {
                 with: None,
                 body: SetExpr::Values(values),
@@ -162,7 +120,8 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
-                let values = self.bind_values(values, Some(expected_types.clone()))?;
+                let (values, nulls_inserted) =
+                    self.bind_values(values, Some(expected_types.clone()))?;
                 let body = BoundSetExpr::Values(values.into());
                 (
                     BoundQuery {
@@ -174,6 +133,7 @@ impl Binder {
                         extra_order_exprs: vec![],
                     },
                     vec![],
+                    nulls_inserted,
                 )
             }
             query => {
@@ -190,7 +150,7 @@ impl Binder {
                             .collect(),
                     )?,
                 };
-                (bound, cast_exprs)
+                (bound, cast_exprs, false)
             }
         };
 
