@@ -174,7 +174,7 @@ impl Compactor {
         context.compactor_metrics.compact_task_pending_num.inc();
         let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
-        let mut need_cancel = true;
+        // let mut need_cancel = true;
         let mut compaction_futures = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
@@ -218,9 +218,6 @@ impl Compactor {
                 future_result = buffered.next() => {
                     match future_result {
                         Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
-                            if !compact_stat.drop_result(compact_task.task_type()) {
-                                need_cancel = false;
-                            }
                             output_ssts.push((split_index, ssts, compact_stat));
                         }
                         Some(Ok(Err(e))) => {
@@ -250,10 +247,6 @@ impl Compactor {
         // Sort by split/key range index.
         if !output_ssts.is_empty() {
             output_ssts.sort_by_key(|(split_index, ..)| *split_index);
-        }
-
-        if need_cancel {
-            task_status = TaskStatus::ManualCanceled;
         }
 
         sync_point::sync_point!("BEFORE_COMPACT_REPORT");
@@ -765,13 +758,7 @@ impl Compactor {
         )
         .await?;
 
-        let ssts = {
-            if compaction_statistics.drop_result(self.task_config.task_type) {
-                vec![]
-            } else {
-                sst_builder.finish().await?
-            }
-        };
+        let ssts = sst_builder.finish().await?;
 
         Ok((ssts, compaction_statistics))
     }

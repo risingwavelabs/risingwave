@@ -80,36 +80,25 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
     }
 }
 
+/// `CompactionStatistics` will count the results of each compact split
 #[derive(Default, Debug)]
 pub struct CompactionStatistics {
+    // to report per-table metrics
     pub delta_drop_stat: TableStatsMap,
 
+    // to calculate delete ratio
     pub iter_total_key_counts: u64,
     pub iter_drop_key_counts: u64,
 }
 
 impl CompactionStatistics {
-    pub fn delete_ratio(&self) -> Option<u64> {
+    #[allow(dead_code)]
+    fn delete_ratio(&self) -> Option<u64> {
         if self.iter_total_key_counts == 0 {
             return None;
         }
 
         Some(self.iter_drop_key_counts / self.iter_total_key_counts)
-    }
-
-    pub fn drop_result(&self, task_type: compact_task::TaskType) -> bool {
-        let min_delete_ratio = 15;
-        match task_type {
-            compact_task::TaskType::SpaceReclaim => {
-                if let Some(delete_ratio) = self.delete_ratio() && delete_ratio > min_delete_ratio {
-                    return false;
-                }
-
-                true
-            }
-
-            _ => false,
-        }
     }
 }
 
