@@ -16,7 +16,6 @@
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
-
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
@@ -40,6 +39,7 @@ use crate::rpc::metrics::MetaMetrics;
 const SCORE_BASE: u64 = 100;
 
 pub mod selector_option {
+    use std::collections::HashSet;
     use std::sync::Arc;
 
     use risingwave_pb::hummock::CompactionConfig;
@@ -60,7 +60,7 @@ pub mod selector_option {
     #[derive(Clone)]
     pub struct SpaceReclaimCompactionSelectorOption {
         pub compaction_config: Arc<CompactionConfig>,
-        // todo: check existing table_id
+        pub all_table_ids: HashSet<u32>,
     }
 
     #[derive(Clone)]
@@ -380,7 +380,11 @@ impl LevelSelector for DynamicLevelSelector {
     }
 
     fn try_update(&mut self, selector_option: SelectorOption) {
-        if let SelectorOption::Dynamic(selector_option) = selector_option && (*self.dynamic_level_core.get_config() != *selector_option.compaction_config) {
+        let selector_option = selector_option
+            .as_dynamic()
+            .expect("try_update to as_manual");
+
+        if *self.dynamic_level_core.get_config() != *selector_option.compaction_config {
             self.update_impl(selector_option)
         }
     }
@@ -465,8 +469,13 @@ impl LevelSelector for ManualCompactionSelector {
     }
 
     fn try_update(&mut self, selector_option: SelectorOption) {
-        if let SelectorOption::Manual(selector_option) = selector_option && (*self.dynamic_level_core.get_config() != *selector_option.compaction_config
-        || self.option != selector_option.option) {
+        let selector_option = selector_option
+            .as_manual()
+            .expect("try_update to as_manual");
+
+        if *self.dynamic_level_core.get_config() != *selector_option.compaction_config
+            || self.option != selector_option.option
+        {
             self.update_impl(selector_option)
         }
     }
@@ -478,12 +487,13 @@ pub struct SpaceReclaimCompactionSelector {
 }
 
 impl SpaceReclaimCompactionSelector {
-    pub fn new(config: Arc<CompactionConfig>) -> Self {
+    pub fn new(selector_option: selector_option::SpaceReclaimCompactionSelectorOption) -> Self {
         Self {
             picker: SpaceReclaimCompactionPicker::new(
-                config.max_space_reclaim_file_counts as usize,
+                selector_option.compaction_config.max_space_reclaim_bytes,
+                selector_option.all_table_ids,
             ),
-            dynamic_level_core: DynamicLevelSelectorCore::new(config),
+            dynamic_level_core: DynamicLevelSelectorCore::new(selector_option.compaction_config),
         }
     }
 
@@ -493,10 +503,10 @@ impl SpaceReclaimCompactionSelector {
     ) {
         self.dynamic_level_core =
             DynamicLevelSelectorCore::new(selector_option.compaction_config.clone());
+
         self.picker = SpaceReclaimCompactionPicker::new(
-            selector_option
-                .compaction_config
-                .max_space_reclaim_file_counts as usize,
+            selector_option.compaction_config.max_space_reclaim_bytes,
+            selector_option.all_table_ids,
         );
     }
 }
@@ -534,7 +544,13 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
     }
 
     fn try_update(&mut self, selector_option: SelectorOption) {
-        if let SelectorOption::SpaceReclaim(selector_option) = selector_option && (*self.dynamic_level_core.get_config() != *selector_option.compaction_config) {
+        let selector_option = selector_option
+            .as_space_reclaim()
+            .expect("try_update to as_space_reclaim");
+
+        if (*self.dynamic_level_core.get_config() != *selector_option.compaction_config)
+            || self.picker.all_table_ids != selector_option.all_table_ids
+        {
             self.update_impl(selector_option)
         }
     }
@@ -548,7 +564,7 @@ pub struct TtlCompactionSelector {
 impl TtlCompactionSelector {
     pub fn new(config: Arc<CompactionConfig>) -> Self {
         Self {
-            picker: TtlReclaimCompactionPicker::new(config.max_space_reclaim_file_counts as usize),
+            picker: TtlReclaimCompactionPicker::new(config.max_space_reclaim_bytes),
             dynamic_level_core: DynamicLevelSelectorCore::new(config),
         }
     }
@@ -557,9 +573,7 @@ impl TtlCompactionSelector {
         self.dynamic_level_core =
             DynamicLevelSelectorCore::new(selector_option.compaction_config.clone());
         self.picker = TtlReclaimCompactionPicker::new(
-            selector_option
-                .compaction_config
-                .max_space_reclaim_file_counts as usize,
+            selector_option.compaction_config.max_space_reclaim_bytes,
         );
     }
 }
@@ -597,7 +611,9 @@ impl LevelSelector for TtlCompactionSelector {
     }
 
     fn try_update(&mut self, selector_option: SelectorOption) {
-        if let SelectorOption::Ttl(selector_option) = selector_option && (*self.dynamic_level_core.get_config() != *selector_option.compaction_config) {
+        let selector_option = selector_option.as_ttl().expect("try_update to as_manual");
+
+        if *self.dynamic_level_core.get_config() != *selector_option.compaction_config {
             self.update_impl(selector_option)
         }
     }
@@ -668,7 +684,7 @@ pub mod tests {
                 right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,
-            table_ids: vec![],
+            table_ids: vec![id as u32],
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,

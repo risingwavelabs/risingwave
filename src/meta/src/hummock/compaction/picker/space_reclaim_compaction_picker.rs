@@ -12,26 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::InputLevel;
+use risingwave_pb::hummock::{InputLevel, SstableInfo};
 
 use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct SpaceReclaimCompactionPicker {
     // config
-    max_space_reclaim_file_count: usize,
+    pub max_space_reclaim_bytes: u64,
+    pub all_table_ids: HashSet<u32>,
 
     // state
-    last_select_index: usize,
+    pub last_select_index: usize,
 }
 
 impl SpaceReclaimCompactionPicker {
-    pub fn new(max_space_reclaim_file_count: usize) -> Self {
+    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<u32>) -> Self {
         Self {
-            max_space_reclaim_file_count,
+            max_space_reclaim_bytes,
             last_select_index: 0,
+            all_table_ids,
         }
+    }
+
+    fn filter(&self, sst: &SstableInfo) -> bool {
+        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
+        // it means all the table exist , so we not need to pick this sst
+        table_id_in_sst
+            .iter()
+            .all(|id| self.all_table_ids.contains(id))
     }
 }
 
@@ -40,7 +52,6 @@ impl CompactionPicker for SpaceReclaimCompactionPicker {
         &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-
         _stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
@@ -48,19 +59,22 @@ impl CompactionPicker for SpaceReclaimCompactionPicker {
         let mut select_input_ssts = vec![];
         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
-        if self.last_select_index > reclaimed_level.table_infos.len() {
+        if self.last_select_index >= reclaimed_level.table_infos.len() {
             self.last_select_index = 0;
         }
 
         let start_indedx = self.last_select_index;
+        let mut select_file_size = 0;
+
         for sst in &reclaimed_level.table_infos[start_indedx..] {
             self.last_select_index += 1;
-            if level_handler.is_pending_compact(&sst.id) {
+            if level_handler.is_pending_compact(&sst.id) || self.filter(sst) {
                 continue;
             }
 
             select_input_ssts.push(sst.clone());
-            if select_input_ssts.len() == self.max_space_reclaim_file_count {
+            select_file_size += sst.file_size;
+            if select_file_size > self.max_space_reclaim_bytes {
                 break;
             }
         }
@@ -106,11 +120,17 @@ mod test {
     use crate::hummock::compaction::level_selector::{
         LevelSelector, SpaceReclaimCompactionSelector,
     };
-    use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction::{selector_option, LocalSelectorStatistic, SelectorOption};
 
     #[test]
     fn test_space_reclaim_compaction_selector() {
-        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let max_space_reclaim_bytes = 400;
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_level(4)
+                .max_space_reclaim_bytes(max_space_reclaim_bytes)
+                .build(),
+        );
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![
@@ -148,9 +168,11 @@ mod test {
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
-        let mut selector = SpaceReclaimCompactionSelector::new(config);
-        let max_space_reclaim_file_count = 5;
-
+        let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
+            compaction_config: config.clone(),
+            all_table_ids: HashSet::default(),
+        };
+        let mut selector = SpaceReclaimCompactionSelector::new(selector_option);
         {
             // pick space reclaim
             let task = selector
@@ -159,10 +181,7 @@ mod test {
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
-            assert_eq!(
-                task.input.input_levels[0].table_infos.len(),
-                max_space_reclaim_file_count
-            );
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 5);
 
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
@@ -177,6 +196,14 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
+
+            // in this case, no files is pending, so it limit by max_space_reclaim_bytes
+            let select_file_size: u64 = task.input.input_levels[0]
+                .table_infos
+                .iter()
+                .map(|sst| sst.file_size)
+                .sum();
+            assert!(select_file_size > max_space_reclaim_bytes);
         }
 
         {
@@ -198,10 +225,65 @@ mod test {
             let all_file_count = levels.get_levels().last().unwrap().get_table_infos().len();
             assert_eq!(
                 task.input.input_levels[0].table_infos.len(),
-                all_file_count - max_space_reclaim_file_count
+                all_file_count - 5
             );
 
             let mut start_id = 7;
+            for sst in &task.input.input_levels[0].table_infos {
+                assert_eq!(start_id, sst.id);
+                start_id += 1;
+            }
+
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
+            assert!(matches!(
+                task.compaction_task_type,
+                compact_task::TaskType::SpaceReclaim
+            ));
+        }
+
+        {
+            for level_handler in &mut levels_handler {
+                for pending_task_id in &level_handler.pending_tasks_ids() {
+                    level_handler.remove_task(*pending_task_id);
+                }
+            }
+
+            let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
+                compaction_config: config.clone(),
+                all_table_ids: HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9, 10]),
+            };
+            selector.try_update(SelectorOption::SpaceReclaim(selector_option));
+
+            // pick space reclaim
+            let task = selector.pick_compaction(1, &levels, &mut levels_handler, &mut local_stats);
+            assert!(task.is_none());
+        }
+
+        {
+            for level_handler in &mut levels_handler {
+                for pending_task_id in &level_handler.pending_tasks_ids() {
+                    level_handler.remove_task(*pending_task_id);
+                }
+            }
+
+            let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
+                compaction_config: config,
+                all_table_ids: HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9]),
+            };
+            selector.try_update(SelectorOption::SpaceReclaim(selector_option));
+            // pick space reclaim
+            let task = selector
+                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
+
+            let mut start_id = 10;
             for sst in &task.input.input_levels[0].table_infos {
                 assert_eq!(start_id, sst.id);
                 start_id += 1;

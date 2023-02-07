@@ -136,6 +136,7 @@ where
         ));
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
             let (compaction_group, task_type) = tokio::select! {
                 recv = sched_rx.recv() => {
@@ -168,7 +169,7 @@ where
                       if self.env.opts.compaction_deterministic_test {
                         continue;
                     }
-                    // Periodically trigger compaction for all compaction groups.
+                    // Periodically trigger space_reclaim compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
                         if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::SpaceReclaim) {
                             tracing::warn!("Failed to schedule base compaction for compaction group {}. {}", cg_id, e);
@@ -207,6 +208,8 @@ where
                 compact_task::TaskType::SpaceReclaim => {
                     CompactionPickParma::new_space_reclaim_parma()
                 }
+                compact_task::TaskType::Ttl => CompactionPickParma::new_ttl_reclaim_parma(),
+
                 _ => panic!("Error type when scheduler trigger compaction"),
             };
 
@@ -285,6 +288,7 @@ where
             .hummock_manager
             .get_compact_task(compaction_group, compaction_pick_parma)
             .await;
+
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {

@@ -26,7 +26,7 @@ const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
-const DEFAULT_MAX_SPACE_RECLAIM_FILE_COUNTS: u32 = 5;
+const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -60,7 +60,7 @@ impl CompactionConfigBuilder {
                     | CompactionFilterFlag::TTL)
                     .into(),
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
-                max_space_reclaim_file_counts: DEFAULT_MAX_SPACE_RECLAIM_FILE_COUNTS,
+                max_space_reclaim_bytes: DEFAULT_MAX_SPACE_RECLAIM_BYTES,
             },
         }
     }
@@ -104,4 +104,5 @@ builder_field! {
     compression_algorithm: Vec<String>,
     compaction_filter_mask: u32,
     max_sub_compaction: u32,
+    max_space_reclaim_bytes: u64,
 }
