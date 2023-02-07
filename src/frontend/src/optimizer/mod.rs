@@ -432,7 +432,7 @@ impl PlanRoot {
         plan = self.optimize_by_rules(
             plan,
             "Agg on Index".to_string(),
-            vec![AggOnIndexRule::create()],
+            vec![TopNOnIndexRule::create()],
             ApplyOrder::TopDown,
         );
 

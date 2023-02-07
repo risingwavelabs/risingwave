@@ -1,15 +1,15 @@
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN};
+use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, Order};
 use crate::optimizer::PlanRef;
 
-pub struct AggOnIndexRule {}
+pub struct TopNOnIndexRule {}
 
-impl Rule for AggOnIndexRule {
+impl Rule for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_topn: &LogicalTopN = plan.as_logical_top_n()?;
-        let logical_scan: LogicalScan = logical_topn.get_child().as_logical_scan()?.to_owned();
+        let logical_scan: LogicalScan = logical_topn.input().as_logical_scan()?.to_owned();
         let order = logical_topn.topn_order();
         if order.field_order.is_empty() {
             return None;
@@ -53,8 +53,8 @@ impl Rule for AggOnIndexRule {
     }
 }
 
-impl AggOnIndexRule {
+impl TopNOnIndexRule {
     pub fn create() -> BoxedRule {
-        Box::new(AggOnIndexRule {})
+        Box::new(TopNOnIndexRule {})
     }
 }
