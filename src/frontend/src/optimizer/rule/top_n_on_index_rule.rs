@@ -16,8 +16,9 @@
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
+
+use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
-use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, Order};
 use crate::optimizer::PlanRef;
 
@@ -31,7 +32,6 @@ impl Rule for TopNOnIndexRule {
         if order.field_order.is_empty() {
             return None;
         }
-        let _index = logical_scan.indexes();
         let index = logical_scan.indexes().iter().find(|idx| {
             Order {
                 field_order: idx

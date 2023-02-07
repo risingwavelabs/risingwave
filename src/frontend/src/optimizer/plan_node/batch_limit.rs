@@ -55,7 +55,7 @@ impl BatchLimit {
             if self.order().field_order.is_empty() {
                 &any_order
             } else {
-                &self.order()
+                self.order()
             },
         )?;
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
