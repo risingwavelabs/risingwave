@@ -79,7 +79,7 @@ impl StreamingAggImpl for StreamingRowCountAgg {
                 }
             }
             Some(visibility) => {
-                for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
+                for (op, visible) in ops.iter().zip(visibility.iter()) {
                     if visible {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.row_cnt += 1,

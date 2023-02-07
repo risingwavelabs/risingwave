@@ -276,7 +276,7 @@ where
     ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
-                for (op, data) in ops.iter().zip_eq(data.iter()) {
+                for (op, data) in ops.iter().zip(data.iter()) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             self.result = S::accumulate(self.result.as_ref(), data)?
