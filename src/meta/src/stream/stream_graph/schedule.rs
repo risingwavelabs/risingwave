@@ -230,6 +230,9 @@ impl Scheduler {
             );
         }
 
+        // Sort all parallel units by ID to achieve better vnode locality.
+        round_robin.sort_unstable_by_key(|p| p.id);
+
         // Build the default hash mapping uniformly.
         let default_hash_mapping = ParallelUnitMapping::build(&round_robin);
         // Randomly choose a parallel unit as the default singleton parallel unit.
