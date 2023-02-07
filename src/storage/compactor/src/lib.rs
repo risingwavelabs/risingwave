@@ -99,6 +99,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compactor node options: {:?}", opts);
+        warn_future_deprecate_options(&opts);
         tracing::info!("meta address: {}", opts.meta_address.clone());
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -121,4 +122,10 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         observer_join_handle.await.unwrap();
     })
+}
+
+fn warn_future_deprecate_options(opts: &CompactorOpts) {
+    if opts.state_store.is_some() {
+        tracing::warn!("`--state-store` will not be accepted by compactor node in the next release. Please consider moving this argument to the meta node.");
+    }
 }

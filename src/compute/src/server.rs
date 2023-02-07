@@ -109,7 +109,7 @@ pub async fn compute_node_serve(
         &system_params.state_store
     };
     let embedded_compactor_enabled =
-        embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
+        embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
     validate_compute_node_memory_config(
         opts.total_memory_bytes,
         embedded_compactor_enabled,
@@ -143,7 +143,7 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &state_store_url,
+        state_store_url,
         &config.storage.file_cache.dir,
         &config,
         &system_params,

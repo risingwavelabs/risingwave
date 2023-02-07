@@ -156,6 +156,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compute node options: {:?}", opts);
+        warn_future_deprecate_options(&opts);
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -187,4 +188,10 @@ fn default_total_memory_bytes() -> usize {
 
 fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+fn warn_future_deprecate_options(opts: &ComputeNodeOpts) {
+    if opts.state_store.is_some() {
+        tracing::warn!("`--state-store` will not be accepted by compute node in the next release. Please consider moving this argument to the meta node.");
+    }
 }
