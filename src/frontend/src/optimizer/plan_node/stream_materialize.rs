@@ -201,6 +201,7 @@ impl StreamMaterialize {
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
+        let watermark_columns = input.watermark_columns().clone();
         // Note(congyi): avoid pk duplication
         let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
         let schema = input.schema();
@@ -265,6 +266,7 @@ impl StreamMaterialize {
             handle_pk_conflict,
             read_prefix_len_hint,
             version,
+            watermark_columns,
         })
     }
 
