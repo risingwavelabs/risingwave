@@ -92,10 +92,21 @@ impl Binder {
         let et_clone = expected_types.clone().unwrap_or_default();
         let nulls_to_insert = if et_clone.len() > vec_len {
             let nulls_to_insert = et_clone.len() - vec_len;
+            let mut row_len: Option<usize> = None;
             for row in &mut bound {
                 for i in 0..nulls_to_insert {
                     let t = et_clone[vec_len + i].clone();
                     row.push(ExprImpl::literal_null(t));
+                }
+                if row_len.is_none() {
+                    row_len = Some(row.len());
+                    continue;
+                }
+                if row_len.unwrap() != row.len() {
+                    return Err(ErrorCode::BindError(
+                        "VALUES lists must all be the same length".into(),
+                    )
+                    .into());
                 }
             }
             nulls_to_insert
@@ -103,8 +114,9 @@ impl Binder {
             0
         };
 
+        // only check for this condition again if we did not insert any nulls
         let num_columns = bound[0].len();
-        if bound.iter().any(|row| row.len() != num_columns) {
+        if nulls_to_insert == 0 && bound.iter().any(|row| row.len() != num_columns) {
             return Err(
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
