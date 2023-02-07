@@ -30,7 +30,8 @@ use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceStream, Column, DataType, SourceInfo, SplitId, SplitImpl, SplitMetaData,
+    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceInfo, SplitId, SplitImpl,
+    SplitMetaData, SplitReaderV2,
 };
 
 impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
@@ -45,7 +46,10 @@ pub struct DatagenSplitReader {
     source_info: SourceInfo,
 }
 
-impl DatagenSplitReader {
+#[async_trait]
+impl SplitReaderV2 for DatagenSplitReader {
+    type Properties = DatagenProperties;
+
     #[allow(clippy::unused_async)]
     async fn new(
         properties: DatagenProperties,
@@ -132,6 +136,12 @@ impl DatagenSplitReader {
         })
     }
 
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
+    }
+}
+
+impl DatagenSplitReader {
     pub(crate) fn into_data_stream(self) -> BoxSourceStream {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;

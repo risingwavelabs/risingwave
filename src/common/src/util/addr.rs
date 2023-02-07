@@ -16,15 +16,8 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use risingwave_pb::common::HostAddress as ProstHostAddress;
-use risingwave_pb::meta::MetaLeaderInfo;
 
 use crate::error::{internal_error, Result};
-
-pub fn leader_info_to_host_addr(mli: MetaLeaderInfo) -> HostAddr {
-    mli.node_address
-        .parse::<HostAddr>()
-        .expect("invalid leader addr")
-}
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

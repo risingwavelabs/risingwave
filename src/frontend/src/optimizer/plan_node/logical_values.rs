@@ -77,6 +77,10 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ExprRewritable for LogicalValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
         new.rows = new

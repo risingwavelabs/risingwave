@@ -86,6 +86,22 @@ pub enum Convention {
     Stream,
 }
 
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
+}
+
+impl RewriteExprsRecursive for PlanRef {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+}
+
 impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
@@ -225,6 +241,11 @@ impl PlanTreeNode for PlanRef {
             assert_eq!(inputs.len(), 1);
             // We can't clone `LogicalShare`, but only can replace input instead.
             logical_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else if let Some(stream_share) = self.clone().as_stream_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `StreamShare`, but only can replace input instead.
+            stream_share.replace_input(inputs[0].clone());
             self.clone()
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
@@ -371,16 +392,6 @@ impl dyn PlanNode {
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
-    }
-
-    pub fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
-        let new = self.rewrite_exprs(r);
-        let inputs: Vec<PlanRef> = new
-            .inputs()
-            .iter()
-            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
-            .collect();
-        new.clone_with_inputs(&inputs[..])
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
