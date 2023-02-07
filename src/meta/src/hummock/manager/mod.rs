@@ -221,6 +221,7 @@ pub enum CompactionResumeTrigger {
     TaskReport { original_task_num: usize },
 }
 
+#[derive(Clone)]
 pub struct CompactionPickParma {
     pub task_type: compact_task::TaskType,
 
@@ -765,12 +766,48 @@ where
         Ok(())
     }
 
+    async fn build_selector_option(
+        &self,
+        compaction_config: &CompactionConfig,
+        compaction_pick_parma: CompactionPickParma,
+    ) -> SelectorOption {
+        match compaction_pick_parma.task_type {
+            compact_task::TaskType::Dynamic => {
+                SelectorOption::Dynamic(selector_option::DynamicLevelSelectorOption {
+                    compaction_config: Arc::new(compaction_config.clone()),
+                })
+            }
+            compact_task::TaskType::SpaceReclaim => SelectorOption::SpaceReclaim(
+                selector_option::SpaceReclaimCompactionSelectorOption {
+                    compaction_config: Arc::new(compaction_config.clone()),
+                    all_table_ids: self.all_table_ids().await,
+                },
+            ),
+
+            compact_task::TaskType::Ttl => {
+                SelectorOption::Ttl(selector_option::TtlCompactionSelectorOption {
+                    compaction_config: Arc::new(compaction_config.clone()),
+                })
+            }
+
+            compact_task::TaskType::Manual => {
+                SelectorOption::Manual(selector_option::ManualCompactionSelectorOption {
+                    compaction_config: Arc::new(compaction_config.clone()),
+                    option: compaction_pick_parma.manual_compaction_option.unwrap(),
+                })
+            }
+
+            _ => {
+                panic!("SharedBuffer compaction not expected")
+            }
+        }
+    }
+
     #[named]
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
-        task_type: compact_task::TaskType,
-        selector_option: SelectorOption,
+        compaction_pick_parma: CompactionPickParma,
     ) -> Result<Option<CompactTask>> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
@@ -797,19 +834,6 @@ where
         )
         .await?;
 
-        // get selector
-        let selector = Self::fetch_selector(
-            compaction_selectors,
-            compaction_group_id,
-            task_type,
-            selector_option,
-        );
-
-        println!(
-            "get_compact_task_impl cg_id {} task_type {:?}",
-            compaction_group_id, task_type
-        );
-
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
             Some(c) => VarTransaction::new(c),
@@ -832,6 +856,22 @@ where
             // sync_group has not been called for this group, which means no data even written.
             return Ok(None);
         }
+
+        // selector_option will carry some information and affect the selection of compact_task. To
+        // avoid data loss, the selector_option must be constructed after the current_version is
+        // obtained
+        let task_type = compaction_pick_parma.task_type;
+        let selector_option = self
+            .build_selector_option(&group_config.compaction_config, compaction_pick_parma)
+            .await;
+
+        // get selector
+        let selector = Self::fetch_selector(
+            compaction_selectors,
+            compaction_group_id,
+            task_type,
+            selector_option,
+        );
 
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
@@ -1044,25 +1084,11 @@ where
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        let group_config = self
-            .compaction_group(compaction_group_id)
-            .await
-            .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
-
-        let compaction_config = group_config.compaction_config();
         // dispatch
         match compaction_pick_parma.task_type {
             compact_task::TaskType::Dynamic => {
-                let selector_option = selector_option::DynamicLevelSelectorOption {
-                    compaction_config: Arc::new(compaction_config),
-                };
-
                 while let Some(task) = self
-                    .get_compact_task_impl(
-                        compaction_group_id,
-                        compaction_pick_parma.task_type,
-                        SelectorOption::Dynamic(selector_option.clone()),
-                    )
+                    .get_compact_task_impl(compaction_group_id, compaction_pick_parma.clone())
                     .await?
                 {
                     if let TaskStatus::Pending = task.task_status() {
@@ -1074,44 +1100,11 @@ where
                 Ok(None)
             }
 
-            compact_task::TaskType::SpaceReclaim => {
-                let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
-                    compaction_config: Arc::new(compaction_config),
-                    all_table_ids: self.all_table_ids().await,
-                };
-
-                self.get_compact_task_impl(
-                    compaction_group_id,
-                    compaction_pick_parma.task_type,
-                    SelectorOption::SpaceReclaim(selector_option),
-                )
-                .await
-            }
-
-            compact_task::TaskType::Ttl => {
-                let selector_option = selector_option::TtlCompactionSelectorOption {
-                    compaction_config: Arc::new(compaction_config),
-                };
-
-                self.get_compact_task_impl(
-                    compaction_group_id,
-                    compaction_pick_parma.task_type,
-                    SelectorOption::Ttl(selector_option),
-                )
-                .await
-            }
-
-            compact_task::TaskType::Manual => {
-                let selector_option = selector_option::ManualCompactionSelectorOption {
-                    compaction_config: Arc::new(compaction_config),
-                    option: compaction_pick_parma.manual_compaction_option.unwrap(),
-                };
-                self.get_compact_task_impl(
-                    compaction_group_id,
-                    compaction_pick_parma.task_type,
-                    SelectorOption::Manual(selector_option),
-                )
-                .await
+            compact_task::TaskType::SpaceReclaim
+            | compact_task::TaskType::Ttl
+            | compact_task::TaskType::Manual => {
+                self.get_compact_task_impl(compaction_group_id, compaction_pick_parma)
+                    .await
             }
 
             _ => {
