@@ -61,7 +61,9 @@ pub async fn producer(broker_addr: &str, datadir: String) {
     for file in std::fs::read_dir(datadir).unwrap() {
         let file = file.unwrap();
         let name = file.file_name().into_string().unwrap();
-        let (topic, partitions) = name.split_once('.').unwrap();
+        let Some((topic, partitions)) = name.split_once('.') else {
+            panic!("invalid file name: {name:?}. expected format \"topic.partitions\"");
+        };
         admin
             .create_topics(
                 &[NewTopic::new(
