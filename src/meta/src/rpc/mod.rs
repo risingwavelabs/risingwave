@@ -13,9 +13,7 @@
 // limitations under the License.
 
 mod election_client;
-mod follower_svc;
 mod intercept;
-mod leader_svc;
 pub mod metrics;
 pub mod server;
 mod service;

@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use etcd_client::{Client, ConnectOptions, Error, GetOptions};
-use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -28,33 +28,24 @@ const META_ELECTION_KEY: &str = "__meta_election_";
 
 pub struct ElectionMember {
     pub id: String,
-    pub lease: i64,
-}
-
-impl From<ElectionMember> for MetaLeaderInfo {
-    fn from(val: ElectionMember) -> Self {
-        let ElectionMember { id, lease } = val;
-        MetaLeaderInfo {
-            node_address: id,
-            lease_id: lease as u64,
-        }
-    }
+    pub is_leader: bool,
 }
 
 #[async_trait::async_trait]
 pub trait ElectionClient: Send + Sync + 'static {
     fn id(&self) -> MetaResult<String>;
-    async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()>;
-    fn subscribe(&self) -> watch::Receiver<bool>;
+    async fn run_once(&self, ttl: i64, stop: Receiver<()>) -> MetaResult<()>;
+    fn subscribe(&self) -> Receiver<bool>;
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
     async fn is_leader(&self) -> bool;
 }
 
 pub struct EtcdElectionClient {
-    client: Client,
     id: String,
     is_leader_sender: watch::Sender<bool>,
+    endpoints: Vec<String>,
+    options: Option<ConnectOptions>,
 }
 
 #[async_trait::async_trait]
@@ -64,7 +55,7 @@ impl ElectionClient for EtcdElectionClient {
     }
 
     async fn leader(&self) -> MetaResult<Option<ElectionMember>> {
-        let mut election_client = self.client.election_client();
+        let mut election_client = self.client().await?.election_client();
         let leader = election_client.leader(META_ELECTION_KEY).await;
 
         let leader = match leader {
@@ -76,14 +67,15 @@ impl ElectionClient for EtcdElectionClient {
         Ok(leader.and_then(|leader| {
             leader.kv().map(|leader_kv| ElectionMember {
                 id: String::from_utf8_lossy(leader_kv.value()).to_string(),
-                lease: leader_kv.lease(),
+                is_leader: true,
             })
         }))
     }
 
     async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()> {
-        let mut lease_client = self.client.lease_client();
-        let mut election_client = self.client.election_client();
+        let client = self.client().await?;
+        let mut lease_client = client.lease_client();
+        let mut election_client = client.election_client();
         let mut stop = stop;
 
         tracing::info!("client {} start election", self.id);
@@ -134,7 +126,7 @@ impl ElectionClient for EtcdElectionClient {
 
         let (keep_alive_fail_tx, mut keep_alive_fail_rx) = oneshot::channel();
 
-        let mut lease_client = self.client.lease_client();
+        let mut lease_client = client.lease_client();
 
         let mut stop_ = stop.clone();
 
@@ -256,20 +248,35 @@ impl ElectionClient for EtcdElectionClient {
     }
 
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>> {
-        let mut client = self.client.kv_client();
+        let mut client = self.client().await?.kv_client();
         let keys = client
             .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
             .await?;
 
-        // todo, sort by revision
-        Ok(keys
+        let member_ids: HashSet<_> = keys
             .kvs()
             .iter()
-            .map(|kv| ElectionMember {
-                id: String::from_utf8_lossy(kv.value()).to_string(),
-                lease: kv.lease(),
-            })
-            .collect())
+            .map(|kv| String::from_utf8_lossy(kv.value()).to_string())
+            .collect();
+
+        let members = match self.leader().await? {
+            Some(leader) => member_ids
+                .into_iter()
+                .map(|id| {
+                    let is_leader = id == leader.id;
+                    ElectionMember { id, is_leader }
+                })
+                .collect(),
+            None => member_ids
+                .into_iter()
+                .map(|id| ElectionMember {
+                    id,
+                    is_leader: false,
+                })
+                .collect(),
+        };
+
+        Ok(members)
     }
 
     fn id(&self) -> MetaResult<String> {
@@ -282,19 +289,19 @@ impl ElectionClient for EtcdElectionClient {
 }
 
 impl EtcdElectionClient {
-    pub(crate) async fn new(
-        endpoints: Vec<String>,
-        options: Option<ConnectOptions>,
-        id: String,
-    ) -> MetaResult<Self> {
-        let client = Client::connect(&endpoints, options.clone()).await?;
-
+    pub(crate) fn new(endpoints: Vec<String>, options: Option<ConnectOptions>, id: String) -> Self {
         let (sender, _) = watch::channel(false);
-        Ok(Self {
-            client,
+        Self {
+            endpoints,
+            options,
             id,
             is_leader_sender: sender,
-        })
+        }
+    }
+
+    async fn client(&self) -> MetaResult<Client> {
+        let client = Client::connect(self.endpoints.clone(), self.options.clone()).await?;
+        Ok(client)
     }
 }
 
@@ -304,11 +311,12 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use etcd_client::GetOptions;
     use itertools::Itertools;
     use tokio::sync::watch;
     use tokio::time;
 
-    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
+    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient, META_ELECTION_KEY};
 
     #[tokio::test]
     async fn test_election() {
@@ -324,15 +332,11 @@ mod tests {
             let (stop_sender, stop_receiver) = watch::channel(());
             clients.push((
                 stop_sender,
-                Arc::new(
-                    EtcdElectionClient::new(
-                        vec!["localhost:2388".to_string()],
-                        None,
-                        format!("client_{}", i).to_string(),
-                    )
-                    .await
-                    .unwrap(),
-                ),
+                Arc::new(EtcdElectionClient::new(
+                    vec!["localhost:2388".to_string()],
+                    None,
+                    format!("client_{}", i).to_string(),
+                )),
             ));
         }
 
@@ -395,11 +399,25 @@ mod tests {
 
         assert_eq!(election_leader.id, leader.1.id().unwrap());
 
-        let lease_id = election_leader.lease;
-
         let client = etcd_client::Client::connect(&vec!["localhost:2388"], None)
             .await
             .unwrap();
+
+        let kvs = client
+            .kv_client()
+            .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
+            .await
+            .unwrap();
+
+        let leader_kv = kvs
+            .kvs()
+            .iter()
+            .find(|kv| kv.value() == election_leader.id.as_bytes())
+            .cloned()
+            .unwrap();
+
+        let lease_id = leader_kv.lease();
+
         client.lease_client().revoke(lease_id).await.unwrap();
 
         time::sleep(Duration::from_secs(10)).await;
