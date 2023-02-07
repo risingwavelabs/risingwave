@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use futures::{stream, StreamExt, TryStreamExt};
+use futures::{stream, Future, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
@@ -46,6 +48,18 @@ use crate::task::AtomicU64Ref;
 type BoxedAggGroup<S> = Box<AggGroup<S>>;
 type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
 
+mod imp {
+    pub trait EmitPolicy {}
+}
+
+pub struct EmitImmediate;
+
+impl imp::EmitPolicy for EmitImmediate {}
+
+pub struct EmitOnWatermarkClose;
+
+impl imp::EmitPolicy for EmitOnWatermarkClose {}
+
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
 ///
@@ -56,12 +70,12 @@ type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHa
 /// * Upon a barrier is received, the executor will call `.flush` on the storage backend, so that
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `modified_keys`, and produce a stream chunk based on the state changes.
-pub struct HashAggExecutor<K: HashKey, S: StateStore> {
+pub struct HashAggExecutor<K: HashKey, S: StateStore, E: imp::EmitPolicy = EmitImmediate> {
     input: Box<dyn Executor>,
 
     extra: HashAggExecutorExtra<K, S>,
 
-    _phantom: PhantomData<K>,
+    _phantom: PhantomData<E>,
 }
 
 struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
@@ -98,8 +112,8 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
 
-    /// Lru manager. None if using local eviction.
-    watermark_epoch: AtomicU64Ref,
+    /// The evict epoch for `GlobalMemoryManager`. None if using local eviction.
+    cache_evict_watermark_epoch: AtomicU64Ref,
 
     /// How many times have we hit the cache of join executor for the lookup of each key
     lookup_miss_count: AtomicU64,
@@ -118,7 +132,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     extreme_cache_size: usize,
 
     /// Changed group keys in the current epoch (before next flush).
-    group_change_set: HashSet<K>,
+    group_change_set: HashMap<K, bool>,
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -148,7 +162,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     }
 }
 
-impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
+impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -186,8 +200,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 storages,
                 result_table,
                 group_key_indices,
-                watermark_epoch,
-                group_change_set: HashSet::new(),
+                cache_evict_watermark_epoch: watermark_epoch,
+                group_change_set: HashMap::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
                 chunk_lookup_miss_count: 0,
@@ -320,19 +334,20 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             *chunk_lookup_miss_count += 1;
         }
         *chunk_total_lookup_count += 1;
-        let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
-        while let Some(result) = buffered.next().await {
-            let (key, agg_group) = result?;
-            agg_group_cache.put(key, agg_group);
+        {
+            let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
+            while let Some(result) = buffered.next().await {
+                let (key, agg_group) = result?;
+                agg_group_cache.put(key, agg_group);
+            }
         }
-        drop(buffered); // drop to avoid accidental use
 
         // Decompose the input chunk.
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let visibilities: Vec<_> = agg_calls
+        let visibilities: Vec<Option<Bitmap>> = agg_calls
             .iter()
             .map(|agg_call| {
                 agg_call_filter_res(
@@ -367,8 +382,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
-            // Mark the group as changed.
-            group_change_set.insert(key.clone());
+            // Mark the group as unemitted.
+            group_change_set.insert(key.clone(), true);
             let agg_group = agg_group_cache.get_mut(key).unwrap().as_mut();
             let visibilities = visibilities
                 .iter()
@@ -436,18 +451,39 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if dirty_cnt > 0 {
             // Produce the stream chunk
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
-            let mut group_chunks = IterChunks::chunks(group_change_set.drain(), *chunk_size);
-            while let Some(batch) = group_chunks.next() {
+            let mut to_flush_keys = Vec::with_capacity(group_change_set.len());
+            let mut to_emit_chunks = IterChunks::chunks(
+                group_change_set
+                    .drain_filter(|k, changed| {
+                        if *changed {
+                            to_flush_keys.push(k.clone());
+                        }
+                        *changed = false;
+                        let Some(Some(cur_watermark)) = buffered_watermarks.get(0) else {
+                    // There is no watermark value now, so we can't emit any value.
+                    return false;
+                };
+                        let k = K::deserialize(k, group_key_data_types).unwrap();
+                        let Some(ref watermark_val) = k[0] else {
+                    // NULL is unexpected in watermark column, however, if it exists, we'll treat it as the largest, so emit it here.
+                    return true;
+                };
+                        watermark_val >= &cur_watermark.val
+                    })
+                    .map(|(k, _)| k),
+                *chunk_size,
+            );
+            while let Some(batch) = to_emit_chunks.next() {
                 let keys_in_batch = batch.into_iter().collect_vec();
 
                 // Flush agg states.
-                for key in &keys_in_batch {
-                    let agg_group = agg_group_cache
-                        .get_mut(key)
-                        .expect("changed group must have corresponding AggGroup")
-                        .as_mut();
-                    agg_group.flush_state_if_needed(storages).await?;
-                }
+                // for key in &keys_in_batch {
+                //     let agg_group = agg_group_cache
+                //         .get_mut(*key)
+                //         .expect("changed group must have corresponding AggGroup")
+                //         .as_mut();
+                //     agg_group.flush_state_if_needed(storages).await?;
+                // }
 
                 // Create array builders.
                 // As the datatype is retrieved from schema, it contains both group key and
@@ -455,34 +491,57 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let mut builders = schema.create_array_builders(chunk_size * 2);
                 let mut new_ops = Vec::with_capacity(chunk_size * 2);
 
+                let agg_groups = {
+                    let mut agg_group_cache_ptr: NonNull<_> = agg_group_cache.into();
+                    keys_in_batch
+                        .iter()
+                        .map(|key| {
+                            // SAFETY: `keys_in_batch` is a subset of `group_change_set`, which is a
+                            // `HashMap`, so we can ensure that every `&mut agg_group_cache` is
+                            // unique.
+                            unsafe {
+                                let agg_group_cache = agg_group_cache_ptr.as_mut();
+                                agg_group_cache
+                                    .get_mut(key)
+                                    .expect("changed group must have corresponding AggGroup")
+                            }
+                        })
+                        .collect_vec()
+                };
+
                 // Calculate current outputs, concurrently.
-                let futs = keys_in_batch.into_iter().map(|key| {
-                    // Pop out the agg group temporarily.
-                    let mut agg_group = agg_group_cache
-                        .pop(&key)
-                        .expect("changed group must have corresponding AggGroup");
-                    async {
-                        let curr_outputs = agg_group.get_outputs(storages).await?;
-                        Ok::<_, StreamExecutorError>((key, agg_group, curr_outputs))
-                    }
-                });
+                let futs = keys_in_batch
+                    .iter()
+                    .zip(agg_groups.into_iter())
+                    .into_iter()
+                    .map(|(key, agg_group)| {
+                        // Pop out the agg group temporarily.
+                        let storages = &storages;
+                        let f: Pin<
+                            Box<dyn Future<Output = Result<_, StreamExecutorError>> + Send>,
+                        > = Box::pin(async {
+                            let curr_outputs = agg_group.get_outputs(storages).await?;
+                            Ok::<_, StreamExecutorError>((key.clone(), agg_group, curr_outputs))
+                        });
+                        f
+                    });
                 let outputs_in_batch: Vec<_> = stream::iter(futs)
                     .buffer_unordered(10)
                     .fuse()
                     .try_collect()
                     .await?;
 
-                for (key, mut agg_group, curr_outputs) in outputs_in_batch {
-                    let AggChangesInfo {
-                        n_appended_ops,
-                        result_row,
-                        prev_outputs,
-                    } = agg_group.build_changes(
+                for (key, agg_group, curr_outputs) in outputs_in_batch {
+                    let agg_change_info = agg_group.build_changes(
                         curr_outputs,
                         &mut builders[group_key_indices.len()..],
                         &mut new_ops,
                     );
-
+                    let AggChangesInfo {
+                        n_appended_ops,
+                        prev_outputs,
+                        result_row,
+                    } = agg_change_info;
                     if n_appended_ops != 0 {
                         for _ in 0..n_appended_ops {
                             key.deserialize_to_builders(
@@ -491,21 +550,20 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             )?;
                         }
                         if let Some(prev_outputs) = prev_outputs {
-                            let old_row = agg_group.group_key().chain(prev_outputs);
+                            // FIXME: double deserialization here
+                            let group_key = K::deserialize(&key, group_key_data_types).unwrap();
+                            let old_row = group_key.chain(prev_outputs);
                             result_table.update(old_row, result_row);
                         } else {
                             result_table.insert(result_row);
                         }
                     }
-
-                    // Put the agg group back into the agg group cache.
-                    agg_group_cache.put(key, agg_group);
                 }
 
                 let columns = builders
                     .into_iter()
-                    .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
-                    .try_collect()?;
+                    .map(|builder| builder.finish().into())
+                    .collect();
 
                 let chunk = StreamChunk::new(new_ops, columns, None);
 
@@ -553,7 +611,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // The cached state managers. `HashKey` -> `AggGroup`.
         let mut agg_group_cache = AggGroupCache::new(new_with_hasher(
-            extra.watermark_epoch.clone(),
+            extra.cache_evict_watermark_epoch.clone(),
             PrecomputedBuildHasher,
         ));
 

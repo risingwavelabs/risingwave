@@ -46,7 +46,7 @@ impl<S: StateStore> Debug for AggGroup<S> {
         f.debug_struct("AggGroup")
             .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

@@ -39,9 +39,11 @@ mod state_cache;
 mod table;
 mod value;
 
-/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
-/// be provided.
+/// Generate [`HashAggExecutor`][HashAggExecutor]'s schema from `input`, `agg_calls` and
+/// `group_key_indices`. For [`HashAggExecutor`][HashAggExecutor], the group key indices should be
+/// provided.
+///
+/// [HashAggExecutor]:crate::executor::HashAggExecutor
 pub fn generate_agg_schema(
     input: &dyn Executor,
     agg_calls: &[AggCall],
