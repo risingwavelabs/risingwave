@@ -205,7 +205,6 @@ fn build_delta_join_inner(
         lookup_0_frag.fragment_id,
         StreamFragmentEdge {
             dispatch_strategy: dispatch_no_shuffle(),
-            same_worker_node: true,
             link_id: exchange_a0l0.operator_id,
         },
     );
@@ -223,8 +222,6 @@ fn build_delta_join_inner(
                     .map(|x| *x as u32)
                     .collect_vec(),
             ),
-            // stream input doesn't need to be on the same worker node as lookup
-            same_worker_node: false,
             link_id: exchange_a0l1.operator_id,
         },
     );
@@ -242,8 +239,6 @@ fn build_delta_join_inner(
                     .map(|x| *x as u32)
                     .collect_vec(),
             ),
-            // stream input doesn't need to be on the same worker node as lookup
-            same_worker_node: false,
             link_id: exchange_a1l0.operator_id,
         },
     );
@@ -255,7 +250,6 @@ fn build_delta_join_inner(
         lookup_1_frag.fragment_id,
         StreamFragmentEdge {
             dispatch_strategy: dispatch_no_shuffle(),
-            same_worker_node: true,
             link_id: exchange_a1l1.operator_id,
         },
     );
@@ -282,7 +276,6 @@ fn build_delta_join_inner(
         current_fragment.fragment_id,
         StreamFragmentEdge {
             dispatch_strategy: dispatch_consistent_hash_shuffle(node.stream_key.clone()),
-            same_worker_node: false,
             link_id: exchange_l0m.operator_id,
         },
     );
@@ -292,7 +285,6 @@ fn build_delta_join_inner(
         current_fragment.fragment_id,
         StreamFragmentEdge {
             dispatch_strategy: dispatch_consistent_hash_shuffle(node.stream_key.clone()),
-            same_worker_node: false,
             link_id: exchange_l1m.operator_id,
         },
     );
