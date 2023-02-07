@@ -115,7 +115,7 @@ mod test {
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
-        generate_table,
+        generate_table_with_table_ids,
     };
     use crate::hummock::compaction::level_selector::{
         LevelSelector, SpaceReclaimCompactionSelector,
@@ -139,23 +139,23 @@ mod test {
             generate_level(
                 3,
                 vec![
-                    generate_table(0, 1, 150, 151, 1),
-                    generate_table(1, 1, 250, 251, 1),
+                    generate_table_with_table_ids(0, 1, 150, 151, 1, vec![0]),
+                    generate_table_with_table_ids(1, 1, 250, 251, 1, vec![1]),
                 ],
             ),
             Level {
                 level_idx: 4,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
-                    generate_table(2, 1, 0, 100, 1),
-                    generate_table(3, 1, 101, 200, 1),
-                    generate_table(4, 1, 222, 300, 1),
-                    generate_table(5, 1, 333, 400, 1),
-                    generate_table(6, 1, 444, 500, 1),
-                    generate_table(7, 1, 555, 600, 1),
-                    generate_table(8, 1, 666, 700, 1),
-                    generate_table(9, 1, 777, 800, 1),
-                    generate_table(10, 1, 888, 900, 1),
+                    generate_table_with_table_ids(2, 1, 0, 100, 1, vec![2]),
+                    generate_table_with_table_ids(3, 1, 101, 200, 1, vec![3]),
+                    generate_table_with_table_ids(4, 1, 222, 300, 1, vec![4]),
+                    generate_table_with_table_ids(5, 1, 333, 400, 1, vec![5]),
+                    generate_table_with_table_ids(6, 1, 444, 500, 1, vec![6]),
+                    generate_table_with_table_ids(7, 1, 555, 600, 1, vec![7]),
+                    generate_table_with_table_ids(8, 1, 666, 700, 1, vec![8]),
+                    generate_table_with_table_ids(9, 1, 777, 800, 1, vec![9]),
+                    generate_table_with_table_ids(10, 1, 888, 900, 1, vec![10]),
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,

@@ -684,7 +684,31 @@ pub mod tests {
                 right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,
-            table_ids: vec![id as u32],
+            table_ids: vec![],
+            meta_offset: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
+            divide_version: 0,
+        }
+    }
+
+    pub fn generate_table_with_table_ids(
+        id: u64,
+        table_prefix: u64,
+        left: usize,
+        right: usize,
+        epoch: u64,
+        table_ids: Vec<u32>,
+    ) -> SstableInfo {
+        SstableInfo {
+            id,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+                right_exclusive: false,
+            }),
+            file_size: (right - left + 1) as u64,
+            table_ids,
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,

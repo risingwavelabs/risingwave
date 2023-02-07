@@ -40,12 +40,11 @@ use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::{
-    version_update_payload, CompactTask, CompactTaskAssignment, GroupConstruct, GroupDelta,
-    GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
+    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupConstruct,
+    GroupDelta, GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
+    HummockVersion, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
+    IntraLevelDelta, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;

@@ -387,10 +387,11 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
 
 export const CompactTask_TaskType = {
   TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
-  BASE: "BASE",
+  DYNAMIC: "DYNAMIC",
   SPACE_RECLAIM: "SPACE_RECLAIM",
   MANUAL: "MANUAL",
   SHARED_BUFFER: "SHARED_BUFFER",
+  TTL: "TTL",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -402,8 +403,8 @@ export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType 
     case "TYPE_UNSPECIFIED":
       return CompactTask_TaskType.TYPE_UNSPECIFIED;
     case 1:
-    case "BASE":
-      return CompactTask_TaskType.BASE;
+    case "DYNAMIC":
+      return CompactTask_TaskType.DYNAMIC;
     case 2:
     case "SPACE_RECLAIM":
       return CompactTask_TaskType.SPACE_RECLAIM;
@@ -413,6 +414,9 @@ export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType 
     case 4:
     case "SHARED_BUFFER":
       return CompactTask_TaskType.SHARED_BUFFER;
+    case 5:
+    case "TTL":
+      return CompactTask_TaskType.TTL;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -424,14 +428,16 @@ export function compactTask_TaskTypeToJSON(object: CompactTask_TaskType): string
   switch (object) {
     case CompactTask_TaskType.TYPE_UNSPECIFIED:
       return "TYPE_UNSPECIFIED";
-    case CompactTask_TaskType.BASE:
-      return "BASE";
+    case CompactTask_TaskType.DYNAMIC:
+      return "DYNAMIC";
     case CompactTask_TaskType.SPACE_RECLAIM:
       return "SPACE_RECLAIM";
     case CompactTask_TaskType.MANUAL:
       return "MANUAL";
     case CompactTask_TaskType.SHARED_BUFFER:
       return "SHARED_BUFFER";
+    case CompactTask_TaskType.TTL:
+      return "TTL";
     case CompactTask_TaskType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -763,7 +769,7 @@ export interface CompactionConfig {
   targetFileSizeBase: number;
   compactionFilterMask: number;
   maxSubCompaction: number;
-  maxSpaceReclaimFileCounts: number;
+  maxSpaceReclaimBytes: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -4215,7 +4221,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     targetFileSizeBase: 0,
     compactionFilterMask: 0,
     maxSubCompaction: 0,
-    maxSpaceReclaimFileCounts: 0,
+    maxSpaceReclaimBytes: 0,
   };
 }
 
@@ -4243,7 +4249,7 @@ export const CompactionConfig = {
       targetFileSizeBase: isSet(object.targetFileSizeBase) ? Number(object.targetFileSizeBase) : 0,
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
-      maxSpaceReclaimFileCounts: isSet(object.maxSpaceReclaimFileCounts) ? Number(object.maxSpaceReclaimFileCounts) : 0,
+      maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
     };
   },
 
@@ -4268,8 +4274,7 @@ export const CompactionConfig = {
     message.targetFileSizeBase !== undefined && (obj.targetFileSizeBase = Math.round(message.targetFileSizeBase));
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
-    message.maxSpaceReclaimFileCounts !== undefined &&
-      (obj.maxSpaceReclaimFileCounts = Math.round(message.maxSpaceReclaimFileCounts));
+    message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
     return obj;
   },
 
@@ -4286,7 +4291,7 @@ export const CompactionConfig = {
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
-    message.maxSpaceReclaimFileCounts = object.maxSpaceReclaimFileCounts ?? 0;
+    message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
     return message;
   },
 };
