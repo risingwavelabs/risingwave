@@ -380,7 +380,7 @@ impl Catalog {
         for database in self.database_by_name.values() {
             if !found {
                 for schema in database.iter_schemas() {
-                    if schema.iter_table().find(|t| t.id() == *table_id).is_some() {
+                    if schema.iter_table().any(|t| t.id() == *table_id) {
                         found = true;
                         database_id = database.id();
                         schema_id = schema.id();
