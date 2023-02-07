@@ -11,9 +11,10 @@ RUN apt-get update -yy && \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 RUN export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-RUN source ~/.bashrc
+
 SHELL ["/bin/bash", "-c"]
 
+RUN source ~/.bashrc
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
