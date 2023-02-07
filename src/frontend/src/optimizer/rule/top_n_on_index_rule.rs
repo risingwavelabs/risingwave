@@ -14,14 +14,16 @@ impl Rule for TopNOnIndexRule {
         if order.field_order.is_empty() {
             return None;
         }
+        let _index = logical_scan.indexes();
         let index = logical_scan.indexes().iter().find(|idx| {
             Order {
                 field_order: idx
-                    .index_item
+                    .index_table
+                    .pk()
                     .iter()
                     .map(|idx_item| FieldOrder {
                         index: idx_item.index,
-                        direct: Asc,
+                        direct: idx_item.direct,
                     })
                     .collect(),
             }
