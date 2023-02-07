@@ -85,28 +85,19 @@ impl Binder {
 
         // Adding Null values in case user did not specify all columns. E.g.
         // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
-        let vec_len = match bound.get(0) {
-            None => 0,
-            Some(row) => row.len(),
-        };
-        let et_clone = expected_types.clone().unwrap_or_default();
-        let nulls_to_insert = if et_clone.len() > vec_len {
-            let nulls_to_insert = et_clone.len() - vec_len;
-            let mut row_len: Option<usize> = None;
+        let vec_len = bound[0].len();
+        let nulls_to_insert = if let Some(expected_types) = &expected_types && expected_types.len() > vec_len {
+            let nulls_to_insert = expected_types.len() - vec_len;
             for row in &mut bound {
-                for i in 0..nulls_to_insert {
-                    let t = et_clone[vec_len + i].clone();
-                    row.push(ExprImpl::literal_null(t));
-                }
-                if row_len.is_none() {
-                    row_len = Some(row.len());
-                    continue;
-                }
-                if row_len.unwrap() != row.len() {
+                if vec_len != row.len() {
                     return Err(ErrorCode::BindError(
                         "VALUES lists must all be the same length".into(),
                     )
                     .into());
+                }
+                for i in 0..nulls_to_insert {
+                    let t = expected_types[vec_len + i].clone();
+                    row.push(ExprImpl::literal_null(t));
                 }
             }
             nulls_to_insert
