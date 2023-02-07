@@ -62,7 +62,8 @@ pub async fn producer(broker_addr: &str, datadir: String) {
         let file = file.unwrap();
         let name = file.file_name().into_string().unwrap();
         let Some((topic, partitions)) = name.split_once('.') else {
-            panic!("invalid file name: {name:?}. expected format \"topic.partitions\"");
+            warn!("ignore file: {name:?}. expected format \"topic.partitions\"");
+            continue;
         };
         admin
             .create_topics(
