@@ -741,7 +741,6 @@ where
             .compaction_group(compaction_group_id)
             .await
             .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
-        let all_table_ids = self.all_table_ids().await;
         if !compaction
             .compaction_statuses
             .contains_key(&compaction_group_id)
@@ -776,7 +775,7 @@ where
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
-            // sync_group has not been called for this group, which means no data even written.
+            // compaction group has been deleted.
             return Ok(None);
         }
         let can_trivial_move = manual_compaction_option.is_none();
@@ -813,6 +812,7 @@ where
                 start_time.elapsed()
             );
         } else {
+            let all_table_ids = self.all_table_ids().await;
             // to get all relational table_id from sst_info
             let table_ids = compact_task
                 .input_ssts
