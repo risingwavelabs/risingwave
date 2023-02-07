@@ -17,7 +17,8 @@
 use std::f64;
 
 use bytes::BufMut;
-use xxhash_rust::xxh32;
+
+use super::Sstable;
 
 pub trait BitSlice {
     fn get_bit(&self, idx: usize) -> bool;
@@ -30,7 +31,7 @@ pub trait BitSliceMut {
 
 pub trait FilterBuilder {
     /// add key which need to be filter for construct filter data.
-    fn add_key(&mut self, key: &[u8]);
+    fn add_key(&mut self, dist_key: &[u8], table_id: u32);
     /// Builds Bloom filter from key hashes
     fn finish(&mut self) -> Vec<u8>;
 }
@@ -144,8 +145,9 @@ impl BloomFilterBuilder {
 }
 
 impl FilterBuilder for BloomFilterBuilder {
-    fn add_key(&mut self, key: &[u8]) {
-        self.key_hash_entries.push(xxh32::xxh32(key, 0));
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.key_hash_entries
+            .push(Sstable::hash_for_bloom_filter(key, table_id));
     }
 
     fn finish(&mut self) -> Vec<u8> {
@@ -179,6 +181,8 @@ impl FilterBuilder for BloomFilterBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::BitXor;
+
     use bytes::Bytes;
     use xxhash_rust::xxh32;
 
@@ -188,8 +192,8 @@ mod tests {
     #[test]
     fn test_small_bloom_filter() {
         let mut builder = BloomFilterBuilder::new(0.01, 0);
-        builder.add_key(b"hello");
-        builder.add_key(b"world");
+        builder.add_key(b"hello", 0);
+        builder.add_key(b"world", 0);
         let buf = builder.finish();
 
         let check_hash: Vec<u32> = vec![
@@ -199,7 +203,7 @@ mod tests {
             b"fool".to_vec(),
         ]
         .into_iter()
-        .map(|x| xxh32::xxh32(&x, 0))
+        .map(|x| xxh32::xxh32(&x, 0).bitxor(0))
         .collect();
 
         let f = BloomFilterReader::new(buf);
@@ -229,7 +233,7 @@ mod tests {
         let mut builder = BloomFilterBuilder::new(expected_false_positive_rate, preset_key_count);
         for i in 0..preset_key_count {
             let k = Bytes::from(format!("{:032}", i));
-            builder.add_key(&k);
+            builder.add_key(&k, 0);
         }
 
         let data = builder.finish();

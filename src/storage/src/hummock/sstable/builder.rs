@@ -28,8 +28,8 @@ use risingwave_pb::hummock::SstableInfo;
 
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, BlockMeta, Sstable, SstableMeta, SstableWriter,
-    DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
+    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::sstable::bloom::{BloomFilterBuilder, FilterBuilder};
 use crate::hummock::value::HummockValue;
