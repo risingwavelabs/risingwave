@@ -217,11 +217,7 @@ impl Binder {
         {
             let provided_insert_cols: HashSet<usize> =
                 target_table_col_indices.iter().cloned().collect();
-            let all_insert_cols: HashSet<usize> = (0..columns_to_insert.len())
-                .collect::<Vec<usize>>()
-                .iter()
-                .cloned()
-                .collect();
+            let all_insert_cols: HashSet<usize> = (0..columns_to_insert.len()).collect();
             let null_cols: HashSet<usize> = (&all_insert_cols - &provided_insert_cols)
                 .iter()
                 .cloned()
