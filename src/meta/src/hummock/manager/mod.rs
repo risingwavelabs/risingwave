@@ -1222,28 +1222,22 @@ where
             // 1. compactor does not exist
             // 2. trivival_move
 
-            if CompactStatus::is_trivial_move_task(compact_task) {
+            let label = if CompactStatus::is_trivial_move_task(compact_task) {
                 // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
                 // task_type next PR
-                self.metrics
-                    .compact_frequency
-                    .with_label_values(&[
-                        "trivial-move",
-                        &compact_task.compaction_group_id.to_string(),
-                        task_status_label,
-                    ])
-                    .inc();
+                "trivial-move"
             } else {
-                // Update compaction task count. The task will be marked as `unassigned`.
-                self.metrics
-                    .compact_frequency
-                    .with_label_values(&[
-                        "unassigned",
-                        &compact_task.compaction_group_id.to_string(),
-                        task_status_label,
-                    ])
-                    .inc();
-            }
+                "unassigned"
+            };
+
+            self.metrics
+                .compact_frequency
+                .with_label_values(&[
+                    label,
+                    &compact_task.compaction_group_id.to_string(),
+                    task_status_label,
+                ])
+                .inc();
         }
 
         tracing::trace!(
