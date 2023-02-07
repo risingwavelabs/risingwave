@@ -69,7 +69,7 @@ macro_rules! impl_fmt_display {
 //     with_properties: AstOption<WithProperties>,
 //     [Keyword::ROW, Keyword::FORMAT],
 //     source_schema: SourceSchema,
-//     [Keyword::WATERMARK, Keyword::FOR] column [Keywork::AS] <expr>
+//     [Keyword::WATERMARK, Keyword::FOR] column [Keyword::AS] <expr>
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

@@ -1522,6 +1522,9 @@ where
             NodeBody::Now(node) => {
                 always!(node.state_table, "Now");
             }
+            NodeBody::WatermarkFilter(node) => {
+                always!(node.table, "WatermarkFilter");
+            }
 
             // Shared arrangement
             NodeBody::Arrange(node) => {

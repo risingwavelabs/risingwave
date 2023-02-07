@@ -23,7 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::{AvroParserConfig, ProtobufParserConfig};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, WatermarkDesc, StreamSourceInfo,
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, WatermarkDesc,
 };
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
@@ -334,7 +334,7 @@ pub async fn handle_create_source(
     let watermark_descs =
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
-    assert!(watermark_descs.len() < 1);
+    assert!(watermark_descs.len() <= 1);
 
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();

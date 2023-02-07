@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, collections::HashMap};
+use std::collections::HashMap;
+use std::fmt;
 
-use risingwave_common::{catalog::Field, types::DataType, util::sort_util::OrderType};
-use risingwave_pb::{stream_plan::stream_node::NodeBody as ProstStreamNode, catalog::WatermarkDesc};
+use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::catalog::WatermarkDesc;
+use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode, utils::TableCatalogBuilder};
-use crate::{stream_fragmenter::BuildFragmentGraphState, TableCatalog, WithOptions};
+use super::utils::TableCatalogBuilder;
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::{TableCatalog, WithOptions};
 
 #[derive(Clone, Debug)]
 pub struct StreamWatermarkFilter {
@@ -51,7 +57,7 @@ impl fmt::Display for StreamWatermarkFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            // TOOD(yuhao): display watermark filter expr
+            // TODO(yuhao): display watermark filter expr
             "StreamWatermarkFilter",
         )
     }
@@ -88,7 +94,7 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
     let ordered_col_idx = builder.add_column(&key);
     builder.add_column(&value);
     builder.add_order_column(ordered_col_idx, OrderType::Ascending);
-    
+
     builder.set_vnode_col_idx(0);
     builder.set_value_indices(vec![1]);
 
@@ -105,6 +111,13 @@ impl StreamNode for StreamWatermarkFilter {
 
         let table = infer_internal_table_catalog(watermark_type);
 
-        ProstStreamNode::WatermarkFilter(WatermarkFilterNode { watermark_desc: Some(watermark_desc), table: Some(table.with_id(state.gen_table_id_wrapped()).to_internal_table_prost()) })
+        ProstStreamNode::WatermarkFilter(WatermarkFilterNode {
+            watermark_desc: Some(watermark_desc),
+            table: Some(
+                table
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            ),
+        })
     }
 }

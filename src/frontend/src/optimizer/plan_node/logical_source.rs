@@ -357,7 +357,7 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef = StreamSource::new(self.clone()).into();
-        if let Some(catalog) = self.source_catalog() && catalog.watermark_descs.len() > 0{
+        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty(){
             plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
         }
         if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {

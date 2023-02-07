@@ -115,6 +115,8 @@ impl fmt::Display for ParserError {
 #[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
+type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
+
 pub struct Parser {
     tokens: Vec<Token>,
     /// The index of the first unprocessed token in `self.tokens`
@@ -1877,16 +1879,14 @@ impl Parser {
         Ok((column_refs, table_constraints))
     }
 
-    pub fn parse_columns_with_watermark(
-        &mut self,
-    ) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>), ParserError> {
+    pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
         self.parse_columns_inner(true)
     }
 
     fn parse_columns_inner(
         &mut self,
         with_watermark: bool,
-    ) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>), ParserError> {
+    ) -> Result<ColumnsDefTuple, ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
         let mut watermarks = vec![];
@@ -1899,15 +1899,14 @@ impl Parser {
                 constraints.push(constraint);
             } else if with_watermark && let Some(watermark) = self.parse_optional_watermark()? {
                 watermarks.push(watermark);
-            } else if let Token::Word(_) = self.peek_token() {
-                columns.push(self.parse_column_def()?);
-                
-                if columns.len() > 1 {
+                if watermarks.len() > 1 {
                     // TODO(yuhao): allow multiple watermark on source.
                     return Err(ParserError::ParserError(
                         "Only 1 watermark is allowed to be defined on source.".to_string(),
                     ));
                 }
+            } else if let Token::Word(_) = self.peek_token() {
+                columns.push(self.parse_column_def()?);
             } else {
                 return self.expected("column name or constraint definition", self.peek_token());
             }
