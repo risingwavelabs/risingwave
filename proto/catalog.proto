@@ -16,6 +16,13 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
+message WatermarkDesc {
+  // The column idx the watermark is on
+  ColumnIndex watermark_idx = 1;
+  // The expression to calculate the watermark value.
+  expr.ExprNode expr = 2;
+}
+
 message StreamSourceInfo {
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
@@ -44,6 +51,8 @@ message Source {
   uint32 owner = 9;
 
   StreamSourceInfo info = 10;
+  // Define watermarks on source.
+  repeated WatermarkDesc watermark_descs = 11;
 }
 
 message Sink {

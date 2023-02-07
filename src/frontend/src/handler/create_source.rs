@@ -23,19 +23,23 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::{AvroParser, ProtobufParser};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, WatermarkDesc, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::RowFormatType;
-use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
+use risingwave_sqlparser::ast::{
+    AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema, SourceWatermark,
+};
 
 use super::create_table::bind_sql_table_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{ColumnId, ROW_ID_COLUMN_ID};
+use crate::expr::Expr;
 use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
+use crate::session::SessionImpl;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
@@ -255,10 +259,46 @@ fn check_and_add_timestamp_column(
     }
 }
 
+fn bind_source_watermark(
+    session: &SessionImpl,
+    name: String,
+    source_watermarks: Vec<SourceWatermark>,
+    column_catalogs: &[ColumnCatalog],
+) -> Result<Vec<WatermarkDesc>> {
+    let mut binder = Binder::new(session);
+    binder.bind_column_defs(name.clone(), column_catalogs.to_vec())?;
+
+    let watermark_descs = source_watermarks
+        .into_iter()
+        .map(|source_watermark| {
+            let col_name = source_watermark.column.real_value();
+            let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
+
+            let expr = binder.bind_expr(source_watermark.expr)?.to_expr_proto();
+
+            Ok::<_, RwError>(WatermarkDesc {
+                watermark_idx: Some(ProstColumnIndex {
+                    index: watermark_idx as u64,
+                }),
+                expr: Some(expr),
+            })
+        })
+        .try_collect()?;
+    Ok(watermark_descs)
+}
+
 pub async fn handle_create_source(
     handler_args: HandlerArgs,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+
+    session.check_relation_name_duplicated(stmt.source_name.clone())?;
+
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
     let with_properties = handler_args.with_options.inner().clone();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
@@ -268,8 +308,11 @@ pub async fn handle_create_source(
 
     check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
-    let (mut columns, pk_column_ids, row_id_index) =
-        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+    let (mut columns, pk_column_ids, row_id_index) = bind_sql_table_constraints(
+        column_descs.clone(),
+        pk_column_id_from_columns,
+        stmt.constraints,
+    )?;
     if row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
             "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
@@ -288,16 +331,13 @@ pub async fn handle_create_source(
     )
     .await?;
 
+    let watermark_descs =
+        bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
+    // TODO(yuhao): allow multiple watermark on source.
+    assert!(watermark_descs.len() < 1);
+
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-
-    let session = handler_args.session.clone();
-
-    session.check_relation_name_duplicated(stmt.source_name.clone())?;
-
-    let db_name = session.database();
-    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
@@ -312,6 +352,7 @@ pub async fn handle_create_source(
         properties: with_properties,
         info: Some(source_info),
         owner: session.user_id(),
+        watermark_descs,
     };
 
     let catalog_writer = session.env().catalog_writer();

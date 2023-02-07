@@ -146,5 +146,6 @@ pub async fn create_executor(
         NodeBody::Dml => DmlExecutorBuilder,
         NodeBody::RowIdGen => RowIdGenExecutorBuilder,
         NodeBody::Now => NowExecutorBuilder,
+        NodeBody::WatermarkFilter => WatermarkFilterBuilder,
     }
 }

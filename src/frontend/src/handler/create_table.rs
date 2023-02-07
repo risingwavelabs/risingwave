@@ -393,6 +393,7 @@ fn gen_table_plan_inner(
         properties: context.with_options().inner().clone(),
         info: Some(source_info),
         owner: session.user_id(),
+        watermark_descs: vec![],
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));

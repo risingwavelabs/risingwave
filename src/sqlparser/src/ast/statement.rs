@@ -18,6 +18,7 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::ddl::SourceWatermark;
 use super::{Ident, ObjectType, Query};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
@@ -68,6 +69,7 @@ macro_rules! impl_fmt_display {
 //     with_properties: AstOption<WithProperties>,
 //     [Keyword::ROW, Keyword::FORMAT],
 //     source_schema: SourceSchema,
+//     [Keyword::WATERMARK, Keyword::FOR] column [Keywork::AS] <expr>
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -78,6 +80,7 @@ pub struct CreateSourceStatement {
     pub source_name: ObjectName,
     pub with_properties: WithProperties,
     pub source_schema: SourceSchema,
+    pub source_watermarks: Vec<SourceWatermark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -264,7 +267,7 @@ impl ParseTo for CreateSourceStatement {
         impl_parse_to!(source_name: ObjectName, p);
 
         // parse columns
-        let (columns, constraints) = p.parse_columns()?;
+        let (columns, constraints, source_watermarks) = p.parse_columns_with_watermark()?;
 
         impl_parse_to!(with_properties: WithProperties, p);
         let option = with_properties
@@ -291,6 +294,7 @@ impl ParseTo for CreateSourceStatement {
             source_name,
             with_properties,
             source_schema,
+            source_watermarks,
         })
     }
 }

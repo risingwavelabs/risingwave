@@ -34,8 +34,9 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let watermark_expr = build_from_prost(node.get_watermark_expr()?)?;
-        let event_time_col_idx = node.get_event_time_col_idx() as usize;
+        let watermark_desc = node.get_watermark_desc()?.clone();
+        let watermark_expr = build_from_prost(&watermark_desc.expr.unwrap())?;
+        let event_time_col_idx = watermark_desc.watermark_idx.unwrap().index as usize;
         let vnodes = Arc::new(
             params
                 .vnode_bitmap

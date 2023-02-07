@@ -419,12 +419,10 @@ message LookupNode {
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
 message WatermarkFilterNode {
-  // The expression to calculate the watermark value.
-  expr.ExprNode watermark_expr = 1;
-  // The column the event time belongs.
-  uint64 event_time_col_idx = 2;
+  // The watermark desc
+  catalog.WatermarkDesc watermark_desc = 1;
   // The table used to persist watermark, the key is vnode.
-  catalog.Table table = 3;
+  catalog.Table table = 2;
 }
 
 // Acts like a merger, but on different inputs.
