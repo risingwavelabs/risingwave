@@ -535,6 +535,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
+            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+            // abort it using timeout.
             match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
                 Ok(Err(err)) => {
                     tracing::warn!("Failed to join shutdown: {:?}", err);
