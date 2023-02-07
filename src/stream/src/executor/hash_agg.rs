@@ -510,7 +510,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                 };
 
                 // Calculate current outputs, concurrently.
-                let futs = keys_in_batch
+                let futs: Vec<_> = keys_in_batch
                     .iter()
                     .zip(agg_groups.into_iter())
                     .into_iter()
@@ -524,7 +524,8 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                             Ok::<_, StreamExecutorError>((key.clone(), agg_group, curr_outputs))
                         });
                         f
-                    });
+                    })
+                    .collect();
                 let outputs_in_batch: Vec<_> = stream::iter(futs)
                     .buffer_unordered(10)
                     .fuse()
