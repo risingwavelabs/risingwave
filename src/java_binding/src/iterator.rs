@@ -73,7 +73,6 @@ impl Iterator {
             parse_remote_object_store(
                 &read_plan.object_store_url,
                 Arc::new(ObjectStoreMetrics::unused()),
-                true,
                 "Hummock",
             )
             .await,

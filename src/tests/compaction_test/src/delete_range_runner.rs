@@ -179,7 +179,6 @@ async fn compaction_test(
     let remote_object_store = parse_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
-        false,
         "Hummock",
     )
     .await;
