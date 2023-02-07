@@ -138,27 +138,10 @@ service StreamManagerService {
 
 // Below for cluster service.
 
-message FrontendVerifyParams {}
-
-message ComputeNodeVerifyParams {
-  uint32 barrier_interval_ms = 1;
-}
-
-message CompactorVerifyParams {}
-
-message VerifyParams {
-  oneof params {
-    FrontendVerifyParams frontend = 1;
-    ComputeNodeVerifyParams compute_node = 2;
-    CompactorVerifyParams compactor = 3;
-  }
-}
-
 message AddWorkerNodeRequest {
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
   uint64 worker_node_parallelism = 3;
-  VerifyParams verify_params = 4;
 }
 
 message AddWorkerNodeResponse {

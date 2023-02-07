@@ -56,17 +56,12 @@ where
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
         let host = req.get_host()?.clone();
-        // Allow the worker to join only if it's system parameters are consistent with the cluster.
-        // Note that the verification is just for backward compatibility. It may be removed after
-        // we deprecate system param items from the config file.
-        let system_params = self
-            .system_param_manager
-            .verify_params(worker_type, req.verify_params.unwrap())?;
         let worker_node_parallelism = req.worker_node_parallelism as usize;
         let worker_node = self
             .cluster_manager
             .add_worker_node(worker_type, host, worker_node_parallelism)
             .await?;
+        let system_params = self.system_param_manager.get_params().clone();
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,
             node: Some(worker_node),

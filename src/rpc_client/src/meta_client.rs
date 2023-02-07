@@ -71,7 +71,7 @@ use tonic::{Code, Streaming};
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef, VerifyParams};
+use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -162,7 +162,6 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-        verify_params: VerifyParams,
     ) -> Result<(Self, SystemParams)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
 
@@ -171,7 +170,6 @@ impl MetaClient {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
-            verify_params: Some(verify_params.inner),
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let resp = tokio_retry::Retry::spawn(retry_strategy, || async {

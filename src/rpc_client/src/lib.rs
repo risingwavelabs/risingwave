@@ -39,10 +39,6 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
-use risingwave_pb::meta::{
-    verify_params, CompactorVerifyParams, ComputeNodeVerifyParams, FrontendVerifyParams,
-    VerifyParams as ProstVerifyParams,
-};
 #[cfg(madsim)]
 use tokio::sync::Mutex;
 
@@ -149,47 +145,6 @@ pub trait ExtraInfoSource: Send + Sync {
 }
 
 pub type ExtraInfoSourceRef = Arc<dyn ExtraInfoSource>;
-
-/// A wrapper for [`risingwave_pb::meta::VerifyParams`] to simplify construction.
-pub struct VerifyParams {
-    inner: ProstVerifyParams,
-}
-
-impl VerifyParams {
-    pub fn for_frontend() -> Self {
-        Self {
-            inner: ProstVerifyParams {
-                params: Some(verify_params::Params::Frontend(FrontendVerifyParams {})),
-            },
-        }
-    }
-
-    pub fn for_compute_node(barrier_interval_ms: u32) -> Self {
-        Self {
-            inner: ProstVerifyParams {
-                params: Some(verify_params::Params::ComputeNode(
-                    ComputeNodeVerifyParams {
-                        barrier_interval_ms,
-                    },
-                )),
-            },
-        }
-    }
-
-    pub fn for_compactor() -> Self {
-        Self {
-            inner: ProstVerifyParams {
-                params: Some(verify_params::Params::Compactor(CompactorVerifyParams {})),
-            },
-        }
-    }
-
-    pub fn need_not_verify() -> Self {
-        Self {
-            inner: ProstVerifyParams { params: None },
-        }
-    }
-}
 
 #[macro_export]
 macro_rules! rpc_client_method_impl {

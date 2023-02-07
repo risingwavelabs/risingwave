@@ -17,7 +17,7 @@ use std::env;
 use anyhow::{bail, Result};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
-use risingwave_rpc_client::{MetaClient, VerifyParams};
+use risingwave_rpc_client::MetaClient;
 
 pub struct MetaServiceOpts {
     pub meta_addr: String,
@@ -58,7 +58,6 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
             WorkerType::RiseCtl,
             &get_new_ctl_identity(),
             0,
-            VerifyParams::need_not_verify(),
         )
         .await?;
         let worker_id = client.worker_id();

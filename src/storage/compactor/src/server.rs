@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
-use risingwave_rpc_client::{MetaClient, VerifyParams};
+use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
@@ -61,7 +61,6 @@ pub async fn compactor_serve(
         WorkerType::Compactor,
         &advertise_addr,
         0,
-        VerifyParams::for_compactor(),
     )
     .await
     .unwrap();

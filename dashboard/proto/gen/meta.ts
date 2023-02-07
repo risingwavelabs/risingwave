@@ -329,28 +329,10 @@ export interface ListTableFragmentsResponse_TableFragmentsEntry {
   value: ListTableFragmentsResponse_TableFragmentInfo | undefined;
 }
 
-export interface FrontendVerifyParams {
-}
-
-export interface ComputeNodeVerifyParams {
-  barrierIntervalMs: number;
-}
-
-export interface CompactorVerifyParams {
-}
-
-export interface VerifyParams {
-  params?: { $case: "frontend"; frontend: FrontendVerifyParams } | {
-    $case: "computeNode";
-    computeNode: ComputeNodeVerifyParams;
-  } | { $case: "compactor"; compactor: CompactorVerifyParams };
-}
-
 export interface AddWorkerNodeRequest {
   workerType: WorkerType;
   host: HostAddress | undefined;
   workerNodeParallelism: number;
-  verifyParams: VerifyParams | undefined;
 }
 
 export interface AddWorkerNodeResponse {
@@ -1285,127 +1267,8 @@ export const ListTableFragmentsResponse_TableFragmentsEntry = {
   },
 };
 
-function createBaseFrontendVerifyParams(): FrontendVerifyParams {
-  return {};
-}
-
-export const FrontendVerifyParams = {
-  fromJSON(_: any): FrontendVerifyParams {
-    return {};
-  },
-
-  toJSON(_: FrontendVerifyParams): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<FrontendVerifyParams>, I>>(_: I): FrontendVerifyParams {
-    const message = createBaseFrontendVerifyParams();
-    return message;
-  },
-};
-
-function createBaseComputeNodeVerifyParams(): ComputeNodeVerifyParams {
-  return { barrierIntervalMs: 0 };
-}
-
-export const ComputeNodeVerifyParams = {
-  fromJSON(object: any): ComputeNodeVerifyParams {
-    return { barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : 0 };
-  },
-
-  toJSON(message: ComputeNodeVerifyParams): unknown {
-    const obj: any = {};
-    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ComputeNodeVerifyParams>, I>>(object: I): ComputeNodeVerifyParams {
-    const message = createBaseComputeNodeVerifyParams();
-    message.barrierIntervalMs = object.barrierIntervalMs ?? 0;
-    return message;
-  },
-};
-
-function createBaseCompactorVerifyParams(): CompactorVerifyParams {
-  return {};
-}
-
-export const CompactorVerifyParams = {
-  fromJSON(_: any): CompactorVerifyParams {
-    return {};
-  },
-
-  toJSON(_: CompactorVerifyParams): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<CompactorVerifyParams>, I>>(_: I): CompactorVerifyParams {
-    const message = createBaseCompactorVerifyParams();
-    return message;
-  },
-};
-
-function createBaseVerifyParams(): VerifyParams {
-  return { params: undefined };
-}
-
-export const VerifyParams = {
-  fromJSON(object: any): VerifyParams {
-    return {
-      params: isSet(object.frontend)
-        ? { $case: "frontend", frontend: FrontendVerifyParams.fromJSON(object.frontend) }
-        : isSet(object.computeNode)
-        ? { $case: "computeNode", computeNode: ComputeNodeVerifyParams.fromJSON(object.computeNode) }
-        : isSet(object.compactor)
-        ? { $case: "compactor", compactor: CompactorVerifyParams.fromJSON(object.compactor) }
-        : undefined,
-    };
-  },
-
-  toJSON(message: VerifyParams): unknown {
-    const obj: any = {};
-    message.params?.$case === "frontend" &&
-      (obj.frontend = message.params?.frontend ? FrontendVerifyParams.toJSON(message.params?.frontend) : undefined);
-    message.params?.$case === "computeNode" && (obj.computeNode = message.params?.computeNode
-      ? ComputeNodeVerifyParams.toJSON(message.params?.computeNode)
-      : undefined);
-    message.params?.$case === "compactor" &&
-      (obj.compactor = message.params?.compactor ? CompactorVerifyParams.toJSON(message.params?.compactor) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<VerifyParams>, I>>(object: I): VerifyParams {
-    const message = createBaseVerifyParams();
-    if (
-      object.params?.$case === "frontend" && object.params?.frontend !== undefined && object.params?.frontend !== null
-    ) {
-      message.params = { $case: "frontend", frontend: FrontendVerifyParams.fromPartial(object.params.frontend) };
-    }
-    if (
-      object.params?.$case === "computeNode" &&
-      object.params?.computeNode !== undefined &&
-      object.params?.computeNode !== null
-    ) {
-      message.params = {
-        $case: "computeNode",
-        computeNode: ComputeNodeVerifyParams.fromPartial(object.params.computeNode),
-      };
-    }
-    if (
-      object.params?.$case === "compactor" &&
-      object.params?.compactor !== undefined &&
-      object.params?.compactor !== null
-    ) {
-      message.params = { $case: "compactor", compactor: CompactorVerifyParams.fromPartial(object.params.compactor) };
-    }
-    return message;
-  },
-};
-
 function createBaseAddWorkerNodeRequest(): AddWorkerNodeRequest {
-  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerNodeParallelism: 0, verifyParams: undefined };
+  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerNodeParallelism: 0 };
 }
 
 export const AddWorkerNodeRequest = {
@@ -1414,7 +1277,6 @@ export const AddWorkerNodeRequest = {
       workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
       workerNodeParallelism: isSet(object.workerNodeParallelism) ? Number(object.workerNodeParallelism) : 0,
-      verifyParams: isSet(object.verifyParams) ? VerifyParams.fromJSON(object.verifyParams) : undefined,
     };
   },
 
@@ -1424,8 +1286,6 @@ export const AddWorkerNodeRequest = {
     message.host !== undefined && (obj.host = message.host ? HostAddress.toJSON(message.host) : undefined);
     message.workerNodeParallelism !== undefined &&
       (obj.workerNodeParallelism = Math.round(message.workerNodeParallelism));
-    message.verifyParams !== undefined &&
-      (obj.verifyParams = message.verifyParams ? VerifyParams.toJSON(message.verifyParams) : undefined);
     return obj;
   },
 
@@ -1436,9 +1296,6 @@ export const AddWorkerNodeRequest = {
       ? HostAddress.fromPartial(object.host)
       : undefined;
     message.workerNodeParallelism = object.workerNodeParallelism ?? 0;
-    message.verifyParams = (object.verifyParams !== undefined && object.verifyParams !== null)
-      ? VerifyParams.fromPartial(object.verifyParams)
-      : undefined;
     return message;
   },
 };
