@@ -81,9 +81,6 @@ pub mod java_binding;
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path = "sim/leader.rs")]
-pub mod leader;
-#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]
@@ -143,9 +140,6 @@ pub mod backup_service_serde;
 #[rustfmt::skip]
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
-#[rustfmt::skip]
-#[path = "leader.serde.rs"]
-pub mod leader_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);

@@ -241,10 +241,16 @@ mod tests {
             .await
             .unwrap();
 
-        let database_id = {
+        let (session_database_id, database_id) = {
             let catalog_reader = session.env().catalog_reader();
             let reader = catalog_reader.read_guard();
-            reader.get_database_by_name("db1").unwrap().id()
+            (
+                reader
+                    .get_database_by_name(session.database())
+                    .unwrap()
+                    .id(),
+                reader.get_database_by_name("db1").unwrap().id(),
+            )
         };
 
         {
@@ -253,21 +259,31 @@ mod tests {
             let user_info = reader.get_user_by_name("user1").unwrap();
             assert_eq!(
                 user_info.grant_privileges,
-                vec![ProstPrivilege {
-                    action_with_opts: vec![
-                        ActionWithGrantOption {
+                vec![
+                    ProstPrivilege {
+                        action_with_opts: vec![ActionWithGrantOption {
                             action: Action::Connect as i32,
                             with_grant_option: true,
-                            granted_by: DEFAULT_SUPER_USER_ID,
-                        },
-                        ActionWithGrantOption {
-                            action: Action::Create as i32,
-                            with_grant_option: true,
-                            granted_by: DEFAULT_SUPER_USER_ID,
-                        }
-                    ],
-                    object: Some(ProstObject::DatabaseId(database_id)),
-                }]
+                            granted_by: session.user_id(),
+                        }],
+                        object: Some(ProstObject::DatabaseId(session_database_id)),
+                    },
+                    ProstPrivilege {
+                        action_with_opts: vec![
+                            ActionWithGrantOption {
+                                action: Action::Connect as i32,
+                                with_grant_option: true,
+                                granted_by: DEFAULT_SUPER_USER_ID,
+                            },
+                            ActionWithGrantOption {
+                                action: Action::Create as i32,
+                                with_grant_option: true,
+                                granted_by: DEFAULT_SUPER_USER_ID,
+                            }
+                        ],
+                        object: Some(ProstObject::DatabaseId(database_id)),
+                    }
+                ]
             );
         }
 
@@ -282,6 +298,7 @@ mod tests {
             assert!(user_info
                 .grant_privileges
                 .iter()
+                .filter(|gp| gp.object == Some(ProstObject::DatabaseId(database_id)))
                 .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option)));
         }
 
@@ -293,7 +310,18 @@ mod tests {
             let user_reader = session.env().user_info_reader();
             let reader = user_reader.read_guard();
             let user_info = reader.get_user_by_name("user1").unwrap();
-            assert!(user_info.grant_privileges.is_empty());
+            assert_eq!(
+                user_info.grant_privileges,
+                vec![ProstPrivilege {
+                    action_with_opts: vec![ActionWithGrantOption {
+                        action: Action::Connect as i32,
+                        with_grant_option: true,
+                        granted_by: session.user_id(),
+                    }],
+                    object: Some(ProstObject::DatabaseId(session_database_id)),
+                }]
+            );
         }
+        frontend.run_sql("DROP USER user1").await.unwrap();
     }
 }

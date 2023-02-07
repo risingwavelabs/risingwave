@@ -20,7 +20,6 @@ use super::{
     gen_filter_and_pushdown, BatchLimit, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -100,11 +99,7 @@ impl ColPrunable for LogicalLimit {
     }
 }
 
-impl ExprRewritable for LogicalLimit {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalLimit {}
 
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(

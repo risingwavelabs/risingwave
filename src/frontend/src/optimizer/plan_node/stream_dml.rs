@@ -37,7 +37,7 @@ impl StreamDml {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             append_only,
-            FixedBitSet::with_capacity(input.schema().len()),
+            FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
         );
 
         Self {

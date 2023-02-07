@@ -336,9 +336,9 @@ dependencies = [
 
 [[package]]
 name = "async-recursion"
-version = "1.0.0"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cda8f4bcc10624c4e85bc66b3f452cca98cfa5ca002dc83a16aad2367641bea"
+checksum = "3b015a331cc64ebd1774ba119538573603427eaace0a1950c423ab971f903796"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1396,9 +1396,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.1.1"
+version = "4.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ec7a4128863c188deefe750ac1d1dfe66c236909f845af04beed823638dc1b2"
+checksum = "f13b9c79b5d1dd500d20ef541215a6423c75829ef43117e1b4d17fd8af0b5d76"
 dependencies = [
  "bitflags",
  "clap_derive 4.1.0",
@@ -2109,9 +2109,9 @@ checksum = "c9b0705efd4599c15a38151f4721f7bc388306f61084d3bfd50bd07fbca5cb60"
 
 [[package]]
 name = "either"
-version = "1.8.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90e5c1c8368803113bf0c9584fc495a58b86dc8a29edbf8fe877d21d9507e797"
+checksum = "7fcaabb2fef8c910e7f4c7ce9f67a1283a1715879a7c230ca9d6d1ae31f16d91"
 
 [[package]]
 name = "encode_unicode"
@@ -3449,7 +3449,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7b603516767d1ab23d0de09d023e62966c3322f7148297c35cf3d97aa8b37fa"
 dependencies = [
- "clap 4.1.1",
+ "clap 4.1.4",
  "termcolor",
  "threadpool",
 ]
@@ -4877,6 +4877,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pretty-bytes"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009d6edd2c1dbf2e1c0cd48a2f7766e03498d49ada7109a01c6911815c685316"
+dependencies = [
+ "atty",
+ "getopts",
+]
+
+[[package]]
 name = "pretty_assertions"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5918,6 +5928,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "pprof",
+ "pretty-bytes",
  "prometheus",
  "prost 0.11.6",
  "rand 0.8.5",
@@ -6112,6 +6123,7 @@ dependencies = [
  "arc-swap",
  "assert-impl",
  "assert_matches",
+ "async-recursion",
  "async-trait",
  "bk-tree",
  "byteorder",
@@ -6389,7 +6401,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "async_stack_trace",
+ "either",
  "futures",
+ "itertools",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -6402,6 +6416,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tracing",
+ "url",
  "workspace-hack",
 ]
 

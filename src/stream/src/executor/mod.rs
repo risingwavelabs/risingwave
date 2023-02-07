@@ -126,7 +126,9 @@ use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use sort::SortExecutor;
 pub use source::*;
-pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
+pub use top_n::{
+    AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
+};
 pub use union::UnionExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;

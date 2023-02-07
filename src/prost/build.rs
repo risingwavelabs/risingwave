@@ -33,7 +33,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "health",
         "hummock",
         "java_binding",
-        "leader",
         "meta",
         "monitor_service",
         "plan_common",
