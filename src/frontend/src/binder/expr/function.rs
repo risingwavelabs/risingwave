@@ -292,6 +292,18 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+        fn now() -> Handle {
+            Box::new(move |binder, mut inputs| {
+                binder.ensure_now_function_allowed()?;
+                if !binder.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
+                raw_call(ExprType::Now)(binder, inputs)
+            })
+        }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
@@ -498,16 +510,8 @@ impl Binder {
                     GIT_SHA
                 )))),
                 // non-deterministic
-                ("now", raw(|binder, mut inputs|{
-                binder.ensure_now_function_allowed()?;
-                    if !binder.in_create_mv {
-                        inputs.push(ExprImpl::from(Literal::new(
-                            Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                            DataType::Timestamptz,
-                        )));
-                    }
-                    raw_call(ExprType::Now)(binder, inputs)
-                }))
+                ("now", now()),
+                ("current_timestamp", now())
             ]
             .into_iter()
             .collect()
