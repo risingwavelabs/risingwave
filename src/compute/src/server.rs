@@ -127,7 +127,7 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &system_params.state_store,
+        &config.storage.state_store,
         &config.storage.file_cache.dir,
         &config,
         &system_params,
