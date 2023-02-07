@@ -36,7 +36,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [[1:Int32::Float32, 2:Int32, null:Varchar], [3:Int32::Float32, 4:Int32, null:Varchar]] }
-- name: implicit null user defined columns
+- name: implicit null user defined columns 1
   sql: |
     create table t (v1 int, v2 int);
     insert into t (v1) values (5);
@@ -52,7 +52,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [[6:Int32, null:Int32]] }
-- name: implicit null user defined columns (cols of diff type) 1
+- name: implicit null user defined columns 3
   sql: |
     create table t (v1 int, v2 int, v3 int);
     insert into t (v3) values (6);
@@ -60,7 +60,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [[6:Int32, null:Int32, null:Int32]] }
-- name: implicit null user defined columns (cols of diff type) 2
+- name: implicit null user defined columns 4
   sql: |
     create table t (v1 int, v2 int, v3 int);
     insert into t (v1) values (6);
@@ -68,7 +68,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [[6:Int32, null:Int32, null:Int32]] }
-- name: implicit null user defined columns (cols of diff type) 3
+- name: implicit null user defined columns 5
   sql: |
     create table t (v1 int, v2 int, v3 int);
     insert into t (v2) values (6);
