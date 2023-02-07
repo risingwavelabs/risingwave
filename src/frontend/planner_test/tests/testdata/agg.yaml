@@ -698,37 +698,38 @@
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: enable two phase aggregation
   sql: |
+    SET QUERY_MODE TO DISTRIBUTED;
     SET RW_ENABLE_TWO_PHASE_AGG=true;
     create table t(v1 int, v2 int);
-    select min(v1), sum(v2) from t group by v1;
+    select min(v1), sum(v2) from t;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [min(t.v1), sum(t.v2)] }
-      └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v1), sum(t.v2)] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    BatchSimpleAgg { aggs: [min(min(t.v1)), sum(sum(t.v2))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [min(t.v1), sum(t.v2)] }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [min, sum, t.v1(hidden)], pk_columns: [t.v1] }
-    └─StreamProject { exprs: [min(t.v1), sum(t.v2), t.v1] }
-      └─StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v1), sum(t.v2)] }
-        └─StreamExchange { dist: HashShard(t.v1) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [min, sum], pk_columns: [] }
+    └─StreamProject { exprs: [min(min(t.v1)), sum(sum(t.v2))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, min(min(t.v1)), sum(sum(t.v2))] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, min(t.v1), sum(t.v2)] }
+            └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id)] }
+              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: disable two phase aggregation
   sql: |
+    SET QUERY_MODE TO DISTRIBUTED;
     SET RW_ENABLE_TWO_PHASE_AGG=false;
     create table t(v1 int, v2 int);
-    select min(v1), sum(v2) from t group by v1;
+    select min(v1), sum(v2) from t;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [min(t.v1), sum(t.v2)] }
-      └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v1), sum(t.v2)] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    BatchSimpleAgg { aggs: [min(t.v1), sum(t.v2)] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [min, sum, t.v1(hidden)], pk_columns: [t.v1] }
-    └─StreamProject { exprs: [min(t.v1), sum(t.v2), t.v1] }
-      └─StreamHashAgg { group_key: [t.v1], aggs: [count, min(t.v1), sum(t.v2)] }
-        └─StreamExchange { dist: HashShard(t.v1) }
+    StreamMaterialize { columns: [min, sum], pk_columns: [] }
+    └─StreamProject { exprs: [min(t.v1), sum(t.v2)] }
+      └─StreamGlobalSimpleAgg { aggs: [count, min(t.v1), sum(t.v2)] }
+        └─StreamExchange { dist: Single }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: only distinct agg
   sql: |
