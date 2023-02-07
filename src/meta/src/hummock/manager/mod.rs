@@ -1182,7 +1182,7 @@ where
         }
 
         let task_status = compact_task.task_status();
-        let task_label = task_status.as_str_name();
+        let task_status_label = task_status.as_str_name();
         if let Some(context_id) = assignee_context_id {
             // A task heartbeat is removed IFF we report the task status of a task and it still has
             // a valid assignment, OR we remove the node context from our list of nodes,
@@ -1200,6 +1200,7 @@ where
                     original_task_num: assigned_task_num,
                 });
             }
+
             // Update compaction task count.
             //
             // A corner case is that the compactor is deleted
@@ -1212,20 +1213,37 @@ where
                     .with_label_values(&[
                         &format!("{}:{}", host.host, host.port),
                         &compact_task.compaction_group_id.to_string(),
-                        task_label,
+                        task_status_label,
                     ])
                     .inc();
             }
         } else {
-            // Update compaction task count. The task will be marked as `unassigned`.
-            self.metrics
-                .compact_frequency
-                .with_label_values(&[
-                    "unassigned",
-                    &compact_task.compaction_group_id.to_string(),
-                    task_label,
-                ])
-                .inc();
+            // There are two cases where assignee_context_id is not available
+            // 1. compactor does not exist
+            // 2. trivival_move
+
+            if CompactStatus::is_trivial_move_task(compact_task) {
+                // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
+                // task_type next PR
+                self.metrics
+                    .compact_frequency
+                    .with_label_values(&[
+                        "trivial-move",
+                        &compact_task.compaction_group_id.to_string(),
+                        task_status_label,
+                    ])
+                    .inc();
+            } else {
+                // Update compaction task count. The task will be marked as `unassigned`.
+                self.metrics
+                    .compact_frequency
+                    .with_label_values(&[
+                        "unassigned",
+                        &compact_task.compaction_group_id.to_string(),
+                        task_status_label,
+                    ])
+                    .inc();
+            }
         }
 
         tracing::trace!(
