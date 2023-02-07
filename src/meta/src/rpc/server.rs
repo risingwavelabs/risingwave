@@ -415,7 +415,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         parse_remote_object_store(
             &env.opts.backup_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
-            true,
             "Meta Backup",
         )
         .await,
