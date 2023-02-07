@@ -24,7 +24,7 @@ use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::RW_VERSION;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -292,6 +292,18 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+        fn now() -> Handle {
+            Box::new(move |binder, mut inputs| {
+                binder.ensure_now_function_allowed()?;
+                if !binder.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
+                raw_call(ExprType::Now)(binder, inputs)
+            })
+        }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
@@ -493,20 +505,13 @@ impl Binder {
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RW-{}",
-                    RW_VERSION
+                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    RW_VERSION,
+                    GIT_SHA
                 )))),
                 // non-deterministic
-                ("now", raw(|binder, mut inputs|{
-                binder.ensure_now_function_allowed()?;
-                    if !binder.in_create_mv {
-                        inputs.push(ExprImpl::from(Literal::new(
-                            Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                            DataType::Timestamptz,
-                        )));
-                    }
-                    raw_call(ExprType::Now)(binder, inputs)
-                }))
+                ("now", now()),
+                ("current_timestamp", now())
             ]
             .into_iter()
             .collect()

@@ -66,3 +66,13 @@
           └─BatchLookupJoin { type: Inner, predicate: t.a = t2.c, output: [t2.c, t2.d, t.a] }
             └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
               └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    create index idx on t2(c) include (d);
+    select * from t1 join idx on t1.a = idx.c and t1.b = idx.d;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: Inner, predicate: t1.a = idx.c AND t1.b = idx.d, output: all }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
+        └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }

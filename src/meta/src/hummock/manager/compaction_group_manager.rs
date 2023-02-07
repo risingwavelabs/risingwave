@@ -434,11 +434,12 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         let mut remove_some_group = false;
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
-            let compaction_group_id = self
-                .index
-                .get(table_id)
-                .cloned()
-                .ok_or(Error::InvalidCompactionGroupMember(*table_id))?;
+            let compaction_group_id = match self.index.get(table_id).cloned() {
+                None => {
+                    continue;
+                }
+                Some(id) => id,
+            };
             let mut compaction_group = compaction_groups
                 .get_mut(compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;

@@ -62,7 +62,7 @@ impl StreamIndexScan {
             logical.functional_dependency().clone(),
             distribution,
             false, // TODO: determine the `append-only` field of table scan
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
             FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self {

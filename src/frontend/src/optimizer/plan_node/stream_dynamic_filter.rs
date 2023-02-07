@@ -40,17 +40,17 @@ impl StreamDynamicFilter {
     pub fn new(left_index: usize, comparator: ExprType, left: PlanRef, right: PlanRef) -> Self {
         assert_eq!(right.schema().len(), 1);
 
-        let watermark_cols = {
-            let mut watermark_cols = FixedBitSet::with_capacity(left.schema().len());
+        let watermark_columns = {
+            let mut watermark_columns = FixedBitSet::with_capacity(left.schema().len());
             if right.watermark_columns()[0] {
                 match comparator {
                     ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                        watermark_cols.set(left_index, true)
+                        watermark_columns.set(left_index, true)
                     }
                     _ => {}
                 }
             }
-            watermark_cols
+            watermark_columns
         };
 
         // TODO: derive from input
@@ -62,8 +62,7 @@ impl StreamDynamicFilter {
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            watermark_cols,
+            watermark_columns,
         );
         let core = generic::DynamicFilter {
             comparator,

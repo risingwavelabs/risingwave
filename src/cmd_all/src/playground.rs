@@ -153,7 +153,6 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
-                tracing::info!("opts: {:#?}", opts);
                 let _meta_handle = tokio::spawn(async move {
                     risingwave_meta::start(opts).await;
                     tracing::warn!("meta is stopped, shutdown all nodes");
@@ -173,7 +172,6 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "compute-node".into());
                 tracing::info!("starting compute-node thread with cli args: {:?}", opts);
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(opts);
-                tracing::info!("opts: {:#?}", opts);
                 let _compute_handle =
                     tokio::spawn(async move { risingwave_compute::start(opts).await });
             }
@@ -181,7 +179,6 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "frontend-node".into());
                 tracing::info!("starting frontend-node thread with cli args: {:?}", opts);
                 let opts = risingwave_frontend::FrontendOpts::parse_from(opts);
-                tracing::info!("opts: {:#?}", opts);
                 let _frontend_handle =
                     tokio::spawn(async move { risingwave_frontend::start(opts).await });
             }
@@ -189,7 +186,6 @@ pub async fn playground() -> Result<()> {
                 opts.insert(0, "compactor".into());
                 tracing::info!("starting compactor thread with cli args: {:?}", opts);
                 let opts = risingwave_compactor::CompactorOpts::parse_from(opts);
-                tracing::info!("opts: {:#?}", opts);
                 let _compactor_handle =
                     tokio::spawn(async move { risingwave_compactor::start(opts).await });
             }

@@ -167,7 +167,7 @@ impl StageExecution {
         catalog_reader: CatalogReader,
         ctx: ExecutionContextRef,
     ) -> Self {
-        let tasks = (0..stage.parallelism)
+        let tasks = (0..stage.parallelism.unwrap())
             .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
             .collect();
         Self {
@@ -328,7 +328,7 @@ impl StageRunner {
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
-            for (id, split) in source_info.split_info().iter().enumerate() {
+            for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
                 let task_id = TaskIdProst {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
@@ -340,7 +340,7 @@ impl StageRunner {
             }
         }
         else {
-            for id in 0..self.stage.parallelism {
+            for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = TaskIdProst {
                     query_id: self.stage.query_id.id.clone(),
                     stage_id: self.stage.id,
@@ -720,7 +720,7 @@ impl StageRunner {
 
         let plan_node_prost =
             self.convert_plan_node(&self.stage.root, task_id, partition, identity_id);
-        let exchange_info = self.stage.exchange_info.clone();
+        let exchange_info = self.stage.exchange_info.clone().unwrap();
 
         PlanFragment {
             root: Some(plan_node_prost),

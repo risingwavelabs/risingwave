@@ -511,6 +511,7 @@ profile:
       - use: meta-node
       - use: compute-node
         enable-tiered-cache: true
+        total-memory-bytes: 17179869184
       - use: frontend
       - use: compactor
 

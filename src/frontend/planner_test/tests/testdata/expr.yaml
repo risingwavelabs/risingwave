@@ -536,7 +536,6 @@
   logical_plan: |
     LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-
 - name: regression (#7641) -fuzzing test failed at Bind error,types Boolean and Varchar cannot be matched
   sql: |
     select false >= 'LN1O0QP1yi' NOT IN (md5('4SeUPZhUbH'))
