@@ -110,9 +110,8 @@ impl DistinctAggRule {
 
         let n_different_distinct = distinct_aggs
             .iter()
-            .map(|agg_call| agg_call.input_indices())
-            .counts()
-            .len();
+            .unique_by(|agg_call| agg_call.input_indices())
+            .count();
         assert_ne!(n_different_distinct, 0); // since `distinct_aggs` is not empty here
         if n_different_distinct == 1 {
             // no need to have expand if there is only one distinct aggregates.
