@@ -109,7 +109,7 @@ impl LocalHummockStorage {
             .await
     }
 
-    pub async fn may_exist(
+    pub async fn may_exist_inner(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
@@ -223,7 +223,7 @@ impl LocalStateStore for LocalHummockStorage {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::SurelyNotHaveFuture<'_> {
-        self.core.may_exist(key_range, read_options)
+        self.may_exist_inner(key_range, read_options)
     }
 }
 

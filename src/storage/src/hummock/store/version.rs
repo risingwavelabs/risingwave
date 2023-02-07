@@ -779,7 +779,7 @@ impl HummockVersionReader {
             user_key_range.1.as_ref().map(UserKey::encode),
         );
         let bloom_filter_prefix_hash = if let Some(prefix_hint) = read_options.prefix_hint {
-            Sstable::hash_for_bloom_filter(&prefix_hint)
+            Sstable::hash_for_bloom_filter(&prefix_hint, table_id.table_id)
         } else {
             // only use `table_key_range` to see whether all SSTs are filtered out
             // without looking at bloom filter because prefix_hint is not provided

@@ -196,7 +196,17 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::SurelyNotHaveFuture<'_> {
-        self.inner.may_exist(key_range, read_options)
+        async move {
+            let table_id_label = read_options.table_id.to_string();
+            let timer = self
+                .storage_metrics
+                .write_batch_duration
+                .with_label_values(&[table_id_label.as_str()])
+                .start_timer();
+            let res = self.inner.may_exist(key_range, read_options).await;
+            timer.observe_duration();
+            res
+        }
     }
 }
 
