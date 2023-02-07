@@ -385,7 +385,7 @@ mod tests {
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
         StreamingClusterInfo,
     };
-    use crate::model::ActorId;
+    use crate::model::{ActorId, FragmentId};
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
@@ -597,7 +597,8 @@ mod tests {
 
         async fn create_materialized_view(
             &self,
-            table_fragments: TableFragments,
+            table_id: TableId,
+            fragments: BTreeMap<FragmentId, Fragment>,
         ) -> MetaResult<()> {
             // Create fake locations where all actors are scheduled to the same parallel unit.
             let locations = {
@@ -610,10 +611,10 @@ mod tests {
                     .get_streaming_cluster_info()
                     .await;
 
-                let actor_locations = table_fragments
-                    .actor_ids()
-                    .into_iter()
-                    .map(|id| (id, parallel_units[&0].clone()))
+                let actor_locations = fragments
+                    .values()
+                    .flat_map(|f| &f.actors)
+                    .map(|a| (a.actor_id, parallel_units[&0].clone()))
                     .collect();
 
                 Locations {
@@ -622,12 +623,18 @@ mod tests {
                 }
             };
 
-            let ctx = CreateStreamingJobContext {
-                building_locations: locations,
+            let table = Table {
+                id: table_id.table_id(),
                 ..Default::default()
             };
-            let table = Table {
-                id: table_fragments.table_id().table_id(),
+            let table_fragments = TableFragments::new(
+                table_id,
+                fragments,
+                &locations.actor_locations,
+                Default::default(),
+            );
+            let ctx = CreateStreamingJobContext {
+                building_locations: locations,
                 ..Default::default()
             };
 
@@ -699,8 +706,9 @@ mod tests {
                 ..Default::default()
             },
         );
-        let table_fragments = TableFragments::for_test(table_id, fragments);
-        services.create_materialized_view(table_fragments).await?;
+        services
+            .create_materialized_view(table_id, fragments)
+            .await?;
 
         let actor_len = services.state.actor_streams.lock().unwrap().len();
         assert_eq!(actor_len, 4); // assert that actors are created
@@ -755,9 +763,8 @@ mod tests {
             },
         );
 
-        let table_fragments = TableFragments::for_test(table_id, fragments);
         services
-            .create_materialized_view(table_fragments)
+            .create_materialized_view(table_id, fragments)
             .await
             .unwrap();
 
