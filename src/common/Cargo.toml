@@ -29,6 +29,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
+hyper = "0.14.23"
 itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
@@ -82,6 +83,7 @@ mach = "0.3.2"
 criterion = "0.4"
 rand = "0.8"
 tempfile = "3"
+httpmock = "0.6.7"
 
 [[bench]]
 name = "bench_encoding"

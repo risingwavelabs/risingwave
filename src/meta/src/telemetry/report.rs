@@ -17,21 +17,20 @@ use std::time::SystemTime;
 
 use anyhow::anyhow;
 use hyper::StatusCode;
+use risingwave_common::telemetry::SystemData;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use super::SystemData;
 use crate::storage::MetaStore;
-use crate::stream::SourceManager;
 
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
 /// Url of telemetry backend
 const TELEMETRY_REPORT_URL: &str = "unreachable";
-/// Telemetry reporting interval in seconds
+/// Telemetry reporting interval in seconds, 24h
 const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
@@ -44,19 +43,13 @@ struct TelemetryReport {
     /// session_id is reset every time Meta node restarts
     session_id: String,
     system: SystemData,
-
-    // number of sources created
-    source_count: usize,
-
     up_time: u64,
-
     time_stamp: u64,
 }
 
 /// spawn a new tokio task to report telemetry
 pub async fn start_telemetry_reporting(
     meta_store: Arc<impl MetaStore>,
-    source_manager: Arc<SourceManager<impl MetaStore>>,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
@@ -74,7 +67,7 @@ pub async fn start_telemetry_reporting(
             }
 
             if !telemetry_enabled() {
-                tracing::info!("Meta Telemetry not enabled");
+                tracing::info!("Telemetry not enabled");
                 continue;
             }
 
@@ -84,7 +77,6 @@ pub async fn start_telemetry_reporting(
                         tracking_id: tracking_id.to_string(),
                         session_id: session_id.to_string(),
                         system: SystemData::new(),
-                        source_count: source_manager.source_count().await,
                         up_time: begin_time.elapsed().as_secs(),
                         time_stamp: SystemTime::now()
                             .duration_since(SystemTime::UNIX_EPOCH)
@@ -103,22 +95,6 @@ pub async fn start_telemetry_reporting(
         }
     });
     (join_handle, shutdown_tx)
-}
-
-/// post a telemetry reporting request
-async fn post_telemetry_report(url: &str, report: &TelemetryReport) -> Result<(), anyhow::Error> {
-    let http_client = hyper::Client::new();
-    let report_json = serde_json::to_string(report)?;
-    let req = hyper::Request::post(url)
-        .header("Content-Type", "application/json")
-        .body(hyper::Body::from(report_json))?;
-
-    let res = http_client.request(req).await?;
-    if res.status() == StatusCode::OK {
-        Ok(())
-    } else {
-        Err(anyhow!("invalid telemetry resp status, {}", res.status()))
-    }
 }
 
 /// fetch `tracking_id` from etcd
@@ -161,7 +137,6 @@ impl TelemetryReport {
             tracking_id: Uuid::new_v4().to_string(),
             session_id: Uuid::new_v4().to_string(),
             system: SystemData::new(),
-            source_count: 10,
             up_time: 123123,
             time_stamp: 10,
         }
@@ -175,41 +150,6 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_post_telemetry_report_success() {
-        let mock_server = MockServer::start();
-        let url = mock_server.url("/report");
-
-        let report = TelemetryReport::for_test();
-        let report_json = serde_json::to_string(&report).unwrap();
-        let resp_mock = mock_server.mock(|when, then| {
-            when.method(POST)
-                .path("/report")
-                .header("Content-Type", "application/json")
-                .body(report_json);
-            then.status(200);
-        });
-        post_telemetry_report(&url, &report).await.unwrap();
-        resp_mock.assert();
-    }
-
-    #[tokio::test]
-    async fn test_post_telemetry_report_fail() {
-        let mock_server = MockServer::start();
-        let url = mock_server.url("/report");
-
-        let report = TelemetryReport::for_test();
-        let report_json = serde_json::to_string(&report).unwrap();
-        let resp_mock = mock_server.mock(|when, then| {
-            when.method(POST)
-                .path("/report")
-                .header("Content-Type", "application/json")
-                .body(report_json);
-            then.status(404);
-        });
-        assert!(post_telemetry_report(&url, &report).await.is_err());
-        resp_mock.assert();
-    }
     #[test]
     fn test_telemetry_enabled() {
         assert!(telemetry_enabled());

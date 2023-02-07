@@ -52,7 +52,6 @@ serde_json = "1"
 serial_test = "0.9"
 smallvec = "1"
 sync-point = { path = "../utils/sync-point" }
-sysinfo = "0.27.6"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -79,7 +78,6 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-httpmock = "0.6.7"
 maplit = "1.0.2"
 rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
