@@ -101,6 +101,7 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
+    // TODO(zhidong): Make it required in v0.1.18
     /// State store url.
     #[clap(long, env = "RW_STATE_STORE")]
     state_store: Option<String>,

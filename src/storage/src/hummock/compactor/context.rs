@@ -29,7 +29,7 @@ use crate::monitor::CompactorMetrics;
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {
-    // TODO: should decouple it from config schema
+    // TODO(zhidong): should decouple it from config schema
     /// Local storage configurations.
     pub storage_config: Arc<StorageConfig>,
 

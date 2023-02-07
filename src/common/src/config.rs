@@ -46,6 +46,7 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
+    // TODO(zhidong): warn deprecated config
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
@@ -252,19 +253,19 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    // TODO: Remove in 0.1.18 release
+    // TODO(zhidong): Remove in 0.1.18 release
     // NOTE: It is now a system parameter and should not be used directly.
     /// Target size of the Sstable.
     #[serde(default = "default::storage::sst_size_mb")]
     pub sstable_size_mb: u32,
 
-    // TODO: Remove in 0.1.18 release
+    // TODO(zhidong): Remove in 0.1.18 release
     // NOTE: It is now a system parameter and should not be used directly.
     /// Size of each block in bytes in SST.
     #[serde(default = "default::storage::block_size_kb")]
     pub block_size_kb: u32,
 
-    // TODO: Remove in 0.1.18 release
+    // TODO(zhidong): Remove in 0.1.18 release
     // NOTE: It is now a system parameter and should not be used directly.
     /// False positive probability of bloom filter.
     #[serde(default = "default::storage::bloom_false_positive")]
@@ -284,7 +285,7 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
 
-    // TODO: Remove in 0.1.18 release
+    // TODO(zhidong): Remove in 0.1.18 release
     // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
