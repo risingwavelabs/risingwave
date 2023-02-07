@@ -535,8 +535,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
-            if let Err(err) = join_handle.await {
-                tracing::warn!("Failed to join shutdown: {:?}", err);
+            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
+                Ok(Err(err)) => {
+                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                }
+                Err(e) => {
+                    tracing::warn!("Join shutdown timeout: {:?}", e);
+                }
+                _ => {}
             }
         }
     };

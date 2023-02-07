@@ -111,6 +111,7 @@ where
     pub async fn abort_all(&self) {
         let mut guard = self.core.lock().await;
         *guard = NotificationManagerCore::new();
+        guard.exiting = true;
     }
 
     #[inline(always)]
@@ -215,6 +216,10 @@ where
         sender: UnboundedSender<Notification>,
     ) {
         let mut core_guard = self.core.lock().await;
+        if core_guard.exiting {
+            tracing::warn!("notification manager exiting.");
+            return;
+        }
         let senders = match subscribe_type {
             SubscribeType::Frontend => &mut core_guard.frontend_senders,
             SubscribeType::Hummock => &mut core_guard.hummock_senders,
@@ -227,6 +232,10 @@ where
 
     pub async fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
         let mut core_guard = self.core.lock().await;
+        if core_guard.exiting {
+            tracing::warn!("(l)notification manager exiting.");
+            return;
+        }
         core_guard.local_senders.push(sender);
     }
 
@@ -245,6 +254,7 @@ struct NotificationManagerCore {
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
+    exiting: bool,
 }
 
 impl NotificationManagerCore {
@@ -254,6 +264,7 @@ impl NotificationManagerCore {
             hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
             local_senders: vec![],
+            exiting: false,
         }
     }
 
