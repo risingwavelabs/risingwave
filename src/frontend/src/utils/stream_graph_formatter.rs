@@ -180,10 +180,6 @@ impl StreamGraphFormatter {
                         })
                         .join(", ")
                 )),
-                stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
                 stream_node::NodeBody::HashJoin(node) => Some(format!(
                     "left table: {}, right table {},{}{}",
                     self.add_table(node.get_left_table().unwrap()),
@@ -201,6 +197,10 @@ impl StreamGraphFormatter {
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
                 )),
+                stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(
+                    "state table: {}",
+                    self.add_table(node.get_table().unwrap())
+                )),
                 stream_node::NodeBody::Arrange(node) => Some(format!(
                     "arrange table: {}",
                     self.add_table(node.get_table().unwrap())
@@ -211,6 +211,10 @@ impl StreamGraphFormatter {
                     self.add_table(node.get_right_table().unwrap()),
                 )),
                 stream_node::NodeBody::GroupTopN(node) => Some(format!(
+                    "state table: {}",
+                    self.add_table(node.get_table().unwrap())
+                )),
+                stream_node::NodeBody::AppendOnlyGroupTopN(node) => Some(format!(
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
                 )),
