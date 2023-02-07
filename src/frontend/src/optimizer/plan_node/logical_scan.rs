@@ -301,7 +301,8 @@ impl LogicalScan {
         )
     }
 
-    /// used by optimizer (currently top_n_on_index_rule) to help reduce useless chunk_size at executor
+    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
+    /// executor
     pub fn set_chunk_size(&mut self, chunk_size: usize) {
         self.core.chunk_size = chunk_size;
     }

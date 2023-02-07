@@ -38,6 +38,7 @@ export interface RowSeqScanNode {
     | undefined;
   /** Whether the order on output columns should be preserved. */
   ordered: boolean;
+  chunkSize: number;
 }
 
 export interface SysRowSeqScanNode {
@@ -414,7 +415,7 @@ export interface PlanFragment {
 }
 
 function createBaseRowSeqScanNode(): RowSeqScanNode {
-  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false };
+  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false, chunkSize: 0 };
 }
 
 export const RowSeqScanNode = {
@@ -425,6 +426,7 @@ export const RowSeqScanNode = {
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
+      chunkSize: isSet(object.chunkSize) ? Number(object.chunkSize) : 0,
     };
   },
 
@@ -445,6 +447,7 @@ export const RowSeqScanNode = {
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.ordered !== undefined && (obj.ordered = message.ordered);
+    message.chunkSize !== undefined && (obj.chunkSize = Math.round(message.chunkSize));
     return obj;
   },
 
@@ -459,6 +462,7 @@ export const RowSeqScanNode = {
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
     message.ordered = object.ordered ?? false;
+    message.chunkSize = object.chunkSize ?? 0;
     return message;
   },
 };
