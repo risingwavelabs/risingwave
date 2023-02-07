@@ -16,8 +16,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
-use hyper::StatusCode;
-use risingwave_common::telemetry::SystemData;
+use risingwave_common::telemetry::{post_telemetry_report, SystemData};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -47,7 +46,13 @@ struct TelemetryReport {
     time_stamp: u64,
 }
 
-/// spawn a new tokio task to report telemetry
+/// This function spawns a new tokio task to report telemetry.
+/// It creates a channel for killing itself and a join handle to the spawned task.
+/// It then creates an interval of TELEMETRY_REPORT_INTERVAL seconds and checks if telemetry is
+/// enabled. If it is, it gets or creates a tracking ID from the meta store,
+/// creates a TelemetryReport object with system data, uptime, timestamp, and tracking ID.
+/// Finally, it posts the report to TELEMETRY_REPORT_URL.
+/// If an error occurs at any point in the process, it logs an error message.
 pub async fn start_telemetry_reporting(
     meta_store: Arc<impl MetaStore>,
 ) -> (JoinHandle<()>, Sender<()>) {
@@ -71,26 +76,36 @@ pub async fn start_telemetry_reporting(
                 continue;
             }
 
-            match get_or_create_tracking_id(meta_store.clone()).await {
-                Ok(tracking_id) => {
-                    let report = TelemetryReport {
-                        tracking_id: tracking_id.to_string(),
-                        session_id: session_id.to_string(),
-                        system: SystemData::new(),
-                        up_time: begin_time.elapsed().as_secs(),
-                        time_stamp: SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .expect("Clock might go backward")
-                            .as_secs(),
-                    };
-
-                    if let Err(e) = post_telemetry_report(TELEMETRY_REPORT_URL, &report).await {
-                        tracing::error!("Telemetry post error, {}", e);
-                    }
-                }
+            let tracking_id = match get_or_create_tracking_id(meta_store.clone()).await {
+                Ok(tracking_id) => tracking_id,
                 Err(e) => {
                     tracing::error!("Telemetry fetch tacking id error {}", e);
+                    continue;
                 }
+            };
+
+            let report = TelemetryReport {
+                tracking_id: tracking_id.to_string(),
+                session_id: session_id.to_string(),
+                system: SystemData::new(),
+                up_time: begin_time.elapsed().as_secs(),
+                time_stamp: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock might go backward")
+                    .as_secs(),
+            };
+
+            let report_json = match serde_json::to_string(&report) {
+                Ok(report_json) => report_json,
+                Err(e) => {
+                    tracing::error!("Telemetry failed to serialize report{}", e);
+                    continue;
+                }
+            };
+
+            match post_telemetry_report(TELEMETRY_REPORT_URL, report_json).await {
+                Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
+                Err(e) => tracing::error!("Telemetry post error, {}", e),
             }
         }
     });
@@ -130,24 +145,8 @@ fn telemetry_enabled() -> bool {
         .unwrap_or(true)
 }
 
-impl TelemetryReport {
-    #[cfg(test)]
-    fn for_test() -> Self {
-        Self {
-            tracking_id: Uuid::new_v4().to_string(),
-            session_id: Uuid::new_v4().to_string(),
-            system: SystemData::new(),
-            up_time: 123123,
-            time_stamp: 10,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use httpmock::Method::POST;
-    use httpmock::MockServer;
-
     use super::*;
 
     #[test]
