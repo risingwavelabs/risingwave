@@ -62,7 +62,7 @@ pub async fn producer(broker_addr: &str, datadir: String) {
         let file = file.unwrap();
         let name = file.file_name().into_string().unwrap();
         let Some((topic, partitions)) = name.split_once('.') else {
-            warn!("ignore file: {name:?}. expected format \"topic.partitions\"");
+            tracing::warn!("ignore file: {name:?}. expected format \"topic.partitions\"");
             continue;
         };
         admin
