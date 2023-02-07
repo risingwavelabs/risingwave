@@ -52,7 +52,7 @@ impl TryFrom<Type> for AggKind {
             Type::ApproxCountDistinct => Ok(AggKind::ApproxCountDistinct),
             Type::ArrayAgg => Ok(AggKind::ArrayAgg),
             Type::FirstValue => Ok(AggKind::FirstValue),
-            Type::Stddev => todo!("stddev placeholder"),
+            Type::Stddev => Ok(AggKind::Stddev),
             Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -71,7 +71,7 @@ impl AggKind {
             Self::ApproxCountDistinct => Type::ApproxCountDistinct,
             Self::ArrayAgg => Type::ArrayAgg,
             Self::FirstValue => Type::FirstValue,
-            Self::Stddev => todo!("stddev placeholder"),
+            Self::Stddev => Type::Stddev,
         }
     }
 }

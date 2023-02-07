@@ -143,7 +143,19 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             DataType::Interval => DataType::Interval,
             _ => return None,
         },
+
         (AggKind::Sum, _) => return None,
+
+        // StdDev
+        (AggKind::Stddev, [input]) => match input {
+            DataType::Int32 => DataType::Float64,
+            _ => {
+                println!("data type {:?}", input);
+                todo!("todo for stddev")
+            },
+        },
+
+        (AggKind::Stddev, _) => return None,
 
         (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
         (AggKind::Sum0, _) => return None,
@@ -165,9 +177,6 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             datatype: Box::new(input.clone()),
         },
         (AggKind::ArrayAgg, _) => return None,
-
-        // StdDev
-        (AggKind::Stddev, _) => todo!("stddev placeholder"),
     };
 
     Some(return_type)

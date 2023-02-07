@@ -296,7 +296,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
+                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg | AggKind::Stddev => {
                     AggCallState::ResultValue
                 }
                 AggKind::ApproxCountDistinct => {
@@ -309,7 +309,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::Table(Box::new(state))
                     }
                 }
-                AggKind::Stddev => todo!("stddev placeholder"),
             })
             .collect()
     }
