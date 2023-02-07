@@ -112,9 +112,9 @@ impl Binder {
                         let mut nulls = vec![Expr::Value(Value::Null); nulls_to_insert];
                         new_value.append(&mut nulls);
                     }
-                    (SetExpr::Values(new_values), nulls_to_insert)
+                    (SetExpr::Values(new_values), true)
                 } else {
-                    (SetExpr::Values(values), 0)
+                    (SetExpr::Values(values), false)
                 };
                 (
                     Query {
@@ -128,7 +128,7 @@ impl Binder {
                     nulls_inserted,
                 )
             }
-            _ => (source, 0),
+            _ => (source, false),
         };
 
         // When the column types of `source` query do not match `expected_types`, casting is
@@ -213,8 +213,7 @@ impl Binder {
         // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
         // We added the null values above. Above is equivalent to
         // insert into t1 values (NULL, 5);
-        let target_table_col_indices = if !target_table_col_indices.is_empty() && nulls_inserted > 0
-        {
+        let target_table_col_indices = if !target_table_col_indices.is_empty() && nulls_inserted {
             let provided_insert_cols: HashSet<usize> =
                 target_table_col_indices.iter().cloned().collect();
 
