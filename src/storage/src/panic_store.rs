@@ -78,7 +78,7 @@ impl StateStoreWrite for PanicStateStore {
 impl LocalStateStore for PanicStateStore {
     define_local_state_store_associated_type!();
 
-    fn surely_not_have(
+    fn may_exist(
         &self,
         _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,

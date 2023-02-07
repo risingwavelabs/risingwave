@@ -1259,16 +1259,16 @@ async fn check_surely_not_have<S>(
 {
     for prefix in existent_prefix {
         let pk_prefix = OwnedRow::new(vec![Some(prefix.into())]);
-        assert!(!state_table.surely_not_have(&pk_prefix).await.unwrap());
+        assert!(state_table.may_exist(&pk_prefix).await.unwrap());
     }
     for prefix in non_existent_prefix {
         let pk_prefix = OwnedRow::new(vec![Some(prefix.into())]);
-        assert!(state_table.surely_not_have(&pk_prefix).await.unwrap());
+        assert!(!state_table.may_exist(&pk_prefix).await.unwrap());
     }
 }
 
 #[tokio::test]
-async fn test_state_table_surely_not_have() {
+async fn test_state_table_may_exist() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 

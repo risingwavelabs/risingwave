@@ -752,7 +752,7 @@ impl HummockVersionReader {
     }
 
     // Note: this method will not check the kv tomestones and delete range tomestones
-    pub async fn surely_not_have(
+    pub async fn may_exist(
         &self,
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
@@ -769,7 +769,7 @@ impl HummockVersionReader {
         for imm in &imms {
             if imm.range_exists(&table_key_range) {
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
-                return Ok(false);
+                return Ok(true);
             }
         }
 
@@ -786,7 +786,7 @@ impl HummockVersionReader {
             if !uncommitted_ssts.is_empty() {
                 // uncommitted_ssts is already pruned by `table_key_range` so no extra check is
                 // needed.
-                return Ok(false);
+                return Ok(true);
             }
             for level in committed_version.levels(table_id) {
                 match level.level_type() {
@@ -795,7 +795,7 @@ impl HummockVersionReader {
                             .next()
                             .is_some()
                         {
-                            return Ok(false);
+                            return Ok(true);
                         }
                     }
                     LevelType::Nonoverlapping => {
@@ -803,12 +803,12 @@ impl HummockVersionReader {
                             .next()
                             .is_some()
                         {
-                            return Ok(false);
+                            return Ok(true);
                         }
                     }
                 }
             }
-            return Ok(true);
+            return Ok(false);
         };
 
         // 2. order guarantee: imm -> sst
@@ -829,7 +829,7 @@ impl HummockVersionReader {
                     false,
                 );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
-                return Ok(false);
+                return Ok(true);
             }
         }
 
@@ -862,7 +862,7 @@ impl HummockVersionReader {
                                 false,
                             );
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
-                            return Ok(false);
+                            return Ok(true);
                         }
                     }
                 }
@@ -887,7 +887,7 @@ impl HummockVersionReader {
                                 false,
                             );
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
-                            return Ok(false);
+                            return Ok(true);
                         }
                     }
                 }
@@ -905,6 +905,6 @@ impl HummockVersionReader {
             true,
         );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
-        Ok(true)
+        Ok(false)
     }
 }

@@ -458,12 +458,12 @@ impl StateStoreWrite for HummockStorageV1 {
 impl LocalStateStore for HummockStorageV1 {
     define_local_state_store_associated_type!();
 
-    fn surely_not_have(
+    fn may_exist(
         &self,
         _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
     ) -> Self::SurelyNotHaveFuture<'_> {
-        async move { Ok(false) }
+        async move { Ok(true) }
     }
 }
 

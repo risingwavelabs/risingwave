@@ -1127,9 +1127,9 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Returns:
-    /// true: the provided pk prefix is absent in state store.
-    /// false: the provided pk prefix may or may not be present in state store.
-    pub async fn surely_not_have(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
+    /// false: the provided pk prefix is absent in state store.
+    /// true: the provided pk prefix may or may not be present in state store.
+    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
         let encoded_key_range = range_of_prefix(&encoded_prefix);
@@ -1142,7 +1142,7 @@ impl<S: StateStore> StateTable<S> {
         let (l, r) = encoded_key_range_with_vnode.clone();
         let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
         if self.mem_table.iter(bytes_key_range).next().is_some() {
-            return Ok(false);
+            return Ok(true);
         }
 
         // Construct prefix hint for prefix bloom filter.
@@ -1170,7 +1170,7 @@ impl<S: StateStore> StateTable<S> {
         };
 
         self.local_store
-            .surely_not_have(encoded_key_range_with_vnode, read_options)
+            .may_exist(encoded_key_range_with_vnode, read_options)
             .await
             .map_err(Into::into)
     }

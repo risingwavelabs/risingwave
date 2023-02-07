@@ -290,9 +290,9 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
     /// be used.
     ///
     /// Returns:
-    /// - true: `key_range` is guaranteed to be absent in storage.
-    /// - false: `key_range` may or may not exist in storage.
-    fn surely_not_have(
+    /// - false: `key_range` is guaranteed to be absent in storage.
+    /// - true: `key_range` may or may not exist in storage.
+    fn may_exist(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,

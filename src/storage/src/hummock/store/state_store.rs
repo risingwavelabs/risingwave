@@ -109,7 +109,7 @@ impl LocalHummockStorage {
             .await
     }
 
-    pub async fn surely_not_have(
+    pub async fn may_exist(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
@@ -124,7 +124,7 @@ impl LocalHummockStorage {
         )?;
 
         self.hummock_version_reader
-            .surely_not_have(table_key_range, read_options, read_snapshot)
+            .may_exist(table_key_range, read_options, read_snapshot)
             .await
     }
 }
@@ -218,12 +218,12 @@ impl StateStoreWrite for LocalHummockStorage {
 impl LocalStateStore for LocalHummockStorage {
     define_local_state_store_associated_type!();
 
-    fn surely_not_have(
+    fn may_exist(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::SurelyNotHaveFuture<'_> {
-        self.core.surely_not_have(key_range, read_options)
+        self.core.may_exist(key_range, read_options)
     }
 }
 

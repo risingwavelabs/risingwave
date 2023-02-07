@@ -398,12 +398,12 @@ pub mod verify {
         // We don't verify `surely_not_have` across different state stores because
         // the return value of `surely_not_have` is implementation specific and may not
         // be consistent across different state store backends.
-        fn surely_not_have(
+        fn may_exist(
             &self,
             _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             _read_options: ReadOptions,
         ) -> Self::SurelyNotHaveFuture<'_> {
-            async move { Ok(false) }
+            async move { Ok(true) }
         }
     }
 
@@ -801,7 +801,7 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedLocalStateStore:
         DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite
     {
-        async fn surely_not_have(
+        async fn may_exist(
             &self,
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             read_options: ReadOptions,
@@ -810,12 +810,12 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
-        async fn surely_not_have(
+        async fn may_exist(
             &self,
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             read_options: ReadOptions,
         ) -> StorageResult<bool> {
-            self.surely_not_have(key_range, read_options).await
+            self.may_exist(key_range, read_options).await
         }
     }
 
@@ -827,12 +827,12 @@ pub mod boxed_state_store {
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         define_local_state_store_associated_type!();
 
-        fn surely_not_have(
+        fn may_exist(
             &self,
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             read_options: ReadOptions,
         ) -> Self::SurelyNotHaveFuture<'_> {
-            self.deref().surely_not_have(key_range, read_options)
+            self.deref().may_exist(key_range, read_options)
         }
     }
 

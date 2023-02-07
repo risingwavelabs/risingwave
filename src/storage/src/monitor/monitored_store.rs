@@ -191,12 +191,12 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     define_local_state_store_associated_type!();
 
-    fn surely_not_have(
+    fn may_exist(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::SurelyNotHaveFuture<'_> {
-        self.inner.surely_not_have(key_range, read_options)
+        self.inner.may_exist(key_range, read_options)
     }
 }
 
