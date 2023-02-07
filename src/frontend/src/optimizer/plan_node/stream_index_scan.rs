@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
@@ -62,8 +61,7 @@ impl StreamIndexScan {
             logical.functional_dependency().clone(),
             distribution,
             false, // TODO: determine the `append-only` field of table scan
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,

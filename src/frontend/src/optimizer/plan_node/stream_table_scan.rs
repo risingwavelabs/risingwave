@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -67,8 +66,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,
