@@ -137,6 +137,16 @@ export interface CreateTableResponse {
   version: number;
 }
 
+export interface AlterTableNameRequest {
+  tableId: number;
+  newTableName: string;
+}
+
+export interface AlterTableNameResponse {
+  status: Status | undefined;
+  version: number;
+}
+
 export interface CreateFunctionRequest {
   function: Function | undefined;
 }
@@ -948,6 +958,62 @@ export const CreateTableResponse = {
       ? Status.fromPartial(object.status)
       : undefined;
     message.tableId = object.tableId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseAlterTableNameRequest(): AlterTableNameRequest {
+  return { tableId: 0, newTableName: "" };
+}
+
+export const AlterTableNameRequest = {
+  fromJSON(object: any): AlterTableNameRequest {
+    return {
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      newTableName: isSet(object.newTableName) ? String(object.newTableName) : "",
+    };
+  },
+
+  toJSON(message: AlterTableNameRequest): unknown {
+    const obj: any = {};
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.newTableName !== undefined && (obj.newTableName = message.newTableName);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<AlterTableNameRequest>, I>>(object: I): AlterTableNameRequest {
+    const message = createBaseAlterTableNameRequest();
+    message.tableId = object.tableId ?? 0;
+    message.newTableName = object.newTableName ?? "";
+    return message;
+  },
+};
+
+function createBaseAlterTableNameResponse(): AlterTableNameResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const AlterTableNameResponse = {
+  fromJSON(object: any): AlterTableNameResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: AlterTableNameResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<AlterTableNameResponse>, I>>(object: I): AlterTableNameResponse {
+    const message = createBaseAlterTableNameResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
     message.version = object.version ?? 0;
     return message;
   },
