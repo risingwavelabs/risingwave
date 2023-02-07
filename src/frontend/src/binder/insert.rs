@@ -217,15 +217,12 @@ impl Binder {
         {
             let provided_insert_cols: HashSet<usize> =
                 target_table_col_indices.iter().cloned().collect();
-            let all_insert_cols: HashSet<usize> = (0..columns_to_insert.len()).collect();
-            let null_cols: HashSet<usize> = (&all_insert_cols - &provided_insert_cols)
-                .iter()
-                .cloned()
-                .collect();
 
             let mut result: Vec<usize> = target_table_col_indices.clone();
-            for val in null_cols {
-                result.push(val);
+            for i in 0..columns_to_insert.len() {
+                if !provided_insert_cols.contains(&i) {
+                    result.push(i);
+                }
             }
             result
         } else {
