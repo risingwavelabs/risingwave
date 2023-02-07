@@ -200,7 +200,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             let table_id_label = read_options.table_id.to_string();
             let timer = self
                 .storage_metrics
-                .write_batch_duration
+                .may_exist_duration
                 .with_label_values(&[table_id_label.as_str()])
                 .start_timer();
             let res = self.inner.may_exist(key_range, read_options).await;
