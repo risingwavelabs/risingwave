@@ -37,6 +37,8 @@ pub struct Scan {
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
+    /// Help RowSeqScan executor use a better chunk size
+    pub chunk_size: usize,
 }
 
 impl Scan {

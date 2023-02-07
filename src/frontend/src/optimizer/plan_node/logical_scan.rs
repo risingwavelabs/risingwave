@@ -86,6 +86,7 @@ impl LogicalScan {
             table_desc,
             indexes,
             predicate,
+            chunk_size: 1024,
         };
 
         let schema = core.schema();
@@ -298,6 +299,15 @@ impl LogicalScan {
             self.ctx(),
             new_predicate,
         )
+    }
+
+    /// used by optimizer (currently top_n_on_index_rule) to help reduce useless chunk_size at executor
+    pub fn set_chunk_size(&mut self, chunk_size: usize) {
+        self.core.chunk_size = chunk_size;
+    }
+
+    pub fn get_chunk_size(&self) -> usize {
+        self.core.chunk_size
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.

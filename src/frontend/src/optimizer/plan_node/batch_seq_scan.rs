@@ -240,6 +240,7 @@ impl ToBatchProst for BatchSeqScan {
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
                 ordered: !self.order().is_any(),
+                chunk_size: self.logical.get_chunk_size() as u32,
             })
         }
     }
