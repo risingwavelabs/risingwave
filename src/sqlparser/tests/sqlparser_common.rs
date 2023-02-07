@@ -457,7 +457,7 @@ fn parse_compound_expr_1() {
     use self::Expr::*;
     let sql = "a + b * c";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("a + (b * c)", &ast.to_string());
+    assert_eq!("a + b * c", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(Identifier(Ident::new("a"))),
@@ -478,7 +478,7 @@ fn parse_compound_expr_2() {
     use self::Expr::*;
     let sql = "a * b + c";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("(a * b) + c", &ast.to_string());
+    assert_eq!("a * b + c", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(BinaryOp {
@@ -498,7 +498,7 @@ fn parse_unary_math() {
     use self::Expr::*;
     let sql = "- a + - b";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("(- a) + (- b)", &ast.to_string());
+    assert_eq!("- a + - b", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(UnaryOp {
@@ -565,7 +565,7 @@ fn parse_not_precedence() {
     // NOT has higher precedence than OR/AND, so the following must parse as (NOT true) OR true
     let sql = "NOT true OR true";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("(NOT true) OR true", &ast.to_string());
+    assert_eq!("NOT true OR true", &ast.to_string());
     assert_matches!(
         ast,
         Expr::BinaryOp {
@@ -578,7 +578,7 @@ fn parse_not_precedence() {
     // NULL)
     let sql = "NOT a IS NULL";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("NOT (a IS NULL)", &ast.to_string());
+    assert_eq!("NOT a IS NULL", &ast.to_string());
     assert_matches!(
         ast,
         Expr::UnaryOp {
@@ -605,7 +605,7 @@ fn parse_not_precedence() {
     // NOT has lower precedence than LIKE, so the following parses as NOT ('a' NOT LIKE 'b')
     let sql = "NOT 'a' NOT LIKE 'b'";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("NOT ('a' NOT LIKE 'b')", &ast.to_string());
+    assert_eq!("NOT 'a' NOT LIKE 'b'", &ast.to_string());
     assert_eq!(
         ast,
         Expr::UnaryOp {

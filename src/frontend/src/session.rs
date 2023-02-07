@@ -38,6 +38,7 @@ use risingwave_common::session_config::ConfigMap;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
@@ -51,6 +52,7 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -148,11 +150,14 @@ impl FrontendEnv {
         opts: FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
-        tracing::info!(
-            "Starting frontend node with config {:?} with debug assertions {}",
-            config,
+        info!("Starting frontend node");
+        info!("> config: {:?}", config);
+        info!(
+            "> debug assertions: {}",
             if cfg!(debug_assertions) { "on" } else { "off" }
         );
+        info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
         let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
@@ -164,7 +169,7 @@ impl FrontendEnv {
             })
             .parse()
             .unwrap();
-        tracing::info!("advertise addr is {}", frontend_address);
+        info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
         let (meta_client, _) = MetaClient::register_new(
@@ -247,7 +252,7 @@ impl FrontendEnv {
                 .await
                 .unwrap();
         });
-        tracing::info!(
+        info!(
             "Health Check RPC Listener is set up on {}",
             opts.health_check_listener_addr.clone()
         );
@@ -499,12 +504,12 @@ impl SessionImpl {
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
         if let Some(trigger) = flag_guard.take() {
-            tracing::info!("Trying to cancel query in local mode.");
+            info!("Trying to cancel query in local mode.");
             // Current running query is in local mode
             trigger.abort();
-            tracing::info!("Cancel query request sent.");
+            info!("Cancel query request sent.");
         } else {
-            tracing::info!("Trying to cancel query in distributed mode.");
+            info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
     }
@@ -616,7 +621,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_query()
         } else {
-            tracing::info!("Current session finished, ignoring cancel query request")
+            info!("Current session finished, ignoring cancel query request")
         }
     }
 
