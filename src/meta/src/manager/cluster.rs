@@ -102,6 +102,7 @@ where
                     _ = monitor_interval.tick() => {},
                     // Shutdown monitor
                     _ = &mut shutdown_rx => {
+                        tracing::info!("Worker number monitor is stopped");
                         return;
                     }
                 }
