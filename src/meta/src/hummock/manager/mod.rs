@@ -223,7 +223,7 @@ pub enum CompactionResumeTrigger {
 }
 
 pub struct CompactionPickParma {
-    task_type: compact_task::TaskType,
+    pub task_type: compact_task::TaskType,
 
     manual_compaction_option: Option<ManualCompactionOption>,
 }
@@ -239,6 +239,13 @@ impl CompactionPickParma {
     pub fn new_space_reclaim_parma() -> Self {
         Self {
             task_type: compact_task::TaskType::SpaceReclaim,
+            manual_compaction_option: None,
+        }
+    }
+
+    pub fn new_ttl_reclaim_parma() -> Self {
+        Self {
+            task_type: compact_task::TaskType::Ttl,
             manual_compaction_option: None,
         }
     }
@@ -799,6 +806,11 @@ where
             selector_option,
         );
 
+        println!(
+            "get_compact_task_impl cg_id {} task_type {:?}",
+            compaction_group_id, task_type
+        );
+
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
             Some(c) => VarTransaction::new(c),
@@ -948,8 +960,6 @@ where
                 CompactStatus::new(compaction_group_id, compaction_config.max_level),
             );
             commit_multi_var!(self, None, Transaction::default(), new_compact_status)?;
-
-            // init compaction selector for new group
         }
 
         Ok(())
@@ -1000,15 +1010,11 @@ where
                         let selector_option = selector_option
                             .as_space_reclaim()
                             .expect("tried to as_space_reclaim");
-                        Box::new(SpaceReclaimCompactionSelector::new(
-                            selector_option.compaction_config,
-                        ))
+                        Box::new(SpaceReclaimCompactionSelector::new(selector_option))
                     }
 
                     compact_task::TaskType::Ttl => {
-                        let selector_option = selector_option
-                            .as_space_reclaim()
-                            .expect("tried to as_space_reclaim");
+                        let selector_option = selector_option.as_ttl().expect("tried to as_ttl");
                         Box::new(TtlCompactionSelector::new(
                             selector_option.compaction_config,
                         ))
@@ -1072,6 +1078,7 @@ where
             compact_task::TaskType::SpaceReclaim => {
                 let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
                     compaction_config: Arc::new(compaction_config),
+                    all_table_ids: self.all_table_ids().await,
                 };
 
                 self.get_compact_task_impl(
@@ -1392,7 +1399,15 @@ where
         }
 
         let task_status = compact_task.task_status();
-        let task_label = task_status.as_str_name();
+        let task_status_label = task_status.as_str_name();
+        let task_type_label = match compact_task.task_type() {
+            compact_task::TaskType::Dynamic => "Dynamic",
+            compact_task::TaskType::SpaceReclaim => "SpaceReclaim",
+            compact_task::TaskType::Manual => "Manual",
+            compact_task::TaskType::SharedBuffer => "SharedBuffer",
+            compact_task::TaskType::Ttl => "Ttl",
+            _ => "Invalid",
+        };
         if let Some(context_id) = assignee_context_id {
             // A task heartbeat is removed IFF we report the task status of a task and it still has
             // a valid assignment, OR we remove the node context from our list of nodes,
@@ -1422,7 +1437,8 @@ where
                     .with_label_values(&[
                         &format!("{}:{}", host.host, host.port),
                         &compact_task.compaction_group_id.to_string(),
-                        task_label,
+                        task_type_label,
+                        task_status_label,
                     ])
                     .inc();
             }
@@ -1433,7 +1449,8 @@ where
                 .with_label_values(&[
                     "unassigned",
                     &compact_task.compaction_group_id.to_string(),
-                    task_label,
+                    task_type_label,
+                    task_status_label,
                 ])
                 .inc();
         }
