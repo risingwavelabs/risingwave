@@ -459,8 +459,9 @@ impl Cluster {
     /// Graceful shutdown all RisingWave nodes.
     pub async fn graceful_shutdown(&self) {
         let mut nodes = vec![];
+        let mut metas = vec![];
         for i in 1..=self.config.meta_nodes {
-            nodes.push(format!("meta-{i}"));
+            metas.push(format!("meta-{i}"));
         }
         for i in 1..=self.config.frontend_nodes {
             nodes.push(format!("frontend-{i}"));
@@ -473,12 +474,20 @@ impl Cluster {
         }
 
         tracing::info!("graceful shutdown");
+        let waiting_time = Duration::from_secs(10);
+        // shutdown frontends, computes, compactors
         for node in &nodes {
             self.handle.send_ctrl_c(node);
         }
-        let waiting_time = Duration::from_secs(10);
         madsim::time::sleep(waiting_time).await;
-        for node in &nodes {
+        // shutdown metas
+        for meta in &metas {
+            self.handle.send_ctrl_c(meta);
+        }
+        madsim::time::sleep(waiting_time).await;
+
+        // check all nodes are exited
+        for node in nodes.iter().chain(metas.iter()) {
             if !self.handle.is_exit(node) {
                 panic!("failed to graceful shutdown {node} in {waiting_time:?}");
             }
