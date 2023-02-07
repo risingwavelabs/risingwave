@@ -1,4 +1,4 @@
 query T
-SELECT version();
+select substring(version() from 1 for 15);
 ----
-PostgreSQL 13.9-RW-0.2.0-alpha
+PostgreSQL 13.9

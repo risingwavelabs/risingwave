@@ -86,9 +86,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
 
+        // NOTE:
+        // We generate AST first, then use its `Display` trait
+        // to generate an sql string.
+        // That may erase nesting context.
+        // For instance `IN(a, b)` is `a IN b`.
+        // this can lead to ambiguity, if `a` is an
+        // INFIX/POSTFIX compound expression too:
+        // - `a1 IN a2 IN b`
+        // - `a1 >= a2 IN b`
+        // ...
+        // We just nest compound expressions to avoid this.
         let range = if context.can_gen_agg() { 99 } else { 90 };
         match self.rng.gen_range(0..=range) {
-            0..=70 => self.gen_func(typ, context),
+            0..=70 => Expr::Nested(Box::new(self.gen_func(typ, context))),
             71..=80 => self.gen_exists(typ, context),
             81..=90 => self.gen_explicit_cast(typ, context),
             91..=99 => self.gen_agg(typ),
@@ -636,6 +647,13 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
         op: bin_op,
         right: Box::new(exprs[1].clone()),
     })
+}
+
+pub(crate) fn typed_null(ty: &DataType) -> Expr {
+    Expr::Cast {
+        expr: Box::new(sql_null()),
+        data_type: data_type_to_ast_data_type(ty),
+    }
 }
 
 /// Generates a `NULL` value.

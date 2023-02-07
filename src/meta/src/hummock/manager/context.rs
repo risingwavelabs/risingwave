@@ -29,6 +29,7 @@ use crate::hummock::manager::{
     commit_multi_var, read_lock, start_measure_real_process_timer, write_lock,
 };
 use crate::hummock::HummockManager;
+use crate::manager::META_NODE_ID;
 use crate::model::{BTreeMapTransaction, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
@@ -54,7 +55,7 @@ where
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let (compact_statuses, compact_task_assignment) =
-            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref())?;
+            compaction.cancel_assigned_tasks_for_context_ids(context_ids.as_ref());
         for context_id in context_ids.as_ref() {
             self.compactor_manager
                 .purge_heartbeats_for_context(*context_id);
@@ -186,5 +187,9 @@ where
         }
         .await;
         Ok(())
+    }
+
+    pub async fn release_meta_context(&self) -> Result<()> {
+        self.release_contexts([META_NODE_ID]).await
     }
 }
