@@ -1412,7 +1412,7 @@ where
         } else {
             // There are two cases where assignee_context_id is not available
             // 1. compactor does not exist
-            // 2. trivival_move
+            // 2. trivial_move
 
             let label = if CompactStatus::is_trivial_move_task(compact_task) {
                 // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
