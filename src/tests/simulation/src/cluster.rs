@@ -430,7 +430,7 @@ impl Cluster {
     }
 
     /// Create a node for kafka producer and prepare data.
-    pub fn create_kafka_producer(&self, datadir: &str) {
+    pub async fn create_kafka_producer(&self, datadir: &str) {
         self.handle
             .create_node()
             .name("kafka-producer")
@@ -439,7 +439,9 @@ impl Cluster {
             .spawn(crate::kafka::producer(
                 "192.168.11.1:29092",
                 datadir.to_string(),
-            ));
+            ))
+            .await
+            .unwrap();
     }
 
     /// Create a kafka topic.
