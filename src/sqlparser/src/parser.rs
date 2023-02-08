@@ -1580,6 +1580,11 @@ impl Parser {
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
+        let emit_mode = if materialized {
+            self.parse_emit_mode()?
+        } else {
+            None
+        };
         let with_options = self.parse_options(Keyword::WITH)?;
         self.expect_keyword(Keyword::AS)?;
         let query = Box::new(self.parse_query()?);
@@ -1591,6 +1596,7 @@ impl Parser {
             materialized,
             or_replace,
             with_options,
+            emit_mode,
         })
     }
 
@@ -2092,6 +2098,25 @@ impl Parser {
         self.expect_token(&Token::Eq)?;
         let value = self.parse_value()?;
         Ok(SqlOption { name, value })
+    }
+
+    pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
+        if self.parse_keyword(Keyword::EMIT) {
+            match self.parse_one_of_keywords(&[Keyword::IMMEDIATELY, Keyword::ON]) {
+                Some(Keyword::IMMEDIATELY) => Ok(Some(EmitMode::Immediately)),
+                Some(Keyword::ON) => {
+                    self.expect_keywords(&[Keyword::WINDOW, Keyword::CLOSE])?;
+                    Ok(Some(EmitMode::OnWindowClose))
+                }
+                Some(_) => unreachable!(),
+                None => self.expected(
+                    "IMMEDIATELY or ON WINDOW CLOSE after EMIT",
+                    self.peek_token(),
+                ),
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
