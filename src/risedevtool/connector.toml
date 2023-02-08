@@ -16,12 +16,19 @@ description = "Download RisingWave Connector"
 script = '''
 #!/usr/bin/env bash
 set -e
-if [ -d "${RW_CONNECTOR_BIN_PREFIX}/libs" ]; then
+if [ -f "${RW_CONNECTOR_BIN_PREFIX}/start-service.sh" ]; then
     exit 0
 fi
-echo "RisingWave Connector not found, download ${RW_CONNECTOR_RELEASE}"
-curl -fL -o "${RW_CONNECTOR_DOWNLOAD_PATH}" "${RW_CONNECTOR_DOWNLOAD_URL}"
-mkdir -p "${PREFIX_BIN}/connector-node"
-tar xf "${RW_CONNECTOR_DOWNLOAD_PATH}" -C "${PREFIX_BIN}/connector-node"
-rm "${RW_CONNECTOR_DOWNLOAD_PATH}"
+
+if [ -f "${RW_CONNECTOR_DOWNLOAD_PATH}" ]; then
+    mkdir -p "${PREFIX_BIN}/connector-node"
+    tar xf "${RW_CONNECTOR_DOWNLOAD_PATH}" -C "${PREFIX_BIN}/connector-node"
+    rm "${RW_CONNECTOR_DOWNLOAD_PATH}"
+else
+    echo "RisingWave Connector not found, download ${RW_CONNECTOR_RELEASE}"
+    curl -fL -o "${RW_CONNECTOR_DOWNLOAD_PATH}" "${RW_CONNECTOR_DOWNLOAD_URL}"
+    mkdir -p "${PREFIX_BIN}/connector-node"
+    tar xf "${RW_CONNECTOR_DOWNLOAD_PATH}" -C "${PREFIX_BIN}/connector-node"
+    rm "${RW_CONNECTOR_DOWNLOAD_PATH}"
+fi
 '''

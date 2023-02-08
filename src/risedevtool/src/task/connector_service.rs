@@ -20,7 +20,6 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use crate::{ConnectorNodeConfig, ExecuteContext, Task};
-const CONNECTOR_MAIN_CLASS: &str = "com.risingwave.connector.ConnectorService";
 
 pub struct ConnectorNodeService {
     pub config: ConnectorNodeConfig,
@@ -33,7 +32,7 @@ impl ConnectorNodeService {
 
     fn connector_path(&self) -> Result<PathBuf> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Path::new(&prefix_bin).join("connector-node"))
+        Ok(Path::new(&prefix_bin).join("connector-node").join("start-service.sh"))
     }
 }
 
@@ -45,13 +44,9 @@ impl Task for ConnectorNodeService {
         if !path.exists() {
             return Err(anyhow!("RisingWave connector binary not found in {:?}\nDid you enable risingwave connector feature in `./risedev configure`?", path));
         }
-        let prefix_bin = env::var("PREFIX_BIN")?;
-        let classpath = Path::new(&prefix_bin).join("connector-node").join("libs/*");
-        let mut cmd = Command::new("java");
-        cmd.arg("-classpath")
-            .arg(classpath)
-            .arg(CONNECTOR_MAIN_CLASS)
-            .arg("--port")
+        let mut cmd = Command::new("sh");
+        cmd.arg(path)
+            .arg("-p")
             .arg(self.config.port.to_string());
         ctx.run_command(ctx.tmux_run(cmd)?)?;
         ctx.pb.set_message("started");
