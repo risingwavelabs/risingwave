@@ -26,6 +26,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
@@ -112,7 +113,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let schema = input.schema().clone();
         let columns = column_ids
             .into_iter()
-            .zip_eq(schema.fields.iter())
+            .zip_eq_fast(schema.fields.iter())
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
@@ -294,7 +295,7 @@ impl MaterializeBuffer {
         let key_chunk = data_chunk.reorder_columns(pk_indices);
         key_chunk
             .rows_with_holes()
-            .zip_eq(pks.iter_mut())
+            .zip_eq_debug(pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
                     pk_serde.serialize(r, vnode_and_pk);
@@ -306,7 +307,7 @@ impl MaterializeBuffer {
         let mut buffer = MaterializeBuffer::new();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq(vis.iter()) {
+                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq_debug(vis.iter()) {
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => buffer.insert(key, value),

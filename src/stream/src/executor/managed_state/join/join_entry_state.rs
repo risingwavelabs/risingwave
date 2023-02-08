@@ -76,6 +76,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
 
@@ -105,7 +106,7 @@ mod tests {
 
         for ((_, matched_row), (d1, d2)) in managed_state
             .values_mut(&col_types)
-            .zip_eq(col1.iter().zip_eq(col2.iter()))
+            .zip_eq_debug(col1.iter().zip_eq_debug(col2.iter()))
         {
             let matched_row = matched_row.unwrap();
             assert_eq!(matched_row.row[0], Some(ScalarImpl::Int64(*d1)));

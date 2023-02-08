@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
@@ -349,7 +350,7 @@ impl Planner {
         for (subquery, correlated_indices) in rewriter
             .subqueries
             .into_iter()
-            .zip_eq(rewriter.correlated_indices_collection)
+            .zip_eq_fast(rewriter.correlated_indices_collection)
         {
             let mut right = self.plan_query(subquery.query)?.into_subplan();
 

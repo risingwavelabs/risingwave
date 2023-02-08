@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
@@ -245,7 +246,7 @@ impl Binder {
             std::cmp::Ordering::Equal => {
                 return exprs
                     .into_iter()
-                    .zip_eq(expected_types)
+                    .zip_eq_fast(expected_types)
                     .map(|(e, t)| e.cast_assign(t.clone()))
                     .try_collect();
             }

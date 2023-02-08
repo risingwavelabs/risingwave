@@ -20,11 +20,11 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -355,7 +355,7 @@ where
             match row
                 .project(table_pk_indices)
                 .iter()
-                .zip_eq(pk_order.iter())
+                .zip_eq_fast(pk_order.iter())
                 .cmp_by(current_pos.iter(), |(x, order), y| match order {
                     OrderType::Ascending => x.cmp(&y),
                     OrderType::Descending => y.cmp(&x),
