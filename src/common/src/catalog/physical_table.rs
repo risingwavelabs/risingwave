@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
 
 use super::{ColumnDesc, ColumnId, TableId};
@@ -46,6 +47,9 @@ pub struct TableDesc {
 
     /// The prefix len of pk, used in bloom filter.
     pub read_prefix_len_hint: usize,
+
+    /// the column indices which could receive watermarks.
+    pub watermark_columns: FixedBitSet,
 }
 
 impl TableDesc {
