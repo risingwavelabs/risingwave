@@ -43,7 +43,7 @@ impl Binder {
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if ["session_user", "current_schema"]
+                if ["session_user", "current_schema", "current_timestamp"]
                     .iter()
                     .any(|e| ident.real_value().as_str() == *e)
                 {

@@ -67,7 +67,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
             FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self {
@@ -200,7 +200,6 @@ impl StreamTableScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                same_worker_node: false,
                 chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self

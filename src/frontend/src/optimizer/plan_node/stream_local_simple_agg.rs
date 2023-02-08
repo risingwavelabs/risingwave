@@ -40,19 +40,27 @@ impl StreamLocalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let input = logical.input();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        // Watermark column(s) must be in group key.
+        for (idx, input_idx) in logical.group_key().iter().enumerate() {
+            if input.watermark_columns().contains(*input_idx) {
+                watermark_columns.insert(idx);
+            }
+        }
+
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             input_dist.clone(),
             input.append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamLocalSimpleAgg { base, logical }
     }

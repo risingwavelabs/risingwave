@@ -62,7 +62,7 @@ impl StreamIndexScan {
             logical.functional_dependency().clone(),
             distribution,
             false, // TODO: determine the `append-only` field of table scan
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
             FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self {
@@ -177,7 +177,6 @@ impl StreamIndexScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                same_worker_node: true,
                 chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
