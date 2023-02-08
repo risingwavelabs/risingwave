@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use itertools::Itertools;
@@ -138,6 +138,12 @@ pub struct MaterializedInputState {
     pub table: TableCatalog,
     pub included_upstream_indices: Vec<usize>,
     pub table_value_indices: Vec<usize>,
+}
+
+pub struct DistinctDedupTable {
+    pub table: TableCatalog, // group key | distinct key | count | count with filter1 | ...
+    pub _todo: (),
+    // TODO(rctmp): need some column mapping later
 }
 
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
@@ -359,6 +365,65 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         internal_table_catalog_builder
             .set_value_indices((self.group_key.len()..out_fields.len()).collect());
         internal_table_catalog_builder.build(tb_dist)
+    }
+
+    /// Infer the dedup table for distinct agg calls by distinct keys.
+    /// Since distinct agg calls only dedup on the first input column, the key of the result map is
+    /// `usize`, i.e. the distinct key.
+    pub fn infer_distinct_dedup_table(
+        &self,
+        me: &impl GenericPlanRef,
+        vnode_col_idx: Option<usize>,
+    ) -> HashMap<usize, DistinctDedupTable> {
+        let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
+        let in_fields = self.input.schema().fields();
+
+        self.agg_calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| call.distinct) // only distinct agg calls need dedup table
+            .into_group_map_by(|(_, call)| call.inputs[0].index) // a table per distinct key
+            .into_iter()
+            .map(|(distinct_key, indices_and_calls)| {
+                let mut table_builder =
+                    TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+
+                let included_upstream_cols = self
+                    .group_key
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(distinct_key))
+                    .collect_vec();
+                for &idx in &included_upstream_cols {
+                    let table_col_idx = table_builder.add_column(&in_fields[idx]);
+                    table_builder.add_order_column(table_col_idx, OrderType::Ascending);
+                }
+
+                // Agg calls with same distinct key share the same dedup table, but they may have
+                // different filter conditions and different distinct row count. We add one column
+                // for each call in the dedup table.
+                // TODO(rctmp): output column mapping!
+                for (call_index, _) in indices_and_calls {
+                    table_builder.add_column(&Field {
+                        data_type: DataType::Int64,
+                        name: format!("count_for_call_{}", call_index),
+                        sub_fields: vec![],
+                        type_name: String::default(),
+                    });
+                }
+
+                let mapping = ColIndexMapping::with_included_columns(
+                    &included_upstream_cols,
+                    in_fields.len(),
+                );
+                if let Some(idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+                    table_builder.set_vnode_col_idx(idx);
+                }
+                let dist_key = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
+                let table = table_builder.build(dist_key);
+                (distinct_key, DistinctDedupTable { table, _todo: () })
+            })
+            .collect()
     }
 
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {

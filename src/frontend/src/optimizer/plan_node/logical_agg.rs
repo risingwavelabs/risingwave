@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
@@ -21,8 +22,8 @@ use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
-    ProjectBuilder,
+    self, AggCallState, DistinctDedupTable, GenericPlanNode, GenericPlanRef, PlanAggCall,
+    PlanAggOrderByField, ProjectBuilder,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -67,6 +68,15 @@ impl LogicalAgg {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
         self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
+    }
+
+    /// Infer dedup tables for distinct agg calls.
+    pub fn infer_distinct_dedup_table(
+        &self,
+        vnode_col_idx: Option<usize>,
+    ) -> HashMap<usize, DistinctDedupTable> {
+        self.core
+            .infer_distinct_dedup_table(&self.base, vnode_col_idx)
     }
 
     /// Generate plan for stateless 2-phase streaming agg.
