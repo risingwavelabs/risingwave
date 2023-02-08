@@ -486,7 +486,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                         *dirty = false;
 
                         let key = K::deserialize(k, group_key_data_types).unwrap();
-                        E::should_emit(key, &buffered_watermarks)
+                        E::should_emit(key, buffered_watermarks)
                     })
                     .map(|(k, _)| k),
                 *chunk_size,
@@ -521,10 +521,10 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                 // Calculate current outputs, concurrently.
                 // FIXME: In fact, we don't need to collect `futs` as `Vec`, but rustc will report a
                 // error `error: higher-ranked lifetime error`.
+                #[expect(clippy::disallowed_methods)]
                 let futs: Vec<_> = keys_in_batch
                     .iter()
                     .zip(agg_groups.into_iter())
-                    .into_iter()
                     .map(|(key, agg_group)| {
                         // Pop out the agg group temporarily.
                         let storages = &storages;
@@ -560,7 +560,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                         }
                         if let Some(prev_outputs) = prev_outputs {
                             // FIXME: double deserialization here
-                            let group_key = K::deserialize(&key, group_key_data_types).unwrap();
+                            let group_key = K::deserialize(key, group_key_data_types).unwrap();
                             let old_row = group_key.chain(prev_outputs);
                             result_table.update(old_row, result_row);
                         } else {
