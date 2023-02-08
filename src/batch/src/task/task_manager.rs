@@ -100,6 +100,7 @@ impl BatchManager {
         // it's possible do not found parent task id in theory.
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
+            self.metrics.task_num.inc();
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -150,7 +151,10 @@ impl BatchManager {
     pub fn abort_task(&self, sid: &ProstTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
-            Some(task) => task.abort_task(),
+            Some(task) => {
+                task.abort_task();
+                self.metrics.task_num.dec()
+            }
             None => {
                 warn!("Task id not found for abort task")
             }

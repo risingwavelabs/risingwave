@@ -223,6 +223,6 @@ impl BatchManagerMetrics {
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new(Registry::new())
     }
 }
