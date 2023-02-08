@@ -14,7 +14,7 @@
 
 use risingwave_common::config::RwConfig;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct StorageOpts {
     /// Target size of the Sstable.
     pub sstable_size_mb: u32,
@@ -68,6 +68,12 @@ pub struct StorageOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+}
+
+impl Default for StorageOpts {
+    fn default() -> Self {
+        Self::from(&RwConfig::default())
+    }
 }
 
 impl From<&RwConfig> for StorageOpts {
