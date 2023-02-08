@@ -29,6 +29,7 @@ use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -315,7 +316,7 @@ impl StageRunner {
 
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
-                .zip_eq(workers.into_iter())
+                .zip_eq_fast(workers.into_iter())
                 .enumerate()
             {
                 let task_id = TaskIdProst {

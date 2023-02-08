@@ -67,6 +67,7 @@ use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{NaiveDateTimeWrapper, ScalarImpl};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
 use serde_json::json;
@@ -282,7 +283,7 @@ impl SysCatalogReaderImpl {
         let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
 
         Ok(schemas
-            .zip_eq(schema_infos.iter())
+            .zip_eq_debug(schema_infos.iter())
             .flat_map(|(schema, schema_info)| {
                 // !!! If we need to add more class types, remember to update
                 // Catalog::get_id_by_class_name_inner accordingly.
