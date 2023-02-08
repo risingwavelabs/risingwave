@@ -94,7 +94,6 @@ pub async fn compactor_serve(
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
-            storage_opts.object_store_use_batch_delete,
             "Hummock",
         )
         .await,

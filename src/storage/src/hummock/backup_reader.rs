@@ -48,7 +48,6 @@ pub async fn parse_meta_snapshot_storage(
         parse_remote_object_store(
             storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
-            true,
             "Meta Backup",
         )
         .await,

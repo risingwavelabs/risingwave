@@ -19,8 +19,9 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
+use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -177,7 +178,6 @@ impl StreamIndexScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                same_worker_node: true,
                 chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
@@ -205,5 +205,23 @@ impl StreamIndexScan {
             identity: format!("{}", self),
             append_only: self.append_only(),
         }
+    }
+}
+
+impl ExprRewritable for StreamIndexScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.chain_type,
+        )
+        .into()
     }
 }
