@@ -249,7 +249,7 @@ impl ExprRewritable for StreamTableScan {
                 .as_logical_scan()
                 .unwrap()
                 .clone(),
-            self.chain_type
+            self.chain_type,
         )
         .into()
     }
