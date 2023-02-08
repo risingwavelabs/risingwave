@@ -17,6 +17,8 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
+use std::collections::BTreeMap;
+
 use risingwave_common::util::sort_util::OrderType;
 
 use super::{BoxedRule, Rule};
@@ -53,6 +55,13 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         order: &Order,
     ) -> Option<PlanRef> {
+        let required_col_map = logical_scan
+            .required_col_idx()
+            .iter()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let unmatched_idx = required_col_map.len();
         let index = logical_scan.indexes().iter().find(|idx| {
             let s2p_mapping = idx.secondary_to_primary_mapping();
             Order {
@@ -60,11 +69,17 @@ impl TopNOnIndexRule {
                     .index_table
                     .pk()
                     .iter()
-                     .map(|idx_item| FieldOrder {
-                         index: *s2p_mapping.get(&idx_item.index).expect("should be in s2p mapping"),
-                         direct: idx_item.direct,
-                     })
-                     .collect()
+                    .map(|idx_item| FieldOrder {
+                        index: *required_col_map
+                            .get(
+                                s2p_mapping
+                                    .get(&idx_item.index)
+                                    .expect("should be in s2p mapping"),
+                            )
+                            .unwrap_or(&unmatched_idx),
+                        direct: idx_item.direct,
+                    })
+                    .collect(),
             }
             .satisfies(order)
         })?;
