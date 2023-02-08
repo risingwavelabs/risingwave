@@ -20,7 +20,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
 
 use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -103,19 +102,4 @@ fn subset_to_protobuf(subset: &[usize]) -> Subset {
     Subset { column_indices }
 }
 
-impl ExprRewritable for StreamExpand {
-    fn has_rewritable_expr(&self) -> bool {
-        true
-    }
-
-    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_expand()
-                .unwrap()
-                .clone(),
-        )
-        .into()
-    }
-}
+impl ExprRewritable for StreamExpand {}

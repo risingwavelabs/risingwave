@@ -142,7 +142,7 @@ impl ExprRewritable for StreamHashAgg {
                 .as_logical_agg()
                 .unwrap()
                 .clone(),
-            self.vnode_col_idx.clone(),
+            self.vnode_col_idx,
         )
         .into()
     }
