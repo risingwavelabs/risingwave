@@ -441,7 +441,6 @@ impl PlanRoot {
     fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan()?;
-        let ctx = plan.ctx();
 
         // Convert the dag back to the tree, because we don't support physical dag plan for now.
         plan = self.optimize_by_rules(
@@ -456,12 +455,13 @@ impl PlanRoot {
 
         // TODO: SessionTimezone substitution
         // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
+        // plan = const_eval_exprs(plan)?;
 
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        // let ctx = plan.ctx();
+        // if ctx.is_explain_trace() {
+        //     ctx.trace("Const eval exprs:");
+        //     ctx.trace(plan.explain_to_string().unwrap());
+        // }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -616,12 +616,12 @@ impl PlanRoot {
         }
 
         // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
+        // plan = const_eval_exprs(plan)?;
 
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        // if ctx.is_explain_trace() {
+        //     ctx.trace("Const eval exprs:");
+        //     ctx.trace(plan.explain_to_string().unwrap());
+        // }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

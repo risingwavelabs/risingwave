@@ -37,5 +37,5 @@
 - sql: |
     select current_timestamp;
   batch_plan: |
-    BatchProject { exprs: ['2021-04-01 00:00:00+00:00':Timestamptz] }
+    BatchProject { exprs: [Now] }
     └─BatchValues { rows: [[]] }

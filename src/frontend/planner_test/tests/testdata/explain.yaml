@@ -36,11 +36,6 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Const eval exprs:
-
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
-
     To Batch Physical Plan:
 
     BatchProject { exprs: [1:Int32] }
@@ -56,7 +51,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 34,
+            "plan_node_id": 28,
             "plan_node_type": "BatchProject",
             "schema": [
               {
@@ -69,7 +64,7 @@
             ],
             "children": [
               {
-                "plan_node_id": 32,
+                "plan_node_id": 26,
                 "plan_node_type": "BatchValues",
                 "schema": [],
                 "children": [],
