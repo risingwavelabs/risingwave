@@ -26,11 +26,12 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::StateStore;
 
+use self::imp::EmitPolicy;
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{
     expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
@@ -48,16 +49,40 @@ type BoxedAggGroup<S> = Box<AggGroup<S>>;
 type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
 
 mod imp {
-    pub trait EmitPolicy {}
+    use risingwave_common::row::Row;
+
+    use crate::executor::Watermark;
+
+    pub trait EmitPolicy: Send + Sync + 'static {
+        fn should_emit(key: impl Row, buffered_watermarks: &[Option<Watermark>]) -> bool;
+    }
 }
 
 pub struct EmitImmediate;
 
-impl imp::EmitPolicy for EmitImmediate {}
+impl imp::EmitPolicy for EmitImmediate {
+    #[inline(always)]
+    fn should_emit(_key: impl Row, _buffered_watermarks: &[Option<Watermark>]) -> bool {
+        true
+    }
+}
 
 pub struct EmitOnWatermarkClose;
 
-impl imp::EmitPolicy for EmitOnWatermarkClose {}
+impl imp::EmitPolicy for EmitOnWatermarkClose {
+    #[inline(always)]
+    fn should_emit(key: impl Row, buffered_watermarks: &[Option<Watermark>]) -> bool {
+        let Some(Some(cur_watermark)) = buffered_watermarks.get(0) else {
+            // There is no watermark value now, so we can't emit any value.
+            return false;
+        };
+        let Some(ref watermark_val) = key.datum_at(0) else {
+            // NULL is unexpected in watermark column, however, if it exists, we'll treat it as the largest, so emit it here.
+            return true;
+        };
+        watermark_val <= &cur_watermark.val.as_scalar_ref_impl()
+    }
+}
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -144,7 +169,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     buffered_watermarks: Vec<Option<Watermark>>,
 }
 
-impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
+impl<K: HashKey, S: StateStore, E: EmitPolicy> Executor for HashAggExecutor<K, S, E> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -459,16 +484,9 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                             to_flush_keys.push(k.clone());
                         }
                         *dirty = false;
-                        let Some(Some(cur_watermark)) = buffered_watermarks.get(0) else {
-                            // There is no watermark value now, so we can't emit any value.
-                            return false;
-                        };
-                        let k = K::deserialize(k, group_key_data_types).unwrap();
-                        let Some(ref watermark_val) = k[0] else {
-                            // NULL is unexpected in watermark column, however, if it exists, we'll treat it as the largest, so emit it here.
-                            return true;
-                        };
-                        watermark_val <= &cur_watermark.val
+
+                        let key = K::deserialize(k, group_key_data_types).unwrap();
+                        E::should_emit(key, &buffered_watermarks)
                     })
                     .map(|(k, _)| k),
                 *chunk_size,
@@ -699,6 +717,7 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
+    use super::{EmitImmediate, EmitOnWatermarkClose};
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::agg_executor::{create_agg_state_table, create_result_table};
@@ -706,6 +725,7 @@ mod tests {
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     async fn new_boxed_hash_agg_executor<S: StateStore>(
         store: S,
         input: Box<dyn Executor>,
@@ -714,6 +734,8 @@ mod tests {
         pk_indices: PkIndices,
         extreme_cache_size: usize,
         executor_id: u64,
+        // TODO: should we use an enum here?
+        emit_immediate: bool,
     ) -> Box<dyn Executor> {
         let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
@@ -739,22 +761,41 @@ mod tests {
         )
         .await;
 
-        HashAggExecutor::<SerializedKey, S>::new(
-            ActorContext::create(123),
-            input,
-            agg_calls,
-            agg_state_tables,
-            result_table,
-            pk_indices,
-            extreme_cache_size,
-            executor_id,
-            group_key_indices,
-            Arc::new(AtomicU64::new(0)),
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-        )
-        .unwrap()
-        .boxed()
+        if emit_immediate {
+            HashAggExecutor::<SerializedKey, S, EmitImmediate>::new(
+                ActorContext::create(123),
+                input,
+                agg_calls,
+                agg_state_tables,
+                result_table,
+                pk_indices,
+                extreme_cache_size,
+                executor_id,
+                group_key_indices,
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(StreamingMetrics::unused()),
+                1024,
+            )
+            .unwrap()
+            .boxed()
+        } else {
+            HashAggExecutor::<SerializedKey, S, EmitOnWatermarkClose>::new(
+                ActorContext::create(123),
+                input,
+                agg_calls,
+                agg_state_tables,
+                result_table,
+                pk_indices,
+                extreme_cache_size,
+                executor_id,
+                group_key_indices,
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(StreamingMetrics::unused()),
+                1024,
+            )
+            .unwrap()
+            .boxed()
+        }
     }
 
     // --- Test HashAgg with in-memory KeyedState ---
@@ -838,6 +879,7 @@ mod tests {
             vec![],
             1 << 10,
             1,
+            true,
         )
         .await;
         let mut hash_agg = hash_agg.execute();
@@ -940,6 +982,7 @@ mod tests {
             vec![],
             1 << 10,
             1,
+            true,
         )
         .await;
         let mut hash_agg = hash_agg.execute();
@@ -1034,6 +1077,7 @@ mod tests {
             vec![2],
             1 << 10,
             1,
+            true,
         )
         .await;
         let mut hash_agg = hash_agg.execute();
@@ -1133,6 +1177,7 @@ mod tests {
             vec![2],
             1 << 10,
             1,
+            true,
         )
         .await;
         let mut hash_agg = hash_agg.execute();
@@ -1247,6 +1292,7 @@ mod tests {
             vec![2],
             1 << 10,
             1,
+            false,
         )
         .await;
 
