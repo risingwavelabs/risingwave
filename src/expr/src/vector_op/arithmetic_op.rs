@@ -16,7 +16,7 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Pow, Signed, Zero};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF64,
@@ -106,6 +106,16 @@ pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
 
 pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
     Ok(Decimal::abs(&decimal))
+}
+
+#[inline(always)]
+pub fn general_pow<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+where
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
+    T3: Pow<T3> + num_traits::Float,
+{
+    Ok(l.into().powf(r.into()))
 }
 
 #[inline(always)]
