@@ -126,6 +126,7 @@ export const ExprNode_Type = {
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
+  FORMAT_TYPE: "FORMAT_TYPE",
   /**
    * VNODE - Non-pure functions below (> 600)
    * ------------------------
@@ -386,6 +387,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 533:
     case "ARRAY_PREPEND":
       return ExprNode_Type.ARRAY_PREPEND;
+    case 534:
+    case "FORMAT_TYPE":
+      return ExprNode_Type.FORMAT_TYPE;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -566,6 +570,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_APPEND";
     case ExprNode_Type.ARRAY_PREPEND:
       return "ARRAY_PREPEND";
+    case ExprNode_Type.FORMAT_TYPE:
+      return "FORMAT_TYPE";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
