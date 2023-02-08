@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
 use pretty_bytes::converter::convert;
-use risingwave_batch::executor::BatchTaskMetrics;
+use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -121,6 +121,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
@@ -215,7 +216,10 @@ pub async fn compute_node_serve(
     };
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
+    let batch_mgr = Arc::new(BatchManager::new(
+        config.batch.clone(),
+        batch_manager_metrics,
+    ));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         advertise_addr.clone(),
         state_store.clone(),

@@ -78,8 +78,9 @@ enum StageState {
 }
 
 enum StageMessage {
-    /// Contains the reason why need to stop (e.g. Execution failure).
-    Stop(String),
+    /// Contains the reason why need to stop (e.g. Execution failure). The message is `None` if
+    /// it's normal stop.
+    Stop(Option<String>),
 }
 
 #[derive(Debug)]
@@ -91,6 +92,7 @@ pub enum StageEvent {
         id: StageId,
         reason: SchedulerError,
     },
+    /// All tasks in stage finished.
     Completed(StageId),
 }
 
@@ -190,7 +192,7 @@ impl StageExecution {
         let mut s = self.state.write().await;
         let cur_state = mem::replace(&mut *s, StageState::Failed);
         match cur_state {
-            StageState::Pending { msg_sender } => {
+            Pending { msg_sender } => {
                 let runner = StageRunner {
                     epoch: self.epoch.clone(),
                     stage: self.stage.clone(),
@@ -221,12 +223,12 @@ impl StageExecution {
         }
     }
 
-    pub async fn stop(&self, err_str: String) {
+    pub async fn stop(&self, error: Option<String>) {
         // Send message to tell Stage Runner stop.
         if let Some(shutdown_tx) = self.shutdown_tx.write().await.take() {
             // It's possible that the stage has not been scheduled, so the channel sender is
             // None.
-            if shutdown_tx.send(StageMessage::Stop(err_str)).is_err() {
+            if shutdown_tx.send(StageMessage::Stop(error)).is_err() {
                 // The stage runner handle has already closed. so do no-op.
             }
         }
@@ -377,7 +379,7 @@ impl StageRunner {
                     // Received shutdown signal from query runner, should send abort RPC to all CNs.
                     // change state to aborted. Note that the task cancel can only happen after schedule all these tasks to CN.
                     // This can be an optimization for future: How to stop before schedule tasks.
-                    self.abort_all_running_tasks().await?;
+                    self.abort_all_scheduled_tasks().await?;
                     break;
                 }
                 status_res = all_streams.next() => {
@@ -398,7 +400,7 @@ impl StageRunner {
                                     // All tasks in this stage have been scheduled. Notify query runner to schedule next
                                     // stage.
                                     if running_task_cnt == self.tasks.keys().len() {
-                                        self.notify_schedule_next_stage().await;
+                                        self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id))).await;
                                         sent_signal_to_next = true;
                                     }
                                 }
@@ -408,8 +410,9 @@ impl StageRunner {
                                     assert!(finished_task_cnt <= self.tasks.keys().len());
                                     if finished_task_cnt == self.tasks.keys().len() {
                                         assert!(sent_signal_to_next);
-                                        // All tasks finished without failure, just break this loop and return Ok.
-                                        break;
+                                        // All tasks finished without failure, we should not
+                                    // break this lop
+
                                     }
                                 }
 
@@ -462,7 +465,7 @@ impl StageRunner {
 
         // Notify QueryRunner to poll chunk from result_rx.
         let (result_tx, result_rx) = tokio::sync::mpsc::channel(100);
-        self.send_event(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
+        self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 
         let executor = ExecutorBuilder::new(
@@ -501,13 +504,18 @@ impl StageRunner {
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
-                StageMessage::Stop(err_str) => {
+                StageMessage::Stop(Some(err_str)) => {
                     // Tell Query Result Fetcher to stop polling and attach failure reason as str.
                     if let Err(_e) = result_tx.send(Err(TaskExecutionError(err_str))).await {
                         warn!("Send task execution failed");
                     }
                 }
+                StageMessage::Stop(None) => {
+                    unreachable!()
+                }
             }
+        } else {
+            self.notify_stage_completed().await;
         }
 
         Ok(())
@@ -518,7 +526,7 @@ impl StageRunner {
         shutdown_rx: oneshot::Receiver<StageMessage>,
     ) -> SchedulerResult<()> {
         // If root, we execute it locally.
-        if self.stage.id != 0 {
+        if !self.is_root_stage() {
             self.schedule_tasks(shutdown_rx).await?;
         } else {
             self.schedule_tasks_for_root(shutdown_rx).await?;
@@ -610,7 +618,7 @@ impl StageRunner {
     }
 
     /// Write message into channel to notify query runner current stage have been scheduled.
-    async fn notify_schedule_next_stage(&self) {
+    async fn notify_stage_scheduled(&self, msg: QueryMessage) {
         // If all tasks of this stage is scheduled, tell the query manager to schedule next.
         {
             // Changing state
@@ -626,14 +634,35 @@ impl StageRunner {
                 ),
             }
         }
-        self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
+
+        self.send_event(msg).await;
+    }
+
+    /// Notify query execution that this stage completed.
+    async fn notify_stage_completed(&self) {
+        // If all tasks of this stage finished, tell query manager.
+        {
+            // Changing state
+            let mut s = self.state.write().await;
+            let state = mem::replace(&mut *s, StageState::Failed);
+            match state {
+                StageState::Running => {
+                    *s = StageState::Completed;
+                }
+                _ => unreachable!(
+                    "The state can not be {:?} for query-{:?}-{:?} to do notify ",
+                    state, self.stage.query_id.id, self.stage.id
+                ),
+            }
+        }
+        self.send_event(QueryMessage::Stage(StageEvent::Completed(self.stage.id)))
             .await;
     }
 
     /// Abort all registered tasks. Note that here we do not care which part of tasks has already
     /// failed or completed, cuz the abort task will not fail if the task has already die.
     /// See PR (#4560).
-    async fn abort_all_running_tasks(&self) -> SchedulerResult<()> {
+    async fn abort_all_scheduled_tasks(&self) -> SchedulerResult<()> {
         // Set state to failed.
         {
             let mut state = self.state.write().await;
@@ -659,7 +688,7 @@ impl StageRunner {
             let query_id = self.stage.query_id.id.clone();
             let stage_id = self.stage.id;
             let task_id = *task;
-            tokio::spawn(async move {
+            spawn(async move {
                 if let Err(e) = client
                     .abort(AbortTaskRequest {
                         task_id: Some(risingwave_pb::batch_plan::TaskId {
@@ -828,6 +857,10 @@ impl StageRunner {
                 }
             }
         }
+    }
+
+    fn is_root_stage(&self) -> bool {
+        self.stage.id == 0
     }
 }
 
