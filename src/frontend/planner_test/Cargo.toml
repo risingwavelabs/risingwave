@@ -10,6 +10,7 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+backtrace = "0.3.67"
 console = "0.15"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
