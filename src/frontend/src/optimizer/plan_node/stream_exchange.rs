@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -91,3 +91,5 @@ impl StreamNode for StreamExchange {
         })
     }
 }
+
+impl ExprRewritable for StreamExchange {}
