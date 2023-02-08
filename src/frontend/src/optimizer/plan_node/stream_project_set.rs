@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
-use super::{LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::try_derive_watermark;
+use super::{ExprRewritable, LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{try_derive_watermark, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone)]
@@ -92,5 +92,22 @@ impl StreamNode for StreamProjectSet {
                 .map(|select_item| select_item.to_project_set_select_item_proto())
                 .collect_vec(),
         })
+    }
+}
+
+impl ExprRewritable for StreamProjectSet {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_project_set()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

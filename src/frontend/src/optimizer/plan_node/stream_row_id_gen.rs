@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Clone, Debug)]
@@ -76,3 +76,5 @@ impl StreamNode for StreamRowIdGen {
         })
     }
 }
+
+impl ExprRewritable for StreamRowIdGen {}
