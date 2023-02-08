@@ -14,7 +14,7 @@ SHELL ["/bin/bash", "-c"]
 
 RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64>>~/.bashrc
 RUN echo source ~/.bashrc>>~/.bashrc
-RUN wget https://mirrors.bfsu.edu.cn/apache/hadoop/common/hadoop-2.7.3/hadoop-2.7.3.tar.gz; 
+RUN wget "https://archive.apache.org/dist/hadoop/core/hadoop-2.7.3/hadoop-2.7.3.tar.gz"
 RUN tar -zxvf hadoop-2.7.3.tar.gz -C /opt/
 RUN mv /opt/hadoop-2.10.1 /opt/hadoop
 RUN echo 'export HADOOP_HOME=/opt/hadoop/' >> ~/.bashrc
