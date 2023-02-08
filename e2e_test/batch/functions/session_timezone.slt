@@ -59,15 +59,15 @@ statement ok
 set timezone = 'europe/london'
 
 # Add/Subtract timestamptz with interval across a daylight savings boundary
-
-# This should first add the days (naively), then the hours, with timezone in mind.
 # Daylight savings falls on 2016-10-30 in London timezone
+
+# This should first add the hours, crossing the daylight saving boundary, then the day
 query T
 select '2016-10-29 12:00:00'::timestamptz + interval '24 hours' + interval '1 day';
 ----
 2016-10-31 11:00:00+00:00
 
-# This should first add the days (naively), then the hours, with timezone in mind.
+# This should first add the days (naively), then the hours, skipping the daylight saving boundary
 query T
 select (interval '24 hours' + interval '1 day') + '2016-10-29 12:00:00'::timestamptz;
 ----
