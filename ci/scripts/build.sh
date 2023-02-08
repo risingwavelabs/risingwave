@@ -33,6 +33,14 @@ cargo hakari generate --diff
 echo "--- Rust format check"
 cargo fmt --all -- --check
 
+echo "--- Show sccache stats"
+sccache --show-stats
+
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+
+aws s3 ls s3://ci-sccache-bucket
+
 echo "--- Build Rust components"
 cargo build \
     -p risingwave_cmd_all \
@@ -53,3 +61,6 @@ ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+
+echo "--- Show sccache stats"
+sccache --show-stats
