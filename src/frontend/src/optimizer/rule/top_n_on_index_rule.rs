@@ -17,21 +17,42 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
+use risingwave_common::util::sort_util::OrderType;
+
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::{Direction, FieldOrder, Order};
 use crate::optimizer::PlanRef;
 
 pub struct TopNOnIndexRule {}
 
 impl Rule for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let logical_topn: &LogicalTopN = plan.as_logical_top_n()?;
-        let logical_scan: LogicalScan = logical_topn.input().as_logical_scan()?.to_owned();
-        let order = logical_topn.topn_order();
+        let logical_top_n: &LogicalTopN = plan.as_logical_top_n()?;
+        let logical_scan: LogicalScan = logical_top_n.input().as_logical_scan()?.to_owned();
+        let order = logical_top_n.topn_order();
         if order.field_order.is_empty() {
             return None;
         }
+        if let Some(p) = self.try_on_pk(logical_top_n, logical_scan.clone(), order) {
+            Some(p)
+        } else {
+            self.try_on_index(logical_top_n, logical_scan, order)
+        }
+    }
+}
+
+impl TopNOnIndexRule {
+    pub fn create() -> BoxedRule {
+        Box::new(TopNOnIndexRule {})
+    }
+
+    fn try_on_index(
+        &self,
+        logical_top_n: &LogicalTopN,
+        logical_scan: LogicalScan,
+        order: &Order,
+    ) -> Option<PlanRef> {
         let index = logical_scan.indexes().iter().find(|idx| {
             Order {
                 field_order: idx
@@ -64,20 +85,49 @@ impl Rule for TopNOnIndexRule {
         }?;
 
         index_scan.set_chunk_size(
-            ((u32::MAX as u64).min(logical_topn.limit() + logical_topn.offset())) as usize,
+            ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as usize,
         );
 
         let logical_limit = LogicalLimit::create(
             index_scan.into(),
-            logical_topn.limit(),
-            logical_topn.offset(),
+            logical_top_n.limit(),
+            logical_top_n.offset(),
         );
         Some(logical_limit)
     }
-}
 
-impl TopNOnIndexRule {
-    pub fn create() -> BoxedRule {
-        Box::new(TopNOnIndexRule {})
+    fn try_on_pk(
+        &self,
+        logical_top_n: &LogicalTopN,
+        mut logical_scan: LogicalScan,
+        order: &Order,
+    ) -> Option<PlanRef> {
+        let primary_key = logical_scan.get_primary_key();
+        let primary_key_order = Order {
+            field_order: primary_key
+                .into_iter()
+                .map(|op| FieldOrder {
+                    index: op.column_idx,
+                    direct: if op.order_type == OrderType::Ascending {
+                        Direction::Asc
+                    } else {
+                        Direction::Desc
+                    },
+                })
+                .collect::<Vec<_>>(),
+        };
+        if primary_key_order.satisfies(order) {
+            logical_scan.set_chunk_size(
+                ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as usize,
+            );
+            let logical_limit = LogicalLimit::create(
+                logical_scan.into(),
+                logical_top_n.limit(),
+                logical_top_n.offset(),
+            );
+            Some(logical_limit)
+        } else {
+            None
+        }
     }
 }
