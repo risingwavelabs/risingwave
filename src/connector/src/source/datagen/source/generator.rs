@@ -61,17 +61,18 @@ impl DatagenEventGenerator {
     pub async fn into_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
+        let mut reach_end = false;
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
             let mut rows_generated_this_second = 0;
             while rows_generated_this_second < self.partition_rows_per_second {
-                let mut msgs = vec![];
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
-                for _ in 0..num_rows_to_generate {
+                let mut msgs = Vec::with_capacity(num_rows_to_generate as usize);
+                'outer: for _ in 0..num_rows_to_generate {
                     let mut fields = serde_json::Map::with_capacity(self.fields_map.len());
                     for (name, field_generator) in &mut self.fields_map {
                         let field = field_generator.generate(self.offset);
@@ -82,7 +83,8 @@ impl DatagenEventGenerator {
                                 self.split_id,
                                 self.offset
                             );
-                            return Ok(());
+                            reach_end = true;
+                            break 'outer;
                         }
                         fields.insert(name.to_string(), field);
                     }
@@ -103,7 +105,13 @@ impl DatagenEventGenerator {
                     self.offset += 1;
                     rows_generated_this_second += 1;
                 }
-                yield msgs;
+                if !msgs.is_empty() {
+                    yield msgs;
+                }
+
+                if reach_end {
+                    return Ok(());
+                }
             }
         }
     }
@@ -165,6 +173,7 @@ mod tests {
         assert_eq!(expected_length, chunk.len());
 
         let empty_chunk = stream.next().await;
+        println!("empty_chunk: {:?}", empty_chunk);
         if rows_per_second >= (end - start + 1) {
             assert!(empty_chunk.is_none());
         } else {
@@ -188,5 +197,23 @@ mod tests {
         check_sequence_partition_result(3, 0, 10, 4).await;
         check_sequence_partition_result(3, 1, 10, 3).await;
         check_sequence_partition_result(3, 2, 10, 3).await;
+    }
+
+    #[tokio::test]
+    async fn test_one_partition_sequence_reach_end() {
+        check_sequence_partition_result(1, 0, 15, 10).await;
+    }
+
+    #[tokio::test]
+    async fn test_two_partition_sequence_reach_end() {
+        check_sequence_partition_result(2, 0, 15, 5).await;
+        check_sequence_partition_result(2, 1, 15, 5).await;
+    }
+
+    #[tokio::test]
+    async fn test_three_partition_sequence_reach_end() {
+        check_sequence_partition_result(3, 0, 15, 4).await;
+        check_sequence_partition_result(3, 1, 15, 3).await;
+        check_sequence_partition_result(3, 2, 15, 3).await;
     }
 }
