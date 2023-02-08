@@ -552,3 +552,4 @@
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: const_eval of division by 0 error
   sql: select 1 / 0 t1;
+  batch_error: 'Expr error: Division by zero'

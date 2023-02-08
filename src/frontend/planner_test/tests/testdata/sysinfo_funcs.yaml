@@ -37,5 +37,5 @@
 - sql: |
     select current_timestamp > now() - interval '10 minutes';
   batch_plan: |
-    BatchProject { exprs: [t::bolean] }
+    BatchProject { exprs: [true:Boolean] }
     └─BatchValues { rows: [[]] }
