@@ -16,7 +16,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
-use risingwave_common::telemetry::{post_telemetry_report, telemetry_enabled, SystemData};
+use risingwave_common::telemetry::{
+    post_telemetry_report, telemetry_enabled, SystemData, TelemetryNodeType, TelemetryReportBase,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -35,13 +37,8 @@ pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TelemetryReport {
-    /// tracking_id is persistent in etcd
-    tracking_id: String,
-    /// session_id is reset every time Meta node restarts
-    session_id: String,
-    system: SystemData,
-    up_time: u64,
-    time_stamp: u64,
+    #[serde(flatten)]
+    base: TelemetryReportBase,
 }
 
 /// This function spawns a new tokio task to report telemetry.
@@ -83,14 +80,17 @@ pub async fn start_telemetry_reporting(
             };
 
             let report = TelemetryReport {
-                tracking_id: tracking_id.to_string(),
-                session_id: session_id.to_string(),
-                system: SystemData::new(),
-                up_time: begin_time.elapsed().as_secs(),
-                time_stamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("Clock might go backward")
-                    .as_secs(),
+                base: TelemetryReportBase {
+                    tracking_id: tracking_id.to_string(),
+                    session_id: session_id.to_string(),
+                    system_data: SystemData::new(),
+                    up_time: begin_time.elapsed().as_secs(),
+                    time_stamp: SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Clock might go backward")
+                        .as_secs(),
+                    node_type: TelemetryNodeType::Meta,
+                },
             };
 
             let report_json = match serde_json::to_string(&report) {

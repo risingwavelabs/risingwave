@@ -15,7 +15,9 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use risingwave_common::telemetry::{post_telemetry_report, SystemData};
+use risingwave_common::telemetry::{
+    post_telemetry_report, SystemData, TelemetryNodeType, TelemetryReportBase,
+};
 use risingwave_pb::meta::TelemetryInfoResponse;
 use risingwave_rpc_client::MetaClient;
 use serde::{Deserialize, Serialize};
@@ -35,16 +37,8 @@ pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TelemetryReport {
-    /// tracking_id is persistent in etcd
-    tracking_id: String,
-    /// session_id is reset every time Meta node restarts
-    session_id: String,
-    /// system_data is hardware and os info
-    system_data: SystemData,
-    /// up_time is how long the node has been running
-    up_time: u64,
-    /// time_stamp is when the report is created
-    time_stamp: u64,
+    #[serde(flatten)]
+    base: TelemetryReportBase,
 }
 
 pub fn start_telemetry_reporting(meta_client: MetaClient) -> (JoinHandle<()>, Sender<()>) {
@@ -79,14 +73,17 @@ pub fn start_telemetry_reporting(meta_client: MetaClient) -> (JoinHandle<()>, Se
             }
 
             let report = TelemetryReport {
-                tracking_id: tracking_id.to_string(),
-                session_id: session_id.to_string(),
-                system_data: SystemData::new(),
-                up_time: begin_time.elapsed().as_secs(),
-                time_stamp: SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("Clock might go backward")
-                    .as_secs(),
+                base: TelemetryReportBase {
+                    tracking_id: tracking_id.to_string(),
+                    session_id: session_id.to_string(),
+                    system_data: SystemData::new(),
+                    up_time: begin_time.elapsed().as_secs(),
+                    time_stamp: SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Clock might go backward")
+                        .as_secs(),
+                    node_type: TelemetryNodeType::Compute,
+                },
             };
 
             let report_json = match serde_json::to_string(&report) {

@@ -24,6 +24,29 @@ use crate::util::resource_util::memory::{total_memory_available_bytes, total_mem
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum TelemetryNodeType {
+    Meta,
+    Compute,
+    Storage,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TelemetryReportBase {
+    /// tracking_id is persistent in etcd
+    pub tracking_id: String,
+    /// session_id is reset every time node restarts
+    pub session_id: String,
+    /// system_data is hardware and os info
+    pub system_data: SystemData,
+    /// up_time is how long the node has been running
+    pub up_time: u64,
+    /// time_stamp is when the report is created
+    pub time_stamp: u64,
+    /// node_type is the node that creates the report
+    pub node_type: TelemetryNodeType,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SystemData {
     memory: Memory,
     os: Os,
