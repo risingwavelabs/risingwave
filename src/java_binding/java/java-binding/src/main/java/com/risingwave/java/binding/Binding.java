@@ -21,7 +21,17 @@ public class Binding {
 
     static native boolean rowIsNull(long pointer, int index);
 
+    static native short rowGetInt16Value(long pointer, int index);
+
+    static native int rowGetInt32Value(long pointer, int index);
+
     static native long rowGetInt64Value(long pointer, int index);
+
+    static native float rowGetFloatValue(long pointer, int index);
+
+    static native double rowGetDoubleValue(long pointer, int index);
+
+    static native boolean rowGetBooleanValue(long pointer, int index);
 
     static native String rowGetStringValue(long pointer, int index);
 

@@ -369,7 +369,7 @@ mod tests {
     use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::HummockContextId;
-    use risingwave_pb::hummock::compact_task::TaskStatus;
+    use risingwave_pb::hummock::compact_task::{self, TaskStatus};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::{CompactTask, CompactTaskAssignment, InputLevel, SstableInfo};
     use tokio::sync::mpsc::error::TryRecvError;
@@ -383,7 +383,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::HummockManager;
+    use crate::hummock::{CompactionPickParma, HummockManager};
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -438,6 +438,7 @@ mod tests {
             table_options: HashMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: 0,
+            task_type: compact_task::TaskType::Dynamic as i32,
         }
     }
 
@@ -513,7 +514,10 @@ mod tests {
         ));
 
         let task = hummock_manager
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap()
             .unwrap();
