@@ -331,9 +331,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
-    #[serde(default = "default::storage::object_store_use_batch_delete")]
-    pub object_store_use_batch_delete: bool,
-
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
@@ -590,10 +587,6 @@ mod default {
 
         pub fn max_sub_compaction() -> u32 {
             4
-        }
-
-        pub fn object_store_use_batch_delete() -> bool {
-            true
         }
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
