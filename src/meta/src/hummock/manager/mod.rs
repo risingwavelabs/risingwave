@@ -825,8 +825,6 @@ where
             .compaction_group(compaction_group_id)
             .await
             .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
-        let all_table_ids = self.all_table_ids().await;
-
         self.precheck_compaction_group(
             compaction_group_id,
             compaction_statuses,
@@ -853,7 +851,7 @@ where
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
-            // sync_group has not been called for this group, which means no data even written.
+            // compaction group has been deleted.
             return Ok(None);
         }
 
@@ -907,6 +905,7 @@ where
                 start_time.elapsed()
             );
         } else {
+            let all_table_ids = self.all_table_ids().await;
             // to get all relational table_id from sst_info
             let table_ids = compact_task
                 .input_ssts
@@ -1392,6 +1391,7 @@ where
                     original_task_num: assigned_task_num,
                 });
             }
+
             // Update compaction task count.
             //
             // A corner case is that the compactor is deleted
@@ -1410,11 +1410,22 @@ where
                     .inc();
             }
         } else {
-            // Update compaction task count. The task will be marked as `unassigned`.
+            // There are two cases where assignee_context_id is not available
+            // 1. compactor does not exist
+            // 2. trivival_move
+
+            let label = if CompactStatus::is_trivial_move_task(compact_task) {
+                // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
+                // task_type next PR
+                "trivial-move"
+            } else {
+                "unassigned"
+            };
+
             self.metrics
                 .compact_frequency
                 .with_label_values(&[
-                    "unassigned",
+                    label,
                     &compact_task.compaction_group_id.to_string(),
                     task_type_label,
                     task_status_label,
