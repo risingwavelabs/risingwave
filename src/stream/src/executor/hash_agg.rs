@@ -130,8 +130,9 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// Extreme state cache size
     extreme_cache_size: usize,
 
-    /// Changed group keys in the current epoch (before next flush).
-    group_change_set: HashMap<K, bool>,
+    /// Held keys blocked by watermark, which should be emitted later.
+    /// The value is a boolean indicates whether the group is changed during the epoch.
+    held_keys: HashMap<K, bool>,
 
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -200,7 +201,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                 result_table,
                 group_key_indices,
                 cache_evict_watermark_epoch: watermark_epoch,
-                group_change_set: HashMap::new(),
+                held_keys: HashMap::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
                 chunk_lookup_miss_count: 0,
@@ -275,7 +276,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
             ref input_schema,
             ref input_pk_indices,
             ref extreme_cache_size,
-            ref mut group_change_set,
+            ref mut held_keys,
             ref schema,
             lookup_miss_count,
             total_lookup_count,
@@ -381,8 +382,8 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, _, vis_map) in &unique_keys {
-            // Mark the group as unemitted.
-            group_change_set.insert(key.clone(), true);
+            // Mark the group as held and dirty.
+            held_keys.insert(key.clone(), true);
             let agg_group = agg_group_cache.get_mut(key).unwrap().as_mut();
             let visibilities = visibilities
                 .iter()
@@ -404,7 +405,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
             ref schema,
             ref mut storages,
             ref mut result_table,
-            ref mut group_change_set,
+            ref mut held_keys,
             ref lookup_miss_count,
             ref total_lookup_count,
             ref mut chunk_lookup_miss_count,
@@ -446,18 +447,18 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
             .inc_by(*chunk_total_lookup_count);
         *chunk_total_lookup_count = 0;
 
-        let dirty_cnt = group_change_set.len();
+        let dirty_cnt = held_keys.len();
         if dirty_cnt > 0 {
             // Produce the stream chunk
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
-            let mut to_flush_keys = Vec::with_capacity(group_change_set.len());
+            let mut to_flush_keys = Vec::with_capacity(held_keys.len());
             let mut to_emit_chunks = IterChunks::chunks(
-                group_change_set
-                    .drain_filter(|k, changed| {
-                        if *changed {
+                held_keys
+                    .drain_filter(|k, dirty| {
+                        if *dirty {
                             to_flush_keys.push(k.clone());
                         }
-                        *changed = false;
+                        *dirty = false;
                         let Some(Some(cur_watermark)) = buffered_watermarks.get(0) else {
                             // There is no watermark value now, so we can't emit any value.
                             return false;
@@ -486,7 +487,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                     keys_in_batch
                         .iter()
                         .map(|key| {
-                            // SAFETY: `keys_in_batch` is a subset of `group_change_set`, which is a
+                            // SAFETY: `keys_in_batch` is a subset of `held_keys`, which is a
                             // `HashMap`, so we can ensure that every `&mut agg_group_cache` is
                             // unique.
                             unsafe {
