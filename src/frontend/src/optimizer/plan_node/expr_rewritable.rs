@@ -14,11 +14,8 @@
 
 use std::ops::Deref;
 
-use paste::paste;
-
 use super::*;
 use crate::expr::ExprRewriter;
-use crate::for_stream_plan_nodes;
 
 /// Rewrites expressions in a `PlanRef`. Due to `Share` operator,
 /// the `ExprRewriter` needs to be idempotent i.e. applying it more than once
@@ -48,12 +45,3 @@ impl ExprRewritable for PlanRef {
         }
     }
 }
-
-macro_rules! ban_expr_rewritable {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl ExprRewritable for [<$convention $name>] {} )*
-        }
-    }
-}
-for_stream_plan_nodes! {ban_expr_rewritable}

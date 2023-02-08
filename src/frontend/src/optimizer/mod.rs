@@ -441,6 +441,7 @@ impl PlanRoot {
     fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan()?;
+        let ctx = plan.ctx();
 
         // Convert the dag back to the tree, because we don't support physical dag plan for now.
         plan = self.optimize_by_rules(
@@ -453,14 +454,14 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
-        // SessionTimezone substitution
+        // TODO: SessionTimezone substitution
         // Const eval of exprs at the last minute
-        // plan = const_eval_exprs(plan)?;
+        plan = const_eval_exprs(plan)?;
 
-        // if explain_trace {
-        //     ctx.trace("Const eval exprs:");
-        //     ctx.trace(plan.explain_to_string().unwrap());
-        // }
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -612,6 +613,14 @@ impl PlanRoot {
                 vec![IndexDeltaJoinRule::create()],
                 ApplyOrder::BottomUp,
             );
+        }
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
         }
 
         #[cfg(debug_assertions)]
