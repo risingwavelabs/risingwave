@@ -535,11 +535,7 @@ pub fn to_stream_prost_body(
             let agg_states = me.infer_stream_agg_state(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
-                agg_calls: me
-                    .agg_calls
-                    .iter()
-                    .map(PlanAggCall::to_protobuf)
-                    .collect(),
+                agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
                 distribution_key: base
                     .dist
                     .dist_column_indices()
@@ -669,11 +665,7 @@ pub fn to_stream_prost_body(
         Node::LocalSimpleAgg(me) => {
             let me = &me.core;
             ProstNode::LocalSimpleAgg(SimpleAggNode {
-                agg_calls: me
-                    .agg_calls
-                    .iter()
-                    .map(PlanAggCall::to_protobuf)
-                    .collect(),
+                agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
                 distribution_key: base
                     .dist
                     .dist_column_indices()
