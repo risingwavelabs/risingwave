@@ -54,7 +54,6 @@ pub struct StorageOpts {
     pub min_sst_size_for_streaming_upload: u64,
     /// Max sub compaction task numbers
     pub max_sub_compaction: u32,
-    pub object_store_use_batch_delete: bool,
     pub max_concurrent_compaction_task_number: u64,
     pub enable_state_store_v1: bool,
 
@@ -95,7 +94,6 @@ impl From<&RwConfig> for StorageOpts {
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_sub_compaction: c.storage.max_sub_compaction,
-            object_store_use_batch_delete: c.storage.object_store_use_batch_delete,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
             enable_state_store_v1: c.storage.enable_state_store_v1,
             file_cache_dir: c.storage.file_cache.dir.clone(),
