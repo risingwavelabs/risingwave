@@ -687,12 +687,10 @@ export interface LookupNode {
 
 /** WatermarkFilter needs to filter the upstream data by the water mark. */
 export interface WatermarkFilterNode {
-  /** The watermark desc */
-  watermarkDesc:
-    | WatermarkDesc
-    | undefined;
-  /** The table used to persist watermark, the key is vnode. */
-  table: Table | undefined;
+  /** The watermark descs */
+  watermarkDescs: WatermarkDesc[];
+  /** The tables used to persist watermarks, the key is vnode. */
+  tables: Table[];
 }
 
 /** Acts like a merger, but on different inputs. */
@@ -2977,31 +2975,40 @@ export const LookupNode = {
 };
 
 function createBaseWatermarkFilterNode(): WatermarkFilterNode {
-  return { watermarkDesc: undefined, table: undefined };
+  return { watermarkDescs: [], tables: [] };
 }
 
 export const WatermarkFilterNode = {
   fromJSON(object: any): WatermarkFilterNode {
     return {
-      watermarkDesc: isSet(object.watermarkDesc) ? WatermarkDesc.fromJSON(object.watermarkDesc) : undefined,
-      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
+      tables: Array.isArray(object?.tables)
+        ? object.tables.map((e: any) => Table.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: WatermarkFilterNode): unknown {
     const obj: any = {};
-    message.watermarkDesc !== undefined &&
-      (obj.watermarkDesc = message.watermarkDesc ? WatermarkDesc.toJSON(message.watermarkDesc) : undefined);
-    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
+    if (message.tables) {
+      obj.tables = message.tables.map((e) => e ? Table.toJSON(e) : undefined);
+    } else {
+      obj.tables = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<WatermarkFilterNode>, I>>(object: I): WatermarkFilterNode {
     const message = createBaseWatermarkFilterNode();
-    message.watermarkDesc = (object.watermarkDesc !== undefined && object.watermarkDesc !== null)
-      ? WatermarkDesc.fromPartial(object.watermarkDesc)
-      : undefined;
-    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
+    message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     return message;
   },
 };

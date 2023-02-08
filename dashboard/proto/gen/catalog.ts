@@ -23,9 +23,7 @@ export interface ColumnIndex {
 
 export interface WatermarkDesc {
   /** The column idx the watermark is on */
-  watermarkIdx:
-    | ColumnIndex
-    | undefined;
+  watermarkIdx: number;
   /** The expression to calculate the watermark value. */
   expr: ExprNode | undefined;
 }
@@ -64,7 +62,10 @@ export interface Source {
   info:
     | StreamSourceInfo
     | undefined;
-  /** Define watermarks on source. */
+  /**
+   * Define watermarks on the source. The `repeated` is just for forward
+   * compatibility, currently, only one watermark on the source
+   */
   watermarkDescs: WatermarkDesc[];
 }
 
@@ -296,30 +297,27 @@ export const ColumnIndex = {
 };
 
 function createBaseWatermarkDesc(): WatermarkDesc {
-  return { watermarkIdx: undefined, expr: undefined };
+  return { watermarkIdx: 0, expr: undefined };
 }
 
 export const WatermarkDesc = {
   fromJSON(object: any): WatermarkDesc {
     return {
-      watermarkIdx: isSet(object.watermarkIdx) ? ColumnIndex.fromJSON(object.watermarkIdx) : undefined,
+      watermarkIdx: isSet(object.watermarkIdx) ? Number(object.watermarkIdx) : 0,
       expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined,
     };
   },
 
   toJSON(message: WatermarkDesc): unknown {
     const obj: any = {};
-    message.watermarkIdx !== undefined &&
-      (obj.watermarkIdx = message.watermarkIdx ? ColumnIndex.toJSON(message.watermarkIdx) : undefined);
+    message.watermarkIdx !== undefined && (obj.watermarkIdx = Math.round(message.watermarkIdx));
     message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<WatermarkDesc>, I>>(object: I): WatermarkDesc {
     const message = createBaseWatermarkDesc();
-    message.watermarkIdx = (object.watermarkIdx !== undefined && object.watermarkIdx !== null)
-      ? ColumnIndex.fromPartial(object.watermarkIdx)
-      : undefined;
+    message.watermarkIdx = object.watermarkIdx ?? 0;
     message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
     return message;
   },
