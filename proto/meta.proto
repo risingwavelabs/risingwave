@@ -22,7 +22,7 @@ message TelemetryInfoResponse {
 
 service TelemetryInfoService {
   // Request telemetry info from meta node
-  rpc TelemetryInfo(TelemetryInfoRequest) returns(TelemetryInfoResponse);
+  rpc GetTelemetryInfo(TelemetryInfoRequest) returns(TelemetryInfoResponse);
 }
 
 message HeartbeatRequest {

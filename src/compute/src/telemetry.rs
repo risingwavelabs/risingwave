@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::SystemTime;
 
-use anyhow::anyhow;
+use anyhow::Result;
 use risingwave_common::telemetry::{post_telemetry_report, SystemData};
+use risingwave_pb::meta::TelemetryInfoResponse;
+use risingwave_rpc_client::MetaClient;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
-
-use crate::storage::MetaStore;
-use crate::telemetry::telemetry_enabled;
 
 /// Url of telemetry backend
 const TELEMETRY_REPORT_URL: &str = "unreachable";
@@ -40,21 +38,15 @@ struct TelemetryReport {
     tracking_id: String,
     /// session_id is reset every time Meta node restarts
     session_id: String,
-    system: SystemData,
+    /// system_data is hardware and os info
+    system_data: SystemData,
+    /// up_time is how long the node has been running
     up_time: u64,
+    /// time_stamp is when the report is created
     time_stamp: u64,
 }
 
-/// This function spawns a new tokio task to report telemetry.
-/// It creates a channel for killing itself and a join handle to the spawned task.
-/// It then creates an interval of `TELEMETRY_REPORT_INTERVAL` seconds and checks if telemetry is
-/// enabled. If it is, it gets or creates a tracking ID from the meta store,
-/// creates a `TelemetryReport` object with system data, uptime, timestamp, and tracking ID.
-/// Finally, it posts the report to `TELEMETRY_REPORT_URL`.
-/// If an error occurs at any point in the process, it logs an error message.
-pub async fn start_telemetry_reporting(
-    meta_store: Arc<impl MetaStore>,
-) -> (JoinHandle<()>, Sender<()>) {
+pub async fn start_telemetry_reporting(meta_client: MetaClient) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let begin_time = std::time::Instant::now();
@@ -70,23 +62,25 @@ pub async fn start_telemetry_reporting(
                 }
             }
 
-            if !telemetry_enabled() {
-                tracing::info!("Telemetry not enabled");
+            // fetch telemetry tracking_id and configs from the meta node
+            let (tracking_id, telemetry_enabled) =
+                match get_tracking_info(meta_client.clone()).await {
+                    Ok(resp) => (resp.tracking_id, resp.telemetry_enabled),
+                    Err(err) => {
+                        tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                        continue;
+                    }
+                };
+
+            // wait for the next interval, do not exit current thread
+            if !telemetry_enabled {
                 continue;
             }
-
-            let tracking_id = match get_or_create_tracking_id(meta_store.clone()).await {
-                Ok(tracking_id) => tracking_id,
-                Err(e) => {
-                    tracing::error!("Telemetry fetch tacking id error {}", e);
-                    continue;
-                }
-            };
 
             let report = TelemetryReport {
                 tracking_id: tracking_id.to_string(),
                 session_id: session_id.to_string(),
-                system: SystemData::new(),
+                system_data: SystemData::new(),
                 up_time: begin_time.elapsed().as_secs(),
                 time_stamp: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
@@ -111,24 +105,7 @@ pub async fn start_telemetry_reporting(
     (join_handle, shutdown_tx)
 }
 
-/// fetch `tracking_id` from etcd
-async fn get_or_create_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyhow::Error> {
-    match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-        Ok(id) => Uuid::from_slice_le(&id).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
-        Err(_) => {
-            let uuid = Uuid::new_v4();
-            // put new uuid in meta store
-            match meta_store
-                .put_cf(
-                    TELEMETRY_CF,
-                    TELEMETRY_KEY.to_vec(),
-                    uuid.to_bytes_le().to_vec(),
-                )
-                .await
-            {
-                Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
-                Ok(_) => Ok(uuid),
-            }
-        }
-    }
+async fn get_tracking_info(meta_client: MetaClient) -> Result<TelemetryInfoResponse> {
+    let resp = meta_client.get_telemetry_info().await?;
+    Ok(resp)
 }

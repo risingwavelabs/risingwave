@@ -30,6 +30,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender as OneSender;
@@ -40,6 +41,7 @@ use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
+use super::service::telemetry_service::TelemetryInfoServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
@@ -260,6 +262,8 @@ pub async fn start_leader_srv<S: MetaStore>(
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
 
+    let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
+
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
             prometheus_addr.to_string(),
@@ -331,6 +335,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .add_service(ScaleServiceServer::new(scale_srv))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {},

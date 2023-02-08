@@ -78,6 +78,12 @@ impl SystemData {
     }
 }
 
+impl Default for SystemData {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// post a telemetry reporting request
 pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
     let http_client = hyper::Client::new();

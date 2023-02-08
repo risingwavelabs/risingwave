@@ -27,6 +27,7 @@ extern crate tracing;
 pub mod memory_management;
 pub mod rpc;
 pub mod server;
+pub mod telemetry;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
