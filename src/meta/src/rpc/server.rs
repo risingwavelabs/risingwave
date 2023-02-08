@@ -182,10 +182,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let join_handle = tokio::spawn(async move {
         if let Some(election_client) = election_client.clone() {
             let mut is_leader_watcher = election_client.subscribe();
-            let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
+            let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
             let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
 
-            let _resp = is_leader_watcher.changed().await;
+            tokio::select! {
+                _ = svc_shutdown_rx_clone.changed() => return,
+                res = is_leader_watcher.changed() => {
+                    if let Err(err) = res {
+                        tracing::error!("leader watcher recv failed {}", err.to_string());
+                    }
+                }
+            }
+            let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
 
             // If not the leader, spawn a follower.
             let follower_handle: Option<JoinHandle<()>> = if !*is_leader_watcher.borrow() {
@@ -206,9 +214,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 None
             };
 
+            let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
             while !*is_leader_watcher.borrow_and_update() {
-                if let Err(e) = is_leader_watcher.changed().await {
-                    tracing::error!("leader watcher recv failed {}", e.to_string());
+                tokio::select! {
+                    _ = svc_shutdown_rx_clone.changed() => {
+                        return;
+                    }
+                    res = is_leader_watcher.changed() => {
+                        if let Err(err) = res {
+                            tracing::error!("leader watcher recv failed {}", err.to_string());
+                        }
+                    }
                 }
             }
 
@@ -252,7 +268,6 @@ pub async fn start_service_as_election_follower(
         .add_service(HealthServer::new(health_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {},
                 // shutdown service if all services should be shut down
                 res = svc_shutdown_rx.changed() =>  {
                     match res {
@@ -400,7 +415,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         parse_remote_object_store(
             &env.opts.backup_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
-            true,
             "Meta Backup",
         )
         .await,
@@ -507,14 +521,29 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .await,
     );
 
+    let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
+    let notification_mgr = env.notification_manager_ref();
+    let abort_notification_handler = tokio::spawn(async move {
+        abort_recv.await.unwrap();
+        notification_mgr.abort_all().await;
+    });
+    sub_tasks.push((abort_notification_handler, abort_sender));
+
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
-                // Maybe it is already shut down
                 continue;
             }
-            if let Err(err) = join_handle.await {
-                tracing::warn!("Failed to join shutdown: {:?}", err);
+            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+            // abort it using timeout.
+            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
+                Ok(Err(err)) => {
+                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                }
+                Err(e) => {
+                    tracing::warn!("Join shutdown timeout: {:?}", e);
+                }
+                _ => {}
             }
         }
     };
@@ -534,7 +563,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(BackupServiceServer::new(backup_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {},
                 res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),

@@ -3589,9 +3589,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "150508f130d4ab8b00ff33bbe7d2f6276a943d8198efddb7c5a69c6b89ee6547"
+checksum = "ad8ec77ebfe5067154eb35baeb03c402e3c57a3db4866e9a1a276d40435c7fb8"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3617,9 +3617,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "399abea1dd4b45ed8564c67e400dfac5b65fe8f21356ea5f0cc32c793ea61285"
+checksum = "b25dd57e0c5b84c838451374177f34be28df7b7885d950f736d46937afc42e96"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3673,11 +3673,10 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.11"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95122ce38cd63608a480fa7ebd8216f79ba8228cea34744e1a93e9c49f21872"
+checksum = "ebc35d85610c81cdefc44f71aad0781b0093fa2d956360e418466cb1d5b1adf2"
 dependencies = [
- "futures-lite",
  "madsim",
  "tokio",
 ]
@@ -5345,6 +5344,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "random-string"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf4e63111ec5292d8af9c220f06fe3bb87991cc78b6f1f7e291d1ae6b8a60817"
+dependencies = [
+ "fastrand",
+]
+
+[[package]]
 name = "raw-cpuid"
 version = "10.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6335,6 +6343,7 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "prometheus",
+ "random-string",
  "risingwave_common",
  "spin 0.9.4",
  "tempfile",
@@ -6364,6 +6373,7 @@ name = "risingwave_planner_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "backtrace",
  "console",
  "futures",
  "itertools",

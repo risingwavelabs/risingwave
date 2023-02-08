@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::NowNode;
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use super::{LogicalNow, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::OptimizerContextRef;
@@ -97,3 +97,5 @@ impl StreamNode for StreamNow {
         })
     }
 }
+
+impl ExprRewritable for StreamNow {}

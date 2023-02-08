@@ -16,8 +16,8 @@ ${RISINGWAVE_ROOT}/risedev d java-binding-demo
 
 psql -d ${DB_NAME} -h localhost -p 4566 -U root << EOF
 DROP TABLE IF EXISTS ${TABLE_NAME};
-CREATE TABLE ${TABLE_NAME} (v1 bigint, v2 varchar, v3 bigint);
-INSERT INTO ${TABLE_NAME} values (1, 'aaa', 1), (2, 'bbb', 2);
+CREATE TABLE ${TABLE_NAME} (v1 smallint, v2 int, v3 bigint, v4 float4, v5 float8, v6 bool, v7 varchar, may_null bigint);
+INSERT INTO ${TABLE_NAME} values (1, 1, 1, 1.0, 1.0, false, 'aaa', 1), (2, 2, 2, 2.0, 2.0, true, 'bbb', NULL);
 FLUSH;
 EOF
 
