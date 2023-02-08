@@ -113,7 +113,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
         | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
+        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
             build_nullable_binary_expr_prost(prost)
         }
         ToChar => build_to_char_expr(prost),
@@ -132,7 +132,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         DateTrunc => build_date_trunc_expr(prost),
-        FormatType => build_format_type_expr(prost),
 
         // Dedicated types
         All | Some => build_some_all_expr_prost(prost),

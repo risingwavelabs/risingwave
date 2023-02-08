@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_common::types::DataType;
 
 use crate::Result;
 
 #[inline(always)]
-pub fn format_type(oid: i32, _typemod: i32, writer: &mut dyn Write) -> Result<()> {
-    writer
-        .write_str(
-            &DataType::from_oid(oid)
-                .map(|t| t.to_string())
-                .unwrap_or("???".to_string()),
-        )
-        .unwrap();
-    Ok(())
+pub fn format_type(oid: Option<i32>, _typemod: Option<i32>) -> Result<Option<Box<str>>> {
+    // since we don't support type modifier, ignore it.
+    Ok(oid.map(|i| {
+        DataType::from_oid(i)
+            .map(|dt| format!("{}", dt).into_boxed_str())
+            .unwrap_or("???".into())
+    }))
 }

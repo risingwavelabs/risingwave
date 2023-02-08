@@ -21,7 +21,6 @@ use super::Expression;
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
 use crate::vector_op::concat_op::concat_op;
-use crate::vector_op::format_type::format_type;
 use crate::vector_op::repeat::repeat;
 use crate::vector_op::substr::*;
 use crate::vector_op::to_char::to_char_timestamp;
@@ -78,20 +77,6 @@ pub fn new_repeat(
 ) -> BoxedExpression {
     BinaryBytesExpression::<Utf8Array, I32Array, _>::new(expr_ia1, expr_ia2, return_type, repeat)
         .boxed()
-}
-
-pub fn new_format_type(
-    expr_ia1: BoxedExpression,
-    expr_ia2: BoxedExpression,
-    return_type: DataType,
-) -> BoxedExpression {
-    BinaryBytesExpression::<I32Array, I32Array, _>::new(
-        expr_ia1,
-        expr_ia2,
-        return_type,
-        format_type,
-    )
-    .boxed()
 }
 
 macro_rules! impl_utf8_utf8 {
@@ -192,15 +177,5 @@ mod tests {
         let substr_for_str_none =
             create_str_i32_binary_expr(new_substr_for, None, Some(ScalarImpl::Int32(for_pos)));
         test_evals_dummy(&substr_for_str_none, None);
-    }
-
-    #[test]
-    fn test_format_type() {
-        let format_type = new_format_type(
-            Box::new(LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(16)))),
-            Box::new(LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(0)))),
-            DataType::Varchar,
-        );
-        test_evals_dummy(&format_type, Some(ScalarImpl::from(String::from("boolean"))));
     }
 }
