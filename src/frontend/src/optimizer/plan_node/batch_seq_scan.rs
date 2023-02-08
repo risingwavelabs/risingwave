@@ -241,11 +241,10 @@ impl ToBatchProst for BatchSeqScan {
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
                 ordered: !self.order().is_any(),
-                chunk_size: if let Some(chunk_size) = self.logical.chunk_size() {
-                    Some(ChunkSize { chunk_size })
-                } else {
-                    None
-                },
+                chunk_size: self
+                    .logical
+                    .chunk_size()
+                    .map(|chunk_size| ChunkSize { chunk_size }),
             })
         }
     }

@@ -28,6 +28,7 @@ message RowSeqScanNode {
   message ChunkSize { 
     uint32 chunk_size = 1; 
   } 
+  // If along with `batch_limit`, `chunk_size` will be set.
   ChunkSize chunk_size = 6;
 }
 

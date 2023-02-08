@@ -38,6 +38,7 @@ export interface RowSeqScanNode {
     | undefined;
   /** Whether the order on output columns should be preserved. */
   ordered: boolean;
+  /** If along with `batch_limit`, `chunk_size` will be set. */
   chunkSize: RowSeqScanNode_ChunkSize | undefined;
 }
 
