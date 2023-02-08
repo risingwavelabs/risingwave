@@ -14,12 +14,11 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::pin::Pin;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use futures::{stream, Future, StreamExt, TryStreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
@@ -460,30 +459,21 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                         }
                         *changed = false;
                         let Some(Some(cur_watermark)) = buffered_watermarks.get(0) else {
-                    // There is no watermark value now, so we can't emit any value.
-                    return false;
-                };
+                            // There is no watermark value now, so we can't emit any value.
+                            return false;
+                        };
                         let k = K::deserialize(k, group_key_data_types).unwrap();
                         let Some(ref watermark_val) = k[0] else {
-                    // NULL is unexpected in watermark column, however, if it exists, we'll treat it as the largest, so emit it here.
-                    return true;
-                };
-                        watermark_val >= &cur_watermark.val
+                            // NULL is unexpected in watermark column, however, if it exists, we'll treat it as the largest, so emit it here.
+                            return true;
+                        };
+                        watermark_val <= &cur_watermark.val
                     })
                     .map(|(k, _)| k),
                 *chunk_size,
             );
             while let Some(batch) = to_emit_chunks.next() {
                 let keys_in_batch = batch.into_iter().collect_vec();
-
-                // Flush agg states.
-                // for key in &keys_in_batch {
-                //     let agg_group = agg_group_cache
-                //         .get_mut(*key)
-                //         .expect("changed group must have corresponding AggGroup")
-                //         .as_mut();
-                //     agg_group.flush_state_if_needed(storages).await?;
-                // }
 
                 // Create array builders.
                 // As the datatype is retrieved from schema, it contains both group key and
@@ -510,6 +500,8 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                 };
 
                 // Calculate current outputs, concurrently.
+                // FIXME: In fact, we don't need to collect `futs` as `Vec`, but rustc will report a
+                // error `error: higher-ranked lifetime error`.
                 let futs: Vec<_> = keys_in_batch
                     .iter()
                     .zip(agg_groups.into_iter())
@@ -517,13 +509,10 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                     .map(|(key, agg_group)| {
                         // Pop out the agg group temporarily.
                         let storages = &storages;
-                        let f: Pin<
-                            Box<dyn Future<Output = Result<_, StreamExecutorError>> + Send>,
-                        > = Box::pin(async {
+                        async move {
                             let curr_outputs = agg_group.get_outputs(storages).await?;
-                            Ok::<_, StreamExecutorError>((key.clone(), agg_group, curr_outputs))
-                        });
-                        f
+                            Ok::<_, StreamExecutorError>((key, agg_group, curr_outputs))
+                        }
                     })
                     .collect();
                 let outputs_in_batch: Vec<_> = stream::iter(futs)
@@ -570,6 +559,17 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
 
                 trace!("output_chunk: {:?}", &chunk);
                 yield chunk;
+            }
+
+            drop(to_emit_chunks);
+
+            for key in to_flush_keys {
+                // Flush agg states.
+                let agg_group = agg_group_cache
+                    .get_mut(&key)
+                    .expect("changed group must have corresponding AggGroup")
+                    .as_mut();
+                agg_group.flush_state_if_needed(storages).await?;
             }
 
             // Commit all state tables.
@@ -1168,6 +1168,135 @@ mod tests {
             )
             .sorted_rows(),
         );
+    }
+
+    #[tokio::test]
+    async fn test_window_agg_in_memory() {
+        test_window_agg(MemoryStateStore::new()).await;
+    }
+
+    async fn test_window_agg<S: StateStore>(store: S) {
+        let schema = Schema {
+            fields: vec![
+                // group key column
+                Field::unnamed(DataType::Int64),
+                // data column to get minimum
+                Field::unnamed(DataType::Int64),
+                // primary key column
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
+
+        tx.push_barrier(1, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I I
+            + 1 2 1001
+            + 1 4 1002
+            + 2 6 1003",
+        ));
+        tx.push_watermark(0, DataType::Int64, 1i64.into());
+        tx.push_barrier(2, false);
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I  I
+            + 4 16  1004
+            + 3 14 1005
+            + 2 12 1006",
+        ));
+        tx.push_watermark(0, DataType::Int64, 2i64.into());
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I I  I
+            + 3 13 1007
+            + 5 11 1008
+            + 3 15 1009",
+        ));
+        tx.push_barrier(3, false);
+        tx.push_watermark(0, DataType::Int64, 4i64.into());
+        tx.push_barrier(4, false);
+
+        // This is local hash aggregation, so we add another row count state
+        let keys = vec![0];
+        let agg_calls = vec![
+            AggCall {
+                kind: AggKind::Count,
+                args: AggArgs::None,
+                return_type: DataType::Int64,
+                order_pairs: vec![],
+                append_only: false,
+                filter: None,
+            },
+            AggCall {
+                kind: AggKind::Sum,
+                args: AggArgs::Unary(DataType::Int64, 1),
+                return_type: DataType::Int64,
+                order_pairs: vec![],
+                append_only: false,
+                filter: None,
+            },
+        ];
+
+        let return_tys = vec![DataType::Int64, DataType::Int64, DataType::Int64];
+        let row_pretty = |s: &str| OwnedRow::from_pretty_with_tys(&return_tys, s);
+
+        let hash_agg = new_boxed_hash_agg_executor(
+            store,
+            Box::new(source),
+            agg_calls,
+            keys,
+            vec![2],
+            1 << 10,
+            1,
+        )
+        .await;
+
+        let mut hash_agg = hash_agg.execute();
+
+        // Consume the init barrier
+        hash_agg.next().await.unwrap().unwrap();
+        // Consume stream chunk
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        let Message::Chunk(chunk) = msg else { unreachable!() };
+        let [(op, row)]: [_; 1] = chunk.rows().collect_vec().try_into().unwrap();
+        assert_eq!(op, Op::Insert);
+        assert_eq!(row.to_owned_row(), row_pretty("1 2 6"));
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        let Message::Watermark(watermark) = msg else { unreachable!() };
+        assert_eq!(watermark.col_idx, 0);
+        assert_eq!(watermark.val, 1i64.into());
+
+        // Consume a barrier
+        hash_agg.next().await.unwrap().unwrap();
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        let Message::Chunk(chunk) = msg else { unreachable!() };
+        let [(op, row)]: [_; 1] = chunk.rows().collect_vec().try_into().unwrap();
+        assert_eq!(op, Op::Insert);
+        assert_eq!(row.to_owned_row(), row_pretty("2 2 18"));
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        let Message::Watermark(watermark) = msg else { unreachable!() };
+        assert_eq!(watermark.col_idx, 0);
+        assert_eq!(watermark.val, 2i64.into());
+
+        // Consume a barrier
+        hash_agg.next().await.unwrap().unwrap();
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        let Message::Chunk(chunk) = msg else { unreachable!() };
+        let [(op1, row1), (op2, row2)]: [_; 2] = chunk.sorted_rows().try_into().unwrap();
+        assert_eq!(op1, Op::Insert);
+        assert_eq!(row1, row_pretty("3 3 42"));
+        assert_eq!(op2, Op::Insert);
+        assert_eq!(row2, row_pretty("4 1 16"));
+
+        let msg = hash_agg.next().await.unwrap().unwrap();
+        let Message::Watermark(watermark) = msg else { unreachable!() };
+        assert_eq!(watermark.col_idx, 0);
+        assert_eq!(watermark.val, 4i64.into());
+
+        // Consume a barrier
+        hash_agg.next().await.unwrap().unwrap();
     }
 
     trait SortedRows {
