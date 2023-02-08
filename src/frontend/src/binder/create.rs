@@ -20,7 +20,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::Binder;
 
 impl Binder {
-    pub fn bind_column_defs(
+    pub fn bind_columns_to_context(
         &mut self,
         name: String,
         column_catalogs: Vec<ColumnCatalog>,

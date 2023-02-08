@@ -107,17 +107,15 @@ impl StreamNode for StreamWatermarkFilter {
 
         // TODO(yuhao): allow multiple watermark on source.
         let [watermark_desc]: [_; 1] = self.watermark_descs.clone().try_into().unwrap();
-        let watermark_type = (&watermark_desc.expr.clone().unwrap().return_type.unwrap()).into();
+        let watermark_type = (&watermark_desc.expr.unwrap().return_type.unwrap()).into();
 
         let table = infer_internal_table_catalog(watermark_type);
 
         ProstStreamNode::WatermarkFilter(WatermarkFilterNode {
-            watermark_desc: Some(watermark_desc),
-            table: Some(
-                table
-                    .with_id(state.gen_table_id_wrapped())
-                    .to_internal_table_prost(),
-            ),
+            watermark_descs: self.watermark_descs.clone(),
+            tables: vec![table
+                .with_id(state.gen_table_id_wrapped())
+                .to_internal_table_prost()],
         })
     }
 }

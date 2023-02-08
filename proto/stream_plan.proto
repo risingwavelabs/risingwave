@@ -423,10 +423,10 @@ message LookupNode {
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
 message WatermarkFilterNode {
-  // The watermark desc
-  catalog.WatermarkDesc watermark_desc = 1;
-  // The table used to persist watermark, the key is vnode.
-  catalog.Table table = 2;
+  // The watermark descs
+  repeated catalog.WatermarkDesc watermark_descs = 1;
+  // The tables used to persist watermarks, the key is vnode.
+  repeated catalog.Table tables = 2;
 }
 
 // Acts like a merger, but on different inputs.

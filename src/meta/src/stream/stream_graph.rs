@@ -1523,7 +1523,11 @@ where
                 always!(node.state_table, "Now");
             }
             NodeBody::WatermarkFilter(node) => {
-                always!(node.table, "WatermarkFilter");
+                assert!(!node.tables.is_empty());
+                for table in &mut node.tables {
+                    let mut table = Some(table);
+                    always!(table, "WatermarkFilter");
+                }
             }
 
             // Shared arrangement

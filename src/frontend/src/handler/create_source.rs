@@ -266,7 +266,7 @@ fn bind_source_watermark(
     column_catalogs: &[ColumnCatalog],
 ) -> Result<Vec<WatermarkDesc>> {
     let mut binder = Binder::new(session);
-    binder.bind_column_defs(name.clone(), column_catalogs.to_vec())?;
+    binder.bind_columns_to_context(name.clone(), column_catalogs.to_vec())?;
 
     let watermark_descs = source_watermarks
         .into_iter()
