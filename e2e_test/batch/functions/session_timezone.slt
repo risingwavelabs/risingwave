@@ -69,9 +69,21 @@ select '2016-10-29 12:00:00'::timestamptz + interval '24 hours' + interval '1 da
 
 # This should first add the days (naively), then the hours, with timezone in mind.
 query T
-select '2016-10-29 12:00:00'::timestamptz + (interval '24 hours' + interval '1 day');
+select (interval '24 hours' + interval '1 day') + '2016-10-29 12:00:00'::timestamptz;
 ----
 2016-10-31 12:00:00+00:00
+
+# Test inverse for subtract
+query T
+select '2016-10-31 12:00:00+00:00'::timestamptz - interval '24 hours' - interval '1 day';
+----
+2016-10-29 11:00:00+01:00
+
+# Test inverse for subtract, this time we apply diff 1 day first, then 24 hours, so we ignored the daylight savings
+query T
+select '2016-10-31 12:00:00+00:00'::timestamptz - (interval '24 hours' + interval '1 day');
+----
+2016-10-29 12:00:00+01:00
 
 statement ok
 set timezone = 'UTC';
