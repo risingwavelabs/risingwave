@@ -1234,17 +1234,20 @@ impl GrpcMetaClient {
     pub(crate) async fn try_build_rpc_channel_service(addr: String) -> Result<(Channel, String)> {
         let endpoint = Self::addr_to_endpoint(addr.clone())?;
 
-        let res =  tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
-        let endpoint = endpoint.clone();
-        let addr = addr.clone();
+        let res = tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
+            let endpoint = endpoint.clone();
+            let addr = addr.clone();
             match Self::connect_to_endpoint(endpoint).await {
                 Ok(channel) => {
-                    tracing::info!("Connect to meta server via service at {} successfully", addr);
+                    tracing::info!(
+                        "Connect to meta server via service at {} successfully",
+                        addr
+                    );
                     Ok((channel, addr))
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Failed to connect to meta server using service at {}, trying next address: {}",
+                        "Failed to connect to meta server using service at {}, trying again: {}",
                         addr,
                         e
                     );
