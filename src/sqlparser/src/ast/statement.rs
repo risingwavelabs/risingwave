@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::fmt;
+use std::fmt::Write;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -304,6 +305,36 @@ impl fmt::Display for CreateSourceStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(source_name, v, self);
+
+        // Items
+        let mut items = String::new();
+        let has_items = !self.columns.is_empty()
+            || !self.constraints.is_empty()
+            || !self.source_watermarks.is_empty();
+        has_items.then(|| write!(&mut items, "("));
+        write!(&mut items, "{}", display_comma_separated(&self.columns))?;
+        if !self.columns.is_empty()
+            && (!self.constraints.is_empty() || !self.source_watermarks.is_empty())
+        {
+            write!(&mut items, ", ")?;
+        }
+        write!(&mut items, "{}", display_comma_separated(&self.constraints))?;
+        if !self.columns.is_empty()
+            && !self.constraints.is_empty()
+            && !self.source_watermarks.is_empty()
+        {
+            write!(&mut items, ", ")?;
+        }
+        write!(
+            &mut items,
+            "{}",
+            display_comma_separated(&self.source_watermarks)
+        )?;
+        has_items.then(|| write!(&mut items, ")"));
+        if !items.is_empty() {
+            v.push(items);
+        }
+
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::FORMAT], v);
         impl_fmt_display!(source_schema, v, self);
