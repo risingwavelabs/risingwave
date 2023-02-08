@@ -199,7 +199,7 @@ impl LogicalAgg {
 
         // some agg function can not rewrite to 2-phase agg
         // we can only generate stand alone plan for the simple agg
-        let all_agg_calls_can_use_two_phase = self.can_agg_two_phase();
+        let all_agg_calls_can_use_two_phase = self.can_two_phase_agg();
         if !all_agg_calls_can_use_two_phase {
             return gen_single_plan(stream_input);
         }
@@ -232,7 +232,7 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    pub(crate) fn can_agg_two_phase(&self) -> bool {
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
         self.agg_calls().iter().all(|call| {
             matches!(
                 call.agg_kind,
@@ -241,6 +241,12 @@ impl LogicalAgg {
             // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
             //    && call.order_by_fields.is_empty()
         }) && !self.is_agg_result_affected_by_order()
+            && self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_enable_two_phase_agg()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
@@ -789,6 +795,10 @@ impl fmt::Display for LogicalAgg {
 }
 
 impl ExprRewritable for LogicalAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);

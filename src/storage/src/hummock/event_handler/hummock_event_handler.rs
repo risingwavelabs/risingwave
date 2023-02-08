@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
@@ -54,7 +54,7 @@ pub struct BufferTracker {
 
 impl BufferTracker {
     pub fn from_storage_config(config: &StorageConfig) -> Self {
-        let capacity = config.shared_buffer_capacity_mb as usize * (1 << 20);
+        let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
         Self::new(capacity, flush_threshold)
     }

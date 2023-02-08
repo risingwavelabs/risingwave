@@ -297,7 +297,7 @@ impl StateStore for HummockStorage {
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {
                 return Err(HummockError::read_current_epoch(format!(
-                    "cannot read current epoch because read epoch {} > sealed epoch {}",
+                    "Cannot read when cluster is under recovery. read {} > max seal epoch {}",
                     read_current_epoch, sealed_epoch
                 ))
                 .into());
@@ -306,7 +306,7 @@ impl StateStore for HummockStorage {
             let min_current_epoch = self.min_current_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch < min_current_epoch {
                 return Err(HummockError::read_current_epoch(format!(
-                    "cannot read current epoch because read epoch {} < min current epoch {}",
+                    "Cannot read when cluster is under recovery. read {} < min current epoch {}",
                     read_current_epoch, min_current_epoch
                 ))
                 .into());

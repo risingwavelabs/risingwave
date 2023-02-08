@@ -32,7 +32,9 @@ use tonic::Status;
 
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
-use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput, TaskOutputId};
+use crate::task::{
+    BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
+};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
@@ -82,6 +84,7 @@ impl BatchManager {
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
+        state_reporter: StateReporter,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime)?;
@@ -100,7 +103,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.clone().async_execute().await?;
+        task.clone().async_execute(state_reporter).await?;
         ret
     }
 
@@ -223,7 +226,7 @@ impl BatchManager {
             }
             // Alternatively, we can use a bool flag to indicate end of execution.
             // Now we use only store 0 bytes in Context after execution ends.
-            let mem_usage = t.get_mem_usage();
+            let mem_usage = t.mem_usage();
             if mem_usage > max_mem {
                 max_mem = mem_usage;
                 max_mem_task_id = Some(t_id.clone());
@@ -231,13 +234,15 @@ impl BatchManager {
         }
         if let Some(id) = max_mem_task_id {
             let t = guard.get(&id).unwrap();
+            // FIXME: `Abort` will not report error but truncated results to user. We should
+            // consider throw error.
             t.abort_task();
         }
     }
 
     /// Called by global memory manager for total usage of batch tasks. This op is designed to be
     /// light-weight
-    pub fn get_all_memory_usage(&self) -> usize {
+    pub fn total_mem_usage(&self) -> usize {
         self.total_mem_val.get() as usize
     }
 
@@ -270,7 +275,7 @@ mod tests {
     use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
-    use crate::task::{BatchManager, ComputeNodeContext, TaskId};
+    use crate::task::{BatchManager, ComputeNodeContext, StateReporter, TaskId};
 
     #[test]
     fn test_task_not_found() {
@@ -330,11 +335,18 @@ mod tests {
                 plan.clone(),
                 to_committed_batch_query_epoch(0),
                 context.clone(),
+                StateReporter::new_with_test(),
             )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, to_committed_batch_query_epoch(0), context)
+            .fire_task(
+                &task_id,
+                plan,
+                to_committed_batch_query_epoch(0),
+                context,
+                StateReporter::new_with_test(),
+            )
             .await
             .unwrap_err();
         assert!(err
@@ -380,6 +392,7 @@ mod tests {
                 plan.clone(),
                 to_committed_batch_query_epoch(0),
                 context.clone(),
+                StateReporter::new_with_test(),
             )
             .await
             .unwrap();

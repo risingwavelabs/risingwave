@@ -14,24 +14,35 @@
 
 use std::fmt::Debug;
 
-use futures::future::ready;
+use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, ValueAccess};
 
 use super::operators::*;
+use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
-use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::SourceColumnDesc;
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
 
+impl_common_parser_logic!(MaxwellParser);
+
 #[derive(Debug)]
-pub struct MaxwellParser;
+pub struct MaxwellParser {
+    pub(crate) rw_columns: Vec<SourceColumnDesc>,
+}
 
 impl MaxwellParser {
-    fn parse_inner(
+    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+        Ok(Self { rw_columns })
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn parse_inner(
         &self,
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
@@ -102,21 +113,5 @@ impl MaxwellParser {
                 other
             )))),
         }
-    }
-}
-
-impl SourceParser for MaxwellParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
     }
 }

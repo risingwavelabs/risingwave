@@ -47,7 +47,7 @@ pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
 /// The representation is compressed as described in [`compress_data`], which is optimized for the
 /// mapping with a small number of items and good locality.
 #[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq)]
+#[derivative(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VnodeMapping<T: VnodeMappingItem> {
     original_indices: Vec<u32>,
     data: Vec<T::Item>,
@@ -117,6 +117,15 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self[vnode]
     }
 
+    /// Get the item matched by the virtual nodes indicated by high bits in the given `bitmap`.
+    /// Returns `None` if the no virtual node is set in the bitmap.
+    pub fn get_matched(&self, bitmap: &Bitmap) -> Option<T::Item> {
+        bitmap
+            .iter_ones()
+            .next() // only need to check the first one
+            .map(|i| self.get(VirtualNode::from_index(i)))
+    }
+
     /// Iterate over all items in this mapping, in the order of vnodes.
     pub fn iter(&self) -> impl Iterator<Item = T::Item> + '_ {
         self.data
@@ -142,6 +151,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     pub fn iter_unique(&self) -> impl Iterator<Item = T::Item> + '_ {
         // Note: we can't ensure there's no duplicated items in the `data` after some scaling.
         self.data.iter().copied().sorted().dedup()
+    }
+
+    /// Returns the item if it's the only item in this mapping, otherwise returns `None`.
+    pub fn to_single(&self) -> Option<T::Item> {
+        self.data.iter().copied().dedup().exactly_one().ok()
     }
 
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents

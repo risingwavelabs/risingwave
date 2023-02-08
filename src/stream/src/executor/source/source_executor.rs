@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
 };
-use risingwave_source::source_desc::SourceDesc;
+use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -91,7 +91,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        Ok(source_desc
+        source_desc
             .source
             .stream_reader(
                 state,
@@ -103,8 +103,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 ),
             )
             .await
-            .map_err(StreamExecutorError::connector_error)?
-            .into_stream())
+            .map_err(StreamExecutorError::connector_error)
     }
 
     async fn apply_split_change(
@@ -239,10 +238,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut core = self.stream_source_core.unwrap();
 
         // Build source description from the builder.
-        let source_desc = core
-            .source_desc_builder
-            .take()
-            .unwrap()
+        let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
+        let source_desc = source_desc_builder
             .build()
             .await
             .map_err(StreamExecutorError::connector_error)?;

@@ -169,11 +169,6 @@ impl RemoteInput {
                     let bytes = Message::get_encoded_len(&msg);
 
                     metrics
-                        .exchange_recv_size
-                        .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
-
-                    metrics
                         .exchange_frag_recv_size
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])
                         .inc_by(bytes as u64);
