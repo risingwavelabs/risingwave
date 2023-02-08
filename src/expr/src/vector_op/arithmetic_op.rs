@@ -115,7 +115,12 @@ where
     T2: Into<T3> + Debug,
     T3: Pow<T3> + num_traits::Float,
 {
-    Ok(l.into().powf(r.into()))
+    let res = l.into().powf(r.into());
+    if res.is_infinite() {
+        Err(ExprError::NumericOutOfRange)
+    } else {
+        Ok(res)
+    }
 }
 
 #[inline(always)]

@@ -43,7 +43,9 @@ select pow(100000, -200000000000000);
 ----
 0
 
-query T
+statement error QueryError: Expr error: Numeric out of range
 select pow(100000, 200000000000000);
-----
-Infinity
+
+
+statement error QueryError: Expr error: Numeric out of range
+select pow(-100000, 200000000000001);
