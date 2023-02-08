@@ -138,7 +138,7 @@ impl SessionTimezone {
             // We first translate to timestamp to handle years, months and days,
             // then we translate back to timestamptz handle hours and milliseconds
             //
-            // For performance concern, we assume that all the intervals are const-evaled.
+            // For performance concern, we assume that most the intervals are const-evaled.
             //
             // We impl the following expression tree:
             //
