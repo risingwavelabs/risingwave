@@ -122,13 +122,15 @@ mod tests {
         expected_length: usize,
     ) {
         let split_id = format!("{}-{}", split_num, split_index).into();
+        let start = 1;
+        let end = 10;
         let mut fields_map = HashMap::new();
         fields_map.insert(
             "v1".to_string(),
             FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Int32,
-                Some("1".to_string()),
-                Some("10".to_string()),
+                Some(start.to_string()),
+                Some(end.to_string()),
                 split_index,
                 split_num,
             )
@@ -139,8 +141,8 @@ mod tests {
             "v2".to_string(),
             FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Float32,
-                Some("1".to_string()),
-                Some("10".to_string()),
+                Some(start.to_string()),
+                Some(end.to_string()),
                 split_index,
                 split_num,
             )
@@ -157,14 +159,17 @@ mod tests {
         )
         .unwrap();
 
-        let chunk = generator
-            .into_stream()
-            .boxed()
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
+        let mut stream = generator.into_stream().boxed();
+
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(expected_length, chunk.len());
+
+        let empty_chunk = stream.next().await;
+        if rows_per_second >= (end - start + 1) {
+            assert!(empty_chunk.is_none());
+        } else {
+            assert!(empty_chunk.is_some());
+        }
     }
 
     #[tokio::test]
