@@ -1129,8 +1129,12 @@ mod tests {
         );
         assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
         assert_eq!(
-            IntervalUnit::new(-14, 3, -(11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233))
-                .to_string(),
+            IntervalUnit::new(
+                -14,
+                3,
+                -(11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
+            )
+            .to_string(),
             "-1 years -2 mons 3 days -11:45:14.233"
         );
     }
