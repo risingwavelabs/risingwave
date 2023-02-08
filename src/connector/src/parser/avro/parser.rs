@@ -686,7 +686,7 @@ mod test {
         let conf = new_avro_conf_from_local("simple-schema.avsc")
             .await
             .unwrap();
-        let columns = avro_parser_rs.map_to_columns().unwrap();
+        let columns = conf.map_to_columns().unwrap();
         assert_eq!(columns.len(), 10);
         println!("{:?}", columns);
     }
