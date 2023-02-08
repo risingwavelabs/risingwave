@@ -54,13 +54,19 @@ impl TopNOnIndexRule {
         order: &Order,
     ) -> Option<PlanRef> {
         let index = logical_scan.indexes().iter().find(|idx| {
+            let s2p_mapping = idx.secondary_to_primary_mapping();
             Order {
                 field_order: idx
                     .index_table
                     .pk()
-                    .to_vec()
+                    .iter()
+                     .map(|idx_item| FieldOrder {
+                         index: *s2p_mapping.get(&idx_item.index).expect("should be in s2p mapping"),
+                         direct: idx_item.direct,
+                     })
+                     .collect()
             }
-            .supersets(order)
+            .satisfies(order)
         })?;
 
         let p2s_mapping = index.primary_to_secondary_mapping();
@@ -111,7 +117,7 @@ impl TopNOnIndexRule {
                 })
                 .collect::<Vec<_>>(),
         };
-        if primary_key_order.supersets(order) {
+        if primary_key_order.satisfies(order) {
             logical_scan.set_chunk_size(
                 ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
             );

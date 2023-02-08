@@ -15,7 +15,6 @@
 use std::fmt;
 
 use itertools::Itertools;
-use std::collections::HashSet;
 use parse_display::Display;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
@@ -254,19 +253,6 @@ impl Order {
         #[expect(clippy::disallowed_methods)]
         for (order, other_order) in self.field_order.iter().zip(other.field_order.iter()) {
             if order.index != other_order.index || !order.direct.satisfies(&other_order.direct) {
-                return false;
-            }
-        }
-        true
-    }
-
-    pub fn supersets(&self, other: &Order) -> bool {
-        if self.field_order.len() < other.field_order.len() {
-            return false;
-        }
-        let order_set = self.field_order.iter().collect::<HashSet<_>>();
-        for other_order in other.field_order.iter() {
-            if !order_set.contains(other_order) {
                 return false;
             }
         }
