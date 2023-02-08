@@ -38,7 +38,7 @@ pub struct Scan {
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
     /// Help RowSeqScan executor use a better chunk size
-    pub chunk_size: usize,
+    pub chunk_size: Option<u32>,
 }
 
 impl Scan {

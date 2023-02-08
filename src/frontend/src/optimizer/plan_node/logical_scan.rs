@@ -86,7 +86,7 @@ impl LogicalScan {
             table_desc,
             indexes,
             predicate,
-            chunk_size: 1024,
+            chunk_size: None,
         };
 
         let schema = core.schema();
@@ -303,15 +303,15 @@ impl LogicalScan {
 
     /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
     /// executor
-    pub fn set_chunk_size(&mut self, chunk_size: usize) {
-        self.core.chunk_size = chunk_size;
+    pub fn set_chunk_size(&mut self, chunk_size: u32) {
+        self.core.chunk_size = Some(chunk_size);
     }
 
-    pub fn get_chunk_size(&self) -> usize {
+    pub fn chunk_size(&self) -> Option<u32> {
         self.core.chunk_size
     }
 
-    pub fn get_primary_key(&self) -> Vec<OrderPair> {
+    pub fn primary_key(&self) -> Vec<OrderPair> {
         self.core.table_desc.pk.clone()
     }
 

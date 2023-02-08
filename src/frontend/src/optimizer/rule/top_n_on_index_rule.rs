@@ -58,14 +58,9 @@ impl TopNOnIndexRule {
                 field_order: idx
                     .index_table
                     .pk()
-                    .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: idx_item.index,
-                        direct: idx_item.direct,
-                    })
-                    .collect(),
+                    .to_vec()
             }
-            .satisfies(order)
+            .supersets(order)
         })?;
 
         let p2s_mapping = index.primary_to_secondary_mapping();
@@ -85,7 +80,7 @@ impl TopNOnIndexRule {
         }?;
 
         index_scan.set_chunk_size(
-            ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as usize,
+            ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
         );
 
         let logical_limit = LogicalLimit::create(
@@ -102,7 +97,7 @@ impl TopNOnIndexRule {
         mut logical_scan: LogicalScan,
         order: &Order,
     ) -> Option<PlanRef> {
-        let primary_key = logical_scan.get_primary_key();
+        let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {
             field_order: primary_key
                 .into_iter()
@@ -116,9 +111,9 @@ impl TopNOnIndexRule {
                 })
                 .collect::<Vec<_>>(),
         };
-        if primary_key_order.satisfies(order) {
+        if primary_key_order.supersets(order) {
             logical_scan.set_chunk_size(
-                ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as usize,
+                ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
             );
             let logical_limit = LogicalLimit::create(
                 logical_scan.into(),
