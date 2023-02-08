@@ -84,7 +84,7 @@ impl LocalStateStore for PanicStateStore {
         _read_options: ReadOptions,
     ) -> Self::SurelyNotHaveFuture<'_> {
         async move {
-            panic!("should not call surely_not_have from the state store!");
+            panic!("should not call may_exist from the state store!");
         }
     }
 }

@@ -395,8 +395,8 @@ pub mod verify {
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
         define_local_state_store_associated_type!();
 
-        // We don't verify `surely_not_have` across different state stores because
-        // the return value of `surely_not_have` is implementation specific and may not
+        // We don't verify `may_exist` across different state stores because
+        // the return value of `may_exist` is implementation specific and may not
         // be consistent across different state store backends.
         fn may_exist(
             &self,

@@ -1250,7 +1250,7 @@ async fn test_state_table_write_chunk_value_indices() {
     );
 }
 
-async fn check_surely_not_have<S>(
+async fn check_may_exist<S>(
     state_table: &StateTable<S>,
     existent_prefix: Vec<i32>,
     non_existent_prefix: Vec<i32>,
@@ -1322,20 +1322,20 @@ async fn test_state_table_may_exist() {
         Some(555_i32.into()),
     ]));
 
-    // test surely_not_have with data only in memtable (e1)
-    check_surely_not_have(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+    // test may_exist with data only in memtable (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
 
     epoch.inc();
     state_table.commit(epoch).await.unwrap();
     let e1 = epoch.prev;
 
-    // test surely_not_have with data only in immutable memtable (e1)
-    check_surely_not_have(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+    // test may_exist with data only in immutable memtable (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
 
     let e1_res = test_env.storage.seal_and_sync_epoch(e1).await.unwrap();
 
-    // test surely_not_have with data only in uncommitted ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+    // test may_exist with data only in uncommitted ssts (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
 
     test_env
         .meta_client
@@ -1344,8 +1344,8 @@ async fn test_state_table_may_exist() {
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(e1).await;
 
-    // test surely_not_have with data only in committed ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+    // test may_exist with data only in committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -1363,15 +1363,15 @@ async fn test_state_table_may_exist() {
         Some(666_i32.into()),
     ]));
 
-    // test surely_not_have with data in memtable (e2), committed ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
+    // test may_exist with data in memtable (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
 
     epoch.inc();
     state_table.commit(epoch).await.unwrap();
     let e2 = epoch.prev;
 
-    // test surely_not_have with data in immutable memtable (e2), committed ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
+    // test may_exist with data in immutable memtable (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -1384,21 +1384,21 @@ async fn test_state_table_may_exist() {
         Some(111_i32.into()),
     ]));
 
-    // test surely_not_have with data in memtable (e3), immutable memtable (e2), committed ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
+    // test may_exist with data in memtable (e3), immutable memtable (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
 
     let e2_res = test_env.storage.seal_and_sync_epoch(e2).await.unwrap();
 
-    // test surely_not_have with data in memtable (e3), uncommitted ssts (e2), committed ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
+    // test may_exist with data in memtable (e3), uncommitted ssts (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
 
     epoch.inc();
     state_table.commit(epoch).await.unwrap();
     let e3 = epoch.prev;
 
-    // test surely_not_have with data in immutable memtable (e3), uncommitted ssts (e2), committed
+    // test may_exist with data in immutable memtable (e3), uncommitted ssts (e2), committed
     // ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -1411,9 +1411,9 @@ async fn test_state_table_may_exist() {
         Some(111_i32.into()),
     ]));
 
-    // test surely_not_have with data in memtable (e4), immutable memtable (e3), uncommitted ssts
+    // test may_exist with data in memtable (e4), immutable memtable (e3), uncommitted ssts
     // (e2), committed ssts (e1)
-    check_surely_not_have(&state_table, vec![1, 3, 4, 6], vec![12]).await;
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
 
     test_env
         .meta_client
@@ -1429,8 +1429,8 @@ async fn test_state_table_may_exist() {
     let e3_res = test_env.storage.seal_and_sync_epoch(e3).await.unwrap();
     let e4_res = test_env.storage.seal_and_sync_epoch(e4).await.unwrap();
 
-    // test surely_not_have with data in uncommitted ssts (e3, e4), committed ssts (e1, e2, e3, e4)
-    check_surely_not_have(&state_table, vec![1, 3, 4, 6], vec![12]).await;
+    // test may_exist with data in uncommitted ssts (e3, e4), committed ssts (e1, e2, e3, e4)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
 
     test_env
         .meta_client
@@ -1446,6 +1446,6 @@ async fn test_state_table_may_exist() {
         .unwrap();
     test_env.storage.try_wait_epoch_for_test(e4).await;
 
-    // test surely_not_have with data in committed ssts (e1, e2, e3, e4)
-    check_surely_not_have(&state_table, vec![1, 3, 4, 6], vec![12]).await;
+    // test may_exist with data in committed ssts (e1, e2, e3, e4)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
 }

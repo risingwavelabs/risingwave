@@ -824,7 +824,7 @@ impl HummockVersionReader {
             ) {
                 local_stats.report_bloom_filter_metrics(
                     self.state_store_metrics.as_ref(),
-                    "surely_not_have",
+                    "may_exist",
                     table_id_label,
                     false,
                 );
@@ -857,7 +857,7 @@ impl HummockVersionReader {
                         ) {
                             local_stats.report_bloom_filter_metrics(
                                 self.state_store_metrics.as_ref(),
-                                "surely_not_have",
+                                "may_exist",
                                 table_id_label,
                                 false,
                             );
@@ -882,7 +882,7 @@ impl HummockVersionReader {
                         ) {
                             local_stats.report_bloom_filter_metrics(
                                 self.state_store_metrics.as_ref(),
-                                "surely_not_have",
+                                "may_exist",
                                 table_id_label,
                                 false,
                             );
@@ -900,7 +900,7 @@ impl HummockVersionReader {
             .observe(table_counts as f64);
         local_stats.report_bloom_filter_metrics(
             self.state_store_metrics.as_ref(),
-            "surely_not_have",
+            "may_exist",
             table_id_label,
             true,
         );
