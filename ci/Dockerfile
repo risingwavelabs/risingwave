@@ -12,16 +12,6 @@ RUN apt-get update -yy && \
 
 SHELL ["/bin/bash", "-c"]
 
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-RUN wget "https://archive.apache.org/dist/hadoop/core/hadoop-2.7.3/hadoop-2.7.3.tar.gz"
-RUN tar -zxvf hadoop-2.7.3.tar.gz -C /opt/
-RUN mv /opt/hadoop-2.7.3 /opt/hadoop
-ENV HADOOP_HOME=/opt/hadoop/
-ENV PATH=$PATH:$HADOOP_HOME/bin
-ENV PATH=$PATH:$HADOOP_HOME/sbin
-RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 >> /opt/hadoop/etc/hadoop/yarn-env.sh
-RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 >> /opt/hadoop/etc/hadoop/hadoop-env.sh
-
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
