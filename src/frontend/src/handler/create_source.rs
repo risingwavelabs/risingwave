@@ -277,9 +277,7 @@ fn bind_source_watermark(
             let expr = binder.bind_expr(source_watermark.expr)?.to_expr_proto();
 
             Ok::<_, RwError>(WatermarkDesc {
-                watermark_idx: Some(ProstColumnIndex {
-                    index: watermark_idx as u64,
-                }),
+                watermark_idx: watermark_idx as u32,
                 expr: Some(expr),
             })
         })

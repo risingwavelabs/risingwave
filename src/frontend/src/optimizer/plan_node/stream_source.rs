@@ -35,9 +35,10 @@ impl StreamSource {
     pub fn new(logical: LogicalSource) -> Self {
         let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
         if let Some(catalog) = logical.source_catalog() {
-            catalog.watermark_descs.iter().for_each(|desc| {
-                watermark_columns.insert(desc.watermark_idx.clone().unwrap().index as usize)
-            })
+            catalog
+                .watermark_descs
+                .iter()
+                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
         }
 
         let base = PlanBase::new_stream(

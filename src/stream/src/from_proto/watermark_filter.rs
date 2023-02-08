@@ -36,7 +36,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let watermark_desc = node.get_watermark_desc()?.clone();
         let watermark_expr = build_from_prost(&watermark_desc.expr.unwrap())?;
-        let event_time_col_idx = watermark_desc.watermark_idx.unwrap().index as usize;
+        let event_time_col_idx = watermark_desc.watermark_idx as usize;
         let vnodes = Arc::new(
             params
                 .vnode_bitmap

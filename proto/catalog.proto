@@ -18,7 +18,7 @@ message ColumnIndex {
 
 message WatermarkDesc {
   // The column idx the watermark is on
-  ColumnIndex watermark_idx = 1;
+  uint32 watermark_idx = 1;
   // The expression to calculate the watermark value.
   expr.ExprNode expr = 2;
 }
@@ -51,7 +51,8 @@ message Source {
   uint32 owner = 9;
 
   StreamSourceInfo info = 10;
-  // Define watermarks on source.
+  // Define watermarks on the source. The `repeated` is just for forward
+  // compatibility, currently, only one watermark on the source
   repeated WatermarkDesc watermark_descs = 11;
 }
 
