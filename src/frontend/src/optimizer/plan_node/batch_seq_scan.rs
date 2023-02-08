@@ -20,6 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
@@ -240,7 +241,11 @@ impl ToBatchProst for BatchSeqScan {
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
                 ordered: !self.order().is_any(),
-                chunk_size: self.logical.chunk_size(),
+                chunk_size: if let Some(chunk_size) = self.logical.chunk_size() {
+                    Some(ChunkSize { chunk_size })
+                } else {
+                    None
+                },
             })
         }
     }

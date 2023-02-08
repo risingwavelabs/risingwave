@@ -25,7 +25,10 @@ message RowSeqScanNode {
   // Whether the order on output columns should be preserved.
   bool ordered = 5;
 
-  optional uint32 chunk_size = 6;
+  message ChunkSize { 
+    uint32 chunk_size = 1; 
+  } 
+  ChunkSize chunk_size = 6;
 }
 
 message SysRowSeqScanNode {

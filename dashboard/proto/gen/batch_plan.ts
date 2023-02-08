@@ -38,7 +38,11 @@ export interface RowSeqScanNode {
     | undefined;
   /** Whether the order on output columns should be preserved. */
   ordered: boolean;
-  chunkSize?: number | undefined;
+  chunkSize: RowSeqScanNode_ChunkSize | undefined;
+}
+
+export interface RowSeqScanNode_ChunkSize {
+  chunkSize: number;
 }
 
 export interface SysRowSeqScanNode {
@@ -433,7 +437,7 @@ export const RowSeqScanNode = {
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
-      chunkSize: isSet(object.chunkSize) ? Number(object.chunkSize) : undefined,
+      chunkSize: isSet(object.chunkSize) ? RowSeqScanNode_ChunkSize.fromJSON(object.chunkSize) : undefined,
     };
   },
 
@@ -454,7 +458,8 @@ export const RowSeqScanNode = {
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.ordered !== undefined && (obj.ordered = message.ordered);
-    message.chunkSize !== undefined && (obj.chunkSize = Math.round(message.chunkSize));
+    message.chunkSize !== undefined &&
+      (obj.chunkSize = message.chunkSize ? RowSeqScanNode_ChunkSize.toJSON(message.chunkSize) : undefined);
     return obj;
   },
 
@@ -469,7 +474,31 @@ export const RowSeqScanNode = {
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
     message.ordered = object.ordered ?? false;
-    message.chunkSize = object.chunkSize ?? undefined;
+    message.chunkSize = (object.chunkSize !== undefined && object.chunkSize !== null)
+      ? RowSeqScanNode_ChunkSize.fromPartial(object.chunkSize)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRowSeqScanNode_ChunkSize(): RowSeqScanNode_ChunkSize {
+  return { chunkSize: 0 };
+}
+
+export const RowSeqScanNode_ChunkSize = {
+  fromJSON(object: any): RowSeqScanNode_ChunkSize {
+    return { chunkSize: isSet(object.chunkSize) ? Number(object.chunkSize) : 0 };
+  },
+
+  toJSON(message: RowSeqScanNode_ChunkSize): unknown {
+    const obj: any = {};
+    message.chunkSize !== undefined && (obj.chunkSize = Math.round(message.chunkSize));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RowSeqScanNode_ChunkSize>, I>>(object: I): RowSeqScanNode_ChunkSize {
+    const message = createBaseRowSeqScanNode_ChunkSize();
+    message.chunkSize = object.chunkSize ?? 0;
     return message;
   },
 };
