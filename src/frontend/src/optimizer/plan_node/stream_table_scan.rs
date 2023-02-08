@@ -238,18 +238,19 @@ impl StreamTableScan {
 }
 
 impl ExprRewritable for StreamTableScan {
-    // fn has_rewritable_expr(&self) -> bool {
-    //     true
-    // }
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
 
-    // fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-    //     Self::new(
-    //         self.logical
-    //             .rewrite_exprs(r)
-    //             .as_logical_scan()
-    //             .unwrap()
-    //             .clone(),
-    //     )
-    //     .into()
-    // }
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new_with_chain_type(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.chain_type
+        )
+        .into()
+    }
 }
