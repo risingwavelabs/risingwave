@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{OrderType, OrderPair};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
