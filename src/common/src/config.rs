@@ -349,32 +349,6 @@ impl Default for StorageConfig {
     }
 }
 
-impl StorageConfig {
-    /// Checks whether an embedded compactor starts with a compute node.
-    #[inline(always)]
-    pub fn embedded_compactor_enabled(&self) -> bool {
-        // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-        // along with the compute node.
-        self.state_store == "hummock+memory"
-            || self.state_store.starts_with("hummock+disk")
-            || self.disable_remote_compactor
-    }
-
-    /// The maximal memory that storage components may use based on the configurations. Note that
-    /// this is the total storage memory for one compute node instead of the whole cluster.
-    pub fn total_storage_memory_limit_mb(&self) -> usize {
-        let total_memory = self.block_cache_capacity_mb
-            + self.meta_cache_capacity_mb
-            + self.shared_buffer_capacity_mb
-            + self.file_cache.total_buffer_capacity_mb;
-        if self.embedded_compactor_enabled() {
-            total_memory + self.compactor_memory_limit_mb
-        } else {
-            total_memory
-        }
-    }
-}
-
 /// The subsection `[storage.file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::file_cache`].
