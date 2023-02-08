@@ -519,7 +519,7 @@ mod default {
         }
 
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
-            7200
+            3600 // 60min
         }
     }
 
