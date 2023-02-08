@@ -214,10 +214,6 @@ impl CompactionPicker for ManualCompactionPicker {
         level_handlers: &[LevelHandler],
         _stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        // if self.option.is_space_reclaim_compaction {
-        //     return self.pick_space_reclaim_compaction(levels, level_handlers);
-        // }
-
         if self.option.level == 0 {
             if !self.option.sst_ids.is_empty() {
                 return self.pick_l0_to_sub_level(levels.l0.as_ref().unwrap(), level_handlers);

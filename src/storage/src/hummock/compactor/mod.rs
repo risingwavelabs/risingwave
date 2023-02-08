@@ -174,7 +174,6 @@ impl Compactor {
         context.compactor_metrics.compact_task_pending_num.inc();
         let mut task_status = TaskStatus::Success;
         let mut output_ssts = Vec::with_capacity(parallelism);
-        // let mut need_cancel = true;
         let mut compaction_futures = vec![];
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());

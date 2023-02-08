@@ -110,8 +110,6 @@ impl SelectorOption {
 }
 
 pub trait LevelSelector: Sync + Send {
-    // fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool;
-
     fn pick_compaction(
         &mut self,
         task_id: HummockCompactionTaskId,

@@ -1084,33 +1084,17 @@ where
             anyhow::anyhow!("failpoint metastore error")
         )));
 
-        // dispatch
-        match compaction_pick_parma.task_type {
-            compact_task::TaskType::Dynamic => {
-                while let Some(task) = self
-                    .get_compact_task_impl(compaction_group_id, compaction_pick_parma.clone())
-                    .await?
-                {
-                    if let TaskStatus::Pending = task.task_status() {
-                        return Ok(Some(task));
-                    }
-                    assert!(CompactStatus::is_trivial_move_task(&task));
-                }
-
-                Ok(None)
+        while let Some(task) = self
+            .get_compact_task_impl(compaction_group_id, compaction_pick_parma.clone())
+            .await?
+        {
+            if let TaskStatus::Pending = task.task_status() {
+                return Ok(Some(task));
             }
-
-            compact_task::TaskType::SpaceReclaim
-            | compact_task::TaskType::Ttl
-            | compact_task::TaskType::Manual => {
-                self.get_compact_task_impl(compaction_group_id, compaction_pick_parma)
-                    .await
-            }
-
-            _ => {
-                panic!("SharedBuffer compaction not expected")
-            }
+            assert!(CompactStatus::is_trivial_move_task(&task));
         }
+
+        Ok(None)
     }
 
     pub async fn manual_get_compact_task(
@@ -1378,28 +1362,19 @@ where
                 }
             } else {
                 // The compaction task is cancelled or failed.
-                if !CompactStatus::is_trivial_move_task(compact_task) {
-                    commit_multi_var!(
-                        self,
-                        context_id,
-                        Transaction::default(),
-                        compact_statuses,
-                        compact_task_assignment
-                    )?;
-                }
+                commit_multi_var!(
+                    self,
+                    context_id,
+                    Transaction::default(),
+                    compact_statuses,
+                    compact_task_assignment
+                )?;
             }
         }
 
         let task_status = compact_task.task_status();
         let task_status_label = task_status.as_str_name();
-        let task_type_label = match compact_task.task_type() {
-            compact_task::TaskType::Dynamic => "Dynamic",
-            compact_task::TaskType::SpaceReclaim => "SpaceReclaim",
-            compact_task::TaskType::Manual => "Manual",
-            compact_task::TaskType::SharedBuffer => "SharedBuffer",
-            compact_task::TaskType::Ttl => "Ttl",
-            _ => "Invalid",
-        };
+        let task_type_label = compact_task.task_type().as_str_name();
         if let Some(context_id) = assignee_context_id {
             // A task heartbeat is removed IFF we report the task status of a task and it still has
             // a valid assignment, OR we remove the node context from our list of nodes,

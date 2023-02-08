@@ -356,7 +356,7 @@ where
 
         // 4. Reschedule it with best effort, in case there are more tasks.
         if let Err(e) =
-            sched_channel.try_sched_compaction(compaction_group, compact_task::TaskType::Dynamic)
+            sched_channel.try_sched_compaction(compaction_group, compact_task.task_type())
         {
             tracing::error!(
                 "Failed to reschedule compaction group {} after sending new task {}. {:#?}",
