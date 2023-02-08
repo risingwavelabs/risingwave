@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
-use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanNode;
 use super::{
     generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
     PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,

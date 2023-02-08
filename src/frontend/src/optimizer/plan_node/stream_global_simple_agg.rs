@@ -20,7 +20,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::generic::PlanAggCall;
 use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
