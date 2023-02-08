@@ -462,6 +462,7 @@ mod tests {
             handle_pk_conflict: false,
             read_prefix_len_hint: 1,
             version: None,
+            watermark_indices: vec![],
         }
     }
 
