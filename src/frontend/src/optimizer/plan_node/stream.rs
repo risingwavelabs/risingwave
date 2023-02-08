@@ -436,7 +436,7 @@ pub fn to_stream_prost_body(
             let condition = me
                 .predicate()
                 .as_expr_unless_true()
-                .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto());
+                .map(|x| x.to_expr_proto());
             let left_table = infer_left_internal_table_catalog(base, me.left_index)
                 .with_id(state.gen_table_id_wrapped());
             let right_table = infer_right_internal_table_catalog(&me.right.0)
@@ -482,7 +482,7 @@ pub fn to_stream_prost_body(
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto()),
+                    .map(|x| x.to_expr_proto()),
                 left_table_id: left_table_desc.table_id.table_id(),
                 right_table_id: right_table_desc.table_id.table_id(),
                 left_info: Some(ArrangementInfo {
@@ -526,11 +526,7 @@ pub fn to_stream_prost_body(
         Node::Filter(me) => {
             let me = &me.core;
             ProstNode::Filter(FilterNode {
-                search_condition: Some(
-                    base.ctx()
-                        .expr_with_session_timezone(ExprImpl::from(me.predicate.clone()))
-                        .to_expr_proto(),
-                ),
+                search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
         Node::GlobalSimpleAgg(me) => {
@@ -542,7 +538,7 @@ pub fn to_stream_prost_body(
                 agg_calls: me
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
+                    .map(|x| PlanAggCall::to_protobuf(x))
                     .collect(),
                 distribution_key: base
                     .dist
@@ -588,7 +584,7 @@ pub fn to_stream_prost_body(
                     .core
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
+                    .map(|x| PlanAggCall::to_protobuf(x))
                     .collect(),
 
                 is_append_only: me.core.input.0.append_only,
@@ -650,7 +646,7 @@ pub fn to_stream_prost_body(
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto()),
+                    .map(|x| x.to_expr_proto()),
                 left_table: Some(left_table.to_internal_table_prost()),
                 right_table: Some(right_table.to_internal_table_prost()),
                 left_degree_table: Some(left_degree_table.to_internal_table_prost()),
@@ -676,7 +672,7 @@ pub fn to_stream_prost_body(
                 agg_calls: me
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
+                    .map(|x| PlanAggCall::to_protobuf(x))
                     .collect(),
                 distribution_key: base
                     .dist
@@ -709,16 +705,7 @@ pub fn to_stream_prost_body(
             ProstNode::ProjectSet(ProjectSetNode { select_list })
         }
         Node::Project(me) => ProstNode::Project(ProjectNode {
-            select_list: me
-                .core
-                .exprs
-                .iter()
-                .map(|x| {
-                    base.ctx()
-                        .expr_with_session_timezone(x.clone())
-                        .to_expr_proto()
-                })
-                .collect(),
+            select_list: me.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
             watermark_input_key: me
                 .watermark_derivations
                 .iter()

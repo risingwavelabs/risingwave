@@ -76,12 +76,7 @@ impl_plan_tree_node_for_unary! { StreamFilter }
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Filter(FilterNode {
-            search_condition: Some(
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(ExprImpl::from(self.predicate().clone()))
-                    .to_expr_proto(),
-            ),
+            search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
         })
     }
 }

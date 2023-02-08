@@ -586,17 +586,7 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        // rewrite the condition before converting to batch as we will handle the expressions in a
-        // special way
-        let new_predicate = Condition {
-            conjunctions: self
-                .predicate()
-                .conjunctions
-                .iter()
-                .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
-                .collect(),
-        };
-        let new = self.clone_with_predicate(new_predicate);
+        let new = self.clone_with_predicate(self.predicate().clone());
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();

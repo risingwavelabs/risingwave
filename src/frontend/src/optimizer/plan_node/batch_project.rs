@@ -89,12 +89,7 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(|expr| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(expr.clone())
-                    .to_expr_proto()
-            })
+            .map(|expr| expr.to_expr_proto())
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
     }

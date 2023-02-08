@@ -18,7 +18,7 @@
   sql: |
     select case when NULL then 1 end;
   batch_plan: |
-    BatchProject { exprs: [Case(null:Boolean, 1:Int32)] }
+    BatchProject { exprs: [null:Int32] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (JOIN ON NULL)
   sql: |
@@ -65,7 +65,7 @@
   sql: |
     select case when 'y' then 1 end;
   batch_plan: |
-    BatchProject { exprs: [Case(true:Boolean, 1:Int32)] }
+    BatchProject { exprs: [1:Int32] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (JOIN ON with literal 'y' of unknown type)
   sql: |

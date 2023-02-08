@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod plan_node;
+use std::ops::DerefMut;
+
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -453,15 +455,22 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
-        // TODO: SessionTimezone substitution
-        // Const eval of exprs at the last minute
-        // plan = const_eval_exprs(plan)?;
+        let ctx = plan.ctx();
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
-        // let ctx = plan.ctx();
-        // if ctx.is_explain_trace() {
-        //     ctx.trace("Const eval exprs:");
-        //     ctx.trace(plan.explain_to_string().unwrap());
-        // }
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -615,13 +624,21 @@ impl PlanRoot {
             );
         }
 
-        // Const eval of exprs at the last minute
-        // plan = const_eval_exprs(plan)?;
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
-        // if ctx.is_explain_trace() {
-        //     ctx.trace("Const eval exprs:");
-        //     ctx.trace(plan.explain_to_string().unwrap());
-        // }
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -732,7 +749,6 @@ impl PlanRoot {
     }
 }
 
-#[allow(dead_code)]
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     let mut const_eval_rewriter = ConstEvalRewriter { error: None };
 
@@ -740,6 +756,11 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     if let Some(error) = const_eval_rewriter.error {
         return Err(error);
     }
+    Ok(plan)
+}
+
+fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
+    let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
     Ok(plan)
 }
 

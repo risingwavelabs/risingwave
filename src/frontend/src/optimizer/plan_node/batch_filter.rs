@@ -80,10 +80,7 @@ impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
             search_condition: Some(
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(ExprImpl::from(self.logical.predicate().clone()))
-                    .to_expr_proto(),
+                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
             ),
         })
     }

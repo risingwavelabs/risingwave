@@ -55,15 +55,7 @@ impl BatchValues {
     }
 
     fn row_to_protobuf(&self, row: &[ExprImpl]) -> ExprTuple {
-        let cells = row
-            .iter()
-            .map(|x| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(x.clone())
-                    .to_expr_proto()
-            })
-            .collect();
+        let cells = row.iter().map(|x| x.to_expr_proto()).collect();
         ExprTuple { cells }
     }
 }

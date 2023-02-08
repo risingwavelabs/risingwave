@@ -96,7 +96,7 @@ impl StreamNode for StreamLocalSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(|x| PlanAggCall::to_protobuf(x))
                 .collect(),
             distribution_key: self
                 .distribution()

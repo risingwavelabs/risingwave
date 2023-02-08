@@ -79,12 +79,7 @@ impl ToBatchProst for BatchUpdate {
             .logical
             .exprs()
             .iter()
-            .map(|x| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(x.clone())
-                    .to_expr_proto()
-            })
+            .map(|x| x.to_expr_proto())
             .collect();
 
         NodeBody::Update(UpdateNode {

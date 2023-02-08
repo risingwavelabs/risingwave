@@ -130,12 +130,7 @@ impl StreamNode for StreamProject {
                 .logical
                 .exprs()
                 .iter()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x.clone())
-                        .to_expr_proto()
-                })
+                .map(|x| x.to_expr_proto())
                 .collect(),
             watermark_input_key: self
                 .watermark_derivations
