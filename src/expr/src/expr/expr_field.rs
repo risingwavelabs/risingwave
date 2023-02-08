@@ -49,10 +49,13 @@ impl Expression for FieldExpression {
 
     fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let struct_datum = self.input.eval_row(input)?;
-        struct_datum.map(|s| match s {
-            ScalarImpl::Struct(v) => Ok(v.fields()[self.index].clone()),
-            _ => Err(anyhow!("expects a struct array ref").into())
-        }).transpose().map(|x| x.flatten())
+        struct_datum
+            .map(|s| match s {
+                ScalarImpl::Struct(v) => Ok(v.fields()[self.index].clone()),
+                _ => Err(anyhow!("expects a struct array ref").into()),
+            })
+            .transpose()
+            .map(|x| x.flatten())
     }
 }
 
