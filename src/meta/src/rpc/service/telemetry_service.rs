@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use risingwave_common::telemetry::telemetry_enabled;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{TelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
@@ -8,7 +9,6 @@ use uuid::Uuid;
 
 use crate::storage::MetaStore;
 use crate::telemetry::report::{TELEMETRY_CF, TELEMETRY_KEY};
-use crate::telemetry::telemetry_enabled;
 
 pub struct TelemetryInfoServiceImpl<S: MetaStore> {
     meta_store: Arc<S>,

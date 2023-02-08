@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
-use risingwave_common::telemetry::{post_telemetry_report, SystemData};
+use risingwave_common::telemetry::{post_telemetry_report, telemetry_enabled, SystemData};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -24,10 +24,9 @@ use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
 use crate::storage::MetaStore;
-use crate::telemetry::telemetry_enabled;
 
 /// Url of telemetry backend
-const TELEMETRY_REPORT_URL: &str = "unreachable";
+const TELEMETRY_REPORT_URL: &str = "http://localhost:8000/report";
 /// Telemetry reporting interval in seconds, 24h
 const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
 pub const TELEMETRY_CF: &str = "cf/telemetry";

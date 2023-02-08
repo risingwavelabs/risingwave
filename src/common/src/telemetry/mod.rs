@@ -20,6 +20,9 @@ use sysinfo::{System, SystemExt};
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
 
+/// Environment Variable that is default to be true
+const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemData {
     memory: Memory,
@@ -86,6 +89,10 @@ impl Default for SystemData {
 
 /// post a telemetry reporting request
 pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
+    if !telemetry_enabled() {
+        tracing::info!("Telemetry is not enabled");
+        return Ok(());
+    }
     let http_client = hyper::Client::new();
     let req = hyper::Request::post(url)
         .header("Content-Type", "application/json")
@@ -97,6 +104,17 @@ pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(),
     } else {
         Err(anyhow!("invalid telemetry resp, status, {}", res.status()))
     }
+}
+
+/// check whether telemetry is enabled
+pub fn telemetry_enabled() -> bool {
+    // default to be true
+    std::env::var(TELEMETRY_ENV_ENABLE)
+        .unwrap_or("true".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .parse()
+        .unwrap_or(true)
 }
 
 #[cfg(test)]
@@ -143,5 +161,16 @@ mod tests {
         });
         assert!(post_telemetry_report(&url, report_json).await.is_err());
         resp_mock.assert();
+    }
+
+    #[test]
+    fn test_telemetry_enabled() {
+        assert!(telemetry_enabled());
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
+        assert!(!telemetry_enabled());
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "wrong_str");
+        assert!(telemetry_enabled());
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "False");
+        assert!(!telemetry_enabled());
     }
 }

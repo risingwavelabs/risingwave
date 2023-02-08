@@ -13,33 +13,3 @@
 // limitations under the License.
 
 pub mod report;
-
-/// Environment Variable that is default to be true
-const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
-
-/// check whether telemetry is enabled
-pub fn telemetry_enabled() -> bool {
-    // default to be true
-    std::env::var(TELEMETRY_ENV_ENABLE)
-        .unwrap_or("true".to_string())
-        .trim()
-        .to_ascii_lowercase()
-        .parse()
-        .unwrap_or(true)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_telemetry_enabled() {
-        assert!(telemetry_enabled());
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
-        assert!(!telemetry_enabled());
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "wrong_str");
-        assert!(telemetry_enabled());
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "False");
-        assert!(!telemetry_enabled());
-    }
-}

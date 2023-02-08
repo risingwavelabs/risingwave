@@ -61,6 +61,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::telemetry::start_telemetry_reporting;
 use crate::{AsyncStackTraceOption, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
@@ -276,6 +277,9 @@ pub async fn compute_node_serve(
     let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_stack_trace_mgr.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
+
+    // used for telemetry
+    sub_tasks.push(start_telemetry_reporting(meta_client.clone()));
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

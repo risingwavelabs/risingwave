@@ -25,9 +25,10 @@ use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
 /// Url of telemetry backend
-const TELEMETRY_REPORT_URL: &str = "unreachable";
+const TELEMETRY_REPORT_URL: &str = "http://localhost:8000/report";
 /// Telemetry reporting interval in seconds, 24h
 const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
+
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
 pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
@@ -46,7 +47,7 @@ struct TelemetryReport {
     time_stamp: u64,
 }
 
-pub async fn start_telemetry_reporting(meta_client: MetaClient) -> (JoinHandle<()>, Sender<()>) {
+pub fn start_telemetry_reporting(meta_client: MetaClient) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         let begin_time = std::time::Instant::now();
