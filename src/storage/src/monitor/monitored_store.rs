@@ -195,7 +195,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::SurelyNotHaveFuture<'_> {
+    ) -> Self::MayExistFuture<'_> {
         async move {
             let table_id_label = read_options.table_id.to_string();
             let timer = self

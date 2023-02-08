@@ -402,7 +402,7 @@ pub mod verify {
             &self,
             _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             _read_options: ReadOptions,
-        ) -> Self::SurelyNotHaveFuture<'_> {
+        ) -> Self::MayExistFuture<'_> {
             async move { Ok(true) }
         }
     }
@@ -831,7 +831,7 @@ pub mod boxed_state_store {
             &self,
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             read_options: ReadOptions,
-        ) -> Self::SurelyNotHaveFuture<'_> {
+        ) -> Self::MayExistFuture<'_> {
             self.deref().may_exist(key_range, read_options)
         }
     }

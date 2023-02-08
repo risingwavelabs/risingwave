@@ -462,7 +462,7 @@ impl LocalStateStore for HummockStorageV1 {
         &self,
         _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::SurelyNotHaveFuture<'_> {
+    ) -> Self::MayExistFuture<'_> {
         async move { Ok(true) }
     }
 }

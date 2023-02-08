@@ -245,12 +245,12 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
-pub trait SurelyNotHaveTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
+pub trait MayExistTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
 
 #[macro_export]
 macro_rules! define_local_state_store_associated_type {
     () => {
-        type SurelyNotHaveFuture<'a> = impl SurelyNotHaveTrait<'a>;
+        type MayExistFuture<'a> = impl MayExistTrait<'a>;
     };
 }
 
@@ -258,7 +258,7 @@ macro_rules! define_local_state_store_associated_type {
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
-    type SurelyNotHaveFuture<'a>: SurelyNotHaveTrait<'a>;
+    type MayExistFuture<'a>: MayExistTrait<'a>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
@@ -296,7 +296,7 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::SurelyNotHaveFuture<'_>;
+    ) -> Self::MayExistFuture<'_>;
 }
 
 #[derive(Default, Clone)]

@@ -222,7 +222,7 @@ impl LocalStateStore for LocalHummockStorage {
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
-    ) -> Self::SurelyNotHaveFuture<'_> {
+    ) -> Self::MayExistFuture<'_> {
         self.may_exist_inner(key_range, read_options)
     }
 }

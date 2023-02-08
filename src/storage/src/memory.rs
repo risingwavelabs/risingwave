@@ -611,7 +611,7 @@ impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {
         &self,
         _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::SurelyNotHaveFuture<'_> {
+    ) -> Self::MayExistFuture<'_> {
         async move { Ok(true) }
     }
 }

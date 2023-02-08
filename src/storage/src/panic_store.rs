@@ -82,7 +82,7 @@ impl LocalStateStore for PanicStateStore {
         &self,
         _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         _read_options: ReadOptions,
-    ) -> Self::SurelyNotHaveFuture<'_> {
+    ) -> Self::MayExistFuture<'_> {
         async move {
             panic!("should not call may_exist from the state store!");
         }
