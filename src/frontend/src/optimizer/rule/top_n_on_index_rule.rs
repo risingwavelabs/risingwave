@@ -36,10 +36,18 @@ impl Rule for TopNOnIndexRule {
         if order.field_order.is_empty() {
             return None;
         }
-        if let Some(p) = self.try_on_pk(logical_top_n, logical_scan.clone(), order) {
+        let output_col_map = logical_scan
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        if let Some(p) = self.try_on_pk(logical_top_n, logical_scan.clone(), order, &output_col_map)
+        {
             Some(p)
         } else {
-            self.try_on_index(logical_top_n, logical_scan, order)
+            self.try_on_index(logical_top_n, logical_scan, order, &output_col_map)
         }
     }
 }
@@ -54,14 +62,9 @@ impl TopNOnIndexRule {
         logical_top_n: &LogicalTopN,
         logical_scan: LogicalScan,
         order: &Order,
+        output_col_map: &BTreeMap<usize, usize>,
     ) -> Option<PlanRef> {
-        let required_col_map = logical_scan
-            .required_col_idx()
-            .iter()
-            .enumerate()
-            .map(|(id, col)| (col, id))
-            .collect::<BTreeMap<_, _>>();
-        let unmatched_idx = required_col_map.len();
+        let unmatched_idx = output_col_map.len();
         let index = logical_scan.indexes().iter().find(|idx| {
             let s2p_mapping = idx.secondary_to_primary_mapping();
             Order {
@@ -70,7 +73,7 @@ impl TopNOnIndexRule {
                     .pk()
                     .iter()
                     .map(|idx_item| FieldOrder {
-                        index: *required_col_map
+                        index: *output_col_map
                             .get(
                                 s2p_mapping
                                     .get(&idx_item.index)
@@ -117,13 +120,15 @@ impl TopNOnIndexRule {
         logical_top_n: &LogicalTopN,
         mut logical_scan: LogicalScan,
         order: &Order,
+        output_col_map: &BTreeMap<usize, usize>,
     ) -> Option<PlanRef> {
+        let unmatched_idx = output_col_map.len();
         let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {
             field_order: primary_key
                 .into_iter()
                 .map(|op| FieldOrder {
-                    index: op.column_idx,
+                    index: *output_col_map.get(&op.column_idx).unwrap_or(&unmatched_idx),
                     direct: if op.order_type == OrderType::Ascending {
                         Direction::Asc
                     } else {
