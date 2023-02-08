@@ -748,7 +748,15 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks and attempting to fix"
-cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+if [ $# -gt 0 ]; then
+  ARGS=("$@")
+
+  echo "Applying clippy --fix for $@ (including dirty and staged files)"
+  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+else
+  echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
+  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+fi
 """
 
 [tasks.check-typos]
