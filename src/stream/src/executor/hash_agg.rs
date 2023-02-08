@@ -519,8 +519,8 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
                 };
 
                 // Calculate current outputs, concurrently.
-                // FIXME: In fact, we don't need to collect `futs` as `Vec`, but rustc will report a
-                // error `error: higher-ranked lifetime error`.
+                // FIXME: In fact, we don't need to collect `futs` as `Vec`, but rustc will report
+                // a weird error `error: higher-ranked lifetime error`.
                 #[expect(clippy::disallowed_methods)]
                 let futs: Vec<_> = keys_in_batch
                     .iter()
