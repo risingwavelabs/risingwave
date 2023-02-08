@@ -33,14 +33,7 @@
         "url" VARCHAR,
         "date_time" TIMESTAMP,
         "extra" VARCHAR
-    )with (appendonly = true);
-- id: nexmark_q0
-  before:
-  - create_tables
-  sql: |
-    CREATE MATERIALIZED VIEW nexmark_q0
-      AS
-    SELECT auction, bidder, price, date_time FROM bid;
+    ) with (appendonly = true);
 - id: nexmark_q0
   before:
   - create_tables
