@@ -147,6 +147,8 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    let storage_memory_bytes = storage_config.total_storage_memory_limit_mb() << 20;
+
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
@@ -215,8 +217,10 @@ pub async fn compute_node_serve(
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
+    let compute_memory_bytes =
+        opts.total_memory_bytes - storage_memory_bytes - SYSTEM_RESERVED_MEMORY_MB;
     let mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
+        compute_memory_bytes,
         config.streaming.barrier_interval_ms,
         streaming_metrics.clone(),
     );

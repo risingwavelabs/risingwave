@@ -76,6 +76,7 @@ where
                 biased;
                 _ = monitor => unreachable!(),
                 output = future => {
+                    // TODO(Yuanxin)
                     // Report bytes allocated when actor ends. Note we should not report 0, cuz actor may allocate memory in block cache and may not be dealloc.
                     BYTES_ALLOCATED.with(|bytes| context.store_mem_usage(bytes.val()));
                     output
