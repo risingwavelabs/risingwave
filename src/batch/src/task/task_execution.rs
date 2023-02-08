@@ -423,14 +423,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     if let Err(_e) = sender.send(None).await {
                         warn!("failed to send None to annotate end");
                     }
-                } else {
-                    if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Finished, &mut state_tx, None)
-                        .await
-                    {
-                        // It's possible to send fail. Same reason in `.try_execute`.
-                        warn!("send task execution finished message fail!");
-                    }
+                } else if let Err(_e) = t_1
+                    .change_state_notify(TaskStatus::Finished, &mut state_tx, None)
+                    .await
+                {
+                    // It's possible to send fail. Same reason in `.try_execute`.
+                    warn!("send task execution finished message fail!");
                 }
             };
 

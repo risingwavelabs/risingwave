@@ -397,7 +397,6 @@ mod tests {
             .unwrap();
         manager.abort_task(&task_id);
         let task_id = TaskId::from(&task_id);
-        let res = manager.wait_until_task_aborted(&task_id).await;
-        assert_eq!(res, Ok(()));
+        assert!(!manager.tasks.lock().contains_key(&task_id));
     }
 }
