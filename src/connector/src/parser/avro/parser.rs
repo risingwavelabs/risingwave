@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,12 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
 use chrono::Datelike;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -30,9 +32,11 @@ use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
+use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::SourceColumnDesc;
 
 fn unix_epoch_days() -> i32 {
     NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
@@ -40,29 +44,37 @@ fn unix_epoch_days() -> i32 {
         .num_days_from_ce()
 }
 
+impl_common_parser_logic!(AvroParser);
+
 #[derive(Debug)]
 pub struct AvroParser {
-    schema: Schema,
-    schema_resolver: Option<ConfluentSchemaResolver>,
+    schema: Arc<Schema>,
+    schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    rw_columns: Vec<SourceColumnDesc>,
 }
 
-// confluent_wire_format, kafka only, subject-name: "${topic-name}-value"
-impl AvroParser {
+#[derive(Debug, Clone)]
+pub struct AvroParserConfig {
+    schema: Arc<Schema>,
+    schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+}
+
+impl AvroParserConfig {
     pub async fn new(
+        props: &HashMap<String, String>,
         schema_location: &str,
         use_schema_registry: bool,
-        props: HashMap<String, String>,
     ) -> Result<Self> {
         let url = Url::parse(schema_location).map_err(|e| {
             InternalError(format!("failed to parse url ({}): {}", schema_location, e))
         })?;
         let (schema, schema_resolver) = if use_schema_registry {
-            let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url, &props)?;
+            let kafka_topic = get_kafka_topic(props)?;
+            let client = Client::new(url, props)?;
             let (schema, resolver) =
                 ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
                     .await?;
-            (schema, Some(resolver))
+            (Arc::new(schema), Some(Arc::new(resolver)))
         } else {
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
@@ -76,7 +88,7 @@ impl AvroParser {
             let schema = Schema::parse_str(&schema_content).map_err(|e| {
                 RwError::from(InternalError(format!("Avro schema parse error {}", e)))
             })?;
-            (schema, None)
+            (Arc::new(schema), None)
         };
         Ok(Self {
             schema,
@@ -86,7 +98,7 @@ impl AvroParser {
 
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         // there must be a record at top level
-        if let Schema::Record { fields, .. } = &self.schema {
+        if let Schema::Record { fields, .. } = self.schema.as_ref() {
             let mut index = 0;
             let fields = fields
                 .iter()
@@ -191,8 +203,23 @@ impl AvroParser {
 
         Ok(data_type)
     }
+}
 
-    async fn parse_inner(
+// confluent_wire_format, kafka only, subject-name: "${topic-name}-value"
+impl AvroParser {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, config: AvroParserConfig) -> Result<Self> {
+        let AvroParserConfig {
+            schema,
+            schema_resolver,
+        } = config;
+        Ok(Self {
+            schema,
+            schema_resolver,
+            rw_columns,
+        })
+    }
+
+    pub(crate) async fn parse_inner(
         &self,
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
@@ -270,26 +297,26 @@ fn from_avro_value(value: Value) -> Result<Datum> {
                 millis / 1_000,
                 (millis % 1_000) as u32 * 1_000_000,
             )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp millis value {}, err {:?}",
-                    millis, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
+                .map_err(|e| {
+                    let err_msg = format!(
+                        "avro parse error.wrong timestamp millis value {}, err {:?}",
+                        millis, e
+                    );
+                    RwError::from(InternalError(err_msg))
+                })?,
         ),
         Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
             NaiveDateTimeWrapper::with_secs_nsecs(
                 micros / 1_000_000,
                 (micros % 1_000_000) as u32 * 1_000,
             )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp micros value {}, err {:?}",
-                    micros, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
+                .map_err(|e| {
+                    let err_msg = format!(
+                        "avro parse error.wrong timestamp micros value {}, err {:?}",
+                        micros, e
+                    );
+                    RwError::from(InternalError(err_msg))
+                })?,
         ),
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
@@ -322,22 +349,6 @@ fn from_avro_value(value: Value) -> Result<Datum> {
     Ok(Some(v))
 }
 
-impl SourceParser for AvroParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        self.parse_inner(payload, writer)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -358,10 +369,10 @@ mod test {
 
     use super::{
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
-        AvroParser,
+        AvroParser, AvroParserConfig,
     };
-    use crate::parser::{SourceParser, SourceStreamChunkBuilder};
-    use crate::SourceColumnDesc;
+    use crate::parser::SourceStreamChunkBuilder;
+    use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -382,7 +393,7 @@ mod test {
         let mut s3_config_props = HashMap::new();
         s3_config_props.insert("region".to_string(), "ap-southeast-1".to_string());
         let url = Url::parse(&schema_location).unwrap();
-        let schema_content = read_schema_from_s3(&url, s3_config_props).await;
+        let schema_content = read_schema_from_s3(&url, &s3_config_props).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
         assert!(schema.is_ok());
@@ -412,9 +423,14 @@ mod test {
         println!("schema = {:?}", schema.unwrap());
     }
 
-    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
+    async fn new_avro_conf_from_local(file_name: &str) -> error::Result<AvroParserConfig> {
         let schema_path = "file://".to_owned() + &test_data_path(file_name);
-        AvroParser::new(schema_path.as_str(), false, HashMap::new()).await
+        AvroParserConfig::new(&HashMap::new(), schema_path.as_str(), false).await
+    }
+
+    async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
+        let conf = new_avro_conf_from_local(file_name).await?;
+        AvroParser::new(Vec::default(), conf)
     }
 
     #[tokio::test]
@@ -434,7 +450,10 @@ mod test {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            avro_parser.parse(&input_data[..], writer).await.unwrap();
+            avro_parser
+                .parse_inner(&input_data[..], writer)
+                .await
+                .unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -473,7 +492,7 @@ mod test {
                             millis / 1000,
                             (millis % 1000) as u32 * 1_000_000,
                         )
-                        .unwrap(),
+                            .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -483,7 +502,7 @@ mod test {
                             micros / 1_000_000,
                             (micros % 1_000_000) as u32 * 1_000,
                         )
-                        .unwrap(),
+                            .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -664,7 +683,7 @@ mod test {
 
     #[tokio::test]
     async fn test_map_to_columns() {
-        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc")
+        let conf = new_avro_conf_from_local("simple-schema.avsc")
             .await
             .unwrap();
         let columns = avro_parser_rs.map_to_columns().unwrap();

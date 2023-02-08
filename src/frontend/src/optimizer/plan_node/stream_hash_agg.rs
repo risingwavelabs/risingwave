@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@ use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -36,6 +37,7 @@ impl StreamHashAgg {
     pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -44,16 +46,24 @@ impl StreamHashAgg {
                 .rewrite_provided_distribution(input_dist),
             d => d.clone(),
         };
+
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        // Watermark column(s) must be in group key.
+        for (idx, input_idx) in logical.group_key().iter().enumerate() {
+            if input.watermark_columns().contains(*input_idx) {
+                watermark_columns.insert(idx);
+            }
+        }
+
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             dist,
             false,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamHashAgg {
             base,
@@ -117,5 +127,23 @@ impl StreamNode for StreamHashAgg {
                     .to_internal_table_prost(),
             ),
         })
+    }
+}
+
+impl ExprRewritable for StreamHashAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+            self.vnode_col_idx,
+        )
+        .into()
     }
 }

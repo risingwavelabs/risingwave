@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,21 +27,20 @@
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 
-use std::collections::HashMap;
+use std::time::Duration;
 
-use futures::stream::BoxStream;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::error::RwError;
-use source::SplitId;
+use duration_str::parse_std;
+use serde::de;
 
 pub mod aws_utils;
 pub mod error;
 mod macros;
-mod manager;
-pub use manager::SourceColumnDesc;
+
 pub mod parser;
 pub mod sink;
 pub mod source;
+
+pub mod common;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
@@ -56,35 +55,31 @@ impl ConnectorParams {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourceFormat {
-    Invalid,
-    Json,
-    Protobuf,
-    DebeziumJson,
-    Avro,
-    Maxwell,
-    CanalJson,
-    Csv,
-}
-
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
-
-/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
-/// current design, one connector source can have multiple split reader. The keys are unique
-/// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug)]
-pub struct StreamChunkWithState {
-    pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
-}
-
-/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
-impl From<StreamChunk> for StreamChunkWithState {
-    fn from(chunk: StreamChunk) -> Self {
-        Self {
-            chunk,
-            split_offset_mapping: None,
-        }
+pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    let s = s.to_ascii_lowercase();
+    match s.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"true or false",
+        )),
     }
+}
+
+pub(crate) fn deserialize_duration_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Duration, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    parse_std(&s).map_err(|_| de::Error::invalid_value(
+        de::Unexpected::Str(&s),
+        &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
+    ))
 }

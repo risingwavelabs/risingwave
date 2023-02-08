@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,12 @@
 
 use std::sync::Arc;
 
+use hytra::TrAdder;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;
@@ -47,6 +48,9 @@ pub struct StreamEnvironment {
 
     /// Metrics for source.
     source_metrics: Arc<SourceMetrics>,
+
+    /// Total memory usage in stream.
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 impl StreamEnvironment {
@@ -67,6 +71,7 @@ impl StreamEnvironment {
             state_store,
             dml_manager,
             source_metrics,
+            total_mem_val: Arc::new(TrAdder::new()),
         }
     }
 
@@ -85,6 +90,7 @@ impl StreamEnvironment {
             )),
             dml_manager: Arc::new(DmlManager::default()),
             source_metrics: Arc::new(SourceMetrics::default()),
+            total_mem_val: Arc::new(TrAdder::new()),
         }
     }
 
@@ -114,5 +120,9 @@ impl StreamEnvironment {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn total_mem_usage(&self) -> Arc<TrAdder<i64>> {
+        self.total_mem_val.clone()
     }
 }

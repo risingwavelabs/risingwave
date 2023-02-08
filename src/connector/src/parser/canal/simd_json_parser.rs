@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use futures::future::ready;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -27,19 +27,28 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
-use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
-use crate::{ensure_rust_type, ensure_str};
+use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::SourceColumnDesc;
+use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
 const IS_DDL: &str = "isddl";
 
+impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
-pub struct CanalJsonParser;
+pub struct CanalJsonParser {
+    pub(crate) rw_columns: Vec<SourceColumnDesc>,
+}
 
 impl CanalJsonParser {
-    fn parse_inner(
+    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+        Ok(Self { rw_columns })
+    }
+
+    #[allow(clippy::unused_async)]
+    pub async fn parse_inner(
         &self,
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
@@ -169,22 +178,6 @@ impl CanalJsonParser {
                 other
             )))),
         }
-    }
-}
-
-impl SourceParser for CanalJsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
     }
 }
 

@@ -1,4 +1,4 @@
-//  Copyright 2023 Singularity Data
+//  Copyright 2023 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -578,7 +578,7 @@ pub mod tests {
             Arc::new(config.clone()),
             Arc::new(RangeOverlapStrategy::default()),
         );
-        let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers, &mut local_stats)
@@ -602,7 +602,7 @@ pub mod tests {
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.l0.as_mut().unwrap().total_file_size = 0;
         push_tables_level0_nonoverlapping(&mut levels, generate_tables(15..25, 0..600, 3, 20));
-        let mut levels_handlers = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers, &mut local_stats)
             .unwrap();

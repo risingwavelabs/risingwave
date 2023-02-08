@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -744,7 +744,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
     let test_get = || {
-        let hummock_storage_clone = hummock_storage.clone();
+        let hummock_storage_clone = &hummock_storage;
         async move {
             assert_eq!(
                 hummock_storage_clone
@@ -837,7 +837,6 @@ async fn test_iter_with_min_epoch() {
 
     // epoch 1 write
     let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),
@@ -861,7 +860,6 @@ async fn test_iter_with_min_epoch() {
     let epoch2 = (32 * 1000) << 16;
     // epoch 2 write
     let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),
@@ -1050,7 +1048,6 @@ async fn test_hummock_version_reader() {
 
     // epoch 1 write
     let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),
@@ -1062,7 +1059,6 @@ async fn test_hummock_version_reader() {
     let epoch2 = (32 * 1000) << 16;
     // epoch 2 write
     let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),
@@ -1074,7 +1070,6 @@ async fn test_hummock_version_reader() {
     let epoch3 = (33 * 1000) << 16;
     // epoch 3 write
     let batch_epoch3: Vec<(Bytes, StorageValue)> = (40..50)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),
@@ -1496,7 +1491,6 @@ async fn test_get_with_min_epoch() {
 
     // epoch 1 write
     let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),
@@ -1520,7 +1514,6 @@ async fn test_get_with_min_epoch() {
     let epoch2 = (32 * 1000) << 16;
     // epoch 2 write
     let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
-        .into_iter()
         .map(|index| {
             (
                 Bytes::from(gen_key(index)),

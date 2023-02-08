@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
@@ -42,7 +42,7 @@ pub mod create_source;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
-mod create_view;
+pub mod create_view;
 mod describe;
 mod drop_database;
 pub mod drop_function;
@@ -151,7 +151,7 @@ pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
@@ -160,7 +160,7 @@ pub async fn handle(
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze),
+        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
@@ -307,7 +307,7 @@ pub async fn handle(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(handler_args, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
             name,

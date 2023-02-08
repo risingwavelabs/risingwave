@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,13 +23,14 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::parser::SourceParserImpl;
-use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
-use risingwave_connector::{SourceColumnDesc, SourceFormat};
+use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::source::monitor::SourceMetrics;
+use risingwave_connector::source::{
+    ConnectorProperties, SourceColumnDesc, SourceFormat, SourceInfo, SplitImpl, SplitMetaData,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::RowFormatType;
-use risingwave_source::connector_source::{ConnectorSource, SourceContext};
-use risingwave_source::monitor::SourceMetrics;
+use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
 use crate::error::BatchError;
@@ -67,7 +68,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let config = ConnectorProperties::extract(source_props)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
-        let info = &source_node.get_info().unwrap();
+        let info = source_node.get_info().unwrap();
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -82,19 +83,9 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 "protobuf file location not provided".to_string(),
             )));
         }
-        let source_parser_rs = SourceParserImpl::create(
-            &format,
-            &source_node.properties,
-            info.row_schema_location.as_str(),
-            info.use_schema_registry,
-            info.proto_message_name.clone(),
-        )
-        .await;
-        let parser = if let Ok(source_parser) = source_parser_rs {
-            source_parser
-        } else {
-            return Err(source_parser_rs.err().unwrap());
-        };
+
+        let parser_config =
+            SpecificParserConfig::new(format, info, &source_node.properties).await?;
 
         let columns: Vec<_> = source_node
             .columns
@@ -105,7 +96,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let connector_source = ConnectorSource {
             config,
             columns,
-            parser,
+            parser_config,
             connector_message_buffer_size: source
                 .context()
                 .get_config()
@@ -162,17 +153,15 @@ impl Executor for SourceExecutor {
 impl SourceExecutor {
     #[try_stream(ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let reader = self
+        let stream = self
             .connector_source
             .stream_reader(
                 Some(vec![self.split]),
                 self.column_ids,
                 self.metrics,
-                SourceContext::new(u32::MAX, self.source_id),
+                SourceInfo::new(u32::MAX, self.source_id),
             )
             .await?;
-
-        let stream = reader.into_stream();
 
         #[for_await]
         for chunk in stream {

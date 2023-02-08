@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{SourceNode, StreamSource as ProstStreamSource};
 
-use super::{LogicalSource, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -103,3 +103,5 @@ impl StreamNode for StreamSource {
         ProstStreamNode::Source(SourceNode { source_inner })
     }
 }
+
+impl ExprRewritable for StreamSource {}

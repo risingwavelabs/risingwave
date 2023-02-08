@@ -148,8 +148,6 @@
 - sql: |
     -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now. #4235
     values(round('abc'));
-  batch_plan: |
-    BatchValues { rows: [[Round('abc':Varchar::Float64)]] }
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
@@ -462,7 +460,8 @@
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamNow { output: [now] }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamNow { output: [now] }
 - name: now expression with proj
   sql: |
     create table t (v1 timestamp with time zone);
@@ -475,8 +474,9 @@
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamDynamicFilter { predicate: (t.v1 >= (now - '00:00:02':Interval)), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamProject { exprs: [(now - '00:00:02':Interval)], watermark_columns: [(now - '00:00:02':Interval)] }
-        └─StreamNow { output: [now] }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [(now - '00:00:02':Interval)], watermark_columns: [(now - '00:00:02':Interval)] }
+          └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
@@ -486,13 +486,15 @@
     └─StreamDynamicFilter { predicate: (t.v2 >= now), output: [t.v1, t.v2, t._row_id] }
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t.v2, t._row_id] }
       | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      | └─StreamNow { output: [now] }
-      └─StreamNow { output: [now] }
+      | └─StreamExchange { dist: Broadcast }
+      |   └─StreamNow { output: [now] }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamNow { output: [now] }
 - name: or of two now expression condition
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() or v2 >= now();
-  stream_error: 'Expr error: Invalid parameter now: now expression must be placed in a comparison'
+  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now inside HAVING clause
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -500,12 +502,13 @@
   stream_plan: |
     StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2] }
     └─StreamProject { exprs: [max(t.v1), t.v2] }
-      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [t.v2, max(t.v1), max(t.v1)] }
-        ├─StreamProject { exprs: [t.v2, max(t.v1), max(t.v1)] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [max(t.v1), max(t.v1), t.v2] }
+        ├─StreamProject { exprs: [max(t.v1), max(t.v1), t.v2] }
         | └─StreamHashAgg { group_key: [t.v2], aggs: [count, max(t.v1), max(t.v1)] }
         |   └─StreamExchange { dist: HashShard(t.v2) }
         |     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamNow { output: [now] }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamNow { output: [now] }
 - name: forbid now in group by for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -521,3 +524,31 @@
     create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
   stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)'
+- name: typo pg_teminate_backend
+  sql: |
+    select pg_teminate_backend(1);
+  binder_error: |-
+    Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+- name: regression (#7571) - literal debug display for array with NULL values
+  sql: |
+    select ARRAY[1, null] t;
+  logical_plan: |
+    LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: regression (#7641) -fuzzing test failed at Bind error,types Boolean and Varchar cannot be matched
+  sql: |
+    select false >= 'LN1O0QP1yi' NOT IN (md5('4SeUPZhUbH'))
+  batch_plan: |
+    BatchProject { exprs: [(false:Boolean >= Not(In('LN1O0QP1yi':Varchar, Md5('4SeUPZhUbH':Varchar))))] }
+    └─BatchValues { rows: [[]] }
+- name: const_eval of const expr
+  sql: |
+    create table t(v1 int);
+    select 1 + 2 + v1 from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [((1:Int32 + 2:Int32) + t.v1)] }
+      └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+- name: const_eval of division by 0 error
+  sql: select 1 / 0 t1;

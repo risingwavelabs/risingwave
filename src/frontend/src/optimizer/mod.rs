@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,12 @@ pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
+mod plan_expr_rewriter;
 mod rule;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
+use plan_expr_rewriter::ConstEvalRewriter;
 use plan_rewriter::ShareSourceRewriter;
 use property::Order;
 use risingwave_common::catalog::{Field, Schema};
@@ -48,9 +49,9 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::handler::create_table::DmlFlag;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
+    RewriteExprsRecursive,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
@@ -194,6 +195,10 @@ impl PlanRoot {
 
     /// Apply logical optimization to the plan.
     pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
+        self.gen_optimized_logical_plan_inner(false)
+    }
+
+    fn gen_optimized_logical_plan_inner(&self, for_stream: bool) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -314,6 +319,16 @@ impl PlanRoot {
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // If for stream, push down predicates with now into a left-semi join
+        if for_stream {
+            plan = self.optimize_by_rules(
+                plan,
+                "Push down filter with now into a left semijoin".to_string(),
+                vec![FilterWithNowToJoinRule::create()],
+                ApplyOrder::TopDown,
+            );
         }
 
         // Push down the calculation of inputs of join's condition.
@@ -438,6 +453,16 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        // TODO: SessionTimezone substitution
+        // Const eval of exprs at the last minute
+        // plan = const_eval_exprs(plan)?;
+
+        // let ctx = plan.ctx();
+        // if ctx.is_explain_trace() {
+        //     ctx.trace("Const eval exprs:");
+        //     ctx.trace(plan.explain_to_string().unwrap());
+        // }
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
@@ -542,14 +567,18 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    pub fn gen_optimized_logical_plan_for_stream(&self) -> Result<PlanRef> {
+        self.gen_optimized_logical_plan_inner(true)
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let plan = match self.plan.convention() {
+        let mut plan = match self.plan.convention() {
             Convention::Logical => {
-                let plan = self.gen_optimized_logical_plan()?;
+                let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
@@ -575,14 +604,24 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        // TODO: enable delta join
-        // // Rewrite joins with index to delta join
-        // plan = self.optimize_by_rules(
-        //     plan,
-        //     "To IndexDeltaJoin".to_string(),
-        //     vec![IndexDeltaJoinRule::create()],
-        //     ApplyOrder::BottomUp,
-        // );
+        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+            // TODO: make it a logical optimization.
+            // Rewrite joins with index to delta join
+            plan = self.optimize_by_rules(
+                plan,
+                "To IndexDeltaJoin".to_string(),
+                vec![IndexDeltaJoinRule::create()],
+                ApplyOrder::BottomUp,
+            );
+        }
+
+        // Const eval of exprs at the last minute
+        // plan = const_eval_exprs(plan)?;
+
+        // if ctx.is_explain_trace() {
+        //     ctx.trace("Const eval exprs:");
+        //     ctx.trace(plan.explain_to_string().unwrap());
+        // }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -597,9 +636,8 @@ impl PlanRoot {
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
         row_id_index: Option<usize>,
-        dml_flag: DmlFlag,
+        append_only: bool,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
@@ -607,7 +645,7 @@ impl PlanRoot {
         // Add DML node.
         stream_plan = StreamDml::new(
             stream_plan,
-            dml_flag == DmlFlag::AppendOnly,
+            append_only,
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )
         .into();
@@ -623,7 +661,7 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            handle_pk_conflict,
+            !append_only,
             row_id_index,
             version,
         )
@@ -692,6 +730,17 @@ impl PlanRoot {
     pub fn set_required_dist(&mut self, required_dist: RequiredDist) {
         self.required_dist = required_dist;
     }
+}
+
+#[allow(dead_code)]
+fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
+    let mut const_eval_rewriter = ConstEvalRewriter { error: None };
+
+    let plan = plan.rewrite_exprs_recursive(&mut const_eval_rewriter);
+    if let Some(error) = const_eval_rewriter.error {
+        return Err(error);
+    }
+    Ok(plan)
 }
 
 #[cfg(test)]

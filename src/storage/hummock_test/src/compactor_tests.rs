@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ pub(crate) mod tests {
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
+    use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::filter_key_extractor::{
@@ -43,9 +44,7 @@ pub(crate) mod tests {
     use risingwave_meta::storage::{MemStore, MetaStore};
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::hummock::compactor::{
-        CompactionExecutor, Compactor, CompactorContext, Context,
-    };
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
@@ -162,7 +161,7 @@ pub(crate) mod tests {
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         get_compactor_context_with_filter_key_extractor_manager_impl(
-            storage.options().clone(),
+            storage.storage_config().clone(),
             storage.sstable_store(),
             hummock_meta_client,
             filter_key_extractor_manager,
@@ -175,8 +174,8 @@ pub(crate) mod tests {
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
-        let context = Arc::new(Context {
-            options: options.clone(),
+        CompactorContext {
+            storage_config: options.clone(),
             sstable_store,
             hummock_meta_client: hummock_meta_client.clone(),
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
@@ -189,8 +188,10 @@ pub(crate) mod tests {
                 options.sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
-        });
-        CompactorContext::new(context)
+            compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
+                CompactorRuntimeConfig::default(),
+            )),
+        }
     }
 
     #[tokio::test]
@@ -223,7 +224,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 10,
-            (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
+            (1..129).map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
 
@@ -352,7 +353,7 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 20,
-            (1..129).into_iter().collect_vec(),
+            (1..129).collect_vec(),
         )
         .await;
 
@@ -405,7 +406,7 @@ pub(crate) mod tests {
             .sstable(output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        let target_table_size = storage.options().sstable_size_mb * (1 << 20);
+        let target_table_size = storage.storage_config().sstable_size_mb * (1 << 20);
 
         assert!(
             table.value().meta.estimated_size > target_table_size,
@@ -648,7 +649,7 @@ pub(crate) mod tests {
         );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
-            global_storage.options().clone(),
+            global_storage.storage_config().clone(),
             global_storage.sstable_store(),
             &hummock_meta_client,
             filter_key_extractor_manager.clone(),
@@ -663,9 +664,9 @@ pub(crate) mod tests {
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let (table_id, storage) = if index % 2 == 0 {
-                (drop_table_id, storage_1.clone())
+                (drop_table_id, &storage_1)
             } else {
-                (existing_table_ids, storage_2.clone())
+                (existing_table_ids, &storage_2)
             };
             register_table_ids_to_compaction_group(
                 &hummock_manager_ref,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,14 @@ fn is_division_by_zero_err(db_error: &str) -> bool {
     db_error.contains(&ExprError::DivisionByZero.to_string())
 }
 
+/// `Casting to u32 out of range` occurs when we have functions
+/// which expect non-negative arguments,
+/// e.g. `select 222 << -1`
+// NOTE: If this error occurs too often, perhaps it is better to
+// wrap call sites with `abs(rhs)`, e.g. 222 << abs(-1);
 fn is_numeric_out_of_range_err(db_error: &str) -> bool {
     db_error.contains(&ExprError::NumericOutOfRange.to_string())
+        || db_error.contains("Casting to u32 out of range")
 }
 
 /// Skip queries with unimplemented features
@@ -46,14 +52,18 @@ fn is_nested_loop_join_error(db_error: &str) -> bool {
     db_error.contains("Not supported: streaming nested-loop join")
 }
 
-// FIXME: <https://github.com/risingwavelabs/risingwave/issues/7218#issuecomment-1386462219>
-// This error should not occur, remove once issue is fixed.
-fn is_hash_shuffle_error(db_error: &str) -> bool {
-    db_error.contains("broken hash_shuffle_channel")
-}
-
 fn is_subquery_unnesting_error(db_error: &str) -> bool {
     db_error.contains("Subquery can not be unnested")
+}
+
+/// Can't avoid numeric overflows, we do not eval const expr
+fn is_numeric_overflow_error(db_error: &str) -> bool {
+    db_error.contains("Number") && db_error.contains("overflows")
+}
+
+/// Negative substr error
+fn is_neg_substr_error(db_error: &str) -> bool {
+    db_error.contains("length in substr should be non-negative")
 }
 
 /// Certain errors are permitted to occur. This is because:
@@ -65,7 +75,8 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
         || is_window_error(db_error)
-        || is_hash_shuffle_error(db_error)
         || is_nested_loop_join_error(db_error)
         || is_subquery_unnesting_error(db_error)
+        || is_numeric_overflow_error(db_error)
+        || is_neg_substr_error(db_error)
 }

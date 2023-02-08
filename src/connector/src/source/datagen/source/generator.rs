@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,25 +61,34 @@ impl DatagenEventGenerator {
     pub async fn into_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
+        let mut reach_end = false;
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
             let mut rows_generated_this_second = 0;
             while rows_generated_this_second < self.partition_rows_per_second {
-                let mut msgs = vec![];
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
-                for _ in 0..num_rows_to_generate {
-                    let value = Value::Object(
-                        self.fields_map
-                            .iter_mut()
-                            .map(|(name, field_generator)| {
-                                (name.to_string(), field_generator.generate(self.offset))
-                            })
-                            .collect(),
-                    );
+                let mut msgs = Vec::with_capacity(num_rows_to_generate as usize);
+                'outer: for _ in 0..num_rows_to_generate {
+                    let mut fields = serde_json::Map::with_capacity(self.fields_map.len());
+                    for (name, field_generator) in &mut self.fields_map {
+                        let field = field_generator.generate(self.offset);
+                        // sequence generator will return None when it reaches the end
+                        if field.is_null() {
+                            tracing::info!(
+                                "datagen split {} stop generate, offset {}",
+                                self.split_id,
+                                self.offset
+                            );
+                            reach_end = true;
+                            break 'outer;
+                        }
+                        fields.insert(name.to_string(), field);
+                    }
+                    let value = Value::Object(fields);
                     msgs.push(SourceMessage {
                         payload: Some(Bytes::from(value.to_string())),
                         offset: self.offset.to_string(),
@@ -96,7 +105,13 @@ impl DatagenEventGenerator {
                     self.offset += 1;
                     rows_generated_this_second += 1;
                 }
-                yield msgs;
+                if !msgs.is_empty() {
+                    yield msgs;
+                }
+
+                if reach_end {
+                    return Ok(());
+                }
             }
         }
     }
@@ -115,13 +130,15 @@ mod tests {
         expected_length: usize,
     ) {
         let split_id = format!("{}-{}", split_num, split_index).into();
+        let start = 1;
+        let end = 10;
         let mut fields_map = HashMap::new();
         fields_map.insert(
             "v1".to_string(),
             FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Int32,
-                Some("1".to_string()),
-                Some("10".to_string()),
+                Some(start.to_string()),
+                Some(end.to_string()),
                 split_index,
                 split_num,
             )
@@ -132,8 +149,8 @@ mod tests {
             "v2".to_string(),
             FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Float32,
-                Some("1".to_string()),
-                Some("10".to_string()),
+                Some(start.to_string()),
+                Some(end.to_string()),
                 split_index,
                 split_num,
             )
@@ -150,14 +167,18 @@ mod tests {
         )
         .unwrap();
 
-        let chunk = generator
-            .into_stream()
-            .boxed()
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
+        let mut stream = generator.into_stream().boxed();
+
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(expected_length, chunk.len());
+
+        let empty_chunk = stream.next().await;
+        println!("empty_chunk: {:?}", empty_chunk);
+        if rows_per_second >= (end - start + 1) {
+            assert!(empty_chunk.is_none());
+        } else {
+            assert!(empty_chunk.is_some());
+        }
     }
 
     #[tokio::test]
@@ -176,5 +197,23 @@ mod tests {
         check_sequence_partition_result(3, 0, 10, 4).await;
         check_sequence_partition_result(3, 1, 10, 3).await;
         check_sequence_partition_result(3, 2, 10, 3).await;
+    }
+
+    #[tokio::test]
+    async fn test_one_partition_sequence_reach_end() {
+        check_sequence_partition_result(1, 0, 15, 10).await;
+    }
+
+    #[tokio::test]
+    async fn test_two_partition_sequence_reach_end() {
+        check_sequence_partition_result(2, 0, 15, 5).await;
+        check_sequence_partition_result(2, 1, 15, 5).await;
+    }
+
+    #[tokio::test]
+    async fn test_three_partition_sequence_reach_end() {
+        check_sequence_partition_result(3, 0, 15, 4).await;
+        check_sequence_partition_result(3, 1, 15, 3).await;
+        check_sequence_partition_result(3, 2, 15, 3).await;
     }
 }

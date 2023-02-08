@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,9 +27,9 @@ use crate::monitor::CompactorMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
-pub struct Context {
+pub struct CompactorContext {
     /// Storage configurations.
-    pub options: Arc<StorageConfig>,
+    pub storage_config: Arc<StorageConfig>,
 
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -52,28 +52,32 @@ pub struct Context {
     pub sstable_id_manager: SstableIdManagerRef,
 
     pub task_progress_manager: TaskProgressManagerRef,
+
+    pub compactor_runtime_config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
 }
 
-impl Context {
+impl CompactorContext {
     pub fn new_local_compact_context(
-        options: Arc<StorageConfig>,
+        storage_config: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        compactor_runtime_config: CompactorRuntimeConfig,
     ) -> Self {
-        let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
-            Arc::new(CompactionExecutor::new(None))
-        } else {
-            Arc::new(CompactionExecutor::new(Some(
-                options.share_buffer_compaction_worker_threads_number as usize,
-            )))
-        };
+        let compaction_executor =
+            if storage_config.share_buffer_compaction_worker_threads_number == 0 {
+                Arc::new(CompactionExecutor::new(None))
+            } else {
+                Arc::new(CompactionExecutor::new(Some(
+                    storage_config.share_buffer_compaction_worker_threads_number as usize,
+                )))
+            };
         // not limit memory for local compact
         let memory_limiter = MemoryLimiter::unlimit();
-        Context {
-            options,
+        Self {
+            storage_config,
             hummock_meta_client,
             sstable_store,
             compactor_metrics,
@@ -83,33 +87,11 @@ impl Context {
             read_memory_limiter: memory_limiter,
             sstable_id_manager,
             task_progress_manager: Default::default(),
-        }
-    }
-}
-#[derive(Clone)]
-pub struct CompactorContext {
-    pub context: Arc<Context>,
-    config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
-}
-
-impl CompactorContext {
-    pub fn new(context: Arc<Context>) -> Self {
-        Self::with_config(
-            context,
-            CompactorRuntimeConfig {
-                max_concurrent_task_number: u64::MAX,
-            },
-        )
-    }
-
-    pub fn with_config(context: Arc<Context>, config: CompactorRuntimeConfig) -> Self {
-        Self {
-            context,
-            config: Arc::new(tokio::sync::Mutex::new(config)),
+            compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(compactor_runtime_config)),
         }
     }
 
     pub async fn lock_config(&self) -> tokio::sync::MutexGuard<'_, CompactorRuntimeConfig> {
-        self.config.lock().await
+        self.compactor_runtime_config.lock().await
     }
 }

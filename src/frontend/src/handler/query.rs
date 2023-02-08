@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::types::Format;
 use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -93,7 +94,7 @@ pub fn gen_batch_query_plan(
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
@@ -102,7 +103,7 @@ pub async fn handle_query(
     let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-    let (query, query_mode, output_schema) = {
+    let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
@@ -115,11 +116,12 @@ pub async fn handle_query(
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
-        );
-        let query = plan_fragmenter.split(plan)?;
+            plan,
+        )?;
         context.append_notice(&mut notice);
-        (query, query_mode, schema)
+        (plan_fragmenter, query_mode, schema)
     };
+    let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let pg_descs = output_schema
@@ -132,6 +134,9 @@ pub async fn handle_query(
         .iter()
         .map(|f| f.data_type())
         .collect_vec();
+
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
     let mut row_stream = {
         let query_epoch = session.config().get_query_epoch();
@@ -149,7 +154,7 @@ pub async fn handle_query(
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
-                format,
+                formats,
                 session.clone(),
             )),
             // Local mode do not support cancel tasks.
@@ -157,7 +162,7 @@ pub async fn handle_query(
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
                     distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
-                    format,
+                    formats,
                     session.clone(),
                 ))
             }
@@ -169,16 +174,23 @@ pub async fn handle_query(
         | StatementType::INSERT_RETURNING
         | StatementType::DELETE_RETURNING
         | StatementType::UPDATE_RETURNING => None,
+
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let first_row_set = row_stream
-                .next()
-                .await
-                .expect("compute node should return affected rows in output")
-                .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
+            let first_row_set = row_stream.next().await;
+            let first_row_set = match first_row_set {
+                None => {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "no affected rows in output".to_string(),
+                    )))
+                }
+                Some(row) => {
+                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+                }
+            };
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            if format {
+            if let Format::Binary = first_field_format {
                 Some(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
@@ -197,30 +209,34 @@ pub async fn handle_query(
         _ => unreachable!(),
     };
 
-    // Implicitly flush the writes.
-    // FIXME(bugen): the DMLs with `RETURNING` clause is done only after the `row_stream` is fully
-    // consumed, so implicitly flushing here doesn't work.
-    if session.config().get_implicit_flush() {
-        flush_for_write(&session, stmt_type).await?;
-    }
+    // We need to do some post work after the query is finished and before the `Complete` response
+    // it sent. This is achieved by the `callback` in `PgResponse`.
+    let callback = async move {
+        // Implicitly flush the writes.
+        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+            do_flush(&session).await?;
+        }
 
-    // update some metrics
-    if query_mode == QueryMode::Local {
-        session
-            .env()
-            .frontend_metrics
-            .latency_local_execution
-            .observe(query_start_time.elapsed().as_secs_f64());
+        // update some metrics
+        if query_mode == QueryMode::Local {
+            session
+                .env()
+                .frontend_metrics
+                .latency_local_execution
+                .observe(query_start_time.elapsed().as_secs_f64());
 
-        session
-            .env()
-            .frontend_metrics
-            .query_counter_local_execution
-            .inc();
-    }
+            session
+                .env()
+                .frontend_metrics
+                .query_counter_local_execution
+                .inc();
+        }
 
-    Ok(PgResponse::new_for_stream_with_notice(
-        stmt_type, rows_count, row_stream, pg_descs, notice,
+        Ok(())
+    };
+
+    Ok(PgResponse::new_for_stream_extra(
+        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
     ))
 }
 
@@ -288,11 +304,4 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
-}
-
-pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    if stmt_type.is_dml() {
-        do_flush(session).await?;
-    }
-    Ok(())
 }

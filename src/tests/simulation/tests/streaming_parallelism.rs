@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,22 +25,17 @@ async fn test_streaming_parallelism_default() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
-    let materialize_fragments = cluster
-        .locate_fragments([identity_contains("materialize")])
+    let materialize_fragment = cluster
+        .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragments.len(), 1);
-    assert_eq!(
-        materialize_fragments[0].inner.actors.len(),
-        default_parallelism
-    );
+    assert_eq!(materialize_fragment.inner.actors.len(), default_parallelism);
     Ok(())
 }
 
 async fn run_sqls_in_session(cluster: &Cluster, sqls: Vec<String>) {
-    let frontend = cluster.rand_frontend_ip();
     cluster
         .run_on_client(async move {
-            let mut session = RisingWave::connect(frontend, "dev".to_string())
+            let mut session = RisingWave::connect("frontend".into(), "dev".into())
                 .await
                 .expect("failed to connect to RisingWave");
             for sql in sqls {
@@ -64,14 +59,10 @@ async fn test_streaming_parallelism_set_some() -> Result<()> {
         ],
     )
     .await;
-    let materialize_fragments = cluster
-        .locate_fragments([identity_contains("materialize")])
+    let materialize_fragment = cluster
+        .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragments.len(), 1);
-    assert_eq!(
-        materialize_fragments[0].inner.actors.len(),
-        target_parallelism
-    );
+    assert_eq!(materialize_fragment.inner.actors.len(), target_parallelism);
     Ok(())
 }
 
@@ -87,14 +78,10 @@ async fn test_streaming_parallelism_set_zero() -> Result<()> {
         ],
     )
     .await;
-    let materialize_fragments = cluster
-        .locate_fragments([identity_contains("materialize")])
+    let materialize_fragment = cluster
+        .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragments.len(), 1);
-    assert_eq!(
-        materialize_fragments[0].inner.actors.len(),
-        default_parallelism
-    );
+    assert_eq!(materialize_fragment.inner.actors.len(), default_parallelism);
     Ok(())
 }
 

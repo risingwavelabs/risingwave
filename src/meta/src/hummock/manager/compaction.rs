@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, Hummock
 use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::CompactStatus;
-use crate::hummock::error::Result;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 use crate::model::BTreeMapTransaction;
@@ -41,10 +40,10 @@ impl Compaction {
     pub fn cancel_assigned_tasks_for_context_ids(
         &mut self,
         context_ids: &[HummockContextId],
-    ) -> Result<(
+    ) -> (
         BTreeMapTransaction<'_, CompactionGroupId, CompactStatus>,
         BTreeMapTransaction<'_, HummockCompactionTaskId, CompactTaskAssignment>,
-    )> {
+    ) {
         let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut self.compact_task_assignment);
@@ -84,7 +83,7 @@ impl Compaction {
                 compact_task_assignment.remove(task_id);
             }
         }
-        Ok((compact_statuses, compact_task_assignment))
+        (compact_statuses, compact_task_assignment)
     }
 }
 
@@ -179,9 +178,7 @@ mod tests {
         );
 
         // irrelevant context id
-        let (compact_status, assignment) = compaction
-            .cancel_assigned_tasks_for_context_ids(&[22])
-            .unwrap();
+        let (compact_status, assignment) = compaction.cancel_assigned_tasks_for_context_ids(&[22]);
         compact_status.commit_memory();
         assignment.commit_memory();
         assert_eq!(
@@ -203,9 +200,7 @@ mod tests {
         );
 
         // target context id
-        let (compact_status, assignment) = compaction
-            .cancel_assigned_tasks_for_context_ids(&[11])
-            .unwrap();
+        let (compact_status, assignment) = compaction.cancel_assigned_tasks_for_context_ids(&[11]);
         compact_status.commit_memory();
         assignment.commit_memory();
         assert_eq!(

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_common::catalog::Field;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
@@ -93,3 +93,5 @@ impl StreamNode for StreamSink {
         })
     }
 }
+
+impl ExprRewritable for StreamSink {}

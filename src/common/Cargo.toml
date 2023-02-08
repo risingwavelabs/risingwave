@@ -9,8 +9,8 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
-arrow-array = { git = "https://github.com/apache/arrow-rs", rev = "6139d898" }
-arrow-schema = { git = "https://github.com/apache/arrow-rs", rev = "6139d898" }
+arrow-array = "31"
+arrow-schema = "31"
 async-stream = "0.3"
 async-trait = "0.1"
 auto_enums = "0.7"
@@ -19,6 +19,7 @@ byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
+clap = { version = "3", features = ["derive"] }
 comfy-table = "6"
 crc32fast = "1"
 derivative = "2"

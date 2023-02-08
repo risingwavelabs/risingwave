@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::pin_version_response;
+use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::backup_reader::BackupReader;
@@ -84,7 +84,7 @@ pub async fn prepare_first_valid_version(
     .await;
     observer_manager.start().await;
     let hummock_version = match rx.recv().await {
-        Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
+        Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(
             version,
         ))) => version,
         _ => unreachable!("should be full version"),
@@ -205,19 +205,13 @@ impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalState
     }
 }
 
-impl<G: Clone, L: Clone> Clone for LocalGlobalStateStoreHolder<G, L> {
+impl<G, L> Clone for LocalGlobalStateStoreHolder<G, L> {
     fn clone(&self) -> Self {
-        Self {
-            local: self.local.clone(),
-            global: self.global.clone(),
-        }
+        unimplemented!()
     }
 }
 
-impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G>
-where
-    <G as StateStore>::Local: Clone,
-{
+impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G> {
     type Local = G::Local;
 
     type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;

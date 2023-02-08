@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -80,6 +80,13 @@ impl<S: MetaStore> SnapshotManager<S> {
             None => self.hummock_manager.unpin_snapshot(META_NODE_ID).await?,
         }
 
+        Ok(())
+    }
+
+    pub async fn unpin_all(&self) -> MetaResult<()> {
+        let mut snapshots = self.snapshots.lock().await;
+        self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
+        snapshots.clear();
         Ok(())
     }
 }

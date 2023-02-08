@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -254,7 +254,7 @@ impl StreamChunk {
         if column_mapping
             .iter()
             .copied()
-            .eq((0..self.data.columns().len()).into_iter())
+            .eq(0..self.data.columns().len())
         {
             // no reorder is needed
             self

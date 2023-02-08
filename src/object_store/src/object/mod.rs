@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -791,7 +791,6 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
-    object_store_use_batch_delete: bool,
     ident: &str,
 ) -> ObjectStoreImpl {
     match url {
@@ -811,7 +810,6 @@ pub async fn parse_remote_object_store(
                         .unwrap()
                         .to_string(),
                     metrics.clone(),
-                    object_store_use_batch_delete,
                 )
                 .await
                 .monitored(metrics),

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source_executor_v2::SourceExecutorV2;
+use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
 };
@@ -162,7 +162,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let actor_ctx = ActorContext::create(0x3f3f3f);
 
     // Create a `SourceExecutor` to read the changes.
-    let source_executor = SourceExecutorV2::<PanicStateStore>::new(
+    let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
         all_schema.clone(),
         pk_indices.clone(),

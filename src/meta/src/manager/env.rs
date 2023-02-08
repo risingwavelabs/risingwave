@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use crate::manager::{
@@ -48,8 +47,6 @@ where
 
     /// idle status manager.
     idle_manager: IdleManagerRef,
-
-    info: MetaLeaderInfo,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -127,7 +124,7 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -140,7 +137,6 @@ where
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info,
             opts: opts.into(),
         }
     }
@@ -184,10 +180,6 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
-
-    pub fn get_leader_info(&self) -> MetaLeaderInfo {
-        self.info.clone()
-    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -199,7 +191,6 @@ impl MetaSrvEnv<MemStore> {
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let leader_info = MetaLeaderInfo::default();
         let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
@@ -212,7 +203,6 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info: leader_info,
             opts,
         }
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -502,7 +502,6 @@ impl StateStoreImpl {
                 let remote_object_store = parse_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
-                    config.object_store_use_batch_delete,
                     "Hummock",
                 )
                 .await;

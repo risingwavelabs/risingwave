@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,14 +58,14 @@ impl CompactorService {
                 "compactor cannot use in-memory hummock if remote object store is not provided"
             ));
         }
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
-            .arg("--client-address")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")

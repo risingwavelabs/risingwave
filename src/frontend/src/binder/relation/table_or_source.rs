@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 use risingwave_sqlparser::parser::Parser;
 
+use super::BoundShare;
 use crate::binder::relation::BoundSubquery;
 use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
@@ -231,8 +232,17 @@ impl Binder {
             ))
         })?;
         let columns = view_catalog.columns.clone();
+        let share_id = match self.shared_views.get(&view_catalog.id) {
+            Some(share_id) => *share_id,
+            None => {
+                let share_id = self.next_share_id();
+                self.shared_views.insert(view_catalog.id, share_id);
+                share_id
+            }
+        };
+        let input = Relation::Subquery(Box::new(BoundSubquery { query }));
         Ok((
-            Relation::Subquery(Box::new(BoundSubquery { query })),
+            Relation::Share(Box::new(BoundShare { share_id, input })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
     }

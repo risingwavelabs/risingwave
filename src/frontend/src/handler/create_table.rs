@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,14 +41,6 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::stream_fragmenter::build_graph;
 use crate::{Binder, TableCatalog, WithOptions};
-
-#[derive(PartialEq, Clone, Debug)]
-pub enum DmlFlag {
-    /// used for `create table`
-    All,
-    /// used for `create table with (append_only = true)`
-    AppendOnly,
-}
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
 #[derive(Debug)]
@@ -434,20 +426,21 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    // Handle pk conflict in materialize executor only when the table is not append-only.
-    let (handle_pk_conflict, dml_flag) = if context.with_options().append_only() {
-        (false, DmlFlag::AppendOnly)
-    } else {
-        (true, DmlFlag::All)
-    };
+    let append_only = context.with_options().append_only();
+
+    if append_only && row_id_index.is_none() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "PRIMARY KEY constraint can not be appiled on a append only table.".to_owned(),
+        )
+        .into());
+    }
 
     let materialize = plan_root.gen_table_plan(
         name,
         columns,
         definition,
-        handle_pk_conflict,
         row_id_index,
-        dml_flag,
+        append_only,
         version,
     )?;
 

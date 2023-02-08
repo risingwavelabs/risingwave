@@ -6,11 +6,14 @@ ARG RUST_TOOLCHAIN
 
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel \
-    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat \
+    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \
     maven -yy \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 SHELL ["/bin/bash", "-c"]
+
+RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64>>~/.bashrc
+RUN echo source ~/.bashrc>>~/.bashrc
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 

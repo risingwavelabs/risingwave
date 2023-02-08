@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -748,9 +748,9 @@ where
         });
 
         let result = try_join_all(collect_futures).await;
-        barrier_complete_tx
+        let _ = barrier_complete_tx
             .send((prev_epoch, result.map_err(Into::into)))
-            .unwrap();
+            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
     }
 
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
@@ -822,6 +822,10 @@ where
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             *tracker = CreateMviewProgressTracker::new();
+            self.snapshot_manager
+                .unpin_all()
+                .await
+                .expect("unpin meta's snapshots");
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state
@@ -847,7 +851,7 @@ where
                 // We must ensure all epochs are committed in ascending order,
                 // because the storage engine will query from new to old in the order in which
                 // the L0 layer files are generated.
-                // See https://github.com/singularity-data/risingwave/issues/1251
+                // See https://github.com/risingwave-labs/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
                 let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
                 // hummock_manager commit epoch.

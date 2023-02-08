@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::CompactionConfig;
-use tokio::sync::RwLock;
+use tokio::sync::{OnceCell, RwLock};
 
 use super::versioning::Versioning;
 use super::write_lock;
@@ -359,24 +359,32 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
                 }
             }
         }
+        // All NewCompactionGroup pairs are mapped to one new compaction group.
+        let new_compaction_group_id: OnceCell<CompactionGroupId> = OnceCell::new();
         let mut compaction_group_id_set = self.compaction_groups.keys().cloned().collect_vec();
         let old_id_cnt = compaction_group_id_set.len();
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs.iter_mut() {
             let mut compaction_group =
                 if *compaction_group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
-                    *compaction_group_id = self
-                        .id_generator_ref
-                        .generate::<{ IdCategory::CompactionGroup }>()
+                    *compaction_group_id = *new_compaction_group_id
+                        .get_or_try_init(|| async {
+                            self.id_generator_ref
+                                .generate::<{ IdCategory::CompactionGroup }>()
+                                .await
+                                .map(|new_id| {
+                                    compaction_group_id_set.push(new_id);
+                                    compaction_groups.insert(
+                                        new_id,
+                                        CompactionGroup::new(
+                                            new_id,
+                                            CompactionConfigBuilder::new().build(),
+                                        ),
+                                    );
+                                    new_id
+                                })
+                        })
                         .await?;
-                    compaction_group_id_set.push(*compaction_group_id);
-                    compaction_groups.insert(
-                        *compaction_group_id,
-                        CompactionGroup::new(
-                            *compaction_group_id,
-                            CompactionConfigBuilder::new().build(),
-                        ),
-                    );
                     compaction_groups.get_mut(*compaction_group_id).unwrap()
                 } else {
                     compaction_groups
@@ -426,11 +434,12 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
         let mut remove_some_group = false;
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
-            let compaction_group_id = self
-                .index
-                .get(table_id)
-                .cloned()
-                .ok_or(Error::InvalidCompactionGroupMember(*table_id))?;
+            let compaction_group_id = match self.index.get(table_id).cloned() {
+                None => {
+                    continue;
+                }
+                Some(id) => id,
+            };
             let mut compaction_group = compaction_groups
                 .get_mut(compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
@@ -725,7 +734,6 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
-    use risingwave_pb::stream_plan::StreamEnvironment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManagerInner;
     use crate::hummock::manager::versioning::Versioning;
@@ -855,7 +863,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager() {
         let (_, compaction_group_manager, ..) = setup_compute_env(8080).await;
-        let table_fragment_1 = TableFragments::new(
+        let table_fragment_1 = TableFragments::for_test(
             TableId::new(10),
             BTreeMap::from([(
                 1,
@@ -865,9 +873,8 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            StreamEnvironment::default(),
         );
-        let table_fragment_2 = TableFragments::new(
+        let table_fragment_2 = TableFragments::for_test(
             TableId::new(20),
             BTreeMap::from([(
                 2,
@@ -877,7 +884,6 @@ mod tests {
                     ..Default::default()
                 },
             )]),
-            StreamEnvironment::default(),
         );
 
         // Test register_table_fragments
@@ -934,7 +940,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
-        assert_eq!(group_number().await, 6);
+        assert_eq!(group_number().await, 3);
 
         // Test `StaticCompactionGroupId::NewCompactionGroup` in `unregister_table_fragments`
         compaction_group_manager
