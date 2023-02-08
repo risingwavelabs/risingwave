@@ -453,11 +453,12 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
-        // SessionTimezone substitution
+        // TODO: SessionTimezone substitution
         // Const eval of exprs at the last minute
         // plan = const_eval_exprs(plan)?;
 
-        // if explain_trace {
+        // let ctx = plan.ctx();
+        // if ctx.is_explain_trace() {
         //     ctx.trace("Const eval exprs:");
         //     ctx.trace(plan.explain_to_string().unwrap());
         // }
@@ -613,6 +614,14 @@ impl PlanRoot {
                 ApplyOrder::BottomUp,
             );
         }
+
+        // Const eval of exprs at the last minute
+        // plan = const_eval_exprs(plan)?;
+
+        // if ctx.is_explain_trace() {
+        //     ctx.trace("Const eval exprs:");
+        //     ctx.trace(plan.explain_to_string().unwrap());
+        // }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
