@@ -72,14 +72,21 @@ impl DatagenEventGenerator {
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
                 for _ in 0..num_rows_to_generate {
-                    let value = Value::Object(
-                        self.fields_map
-                            .iter_mut()
-                            .map(|(name, field_generator)| {
-                                (name.to_string(), field_generator.generate(self.offset))
-                            })
-                            .collect(),
-                    );
+                    let mut fields = serde_json::Map::with_capacity(self.fields_map.len());
+                    for (name, field_generator) in &mut self.fields_map {
+                        let field = field_generator.generate(self.offset);
+                        // sequence generator will return None when it reaches the end
+                        if field.is_null() {
+                            tracing::info!(
+                                "datagen split {} stop generate, offset {}",
+                                self.split_id,
+                                self.offset
+                            );
+                            return Ok(());
+                        }
+                        fields.insert(name.to_string(), field);
+                    }
+                    let value = Value::Object(fields);
                     msgs.push(SourceMessage {
                         payload: Some(Bytes::from(value.to_string())),
                         offset: self.offset.to_string(),
