@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_expr::vector_op::cast::literal_parsing;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
@@ -114,10 +115,25 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_nested(child, target, allows);
         }
+        if child.is_unknown() {
+            // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
+            let literal = child.as_literal().unwrap();
+            let datum = literal
+                .get_data()
+                .as_ref()
+                .map(|scalar| {
+                    let s = scalar.as_utf8();
+                    literal_parsing(&target, s)
+                })
+                .transpose();
+            if let Ok(datum) = datum {
+                return Ok(Literal::new(datum, target).into());
+            }
+            // else when eager parsing fails, just proceed as normal.
+            // Some callers are not ready to handle `'a'::int` error here.
+        }
         let source = child.return_type();
-        if child.is_null() {
-            Ok(Literal::new(None, target).into())
-        } else if source == target {
+        if source == target {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.

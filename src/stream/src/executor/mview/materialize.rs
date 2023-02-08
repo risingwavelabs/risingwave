@@ -574,6 +574,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -690,6 +691,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -822,6 +824,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(

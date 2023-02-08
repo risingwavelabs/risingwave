@@ -38,6 +38,18 @@ app.get("/materialized_views", (req, res, next) => {
   res.json(require("./mock/materialized_views.json"))
 })
 
+app.get("/tables", (req, res, next) => {
+  res.json(require("./mock/tables.json"))
+})
+
+app.get("/indexes", (req, res, next) => {
+  res.json(require("./mock/indexes.json"))
+})
+
+app.get("/internal_tables", (req, res, next) => {
+  res.json(require("./mock/internal_tables.json"))
+})
+
 app.get("/sinks", (req, res, next) => {
   res.json(require("./mock/sinks.json"))
 })

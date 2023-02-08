@@ -10,6 +10,7 @@ import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message TelemetryInfoRequest {
@@ -97,6 +98,8 @@ message TableFragments {
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+
+  stream_plan.StreamEnvironment env = 6;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -130,6 +133,7 @@ message ListTableFragmentsResponse {
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;
+    stream_plan.StreamEnvironment env = 2;
   }
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
