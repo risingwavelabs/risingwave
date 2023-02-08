@@ -45,13 +45,6 @@
   before:
   - create_sources
   sql: |
-    CREATE MATERIALIZED VIEW nexmark_q0
-      AS
-    SELECT auction, bidder, price, date_time FROM bid;
-- id: nexmark_q0
-  before:
-  - create_sources
-  sql: |
     SELECT auction, bidder, price, date_time FROM bid;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
