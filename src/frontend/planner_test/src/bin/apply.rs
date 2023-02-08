@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     std::panic::set_hook(Box::new(move |e| {
         let backtrace = Backtrace::new();
         println!(
-            "{}{}{}{}{}\nBACKTRACE{:?}\n{e}",
+            "{}{}{}{}{}\n{:?}\n{e}",
             style("ERROR: ").red().bold(),
             style("apply-planner-test").yellow(),
             style(" panicked! Try ").red().bold(),
