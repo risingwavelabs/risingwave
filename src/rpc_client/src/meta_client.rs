@@ -1240,7 +1240,7 @@ impl GrpcMetaClient {
             match Self::connect_to_endpoint(endpoint).await {
                 Ok(channel) => {
                     tracing::info!("Connect to meta server via service at {} successfully", addr);
-                    return Ok((channel, addr));
+                    Ok((channel, addr))
                 }
                 Err(e) => {
                     tracing::warn!(
