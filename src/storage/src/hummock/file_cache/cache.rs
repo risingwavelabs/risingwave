@@ -16,8 +16,8 @@ use std::collections::hash_map::RandomState;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::cache::LruCache;
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::Notify;
 
 use super::buffer::TwoLevelBuffer;

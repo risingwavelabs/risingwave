@@ -16,12 +16,12 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use nix::sys::statfs::{
     statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
 };
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::Instrument;
 
