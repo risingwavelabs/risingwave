@@ -113,7 +113,7 @@ impl StreamNode for StreamHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
 
             is_append_only: self.input().append_only(),

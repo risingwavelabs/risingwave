@@ -538,7 +538,7 @@ pub fn to_stream_prost_body(
                 agg_calls: me
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x))
+                    .map(PlanAggCall::to_protobuf)
                     .collect(),
                 distribution_key: base
                     .dist
@@ -584,7 +584,7 @@ pub fn to_stream_prost_body(
                     .core
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x))
+                    .map(PlanAggCall::to_protobuf)
                     .collect(),
 
                 is_append_only: me.core.input.0.append_only,
@@ -672,7 +672,7 @@ pub fn to_stream_prost_body(
                 agg_calls: me
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x))
+                    .map(PlanAggCall::to_protobuf)
                     .collect(),
                 distribution_key: base
                     .dist

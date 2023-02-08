@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
-use crate::expr::{CorrelatedId, ExprImpl, ExprRewriter, SessionTimezone};
+use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
