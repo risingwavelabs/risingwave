@@ -26,6 +26,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -281,8 +282,10 @@ impl StreamActorBuilder {
             // For other nodes, visit the children recursively.
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                for (input, new_input) in
-                    stream_node.input.iter().zip_eq(&mut new_stream_node.input)
+                for (input, new_input) in stream_node
+                    .input
+                    .iter()
+                    .zip_eq_fast(&mut new_stream_node.input)
                 {
                     *new_input = self.rewrite_inner(input, depth + 1)?;
                 }
@@ -491,7 +494,7 @@ impl ActorGraphBuildStateInner {
                 for (upstream_id, downstream_id) in upstream
                     .actor_ids
                     .iter()
-                    .zip_eq(downstream.actor_ids.iter())
+                    .zip_eq_fast(downstream.actor_ids.iter())
                 {
                     // Assert that the each actor pair is in the same location.
                     let upstream_location = self.get_location(*upstream_id);
