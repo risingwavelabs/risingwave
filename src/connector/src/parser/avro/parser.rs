@@ -297,26 +297,26 @@ fn from_avro_value(value: Value) -> Result<Datum> {
                 millis / 1_000,
                 (millis % 1_000) as u32 * 1_000_000,
             )
-                .map_err(|e| {
-                    let err_msg = format!(
-                        "avro parse error.wrong timestamp millis value {}, err {:?}",
-                        millis, e
-                    );
-                    RwError::from(InternalError(err_msg))
-                })?,
+            .map_err(|e| {
+                let err_msg = format!(
+                    "avro parse error.wrong timestamp millis value {}, err {:?}",
+                    millis, e
+                );
+                RwError::from(InternalError(err_msg))
+            })?,
         ),
         Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
             NaiveDateTimeWrapper::with_secs_nsecs(
                 micros / 1_000_000,
                 (micros % 1_000_000) as u32 * 1_000,
             )
-                .map_err(|e| {
-                    let err_msg = format!(
-                        "avro parse error.wrong timestamp micros value {}, err {:?}",
-                        micros, e
-                    );
-                    RwError::from(InternalError(err_msg))
-                })?,
+            .map_err(|e| {
+                let err_msg = format!(
+                    "avro parse error.wrong timestamp micros value {}, err {:?}",
+                    micros, e
+                );
+                RwError::from(InternalError(err_msg))
+            })?,
         ),
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
@@ -492,7 +492,7 @@ mod test {
                             millis / 1000,
                             (millis % 1000) as u32 * 1_000_000,
                         )
-                            .unwrap(),
+                        .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -502,7 +502,7 @@ mod test {
                             micros / 1_000_000,
                             (micros % 1_000_000) as u32 * 1_000,
                         )
-                            .unwrap(),
+                        .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
