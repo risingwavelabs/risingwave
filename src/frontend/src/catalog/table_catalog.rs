@@ -307,8 +307,8 @@ impl TableCatalog {
     pub fn to_internal_table_prost(&self) -> ProstTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
-            SchemaId::placeholder() as u32,
-            DatabaseId::placeholder() as u32,
+            SchemaId::placeholder().schema_id,
+            DatabaseId::placeholder().database_id,
         )
     }
 
