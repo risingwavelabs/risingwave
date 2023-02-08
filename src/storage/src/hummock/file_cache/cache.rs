@@ -101,8 +101,8 @@ where
 
                 for ((key, encoded_value_len), slot) in keys
                     .into_iter()
-                    .zip_eq(encoded_value_lens.into_iter())
-                    .zip_eq(slots.into_iter())
+                    .zip_eq_fast(encoded_value_lens.into_iter())
+                    .zip_eq_fast(slots.into_iter())
                 {
                     let hash = self.hash_builder.hash_one(&key);
                     self.indices.insert(

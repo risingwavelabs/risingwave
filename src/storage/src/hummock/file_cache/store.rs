@@ -200,7 +200,7 @@ where
             .instrument(tracing::trace_span!("meta_write_lock_update_slots"))
             .await;
 
-        for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
+        for (key, bloc) in self.keys.iter().zip_eq_fast(self.blocs.iter()) {
             slots.push(guard.insert(key, bloc)?);
         }
 
