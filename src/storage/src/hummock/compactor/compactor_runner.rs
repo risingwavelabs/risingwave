@@ -43,14 +43,14 @@ pub struct CompactorRunner {
 
 impl CompactorRunner {
     pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
-        let max_target_file_size = context.storage_config.sstable_size_mb as usize * (1 << 20);
+        let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
         let total_file_size = task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|table| table.file_size)
             .sum::<u64>();
-        let mut options: SstableBuilderOptions = context.storage_config.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,

@@ -36,6 +36,7 @@ use risingwave_storage::hummock::{
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tracing::info;
@@ -85,24 +86,24 @@ pub async fn compactor_serve(
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
-    let storage_config = Arc::new(config.storage);
+    let storage_opts = Arc::new(StorageOpts::from(&config));
     let object_store = Arc::new(
         parse_remote_object_store(
-            storage_config
+            storage_opts
                 .state_store
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
-            storage_config.object_store_use_batch_delete,
+            storage_opts.object_store_use_batch_delete,
             "Hummock",
         )
         .await,
     );
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,
-        storage_config.data_directory.to_string(),
+        storage_opts.data_directory.to_string(),
         1 << 20, // set 1MB memory to avoid panic.
-        storage_config.meta_cache_capacity_mb * (1 << 20),
+        storage_opts.meta_cache_capacity_mb * (1 << 20),
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
@@ -111,10 +112,10 @@ pub async fn compactor_serve(
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
     let observer_join_handle = observer_manager.start().await;
-    let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
+    let output_limit_mb = storage_opts.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
-    let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
-    let max_concurrent_task_number = storage_config.max_concurrent_compaction_task_number;
+    let input_limit_mb = storage_opts.compactor_memory_limit_mb as u64 / 2;
+    let max_concurrent_task_number = storage_opts.max_concurrent_compaction_task_number;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
         sstable_store.clone(),
@@ -123,10 +124,10 @@ pub async fn compactor_serve(
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_id_manager = Arc::new(SstableIdManager::new(
         hummock_meta_client.clone(),
-        storage_config.sstable_id_remote_fetch_number,
+        storage_opts.sstable_id_remote_fetch_number,
     ));
     let compactor_context = Arc::new(CompactorContext {
-        storage_config,
+        storage_opts,
         hummock_meta_client: hummock_meta_client.clone(),
         sstable_store: sstable_store.clone(),
         compactor_metrics,

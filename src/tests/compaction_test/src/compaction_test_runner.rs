@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -26,7 +26,7 @@ use clap::Parser;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, StorageConfig, NO_OVERRIDE};
+use risingwave_common::config::{load_config, NO_OVERRIDE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
@@ -38,6 +38,7 @@ use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
@@ -349,9 +350,8 @@ async fn start_replay(
     }
 
     // Creates a hummock state store *after* we reset the hummock version
-    let storage_config = Arc::new(config.storage.clone());
-    let hummock =
-        create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
+    let storage_opts = Arc::new(StorageOpts::from(&config));
+    let hummock = create_hummock_store_with_metrics(&meta_client, storage_opts, &opts).await?;
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
@@ -677,7 +677,7 @@ struct StorageMetrics {
 
 pub async fn create_hummock_store_with_metrics(
     meta_client: &MetaClient,
-    storage_config: Arc<StorageConfig>,
+    storage_opts: Arc<StorageOpts>,
     opts: &CompactionTestOpts,
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
     let metrics = StorageMetrics {
@@ -687,15 +687,10 @@ pub async fn create_hummock_store_with_metrics(
         storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
         compactor_metrics: Arc::new(CompactorMetrics::unused()),
     };
-    let rw_config = RwConfig {
-        storage: storage_config.deref().clone(),
-        ..Default::default()
-    };
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
-        "",
-        &rw_config,
+        storage_opts,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),
