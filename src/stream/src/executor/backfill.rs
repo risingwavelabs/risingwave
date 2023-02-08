@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::executor::PkIndices;
+use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
@@ -232,7 +232,7 @@ where
                                 upstream_chunk_buffer.push(chunk.compact());
                             }
                             Message::Watermark(_) => {
-                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                                // Ignore watermark during backfill.
                             }
                         }
                     }
@@ -381,7 +381,12 @@ where
 
     fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Message {
         match msg {
-            Message::Barrier(_) | Message::Watermark(_) => msg,
+            Message::Barrier(_) => msg,
+            Message::Watermark(watermark) => Message::Watermark(Watermark {
+                col_idx: upstream_indices[watermark.col_idx],
+                data_type: watermark.data_type,
+                val: watermark.val,
+            }),
             Message::Chunk(chunk) => Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)),
         }
     }

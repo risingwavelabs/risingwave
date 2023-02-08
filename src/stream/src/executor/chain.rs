@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::PkIndices;
+use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -114,8 +114,12 @@ impl ChainExecutor {
         #[for_await]
         for msg in upstream {
             match msg? {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(watermark) => {
+                    yield Message::Watermark(Watermark {
+                        col_idx: self.upstream_indices[watermark.col_idx],
+                        data_type: watermark.data_type,
+                        val: watermark.val,
+                    });
                 }
                 Message::Chunk(chunk) => {
                     yield Message::Chunk(mapping(&self.upstream_indices, chunk));

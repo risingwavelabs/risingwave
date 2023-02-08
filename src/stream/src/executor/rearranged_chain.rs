@@ -25,7 +25,7 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
-use crate::executor::PkIndices;
+use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -51,9 +51,11 @@ pub struct RearrangedChainExecutor {
 
 fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
     match msg {
-        Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-        }
+        Message::Watermark(watermark) => Message::Watermark(Watermark {
+            col_idx: upstream_indices[watermark.col_idx],
+            data_type: watermark.data_type,
+            val: watermark.val,
+        }),
 
         Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
@@ -63,7 +65,7 @@ fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
                 .collect();
             Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
         }
-        _ => msg,
+        Message::Barrier(_) => msg,
     }
 }
 
@@ -72,12 +74,14 @@ enum RearrangedMessage {
     RearrangedBarrier(Barrier),
     PhantomBarrier(Barrier),
     Chunk(StreamChunk),
+    // This watermark is just a place holder.
+    Watermark,
 }
 
 impl RearrangedMessage {
     fn phantom_into(self) -> Option<Message> {
         match self {
-            RearrangedMessage::RearrangedBarrier(_) => None,
+            RearrangedMessage::RearrangedBarrier(_) | RearrangedMessage::Watermark => None,
             RearrangedMessage::PhantomBarrier(barrier) => Message::Barrier(barrier).into(),
             RearrangedMessage::Chunk(chunk) => Message::Chunk(chunk).into(),
         }
@@ -87,10 +91,7 @@ impl RearrangedMessage {
 impl RearrangedMessage {
     fn rearranged_from(msg: Message) -> Self {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-            }
-
+            Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::RearrangedBarrier(barrier),
         }
@@ -98,10 +99,7 @@ impl RearrangedMessage {
 
     fn phantom_from(msg: Message) -> Self {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-            }
-
+            Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::PhantomBarrier(barrier),
         }
@@ -219,6 +217,9 @@ impl RearrangedChainExecutor {
                         yield Message::Barrier(barrier);
                     }
                     RearrangedMessage::Chunk(chunk) => yield Message::Chunk(chunk),
+                    RearrangedMessage::Watermark => {
+                        // Ignore watermark during snapshot consumption.
+                    }
                 }
             }
 
