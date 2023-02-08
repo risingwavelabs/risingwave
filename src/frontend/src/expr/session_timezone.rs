@@ -189,7 +189,7 @@ impl SessionTimezone {
                     .into();
                     let interval_non_date_part = FunctionCall::new_unchecked(
                         ExprType::Subtract,
-                        vec![interval.clone(), interval_date_part.clone()],
+                        vec![interval, interval_date_part.clone()],
                         DataType::Interval,
                     )
                     .into();
@@ -197,7 +197,7 @@ impl SessionTimezone {
                         .with_timezone(ExprType::Cast, &vec![orig_timestamptz], DataType::Timestamp)
                         .unwrap();
                     let timestamp_op_date_part = FunctionCall::new_unchecked(
-                        func_type.clone(),
+                        func_type,
                         vec![timestamp, interval_date_part],
                         DataType::Timestamp,
                     )
@@ -210,7 +210,7 @@ impl SessionTimezone {
                         )
                         .unwrap();
                     let timestamptz_op_non_date_part = FunctionCall::new_unchecked(
-                        func_type.clone(),
+                        func_type,
                         vec![timestamptz, interval_non_date_part],
                         DataType::Timestamptz,
                     )
