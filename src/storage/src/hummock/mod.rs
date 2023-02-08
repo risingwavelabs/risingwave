@@ -417,6 +417,7 @@ pub fn hit_sstable_bloom_filter(
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
+
     let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash);
 
     if surely_not_have {
@@ -435,10 +436,9 @@ pub async fn get_from_order_sorted_uncommitted_data(
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
-    let dist_key_hash = read_options
-        .prefix_hint
-        .as_ref()
-        .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+    let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+        Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+    });
 
     let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 

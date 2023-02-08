@@ -256,6 +256,11 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn watermark_columns(&self) -> FixedBitSet {
+        let watermark_columns = &self.table_desc().watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    }
+
     pub fn to_index_scan(
         &self,
         index_name: &str,
@@ -451,6 +456,10 @@ impl ColPrunable for LogicalScan {
 }
 
 impl ExprRewritable for LogicalScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);

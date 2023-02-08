@@ -380,6 +380,7 @@ pub(crate) mod tests {
     use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
+    use fixedbitset::FixedBitSet;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
@@ -482,6 +483,7 @@ pub(crate) mod tests {
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],
                 read_prefix_len_hint: 0,
+                watermark_columns: FixedBitSet::with_capacity(3),
             }),
             vec![],
             ctx,
@@ -546,7 +548,7 @@ pub(crate) mod tests {
             ),
         )
         .into();
-        let batch_exchange_node3: PlanRef = BatchExchange::new(
+        let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
             Distribution::Single,
@@ -590,8 +592,13 @@ pub(crate) mod tests {
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::new(worker_node_manager, catalog_reader);
-        fragmenter.split(batch_exchange_node3.clone()).unwrap()
+        let fragmenter = BatchPlanFragmenter::new(
+            worker_node_manager,
+            catalog_reader,
+            batch_exchange_node.clone(),
+        )
+        .unwrap();
+        fragmenter.generate_complete_query().await.unwrap()
     }
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {

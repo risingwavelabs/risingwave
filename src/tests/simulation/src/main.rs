@@ -163,14 +163,15 @@ async fn main() {
     );
 
     if let Some(datadir) = args.kafka_datadir {
-        cluster.create_kafka_producer(&datadir);
+        cluster.create_kafka_producer(&datadir).await;
     }
 
     if let Some(count) = args.sqlsmith {
-        let host = cluster.rand_frontend_ip();
         cluster
             .run_on_client(async move {
-                let rw = RisingWave::connect(host, "dev".into()).await.unwrap();
+                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                    .await
+                    .unwrap();
                 risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
             })
             .await;
@@ -182,7 +183,7 @@ async fn main() {
         .run_on_client(async move {
             let glob = &args.files;
             if let Some(jobs) = args.jobs {
-                run_parallel_slt_task(cluster0, glob, jobs).await.unwrap();
+                run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
                 run_slt_task(cluster0, glob, &kill_opts).await;
             }

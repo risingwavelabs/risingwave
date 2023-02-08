@@ -59,6 +59,17 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 progress,
                 schema,
                 params.pk_indices,
+                false,
+            )
+            .boxed(),
+            ChainType::UpstreamOnly => ChainExecutor::new(
+                snapshot,
+                mview,
+                upstream_indices,
+                progress,
+                schema,
+                params.pk_indices,
+                true,
             )
             .boxed(),
             ChainType::Rearrange => RearrangedChainExecutor::new(
