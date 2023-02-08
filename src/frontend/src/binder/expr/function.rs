@@ -480,11 +480,7 @@ impl Binder {
                         .into())
                     }
                 })),
-                ("format_type", guard_by_len(2, raw(|_binder, _inputs| {
-                        // TODO
-                        // return null as an workaround for now
-                        Ok(ExprImpl::literal_null(DataType::Varchar))
-                }))),
+                ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),

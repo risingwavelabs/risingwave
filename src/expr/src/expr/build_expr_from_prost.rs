@@ -20,8 +20,8 @@ use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
 use super::expr_some_all::SomeAllExpression;
 use crate::expr::expr_binary_bytes::{
-    new_ltrim_characters, new_repeat, new_rtrim_characters, new_substr_start, new_to_char,
-    new_trim_characters,
+    new_format_type, new_ltrim_characters, new_repeat, new_rtrim_characters, new_substr_start,
+    new_to_char, new_trim_characters,
 };
 use crate::expr::expr_binary_nonnull::{
     new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp,
@@ -127,6 +127,14 @@ pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     } else {
         unreachable!()
     }
+}
+
+pub fn build_format_type_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2);
+    let oid = expr_build_from_prost(&children[0])?;
+    let typemod = expr_build_from_prost(&children[1])?;
+    Ok(new_format_type(oid, typemod, ret_type))
 }
 
 pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {

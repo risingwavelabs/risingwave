@@ -1,0 +1,14 @@
+query T
+SELECT format_type(16, 0);
+----
+boolean
+
+query T
+SELECT format_type(9527, 0);
+----
+???
+
+query T
+SELECT format_type(1000, 1);
+----
+boolean[]

@@ -132,6 +132,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         DateTrunc => build_date_trunc_expr(prost),
+        FormatType => build_format_type_expr(prost),
 
         // Dedicated types
         All | Some => build_some_all_expr_prost(prost),
