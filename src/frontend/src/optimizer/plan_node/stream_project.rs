@@ -20,8 +20,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::generic::GenericPlanRef;
-use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl};
+use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -148,5 +148,22 @@ impl StreamNode for StreamProject {
                 .map(|(_, y)| *y as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamProject {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_project()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

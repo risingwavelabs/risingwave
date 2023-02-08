@@ -134,6 +134,7 @@ async fn compaction_test(
         append_only: false,
         row_id_index: None,
         version: None,
+        watermark_indices: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -179,7 +180,6 @@ async fn compaction_test(
     let remote_object_store = parse_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
-        false,
         "Hummock",
     )
     .await;
