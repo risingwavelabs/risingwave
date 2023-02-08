@@ -394,6 +394,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -402,6 +403,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -410,6 +412,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -418,6 +421,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 

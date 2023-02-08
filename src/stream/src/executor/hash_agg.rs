@@ -751,6 +751,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Count,
@@ -759,6 +760,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Count,
@@ -767,6 +769,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -852,6 +855,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -860,6 +864,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             // This is local hash aggregation, so we add another sum state
             AggCall {
@@ -869,6 +874,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -955,6 +961,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -963,6 +970,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -1054,6 +1062,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -1062,6 +1071,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 

@@ -76,6 +76,7 @@ pub fn build_agg_call_from_prost(
         order_pairs,
         append_only,
         filter,
+        distinct: agg_call_proto.distinct,
     })
 }
 

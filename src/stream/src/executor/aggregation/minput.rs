@@ -343,6 +343,7 @@ mod tests {
             order_pairs: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }
     }
 
@@ -1039,6 +1040,7 @@ mod tests {
             ],
             append_only: false,
             filter: None,
+            distinct: false,
         };
         let group_key = None;
 
@@ -1140,6 +1142,7 @@ mod tests {
             ],
             append_only: false,
             filter: None,
+            distinct: false,
         };
         let group_key = None;
 
