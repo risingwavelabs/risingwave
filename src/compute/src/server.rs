@@ -76,7 +76,15 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
-    validate_compute_node_memory_config(opts.total_memory_bytes, &config.storage);
+    let embedded_compactor_enabled = embedded_compactor_enabled(
+        &config.storage.state_store,
+        config.storage.disable_remote_compactor,
+    );
+    validate_compute_node_memory_config(
+        opts.total_memory_bytes,
+        embedded_compactor_enabled,
+        &config.storage,
+    );
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -155,7 +163,7 @@ pub async fn compute_node_serve(
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
 
-        if storage_config.embedded_compactor_enabled() {
+        if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
@@ -337,9 +345,20 @@ pub async fn compute_node_serve(
 /// for other system usage. Otherwise, it is not allowed to start.
 fn validate_compute_node_memory_config(
     cn_total_memory_bytes: usize,
+    embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
 ) {
-    let storage_memory_mb = storage_config.total_storage_memory_limit_mb();
+    let storage_memory_mb = {
+        let total_memory = storage_config.block_cache_capacity_mb
+            + storage_config.meta_cache_capacity_mb
+            + storage_config.shared_buffer_capacity_mb
+            + storage_config.file_cache.total_buffer_capacity_mb;
+        if embedded_compactor_enabled {
+            total_memory + storage_config.compactor_memory_limit_mb
+        } else {
+            total_memory
+        }
+    };
     if storage_memory_mb << 20 > cn_total_memory_bytes {
         panic!(
             "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
@@ -355,4 +374,13 @@ fn validate_compute_node_memory_config(
             convert((storage_memory_mb << 20) as _)
         );
     }
+}
+
+/// Checks whether an embedded compactor starts with a compute node.
+fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: bool) -> bool {
+    // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
+    // along with the compute node.
+    state_store_url == "hummock+memory"
+        || state_store_url.starts_with("hummock+disk")
+        || disable_remote_compactor
 }
