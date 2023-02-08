@@ -106,6 +106,7 @@ impl StreamNode for StreamLocalSimpleAgg {
             agg_call_states: vec![],
             result_table: None,
             is_append_only: self.input().append_only(),
+            dedup_tables: Default::default(),
         })
     }
 }
