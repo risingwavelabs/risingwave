@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{FragmentId, USER_COLUMN_ID_OFFSET};
@@ -360,3 +360,5 @@ impl StreamNode for StreamMaterialize {
         })
     }
 }
+
+impl ExprRewritable for StreamMaterialize {}
