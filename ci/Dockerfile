@@ -17,12 +17,12 @@ RUN echo source ~/.bashrc>>~/.bashrc
 RUN wget "https://archive.apache.org/dist/hadoop/core/hadoop-2.7.3/hadoop-2.7.3.tar.gz"
 RUN tar -zxvf hadoop-2.7.3.tar.gz -C /opt/
 RUN mv /opt/hadoop-2.7.3 /opt/hadoop
-RUN echo 'export HADOOP_HOME=/opt/hadoop/' >> ~/.bashrc
-RUN echo 'export PATH=$PATH:$HADOOP_HOME/bin' >> ~/.bashrc
-RUN echo 'export PATH=$PATH:$HADOOP_HOME/sbin' >> ~/.bashrc
+RUN echo export HADOOP_HOME=/opt/hadoop/ >> ~/.bashrc
+RUN echo export PATH=$PATH:$HADOOP_HOME/bin >> ~/.bashrc
+RUN echo export PATH=$PATH:$HADOOP_HOME/sbin >> ~/.bashrc
 RUN source ~/.bashrc   
-RUN echo "export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> /opt/hadoop/etc/hadoop/yarn-env.sh
-RUN echo "export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64" >> /opt/hadoop/etc/hadoop/hadoop-env.sh
+RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 >> /opt/hadoop/etc/hadoop/yarn-env.sh
+RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 >> /opt/hadoop/etc/hadoop/hadoop-env.sh
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 
