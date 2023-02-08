@@ -36,6 +36,6 @@
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     select current_timestamp;
-  batch_plan: |-
+  batch_plan: |
     BatchProject { exprs: [Now] }
     └─BatchValues { rows: [[]] }

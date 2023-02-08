@@ -6374,6 +6374,7 @@ name = "risingwave_planner_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "backtrace",
  "console",
  "futures",
  "itertools",
