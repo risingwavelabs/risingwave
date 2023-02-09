@@ -6160,6 +6160,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
+ "petgraph",
  "pgwire",
  "pin-project-lite",
  "postgres-types",

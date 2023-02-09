@@ -1461,7 +1461,7 @@ def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Batch Exchange",
+            "Batch Metrics",
             [
                 panels.timeseries_row(
                     "Exchange Recv Row Number",
@@ -1470,6 +1470,16 @@ def section_batch_exchange(outer_panels):
                         panels.target(
                             f"{metric('batch_task_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mpp Task Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_task_num')}",
+                            "",
                         ),
                     ],
                 ),
