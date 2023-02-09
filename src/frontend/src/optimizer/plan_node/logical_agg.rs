@@ -210,7 +210,10 @@ impl LogicalAgg {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
         });
-        if all_local_are_stateless && input_dist.satisfies(&RequiredDist::AnyShard) {
+        if all_local_are_stateless
+            && input_dist.satisfies(&RequiredDist::AnyShard)
+            && self.group_key().is_empty()
+        {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 

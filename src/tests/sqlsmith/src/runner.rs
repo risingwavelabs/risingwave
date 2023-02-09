@@ -18,7 +18,9 @@ use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
 
 use crate::validation::is_permissible_error;
-use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, session_sql_gen, sql_gen, Table};
+use crate::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, session_sql_gen, sql_gen, Table,
+};
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
@@ -67,19 +69,14 @@ async fn test_sqlsmith<R: Rng>(
 
 /// `SET QUERY_MODE TO DISTRIBUTED`.
 /// Panics if it fails.
-async fn set_distributed_query_mode(
-    client: &tokio_postgres::Client,
-) {
+async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
     client
         .query("SET query_mode TO distributed;", &[])
         .await
         .unwrap();
 }
 
-async fn test_session_variable<R: Rng>(
-    client: &tokio_postgres::Client,
-    rng: &mut R,
-) {
+async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
     let session_sql = session_sql_gen(rng);
     tracing::info!("Executing: {}", session_sql);
     client.query(session_sql.as_str(), &[]).await.unwrap();

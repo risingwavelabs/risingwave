@@ -53,11 +53,15 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
 /// (a simple workaround is limit length of
 /// generated query when `QUERY_MODE=local`.
 pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
-    [ "SET ENABLE_TWO_PHASE_AGG TO TRUE",
-      "SET ENABLE_TWO_PHASE_AGG TO FALSE",
-      "SET FORCE_TWO_PHASE_AGG TO TRUE",
-      "SET FORCE_TWO_PHASE_AGG TO FALSE",
-    ].choose(rng).unwrap().to_string()
+    [
+        "SET RW_ENABLE_TWO_PHASE_AGG TO TRUE",
+        "SET RW_ENABLE_TWO_PHASE_AGG TO FALSE",
+        "SET RW_FORCE_TWO_PHASE_AGG TO TRUE",
+        "SET RW_FORCE_TWO_PHASE_AGG TO FALSE",
+    ]
+    .choose(rng)
+    .unwrap()
+    .to_string()
 }
 
 /// Parse SQL
