@@ -367,3 +367,126 @@ impl Locations {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_success(facts: impl IntoIterator<Item = Fact>, expected: HashMap<Id, Result>) {
+        let mut crepe = Crepe::new();
+        crepe.extend(facts.into_iter().map(Input));
+        let (success, failed) = crepe.run();
+
+        assert!(failed.is_empty());
+
+        let success: HashMap<_, _> = success
+            .into_iter()
+            .map(|Success(id, result)| (id, result))
+            .collect();
+
+        assert_eq!(success, expected);
+    }
+
+    fn test_failed(facts: impl IntoIterator<Item = Fact>) {
+        let mut crepe = Crepe::new();
+        crepe.extend(facts.into_iter().map(Input));
+        let (_success, failed) = crepe.run();
+
+        assert!(!failed.is_empty());
+    }
+
+    // 1 -|-> 101 -->
+    //                103 --> 104
+    // 2 -|-> 102 -->
+    #[test]
+    fn test_scheduling_mv_on_mv() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
+            Fact::ExternalReq { id: 2.into(), dist: DistId::Singleton(2) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
+            Fact::Edge { from: 2.into(), to: 102.into(), dt: NoShuffle },
+            Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
+            Fact::Edge { from: 102.into(), to: 103.into(), dt: Hash },
+            Fact::Edge { from: 103.into(), to: 104.into(), dt: Simple },
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::Required(DistId::Hash(1)),
+            102.into() => Result::Required(DistId::Singleton(2)),
+            103.into() => Result::DefaultHash,
+            104.into() => Result::DefaultSingleton,
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 1 -|-> 101 --> 103 -->
+    //             X          105
+    // 2 -|-> 102 --> 104 -->
+    #[test]
+    fn test_delta_join() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
+            Fact::ExternalReq { id: 2.into(), dist: DistId::Hash(2) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
+            Fact::Edge { from: 2.into(), to: 102.into(), dt: NoShuffle },
+            Fact::Edge { from: 101.into(), to: 103.into(), dt: NoShuffle },
+            Fact::Edge { from: 102.into(), to: 104.into(), dt: NoShuffle },
+            Fact::Edge { from: 101.into(), to: 104.into(), dt: Hash },
+            Fact::Edge { from: 102.into(), to: 103.into(), dt: Hash },
+            Fact::Edge { from: 103.into(), to: 105.into(), dt: Hash },
+            Fact::Edge { from: 104.into(), to: 105.into(), dt: Hash },
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::Required(DistId::Hash(1)),
+            102.into() => Result::Required(DistId::Hash(2)),
+            103.into() => Result::Required(DistId::Hash(1)),
+            104.into() => Result::Required(DistId::Hash(2)),
+            105.into() => Result::DefaultHash,
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 1 -|-> 101 -->
+    //                103
+    //        102 -->
+    #[test]
+    fn test_singleton_leaf() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
+            Fact::SingletonReq(102.into()), // like `Now`
+            Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
+            Fact::Edge { from: 102.into(), to: 103.into(), dt: Broadcast },
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::Required(DistId::Hash(1)),
+            102.into() => Result::DefaultSingleton,
+            103.into() => Result::DefaultHash,
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 1 -|->
+    //        101
+    // 2 -|->
+    #[test]
+    fn test_upstream_hash_shard_failed() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
+            Fact::ExternalReq { id: 2.into(), dist: DistId::Hash(2) },
+            Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
+            Fact::Edge { from: 2.into(), to: 101.into(), dt: NoShuffle },
+        ];
+
+        test_failed(facts);
+    }
+}
