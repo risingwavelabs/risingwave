@@ -8,13 +8,14 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc", "num_traits"]
 
 [dependencies]
 bytes = "1"
 hex = "0.4"
 itertools = "0.10"
 num-derive = "0.3"
+num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
 risingwave_common = { path = "../../common" }
