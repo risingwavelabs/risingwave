@@ -238,7 +238,7 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    fn two_phase_agg_forced(&self) -> bool {
+    pub(crate) fn two_phase_agg_forced(&self) -> bool {
         self.base
             .ctx()
             .session_ctx()
