@@ -198,26 +198,6 @@ impl StoreLocalStatistic {
         }
     }
 
-    pub fn report_for_iter(&self, metrics: &HummockStateStoreMetrics, table_id: &TableId) {
-        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            let table_metrics = local_metrics
-                .entry(table_id.table_id)
-                .or_insert_with(|| LocalStoreMetrics::new(metrics, table_id.to_string().as_str()));
-            self.report(table_metrics);
-            self.report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
-        });
-    }
-
-    pub fn report_for_get(&self, metrics: &HummockStateStoreMetrics, table_id: &TableId) {
-        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
-            let table_metrics = local_metrics
-                .entry(table_id.table_id)
-                .or_insert_with(|| LocalStoreMetrics::new(metrics, table_id.to_string().as_str()));
-            self.report(table_metrics);
-            self.report_bloom_filter_metrics(&mut table_metrics.get_filter_metrics);
-        });
-    }
-
     pub fn flush_all() {
         LOCAL_METRICS.with_borrow_mut(|local_metrics| {
             for (_, metrics) in local_metrics.iter_mut() {
@@ -419,3 +399,75 @@ define_bloom_filter_metrics!(
     read_req_positive_but_non_exist_counts,
     read_req_bloom_filter_positive_counts
 );
+
+pub struct GetLocalMetricsGuard {
+    metrics: Arc<HummockStateStoreMetrics>,
+    table_id: TableId,
+    pub local_stats: StoreLocalStatistic,
+}
+
+impl GetLocalMetricsGuard {
+    pub fn new(metrics: Arc<HummockStateStoreMetrics>, table_id: TableId) -> Self {
+        Self {
+            metrics,
+            table_id,
+            local_stats: StoreLocalStatistic::default(),
+        }
+    }
+}
+
+impl Drop for GetLocalMetricsGuard {
+    fn drop(&mut self) {
+        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+            let table_metrics = local_metrics
+                .entry(self.table_id.table_id)
+                .or_insert_with(|| {
+                    LocalStoreMetrics::new(
+                        self.metrics.as_ref(),
+                        self.table_id.to_string().as_str(),
+                    )
+                });
+            self.local_stats.report(table_metrics);
+            self.local_stats
+                .report_bloom_filter_metrics(&mut table_metrics.get_filter_metrics);
+        });
+    }
+}
+
+pub struct IterLocalMetricsGuard {
+    metrics: Arc<HummockStateStoreMetrics>,
+    table_id: TableId,
+    pub local_stats: StoreLocalStatistic,
+}
+
+impl IterLocalMetricsGuard {
+    pub fn new(
+        metrics: Arc<HummockStateStoreMetrics>,
+        table_id: TableId,
+        local_stats: StoreLocalStatistic,
+    ) -> Self {
+        Self {
+            metrics,
+            table_id,
+            local_stats,
+        }
+    }
+}
+
+impl Drop for IterLocalMetricsGuard {
+    fn drop(&mut self) {
+        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+            let table_metrics = local_metrics
+                .entry(self.table_id.table_id)
+                .or_insert_with(|| {
+                    LocalStoreMetrics::new(
+                        self.metrics.as_ref(),
+                        self.table_id.to_string().as_str(),
+                    )
+                });
+            self.local_stats.report(table_metrics);
+            self.local_stats
+                .report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
+        });
+    }
+}

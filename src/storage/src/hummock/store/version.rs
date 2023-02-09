@@ -52,7 +52,7 @@ use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
     Sstable, SstableDeleteRangeIterator, SstableIterator,
 };
-use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{GetLocalMetricsGuard, HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
@@ -410,9 +410,11 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<Option<Bytes>> {
-        let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let mut stats_guard =
+            GetLocalMetricsGuard::new(self.state_store_metrics.clone(), read_options.table_id);
+        stats_guard.local_stats.found_key = true;
 
         // 1. read staging data
         for imm in &imms {
@@ -420,11 +422,10 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if let Some(data) = get_from_batch(imm, table_key, &mut local_stats) {
+            if let Some(data) = get_from_batch(imm, table_key, &mut stats_guard.local_stats) {
                 return Ok(data.into_user_value());
             }
         }
-        local_stats.found_key = true;
 
         // 2. order guarantee: imm -> sst
         let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
@@ -433,19 +434,17 @@ impl HummockVersionReader {
 
         let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
-            local_stats.sub_iter_count += 1;
+            stats_guard.local_stats.sub_iter_count += 1;
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
                 full_key,
                 &read_options,
                 dist_key_hash,
-                &mut local_stats,
+                &mut stats_guard.local_stats,
             )
             .await?
             {
-                local_stats
-                    .report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
                 return Ok(data.into_user_value());
             }
         }
@@ -468,21 +467,17 @@ impl HummockVersionReader {
                         &(table_key..=table_key),
                     );
                     for sstable_info in sstable_infos {
-                        local_stats.sub_iter_count += 1;
+                        stats_guard.local_stats.sub_iter_count += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
                             full_key,
                             &read_options,
                             dist_key_hash,
-                            &mut local_stats,
+                            &mut stats_guard.local_stats,
                         )
                         .await?
                         {
-                            local_stats.report_for_get(
-                                self.state_store_metrics.as_ref(),
-                                &read_options.table_id,
-                            );
                             return Ok(v.into_user_value());
                         }
                     }
@@ -508,28 +503,23 @@ impl HummockVersionReader {
                         continue;
                     }
 
-                    local_stats.sub_iter_count += 1;
+                    stats_guard.local_stats.sub_iter_count += 1;
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
                         full_key,
                         &read_options,
                         dist_key_hash,
-                        &mut local_stats,
+                        &mut stats_guard.local_stats,
                     )
                     .await?
                     {
-                        local_stats.report_for_get(
-                            self.state_store_metrics.as_ref(),
-                            &read_options.table_id,
-                        );
                         return Ok(v.into_user_value());
                     }
                 }
             }
         }
-        local_stats.found_key = false;
-        local_stats.report_for_get(self.state_store_metrics.as_ref(), &read_options.table_id);
+        stats_guard.local_stats.found_key = false;
         Ok(None)
     }
 
@@ -764,6 +754,7 @@ impl HummockVersionReader {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+        local_stats.found_key = user_iter.is_valid();
 
         Ok(HummockStorageIterator::new(
             user_iter,

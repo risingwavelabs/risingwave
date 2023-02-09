@@ -35,7 +35,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
-use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -245,9 +245,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
-    metrics: Arc<HummockStateStoreMetrics>,
-    table_id: TableId,
-    local_stats: StoreLocalStatistic,
+    stats_guard: IterLocalMetricsGuard,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -279,17 +277,14 @@ impl HummockStorageIterator {
     ) -> Self {
         Self {
             inner,
-            metrics,
-            table_id,
-            local_stats,
+            stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
     }
 }
 
 impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
-        self.inner.collect_local_statistic(&mut self.local_stats);
-        self.local_stats
-            .report_for_iter(&self.metrics, &self.table_id);
+        self.inner
+            .collect_local_statistic(&mut self.stats_guard.local_stats);
     }
 }
