@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
 
 pub use super::context::CompactorContext;
 use crate::hummock::compactor::{
@@ -80,16 +80,20 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
     }
 }
 
-#[derive(Default)]
+/// `CompactionStatistics` will count the results of each compact split
+#[derive(Default, Debug)]
 pub struct CompactionStatistics {
+    // to report per-table metrics
     pub delta_drop_stat: TableStatsMap,
 
+    // to calculate delete ratio
     pub iter_total_key_counts: u64,
     pub iter_drop_key_counts: u64,
 }
 
 impl CompactionStatistics {
-    pub fn delete_ratio(&self) -> Option<u64> {
+    #[allow(dead_code)]
+    fn delete_ratio(&self) -> Option<u64> {
         if self.iter_total_key_counts == 0 {
             return None;
         }
@@ -108,6 +112,7 @@ pub struct TaskConfig {
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
+    pub task_type: compact_task::TaskType,
 }
 
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {

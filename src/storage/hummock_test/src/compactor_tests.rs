@@ -39,7 +39,7 @@ pub(crate) mod tests {
         register_table_ids_to_compaction_group, setup_compute_env,
         unregister_table_ids_from_compaction_group,
     };
-    use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+    use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::{MemStore, MetaStore};
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
@@ -230,7 +230,10 @@ pub(crate) mod tests {
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -359,7 +362,10 @@ pub(crate) mod tests {
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -438,7 +444,10 @@ pub(crate) mod tests {
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap();
 
@@ -604,7 +613,10 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap();
 
@@ -759,7 +771,10 @@ pub(crate) mod tests {
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -932,7 +947,10 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1096,7 +1114,10 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());

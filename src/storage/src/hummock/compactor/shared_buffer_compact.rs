@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::compact_task;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
@@ -301,11 +302,14 @@ impl SharedBufferCompactRunner {
         let compactor = Compactor::new(
             context,
             options,
-            key_range,
-            CachePolicy::Fill,
-            GC_DELETE_KEYS_FOR_FLUSH,
-            GC_WATERMARK_FOR_FLUSH,
-            None,
+            super::TaskConfig {
+                key_range,
+                cache_policy: CachePolicy::Fill,
+                gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
+                watermark: GC_WATERMARK_FOR_FLUSH,
+                stats_target_table_ids: None,
+                task_type: compact_task::TaskType::SharedBuffer,
+            },
         );
         Self {
             compactor,

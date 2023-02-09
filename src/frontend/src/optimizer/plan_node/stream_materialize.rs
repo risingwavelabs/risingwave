@@ -18,14 +18,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
-use crate::catalog::{FragmentId, USER_COLUMN_ID_OFFSET};
+use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -201,6 +200,7 @@ impl StreamMaterialize {
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
+        let watermark_columns = input.watermark_columns().clone();
         // Note(congyi): avoid pk duplication
         let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
         let schema = input.schema();
@@ -265,6 +265,7 @@ impl StreamMaterialize {
             handle_pk_conflict,
             read_prefix_len_hint,
             version,
+            watermark_columns,
         })
     }
 

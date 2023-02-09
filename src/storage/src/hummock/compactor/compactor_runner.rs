@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
+use super::TaskConfig;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
@@ -76,14 +77,18 @@ impl CompactorRunner {
                     .collect_vec()
             })
             .collect();
+
         let compactor = Compactor::new(
             context.clone(),
             options,
-            key_range.clone(),
-            CachePolicy::NotFill,
-            task.gc_delete_keys,
-            task.watermark,
-            Some(stats_target_table_ids),
+            TaskConfig {
+                key_range: key_range.clone(),
+                cache_policy: CachePolicy::NotFill,
+                gc_delete_keys: task.gc_delete_keys,
+                watermark: task.watermark,
+                stats_target_table_ids: Some(stats_target_table_ids),
+                task_type: task.task_type(),
+            },
         );
 
         Self {
@@ -103,7 +108,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let (ssts, table_stats_map) = self
+        let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -113,7 +118,7 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        Ok((self.split_index, ssts, table_stats_map))
+        Ok((self.split_index, ssts, compaction_stat))
     }
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
