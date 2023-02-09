@@ -66,7 +66,7 @@ struct StreamActorBuilder {
 }
 
 impl StreamActorBuilder {
-    pub fn new(
+    fn new(
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
         vnode_bitmap: Option<Bitmap>,
@@ -82,19 +82,19 @@ impl StreamActorBuilder {
         }
     }
 
-    pub fn fragment_id(&self) -> GlobalFragmentId {
+    fn fragment_id(&self) -> GlobalFragmentId {
         self.fragment_id
     }
 
     /// Add a dispatcher to this actor.
-    pub fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
+    fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
         self.downstreams
             .try_insert(dispatcher.dispatcher_id, dispatcher)
             .unwrap();
     }
 
     /// Add an upstream to this actor.
-    pub fn add_upstream(&mut self, upstream: StreamActorUpstream) {
+    fn add_upstream(&mut self, upstream: StreamActorUpstream) {
         self.upstreams
             .try_insert(upstream.edge_id, upstream)
             .unwrap();
@@ -206,7 +206,7 @@ impl StreamActorBuilder {
     }
 
     /// Build an actor after all the upstreams and downstreams are processed.
-    pub fn build(self, job: &StreamingJob) -> MetaResult<StreamActor> {
+    fn build(self, job: &StreamingJob) -> MetaResult<StreamActor> {
         let rewritten_nodes = self.rewrite()?;
 
         // TODO: store each upstream separately
@@ -241,7 +241,7 @@ struct ExternalChange {
 
 impl ExternalChange {
     /// Add a dispatcher to the external actor.
-    pub fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
+    fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
         self.new_downstreams
             .try_insert(dispatcher.dispatcher_id, dispatcher)
             .unwrap();
@@ -283,7 +283,7 @@ impl ActorGraphBuildStateInner {
     /// Insert new generated actor and record its location.
     ///
     /// The `vnode_bitmap` should be `Some` for the actors of hash-distributed fragments.
-    pub fn add_actor(
+    fn add_actor(
         &mut self,
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
@@ -350,7 +350,7 @@ impl ActorGraphBuildStateInner {
     ///
     /// - If the actor is to be built, the dispatcher will be added to the actor builder.
     /// - If the actor is an external actor, the dispatcher will be added to the external changes.
-    pub fn add_dispatcher(&mut self, actor_id: GlobalActorId, dispatcher: Dispatcher) {
+    fn add_dispatcher(&mut self, actor_id: GlobalActorId, dispatcher: Dispatcher) {
         if let Some(actor_builder) = self.actor_builders.get_mut(&actor_id) {
             actor_builder.add_dispatcher(dispatcher);
         } else {
@@ -365,7 +365,7 @@ impl ActorGraphBuildStateInner {
     ///
     /// - If the actor is to be built, the upstream will be added to the actor builder.
     /// - Currently there is no case that an upstream is added to an external actor.
-    pub fn add_upstream(&mut self, actor_id: GlobalActorId, upstream: StreamActorUpstream) {
+    fn add_upstream(&mut self, actor_id: GlobalActorId, upstream: StreamActorUpstream) {
         if let Some(actor_builder) = self.actor_builders.get_mut(&actor_id) {
             actor_builder.add_upstream(upstream);
         } else {
@@ -391,7 +391,7 @@ impl ActorGraphBuildStateInner {
     ///
     /// If there're existing (external) fragments, the info will be recorded in `external_changes`,
     /// instead of the actor builders.
-    pub fn add_link<'a>(
+    fn add_link<'a>(
         &mut self,
         upstream: FragmentLinkNode<'a>,
         downstream: FragmentLinkNode<'a>,

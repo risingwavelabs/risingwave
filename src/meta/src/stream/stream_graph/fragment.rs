@@ -29,7 +29,7 @@ use crate::MetaResult;
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
 /// several additional helper fields.
 #[derive(Debug, Clone)]
-pub struct BuildingFragment {
+pub(super) struct BuildingFragment {
     /// The fragment structure from the frontend, with the global fragment ID.
     inner: StreamFragment,
 
