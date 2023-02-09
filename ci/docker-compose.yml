@@ -30,7 +30,7 @@ services:
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230207_02
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230126
     depends_on:
       - mysql
       - db
@@ -38,7 +38,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230207_02
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230126
     depends_on:
       - mysql
       - db
@@ -46,7 +46,7 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230207_02
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230126
     volumes:
       - ..:/risingwave
   
@@ -56,7 +56,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230207_02
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230126
     depends_on:
       db:
         condition: service_healthy
