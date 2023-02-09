@@ -31,6 +31,7 @@ pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 pub use crate::constants::hummock;
 use crate::error::Result;
 use crate::row::OwnedRow;
+use crate::types::DataType;
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -55,6 +56,35 @@ pub const SYSTEM_SCHEMAS: [&str; 3] = [
     INFORMATION_SCHEMA_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME,
 ];
+
+pub const ROWID_PREFIX: &str = "_row_id";
+
+pub fn row_id_column_name() -> String {
+    ROWID_PREFIX.to_string()
+}
+
+pub fn is_row_id_column_name(name: &str) -> bool {
+    name.starts_with(ROWID_PREFIX)
+}
+
+/// The column ID preserved for the row ID column.
+pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
+
+/// The column ID offset for user-defined columns.
+///
+/// All IDs of user-defined columns must be greater or equal to this value.
+pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
+
+/// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
+pub fn row_id_column_desc() -> ColumnDesc {
+    ColumnDesc {
+        data_type: DataType::Int64,
+        column_id: ROW_ID_COLUMN_ID,
+        name: row_id_column_name(),
+        field_descs: vec![],
+        type_name: "".to_string(),
+    }
+}
 
 /// The local system catalog reader in the frontend node.
 #[async_trait]
