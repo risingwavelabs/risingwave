@@ -116,6 +116,7 @@ message ExprNode {
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
+    FORMAT_TYPE = 534;
 
     // Non-pure functions below (> 600)
     // ------------------------
