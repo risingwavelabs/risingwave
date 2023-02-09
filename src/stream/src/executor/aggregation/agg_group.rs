@@ -25,7 +25,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::{AggCall, DistinctAggDeduplicater};
+use super::{AggCall, DistinctDeduplicater};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
@@ -39,7 +39,7 @@ pub struct AggGroup<S: StateStore> {
     states: Vec<AggState<S>>,
 
     /// TODO(rctmp): comment
-    distinct_dedup: DistinctAggDeduplicater<S>,
+    distinct_dedup: DistinctDeduplicater<S>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
@@ -101,7 +101,7 @@ impl<S: StateStore> AggGroup<S> {
         Ok(Self {
             group_key,
             states,
-            distinct_dedup: DistinctAggDeduplicater::new(), // TODO(rctmp)
+            distinct_dedup: DistinctDeduplicater::new(), // TODO(rctmp)
             prev_outputs,
         })
     }

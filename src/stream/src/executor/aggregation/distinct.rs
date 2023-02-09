@@ -22,11 +22,11 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 
-pub struct DistinctAggDeduplicater<S: StateStore> {
+pub struct DistinctDeduplicater<S: StateStore> {
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> DistinctAggDeduplicater<S> {
+impl<S: StateStore> DistinctDeduplicater<S> {
     pub fn new() -> Self {
         Self {
             _phantom: PhantomData,
