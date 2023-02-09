@@ -165,6 +165,7 @@ export interface Table {
   definition: string;
   handlePkConflict: boolean;
   readPrefixLenHint: number;
+  watermarkIndices: number[];
   /**
    * Per-table catalog version, used by schema change. `None` for internal tables and tests.
    * Not to be confused with the global catalog version for notification service.
@@ -792,6 +793,7 @@ function createBaseTable(): Table {
     definition: "",
     handlePkConflict: false,
     readPrefixLenHint: 0,
+    watermarkIndices: [],
     version: undefined,
   };
 }
@@ -833,6 +835,9 @@ export const Table = {
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      watermarkIndices: Array.isArray(object?.watermarkIndices)
+        ? object.watermarkIndices.map((e: any) => Number(e))
+        : [],
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -892,6 +897,11 @@ export const Table = {
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    if (message.watermarkIndices) {
+      obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
+    } else {
+      obj.watermarkIndices = [];
+    }
     message.version !== undefined &&
       (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
@@ -941,6 +951,7 @@ export const Table = {
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;

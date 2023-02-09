@@ -214,12 +214,12 @@ message ReplaceTablePlanResponse {
   uint64 version = 2;
 }
 
-message JavaGetTableRequest {
+message GetTableRequest {
   string database_name = 1;
   string table_name = 2;
 }
 
-message JavaGetTableResponse {
+message GetTableResponse {
   catalog.Table table = 1;
 }
 
@@ -244,5 +244,5 @@ service DdlService {
   rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
   rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
-  rpc JavaGetTable(JavaGetTableRequest) returns (JavaGetTableResponse);
+  rpc GetTable(GetTableRequest) returns (GetTableResponse);
 }

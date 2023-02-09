@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, StreamNode as ProstStreamPlan,
 };
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -143,3 +143,5 @@ impl StreamShare {
         }
     }
 }
+
+impl ExprRewritable for StreamShare {}

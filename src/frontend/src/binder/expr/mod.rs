@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::{zip_eq, Itertools};
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
     TrimWhereField, UnaryOperator,
 };
 
@@ -64,7 +65,7 @@ impl Binder {
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Array(exprs) => self.bind_array(exprs),
+            Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::Function(f) => self.bind_function(f),
             // subquery
@@ -347,7 +348,7 @@ impl Binder {
             .collect::<Result<_>>()?;
         let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
 
-        for (condition, result) in zip_eq(conditions, results_expr) {
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
@@ -425,7 +426,7 @@ impl Binder {
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(ref expr) = expr && matches!(&data_type, DataType::List{ .. } ) {
+        if let Expr::Array(Array {elem: ref expr, ..}) = expr && matches!(&data_type, DataType::List{ .. } ) {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr(expr)?;
