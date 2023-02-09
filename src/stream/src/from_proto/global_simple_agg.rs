@@ -16,7 +16,10 @@
 
 use risingwave_pb::stream_plan::SimpleAggNode;
 
-use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
+use super::agg_common::{
+    build_agg_call_from_prost, build_agg_state_storages_from_proto,
+    build_distinct_dedup_table_from_proto,
+};
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::AggCall;
@@ -44,7 +47,10 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None).await;
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store.clone(), None)
+                .await;
+        let distinct_dedup_tables =
+            build_distinct_dedup_table_from_proto(node.get_dedup_tables(), store, None).await;
 
         Ok(GlobalSimpleAggExecutor::new(
             params.actor_context,
