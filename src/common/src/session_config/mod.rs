@@ -270,7 +270,7 @@ type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
-type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, true>;
+type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 
 #[derive(Derivative)]
 #[derivative(Default)]
