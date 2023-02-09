@@ -454,16 +454,14 @@ impl LogicalAggBuilder {
         agg_call: AggCall,
     ) -> std::result::Result<ExprImpl, ErrorCode> {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
+        let (agg_kind, inputs, mut distinct, mut order_by, filter) = agg_call.decompose();
         match &agg_kind {
-            AggKind::Min
-            | AggKind::Max
-            | AggKind::Sum
-            | AggKind::Count
-            | AggKind::Avg
-            | AggKind::ApproxCountDistinct => {
-                // this order by is unnecessary.
-                order_by = OrderBy::new(vec![]);
+            AggKind::Min | AggKind::Max => {
+                distinct = false;
+                order_by = OrderBy::any();
+            }
+            AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
+                order_by = OrderBy::any();
             }
             _ => {
                 // To be conservative, we just treat newly added AggKind in the future as not
