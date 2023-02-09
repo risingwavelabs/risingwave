@@ -14,9 +14,9 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
 
-use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, RelationCatalog, SourceId};
 use crate::user::UserId;
 use crate::WithOptions;

@@ -17,10 +17,9 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
 use crate::optimizer::property::{Direction, FieldOrder};

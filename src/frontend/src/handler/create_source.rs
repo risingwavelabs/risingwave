@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -33,8 +33,7 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::{ColumnId, ROW_ID_COLUMN_ID};
+use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
 use crate::handler::HandlerArgs;
@@ -363,11 +362,12 @@ pub async fn handle_create_source(
 pub mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{
+        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]

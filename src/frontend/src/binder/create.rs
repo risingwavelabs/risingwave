@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::Result;
 
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::Binder;
 
 impl Binder {
