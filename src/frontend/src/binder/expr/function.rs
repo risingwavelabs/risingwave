@@ -327,6 +327,7 @@ impl Binder {
                         (1, raw_call(ExprType::Round)),
                     ]),
                 ),
+                ("pow", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),

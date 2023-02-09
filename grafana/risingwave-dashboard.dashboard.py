@@ -558,8 +558,8 @@ def section_compaction(outer_panels):
                     "num of compactions from each level to next level",
                     [
                         panels.target(
-                            f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, result)",
-                            "{{result}} - group-{{group}} @ {{compactor}}",
+                            f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, task_type, result)",
+                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
                         ),
                     ],
                 ),

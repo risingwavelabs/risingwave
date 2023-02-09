@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -25,6 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -108,7 +108,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             })
         });
 
-        for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
+        for (idx, (row, op)) in data_chunk.rows().zip_eq_debug(ops.iter()).enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
 
             let res = if let Some(array) = &eval_results {
@@ -335,7 +335,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let chunk = chunk.compact(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
+                    for (row, op) in data_chunk.rows().zip_eq_debug(ops.iter()) {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
                                 current_epoch_value = Some(row.datum_at(0).to_owned_datum());

@@ -105,6 +105,7 @@ export const ExprNode_Type = {
   BIT_LENGTH: "BIT_LENGTH",
   OVERLAY: "OVERLAY",
   REGEXP_MATCH: "REGEXP_MATCH",
+  POW: "POW",
   /** IS_TRUE - Boolean comparison */
   IS_TRUE: "IS_TRUE",
   IS_NOT_TRUE: "IS_NOT_TRUE",
@@ -339,6 +340,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 232:
     case "REGEXP_MATCH":
       return ExprNode_Type.REGEXP_MATCH;
+    case 233:
+    case "POW":
+      return ExprNode_Type.POW;
     case 301:
     case "IS_TRUE":
       return ExprNode_Type.IS_TRUE;
@@ -538,6 +542,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "OVERLAY";
     case ExprNode_Type.REGEXP_MATCH:
       return "REGEXP_MATCH";
+    case ExprNode_Type.POW:
+      return "POW";
     case ExprNode_Type.IS_TRUE:
       return "IS_TRUE";
     case ExprNode_Type.IS_NOT_TRUE:
