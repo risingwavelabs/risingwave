@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -24,7 +25,7 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::AggCall;
+use super::{AggCall, DistinctAggDeduplicater};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
@@ -36,6 +37,9 @@ pub struct AggGroup<S: StateStore> {
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
+
+    /// TODO(rctmp): comment
+    distinct_dedup: DistinctAggDeduplicater<S>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
@@ -97,6 +101,7 @@ impl<S: StateStore> AggGroup<S> {
         Ok(Self {
             group_key,
             states,
+            distinct_dedup: DistinctAggDeduplicater::new(), // TODO(rctmp)
             prev_outputs,
         })
     }
@@ -123,7 +128,11 @@ impl<S: StateStore> AggGroup<S> {
         ops: &[Op],
         columns: &[Column],
         visibilities: Vec<Option<Bitmap>>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
+        let visibilities =
+            self.distinct_dedup
+                .dedup_chunk(ops, columns, visibilities, distinct_dedup_tables);
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in
             self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)

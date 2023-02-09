@@ -64,6 +64,10 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// table when `flush_data` is called.
     result_table: StateTable<S>,
 
+    /// State tables for deduplicating rows on distinct key for distinct agg calls.
+    /// One table per distinct key (may be shared by multiple agg calls).
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
+
     /// Extreme state cache size
     extreme_cache_size: usize,
 
@@ -97,6 +101,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
+        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         extreme_cache_size: usize,
@@ -117,6 +122,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             agg_calls,
             storages,
             result_table,
+            distinct_dedup_tables,
             extreme_cache_size,
             state_changed: false,
         })
@@ -129,6 +135,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: &[AggCall],
         storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
         input_pk_indices: &PkIndices,
         input_schema: &Schema,
         agg_group: &mut Option<AggGroup<S>>,
@@ -177,6 +184,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .try_collect()?;
 
         // Materialize input chunk if needed.
+        // TODO(rctmp): need to ban distinct agg calls with MaterializedInput state
         storages
             .iter_mut()
             .zip_eq(visibilities.iter().map(Option::as_ref))
@@ -196,7 +204,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             });
 
         // Apply chunk to each of the state (per agg_call)
-        agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
+        agg_group.apply_chunk(
+            storages,
+            &ops,
+            &columns,
+            visibilities,
+            distinct_dedup_tables,
+        )?;
 
         Ok(())
     }
@@ -279,6 +293,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             extreme_cache_size,
             mut storages,
             mut result_table,
+            mut distinct_dedup_tables,
             mut state_changed,
         } = self;
 
@@ -308,6 +323,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &agg_calls,
                         &mut storages,
                         &mut result_table,
+                        &mut distinct_dedup_tables,
                         &input_pk_indices,
                         &input_schema,
                         &mut agg_group,

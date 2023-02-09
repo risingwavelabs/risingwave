@@ -376,7 +376,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
                 .map(Some)
                 .collect();
-            agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
+            agg_group.apply_chunk(storages, &ops, &columns, visibilities, todo!("rctmp"))?;
         }
 
         Ok(())

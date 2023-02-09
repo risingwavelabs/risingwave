@@ -58,6 +58,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             agg_calls,
             storages,
             result_table,
+            distinct_dedup_tables,
             params.pk_indices,
             params.executor_id,
             stream.config.developer.unsafe_stream_extreme_cache_size,
