@@ -18,14 +18,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
-use crate::catalog::{FragmentId, USER_COLUMN_ID_OFFSET};
+use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;

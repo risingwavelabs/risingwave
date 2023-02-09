@@ -271,6 +271,7 @@ fn build_type_derive_map() -> FuncSigMap {
     for e in [E::Replace, E::Translate] {
         map.insert(e, vec![T::Varchar, T::Varchar, T::Varchar], T::Varchar);
     }
+    map.insert(E::FormatType, vec![T::Int32, T::Int32], T::Varchar);
     map.insert(
         E::Overlay,
         vec![T::Varchar, T::Varchar, T::Int32],
