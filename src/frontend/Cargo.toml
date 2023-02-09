@@ -33,6 +33,7 @@ num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
+petgraph = "0.6"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.4" }
@@ -70,7 +71,6 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 uuid = "1"
-petgraph = "0.6"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

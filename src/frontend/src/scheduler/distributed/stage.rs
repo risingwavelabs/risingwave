@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;

@@ -18,8 +18,6 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use petgraph::dot::{Config, Dot};
-use petgraph::Graph;
 use pgwire::pg_server::SessionId;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
@@ -305,29 +303,29 @@ impl QueryRunner {
                 }
             }
 
-            {
-                let mut graph = Graph::<String, String>::new();
-                let mut stage_id_to_node_id = HashMap::new();
-                for stage in &self.stage_executions {
-                    let node_id = graph.add_node(format!("{} {}", stage.0, stage.1.state().await));
-                    stage_id_to_node_id.insert(stage.0, node_id);
-                }
-
-                for stage in &self.stage_executions {
-                    let stage_id = stage.0;
-                    if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id) {
-                        for child_stage in child_stages {
-                            graph.add_edge(
-                                stage_id_to_node_id.get(stage_id).unwrap().clone(),
-                                stage_id_to_node_id.get(child_stage).unwrap().clone(),
-                                "".to_string(),
-                            );
-                        }
-                    }
-                }
-                println!("Printing query execution {} states:", self.query.query_id());
-                println!("{}", Dot::with_config(&graph, &[Config::EdgeNoLabel]));
-            }
+            // {
+            //     let mut graph = Graph::<String, String>::new();
+            //     let mut stage_id_to_node_id = HashMap::new();
+            //     for stage in &self.stage_executions {
+            //         let node_id = graph.add_node(format!("{} {}", stage.0,
+            // stage.1.state().await));         stage_id_to_node_id.insert(stage.0,
+            // node_id);     }
+            //
+            //     for stage in &self.stage_executions {
+            //         let stage_id = stage.0;
+            //         if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id)
+            // {             for child_stage in child_stages {
+            //                 graph.add_edge(
+            //                     stage_id_to_node_id.get(stage_id).unwrap().clone(),
+            //                     stage_id_to_node_id.get(child_stage).unwrap().clone(),
+            //                     "".to_string(),
+            //                 );
+            //             }
+            //         }
+            //     }
+            //     println!("Printing query execution {} states:", self.query.query_id());
+            //     println!("{}", Dot::with_config(&graph, &[Config::EdgeNoLabel]));
+            // }
         }
     }
 
