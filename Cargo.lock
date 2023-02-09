@@ -6033,6 +6033,7 @@ dependencies = [
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_sqlsmith",
+ "serde",
  "serde_derive",
  "serde_json",
  "sqllogictest",
