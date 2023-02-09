@@ -49,13 +49,48 @@ impl KeyedRow {
     }
 
     pub fn is_null(&self, idx: usize) -> bool {
-        self.row[idx].is_some()
+        self.row[idx].is_none()
+    }
+
+    pub fn get_int16(&self, idx: usize) -> i16 {
+        match self.row[idx].as_ref().unwrap() {
+            ScalarImpl::Int16(num) => *num,
+            _ => unreachable!("type is not int16 at index: {}", idx),
+        }
+    }
+
+    pub fn get_int32(&self, idx: usize) -> i32 {
+        match self.row[idx].as_ref().unwrap() {
+            ScalarImpl::Int32(num) => *num,
+            _ => unreachable!("type is not int32 at index: {}", idx),
+        }
     }
 
     pub fn get_int64(&self, idx: usize) -> i64 {
         match self.row[idx].as_ref().unwrap() {
             ScalarImpl::Int64(num) => *num,
             _ => unreachable!("type is not int64 at index: {}", idx),
+        }
+    }
+
+    pub fn get_f32(&self, idx: usize) -> f32 {
+        match self.row[idx].as_ref().unwrap() {
+            ScalarImpl::Float32(num) => num.into_inner(),
+            _ => unreachable!("type is not float32 at index: {}", idx),
+        }
+    }
+
+    pub fn get_f64(&self, idx: usize) -> f64 {
+        match self.row[idx].as_ref().unwrap() {
+            ScalarImpl::Float64(num) => num.into_inner(),
+            _ => unreachable!("type is not float64 at index: {}", idx),
+        }
+    }
+
+    pub fn get_bool(&self, idx: usize) -> bool {
+        match self.row[idx].as_ref().unwrap() {
+            ScalarImpl::Bool(num) => *num,
+            _ => unreachable!("type is not boolean at index: {}", idx),
         }
     }
 

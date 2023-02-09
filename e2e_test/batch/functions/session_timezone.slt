@@ -56,4 +56,34 @@ select '2022-01-01 00:00:00-08:00'::timestamp with time zone::varchar;
 2022-01-01 00:00:00-08:00
 
 statement ok
+set timezone = 'europe/london'
+
+# Add/Subtract timestamptz with interval across a daylight savings boundary
+# Daylight savings falls on 2016-10-30 in London timezone
+
+# This should first add the 24 hours crossing the daylight saving boundary from UTC+1->UTC, then the day
+query T
+select '2016-10-29 12:00:00'::timestamptz + interval '24 hours' + interval '1 day';
+----
+2016-10-31 11:00:00+00:00
+
+# This should first add the days at UTC+1->UTC boundary (no change to time), then the hours
+query T
+select (interval '24 hours' + interval '1 day') + '2016-10-29 12:00:00'::timestamptz;
+----
+2016-10-31 12:00:00+00:00
+
+# Test inverse for subtract, only -1 day is applied at the UTC->UTC+1 boundary (no change to time)
+query T
+select '2016-10-31 11:00:00+00:00'::timestamptz - interval '24 hours' - interval '1 day';
+----
+2016-10-29 11:00:00+01:00
+
+# Test inverse for subtract, this time we apply diff 1 day first, then -24 hours at the UTC->UTC+1 boundary
+query T
+select '2016-10-31 11:00:00+00:00'::timestamptz - (interval '24 hours' + interval '1 day');
+----
+2016-10-29 12:00:00+01:00
+
+statement ok
 set timezone = 'UTC';

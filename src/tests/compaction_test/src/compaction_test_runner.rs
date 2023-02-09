@@ -24,10 +24,10 @@ use anyhow::anyhow;
 use bytes::{BufMut, BytesMut};
 use clap::Parser;
 use futures::TryStreamExt;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, RwConfig, StorageConfig, NO_OVERRIDE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
@@ -635,7 +635,9 @@ pub async fn check_compaction_results(
     mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
     mut actual_resutls: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
-    let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
+    let combined = expect_results
+        .iter_mut()
+        .zip_eq_fast(actual_resutls.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {
         assert_eq!(e1, e2);
         tracing::info!(

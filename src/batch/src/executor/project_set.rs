@@ -20,6 +20,7 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -108,7 +109,7 @@ impl ProjectSetExecutor {
                     projected_row_id_builder.append(Some(i as i64));
                 }
 
-                for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
                     match item {
                         Either::Left(array_ref) => {
                             builder.append_array(&array_ref);
