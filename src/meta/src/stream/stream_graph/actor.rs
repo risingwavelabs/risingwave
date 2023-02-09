@@ -26,6 +26,7 @@ use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 
+use super::id::GlobalFragmentIdsExt;
 use super::Locations;
 use crate::manager::{IdGeneratorManagerRef, StreamingClusterInfo, StreamingJob};
 use crate::model::{DispatcherId, FragmentId};
@@ -33,9 +34,7 @@ use crate::storage::MetaStore;
 use crate::stream::stream_graph::fragment::{
     CompleteStreamFragmentGraph, EdgeId, EitherFragment, StreamFragmentEdge,
 };
-use crate::stream::stream_graph::id::{
-    GlobalActorId, GlobalActorIdGen, GlobalActorIds, GlobalFragmentId,
-};
+use crate::stream::stream_graph::id::{GlobalActorId, GlobalActorIdGen, GlobalFragmentId};
 use crate::stream::stream_graph::schedule;
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::MetaResult;
@@ -48,7 +47,7 @@ struct ActorUpstream {
     edge_id: EdgeId,
 
     /// Upstream actors.
-    actors: GlobalActorIds,
+    actors: Vec<GlobalActorId>,
 
     /// The fragment ID of this upstream.
     fragment_id: GlobalFragmentId,
@@ -227,8 +226,7 @@ impl ActorBuilder {
         let upstream_actor_id = self
             .upstreams
             .into_values()
-            .flat_map(|ActorUpstream { actors, .. }| actors.0)
-            .map(|x| x.as_global_id())
+            .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
 
         Ok(StreamActor {
@@ -340,7 +338,7 @@ impl ActorGraphBuildStateInner {
             column_indices: column_indices.to_vec(),
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
-            downstream_actor_id: GlobalActorIds(downstream_actors.to_vec()).as_global_ids(),
+            downstream_actor_id: downstream_actors.as_global_ids(),
         }
     }
 
@@ -356,7 +354,7 @@ impl ActorGraphBuildStateInner {
             column_indices: Vec::new(),
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
-            downstream_actor_id: GlobalActorIds(downstream_actors.to_vec()).as_global_ids(),
+            downstream_actor_id: downstream_actors.as_global_ids(),
         }
     }
 
@@ -437,7 +435,7 @@ impl ActorGraphBuildStateInner {
                         *downstream_id,
                         ActorUpstream {
                             edge_id: edge.id,
-                            actors: GlobalActorIds(vec![*upstream_id]),
+                            actors: vec![*upstream_id],
                             fragment_id: upstream.fragment_id,
                         },
                     );
@@ -477,7 +475,7 @@ impl ActorGraphBuildStateInner {
                 // Add upstreams for the downstream actors.
                 let actor_upstream = ActorUpstream {
                     edge_id: edge.id,
-                    actors: GlobalActorIds(upstream.actor_ids.to_vec()),
+                    actors: upstream.actor_ids.to_vec(),
                     fragment_id: upstream.fragment_id,
                 };
                 for downstream_id in downstream.actor_ids {
