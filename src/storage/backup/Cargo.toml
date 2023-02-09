@@ -22,7 +22,6 @@ risingwave_hummock_sdk = { path = "../hummock_sdk" }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 serde = { version = "1", features = ["derive"] }
-serde_derive = "1"
 serde_json = "1"
 thiserror = "1"
 twox-hash = "1"

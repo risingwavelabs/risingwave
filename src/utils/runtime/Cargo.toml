@@ -12,7 +12,6 @@ repository = { workspace = true }
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 
 [dependencies]
-async-trait = "0.1"
 async_stack_trace = { path = "../async_stack_trace" }
 console = "0.15"
 console-subscriber = "0.1.8"
@@ -28,7 +27,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs"
 ] }
-tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
 

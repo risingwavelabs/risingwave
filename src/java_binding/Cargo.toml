@@ -9,7 +9,6 @@ ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 [dependencies]
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.10"
 jni = "0.20.0"
 prost = "0.11"
 risingwave_common = { path = "../common" }
