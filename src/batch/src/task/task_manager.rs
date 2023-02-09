@@ -251,12 +251,6 @@ impl BatchManager {
     }
 }
 
-// impl Default for BatchManager {
-//     fn default() -> Self {
-//         BatchManager::new(BatchConfig::default())
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::config::BatchConfig;
