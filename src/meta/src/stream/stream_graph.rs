@@ -952,7 +952,7 @@ impl BuildingFragment {
                 has_table = true;
             }
             NodeBody::Sink(sink_node) => {
-                sink_node.table_id = table_id;
+                sink_node.sink_desc.as_mut().unwrap().id = table_id;
 
                 has_table = true;
             }
