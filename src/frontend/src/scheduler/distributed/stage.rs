@@ -237,12 +237,23 @@ impl StageExecution {
 
     pub async fn is_scheduled(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Running { .. })
+        matches!(*s, StageState::Running { .. } | StageState::Completed)
     }
 
     pub async fn is_pending(&self) -> bool {
         let s = self.state.read().await;
         matches!(*s, StageState::Pending { .. })
+    }
+
+    pub async fn state(&self) -> &'static str {
+        let s = self.state.read().await;
+        match *s {
+            Pending { .. } => "Pending",
+            StageState::Started => "Started",
+            StageState::Running => "Running",
+            StageState::Completed => "Completed",
+            StageState::Failed => "Failed",
+        }
     }
 
     pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
@@ -369,7 +380,6 @@ impl StageRunner {
         // Process the stream until finished.
         let mut running_task_cnt = 0;
         let mut finished_task_cnt = 0;
-        let mut finished_task_cnt_id = HashSet::new();
         let mut sent_signal_to_next = false;
         let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
@@ -409,18 +419,13 @@ impl StageRunner {
 
                                 TaskStatusProst::Finished => {
                                     finished_task_cnt += 1;
-                                    finished_task_cnt_id.insert(status.task_info.as_ref().unwrap
-                                    ().task_id.clone().unwrap().task_id);
                                     assert!(finished_task_cnt <= self.tasks.keys().len());
-                                    if finished_task_cnt_id.len() > self.tasks.keys().len() {
-                                    let total_task_cnt = self.tasks.keys().len();
-                                    println!("Finished task count: {finished_task_cnt}, total \
-                                        task count: {total_task_cnt}");
-                                    }
+                                    assert!(running_task_cnt >= finished_task_cnt);
                                     if finished_task_cnt == self.tasks.keys().len() {
                                         // All tasks finished without failure, we should not break
                                     // this loop
                                         self.notify_stage_completed().await;
+                                        sent_signal_to_next = true;
                                     }
                                 }
 
@@ -498,7 +503,7 @@ impl StageRunner {
                     warn!("Root executor has been dropped before receive any events so the send is failed");
                 }
                 // Different from below, return this function and report error.
-                return Err(SchedulerError::TaskExecutionError(err_str));
+                return Err(TaskExecutionError(err_str));
             } else {
                 // Same for below.
                 if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
@@ -672,15 +677,15 @@ impl StageRunner {
     /// See PR (#4560).
     async fn abort_all_scheduled_tasks(&self) -> SchedulerResult<()> {
         // Set state to failed.
-        {
-            let mut state = self.state.write().await;
-            // Ignore if already finished.
-            if let &StageState::Completed = &*state {
-                return Ok(());
-            }
-            // FIXME: Be careful for state jump back.
-            *state = StageState::Failed
-        }
+        // {
+        //     let mut state = self.state.write().await;
+        //     // Ignore if already finished.
+        //     if let &StageState::Completed = &*state {
+        //         return Ok(());
+        //     }
+        //     // FIXME: Be careful for state jump back.
+        //     *state = StageState::Failed
+        // }
 
         for (task, task_status) in self.tasks.iter() {
             // 1. Collect task info and client.
