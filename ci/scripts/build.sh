@@ -33,9 +33,6 @@ cargo hakari generate --diff
 echo "--- Rust format check"
 cargo fmt --all -- --check
 
-echo "--- Show sccache stats"
-sccache --show-stats
-
 echo "--- Build Rust components"
 cargo build \
     -p risingwave_cmd_all \
