@@ -24,7 +24,7 @@ pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
-use bloom::Bloom;
+pub use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -52,7 +52,7 @@ pub use delete_range_aggregator::{
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
-use xxhash_rust::xxh32;
+use xxhash_rust::{xxh32, xxh64};
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
@@ -158,6 +158,12 @@ impl Sstable {
     pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u32 {
         let dist_key_hash = xxh32::xxh32(dist_key, 0);
         table_id.bitxor(dist_key_hash)
+    }
+
+    #[inline(always)]
+    pub fn hash_for_bloom_filter_u64(dist_key: &[u8], table_id: u32) -> u64 {
+        let dist_key_hash = xxh64::xxh64(dist_key, 0);
+        (table_id as u64).bitxor(dist_key_hash)
     }
 
     #[inline(always)]
