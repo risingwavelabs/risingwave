@@ -646,10 +646,7 @@ impl Compactor {
         };
 
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
-            > self
-                .context
-                .storage_config
-                .min_sst_size_for_streaming_upload
+            > self.context.storage_opts.min_sst_size_for_streaming_upload
         {
             self.compact_key_range_impl(
                 StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),

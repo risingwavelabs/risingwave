@@ -179,7 +179,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
 
-    let sstable_size = (context.storage_config.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
     if compaction_size > sstable_size * 2 {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
@@ -212,7 +212,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(
             indexes.len() as u64,
-            context.storage_config.max_sub_compaction as u64,
+            context.storage_opts.max_sub_compaction as u64,
         );
         let sub_compaction_data_size = std::cmp::max(compaction_size / parallelism, sstable_size);
         let parallelism = compaction_size / sub_compaction_data_size;

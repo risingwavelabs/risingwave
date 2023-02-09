@@ -146,9 +146,9 @@ async fn compact_shared_buffer(
         splits.last_mut().unwrap().right = key_before_last.clone();
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
-    let sstable_size = (context.storage_config.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
-        context.storage_config.share_buffers_sync_parallelism as u64,
+        context.storage_opts.share_buffers_sync_parallelism as u64,
         size_and_start_user_keys.len() as u64,
     );
     let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
@@ -297,7 +297,7 @@ impl SharedBufferCompactRunner {
         context: Arc<CompactorContext>,
         sub_compaction_sstable_size: usize,
     ) -> Self {
-        let mut options: SstableBuilderOptions = context.storage_config.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
         let compactor = Compactor::new(
             context,
