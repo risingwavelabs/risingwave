@@ -59,6 +59,14 @@ where
         };
     }
 
+    macro_rules! repeated {
+        ($tables:expr, $name:expr) => {
+            for table in &mut $tables {
+                f(table, $name);
+            }
+        };
+    }
+
     visit_fragment(fragment, |body| {
         match body {
             // Join
@@ -120,6 +128,10 @@ where
             }
             NodeBody::Now(node) => {
                 always!(node.state_table, "Now");
+            }
+            NodeBody::WatermarkFilter(node) => {
+                assert!(!node.tables.is_empty());
+                repeated!(node.tables, "WatermarkFilter");
             }
 
             // Shared arrangement

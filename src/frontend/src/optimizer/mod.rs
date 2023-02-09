@@ -31,7 +31,7 @@ pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use plan_rewriter::ShareSourceRewriter;
 use property::Order;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
@@ -48,7 +48,6 @@ use self::plan_visitor::{
 };
 use self::property::RequiredDist;
 use self::rule::*;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
