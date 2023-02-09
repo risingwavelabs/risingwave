@@ -28,10 +28,12 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::{ActorInfo, ParallelUnit};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
+use crate::manager::{WorkerId, WorkerLocations};
+use crate::model::ActorId;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 use crate::MetaResult;
@@ -325,5 +327,43 @@ impl Scheduler {
             .collect();
 
         Ok(distributions)
+    }
+}
+
+/// [`Locations`] represents the parallel unit and worker locations of the actors.
+#[cfg_attr(test, derive(Default))]
+pub struct Locations {
+    /// actor location map.
+    pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
+    /// worker location map.
+    pub worker_locations: WorkerLocations,
+}
+
+impl Locations {
+    /// Returns all actors for every worker node.
+    pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
+        self.actor_locations
+            .iter()
+            .map(|(actor_id, parallel_unit)| (parallel_unit.worker_node_id, *actor_id))
+            .into_group_map()
+    }
+
+    /// Returns the `ActorInfo` map for every actor.
+    pub fn actor_info_map(&self) -> HashMap<ActorId, ActorInfo> {
+        self.actor_infos()
+            .map(|info| (info.actor_id, info))
+            .collect()
+    }
+
+    /// Returns an iterator of `ActorInfo`.
+    pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
+        self.actor_locations
+            .iter()
+            .map(|(actor_id, parallel_unit)| ActorInfo {
+                actor_id: *actor_id,
+                host: self.worker_locations[&parallel_unit.worker_node_id]
+                    .host
+                    .clone(),
+            })
     }
 }

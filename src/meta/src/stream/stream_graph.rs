@@ -20,4 +20,5 @@ mod visit;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
 pub use fragment::{CompleteStreamFragmentGraph, StreamFragmentGraph};
+pub use schedule::Locations;
 pub use visit::visit_fragment;
