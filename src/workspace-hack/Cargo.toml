@@ -17,6 +17,9 @@ publish = false
 # are managed by hakari.
 
 ### BEGIN HAKARI SECTION
+[package.metadata.cargo-machete]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }

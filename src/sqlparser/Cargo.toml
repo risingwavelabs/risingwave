@@ -20,6 +20,9 @@ std = []
 # Enable JSON output in the `cli` example:
 json_example = ["serde_json", "serde"]
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 itertools = "0.10"
 serde = { version = "1.0", features = ["derive"], optional = true }

@@ -11,6 +11,9 @@ repository = { workspace = true }
 static-link = ["workspace-config/enable-static-link"]
 static-log-level = ["workspace-config/enable-static-log-level"]
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
