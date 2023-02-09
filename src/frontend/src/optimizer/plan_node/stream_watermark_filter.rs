@@ -22,7 +22,7 @@ use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::utils::TableCatalogBuilder;
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
@@ -45,6 +45,10 @@ impl StreamWatermarkFilter {
             // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
             input.watermark_columns().clone(),
         );
+        Self::with_base(base, input, watermark_descs)
+    }
+
+    fn with_base(base: PlanBase, input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
         Self {
             base,
             input,
@@ -119,3 +123,6 @@ impl StreamNode for StreamWatermarkFilter {
         })
     }
 }
+
+// TODO(yuhao): may impl a `ExprRewritable` after store `ExplImpl` in catalog.
+impl ExprRewritable for StreamWatermarkFilter {}
