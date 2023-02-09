@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::table::{
@@ -24,7 +24,6 @@ use risingwave_pb::catalog::table::{
 };
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
-use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
 use crate::user::UserId;
@@ -438,7 +437,9 @@ impl RelationCatalog for TableCatalog {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{
+        row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
+    };
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
@@ -448,8 +449,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::catalog::column_catalog::ColumnCatalog;
-    use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
     use crate::optimizer::property::{Direction, FieldOrder};
     use crate::WithOptions;
