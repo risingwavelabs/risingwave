@@ -581,7 +581,7 @@ impl<S: StateStore> StateTable<S> {
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        if self.dist_key_indices.is_empty() {
+        if self.vnode_col_idx_in_pk.is_none() && self.dist_key_indices.is_empty() {
             assert_eq!(
                 new_vnodes, self.vnodes,
                 "should not update vnode bitmap for singleton table"
