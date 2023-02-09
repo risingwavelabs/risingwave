@@ -66,31 +66,71 @@ pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
-    database_id: i32,
+    pub database_id: u32,
 }
 
 impl DatabaseId {
-    pub fn new(database_id: i32) -> Self {
+    pub fn new(database_id: u32) -> Self {
         DatabaseId { database_id }
     }
 
-    pub fn placeholder() -> i32 {
-        i32::MAX - 1
+    pub fn placeholder() -> Self {
+        DatabaseId {
+            database_id: u32::MAX - 1,
+        }
+    }
+}
+
+impl From<u32> for DatabaseId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for DatabaseId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<DatabaseId> for u32 {
+    fn from(id: DatabaseId) -> Self {
+        id.database_id
     }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SchemaId {
-    schema_id: i32,
+    pub schema_id: u32,
 }
 
 impl SchemaId {
-    pub fn new(schema_id: i32) -> Self {
+    pub fn new(schema_id: u32) -> Self {
         SchemaId { schema_id }
     }
 
-    pub fn placeholder() -> i32 {
-        i32::MAX - 1
+    pub fn placeholder() -> Self {
+        SchemaId {
+            schema_id: u32::MAX - 1,
+        }
+    }
+}
+
+impl From<u32> for SchemaId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for SchemaId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<SchemaId> for u32 {
+    fn from(id: SchemaId) -> Self {
+        id.schema_id
     }
 }
 
