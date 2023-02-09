@@ -40,6 +40,9 @@ tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config", optional = true }
 workspace-hack = { path = "../workspace-hack" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
+
 [[bin]]
 name = "risingwave"
 path = "src/bin/risingwave.rs"

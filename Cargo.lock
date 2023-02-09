@@ -5403,6 +5403,7 @@ dependencies = [
  "risingwave_rt",
  "task_stats_alloc",
  "tempfile",
+ "tikv-jemallocator",
  "tracing",
  "workspace-config",
  "workspace-hack",
