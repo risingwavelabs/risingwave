@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
 
 use super::{ColumnId, RelationCatalog, SourceId};
 use crate::user::UserId;
@@ -34,6 +34,7 @@ pub struct SourceCatalog {
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
+    pub watermark_descs: Vec<WatermarkDesc>,
 }
 
 impl From<&ProstSource> for SourceCatalog {
@@ -56,6 +57,7 @@ impl From<&ProstSource> for SourceCatalog {
 
         let append_only = row_id_index.is_some();
         let owner = prost.owner;
+        let watermark_descs = prost.get_watermark_descs().clone();
 
         Self {
             id,
@@ -67,6 +69,7 @@ impl From<&ProstSource> for SourceCatalog {
             info: prost.info.clone().unwrap(),
             row_id_index,
             properties: with_options.into_inner(),
+            watermark_descs,
         }
     }
 }

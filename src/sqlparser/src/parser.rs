@@ -24,6 +24,7 @@ use core::fmt;
 
 use tracing::{debug, instrument};
 
+use crate::ast::ddl::SourceWatermark;
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -113,6 +114,8 @@ impl fmt::Display for ParserError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
+
+type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -1946,15 +1949,36 @@ impl Parser {
     }
 
     pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+        let (column_refs, table_constraints, _) = self.parse_columns_inner(true)?;
+        Ok((column_refs, table_constraints))
+    }
+
+    pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
+        self.parse_columns_inner(true)
+    }
+
+    fn parse_columns_inner(
+        &mut self,
+        with_watermark: bool,
+    ) -> Result<ColumnsDefTuple, ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
+        let mut watermarks = vec![];
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {
-            return Ok((columns, constraints));
+            return Ok((columns, constraints, watermarks));
         }
 
         loop {
             if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
+            } else if with_watermark && let Some(watermark) = self.parse_optional_watermark()? {
+                watermarks.push(watermark);
+                if watermarks.len() > 1 {
+                    // TODO(yuhao): allow multiple watermark on source.
+                    return Err(ParserError::ParserError(
+                        "Only 1 watermark is allowed to be defined on source.".to_string(),
+                    ));
+                }
             } else if let Token::Word(_) = self.peek_token() {
                 columns.push(self.parse_column_def()?);
             } else {
@@ -1969,7 +1993,7 @@ impl Parser {
             }
         }
 
-        Ok((columns, constraints))
+        Ok((columns, constraints, watermarks))
     }
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
@@ -2072,6 +2096,18 @@ impl Parser {
                 "one of RESTRICT, CASCADE, SET NULL, NO ACTION or SET DEFAULT",
                 self.peek_token(),
             )
+        }
+    }
+
+    pub fn parse_optional_watermark(&mut self) -> Result<Option<SourceWatermark>, ParserError> {
+        if self.parse_keyword(Keyword::WATERMARK) {
+            self.expect_keyword(Keyword::FOR)?;
+            let column = self.parse_identifier_non_reserved()?;
+            self.expect_keyword(Keyword::AS)?;
+            let expr = self.parse_expr()?;
+            Ok(Some(SourceWatermark { column, expr }))
+        } else {
+            Ok(None)
         }
     }
 
