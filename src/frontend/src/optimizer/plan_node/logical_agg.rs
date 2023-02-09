@@ -186,7 +186,7 @@ impl LogicalAgg {
             .into());
         }
 
-        // now only simple agg
+        // now only simple agg (either single or two phase).
         let input_dist = stream_input.distribution().clone();
         let input_append_only = stream_input.append_only();
 
