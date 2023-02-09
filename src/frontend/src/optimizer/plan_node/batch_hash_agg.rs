@@ -24,7 +24,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
@@ -81,15 +81,15 @@ impl ToDistributedBatch for BatchHashAgg {
         )?;
         if self.logical.can_two_phase_agg() && self.logical.two_phase_agg_forced() {
             // partial agg
-            let partial_agg = self.clone_with_input(new_input).into();
+            let partial_agg: PlanRef = self.clone_with_input(new_input).into();
 
-            // insert exchange
-            let exchange = BatchExchange::new(
-                partial_agg,
-                Order::any(),
-                Distribution::HashShard(self.group_key().to_vec()),
-            )
-            .into();
+            // enforce exchange on input to partial agg.
+            // If we are going to shuffle, we should do it early,
+            // So we can aggregate more data in parallel.
+            let input_fields = self.base.schema().fields();
+            let input_col_num = input_fields.len();
+            let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
+                .enforce_if_not_satisfies(partial_agg, &Order::any())?;
 
             // insert total agg
             let total_agg_types = self
@@ -98,11 +98,17 @@ impl ToDistributedBatch for BatchHashAgg {
                 .iter()
                 .enumerate()
                 .map(|(partial_output_idx, agg_call)| {
-                    agg_call.partial_to_total_agg_call(partial_output_idx, false)
+                    agg_call.partial_to_total_agg_call(
+                        partial_output_idx + self.group_key().len(),
+                        false,
+                    )
                 })
                 .collect();
-            let total_agg_logical =
-                LogicalAgg::new(total_agg_types, self.logical.group_key().to_vec(), exchange);
+            let total_agg_logical = LogicalAgg::new(
+                total_agg_types,
+                (0..self.group_key().len()).collect(),
+                exchange,
+            );
             Ok(BatchHashAgg::new(total_agg_logical).into())
         } else {
             Ok(self.clone_with_input(new_input).into())
