@@ -43,7 +43,7 @@ use crate::MetaResult;
 /// The upstream information of an actor during the building process. This will eventually be used
 /// to create the `MergeNode`s as the leaf executor of each actor.
 #[derive(Debug, Clone)]
-struct StreamActorUpstream {
+struct ActorUpstream {
     /// The ID of this edge.
     edge_id: EdgeId,
 
@@ -54,9 +54,9 @@ struct StreamActorUpstream {
     fragment_id: GlobalFragmentId,
 }
 
-/// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
+/// [`ActorBuilder`] builds a stream actor in a stream DAG.
 #[derive(Debug)]
-struct StreamActorBuilder {
+struct ActorBuilder {
     /// The ID of this actor.
     actor_id: GlobalActorId,
 
@@ -73,13 +73,13 @@ struct StreamActorBuilder {
     downstreams: HashMap<DispatcherId, Dispatcher>,
 
     /// The upstream actors.
-    upstreams: HashMap<EdgeId, StreamActorUpstream>,
+    upstreams: HashMap<EdgeId, ActorUpstream>,
 
     /// The virtual node bitmap, if this fragment is hash distributed.
     vnode_bitmap: Option<Bitmap>,
 }
 
-impl StreamActorBuilder {
+impl ActorBuilder {
     fn new(
         actor_id: GlobalActorId,
         fragment_id: GlobalFragmentId,
@@ -108,7 +108,7 @@ impl StreamActorBuilder {
     }
 
     /// Add an upstream to this actor.
-    fn add_upstream(&mut self, upstream: StreamActorUpstream) {
+    fn add_upstream(&mut self, upstream: ActorUpstream) {
         self.upstreams
             .try_insert(upstream.edge_id, upstream)
             .unwrap();
@@ -227,7 +227,7 @@ impl StreamActorBuilder {
         let upstream_actor_id = self
             .upstreams
             .into_values()
-            .flat_map(|StreamActorUpstream { actors, .. }| actors.0)
+            .flat_map(|ActorUpstream { actors, .. }| actors.0)
             .map(|x| x.as_global_id())
             .collect();
 
@@ -274,7 +274,7 @@ type ActorLocations = BTreeMap<GlobalActorId, ParallelUnitId>;
 #[derive(Default)]
 struct ActorGraphBuildStateInner {
     /// The builders of the actors to be built.
-    actor_builders: BTreeMap<GlobalActorId, StreamActorBuilder>,
+    actor_builders: BTreeMap<GlobalActorId, ActorBuilder>,
 
     /// The scheduled locations of the actors to be built.
     building_locations: ActorLocations,
@@ -308,7 +308,7 @@ impl ActorGraphBuildStateInner {
         self.actor_builders
             .try_insert(
                 actor_id,
-                StreamActorBuilder::new(actor_id, fragment_id, vnode_bitmap, node),
+                ActorBuilder::new(actor_id, fragment_id, vnode_bitmap, node),
             )
             .unwrap();
 
@@ -379,7 +379,7 @@ impl ActorGraphBuildStateInner {
     ///
     /// - If the actor is to be built, the upstream will be added to the actor builder.
     /// - Currently there is no case that an upstream is added to an external actor.
-    fn add_upstream(&mut self, actor_id: GlobalActorId, upstream: StreamActorUpstream) {
+    fn add_upstream(&mut self, actor_id: GlobalActorId, upstream: ActorUpstream) {
         if let Some(actor_builder) = self.actor_builders.get_mut(&actor_id) {
             actor_builder.add_upstream(upstream);
         } else {
@@ -435,7 +435,7 @@ impl ActorGraphBuildStateInner {
                     // Also record the upstream for the downstream actor.
                     self.add_upstream(
                         *downstream_id,
-                        StreamActorUpstream {
+                        ActorUpstream {
                             edge_id: edge.id,
                             actors: GlobalActorIds(vec![*upstream_id]),
                             fragment_id: upstream.fragment_id,
@@ -475,7 +475,7 @@ impl ActorGraphBuildStateInner {
                 }
 
                 // Add upstreams for the downstream actors.
-                let actor_upstream = StreamActorUpstream {
+                let actor_upstream = ActorUpstream {
                     edge_id: edge.id,
                     actors: GlobalActorIds(upstream.actor_ids.to_vec()),
                     fragment_id: upstream.fragment_id,

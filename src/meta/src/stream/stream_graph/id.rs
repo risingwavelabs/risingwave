@@ -31,6 +31,12 @@ impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
     }
 }
 
+impl<const TYPE: IdCategoryType> From<u32> for GlobalId<TYPE> {
+    fn from(id: u32) -> Self {
+        Self(id)
+    }
+}
+
 /// Utility for converting local IDs into pre-allocated global IDs by adding an `offset`.
 ///
 /// This requires the local IDs exactly a permutation of the range `[0, len)`.
