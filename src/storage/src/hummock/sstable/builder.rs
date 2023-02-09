@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
@@ -34,6 +33,7 @@ use super::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
+use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
@@ -51,8 +51,8 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
-impl From<&StorageConfig> for SstableBuilderOptions {
-    fn from(options: &StorageConfig) -> SstableBuilderOptions {
+impl From<&StorageOpts> for SstableBuilderOptions {
+    fn from(options: &StorageOpts) -> SstableBuilderOptions {
         let capacity = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,

@@ -33,7 +33,7 @@ mod subquery;
 mod value;
 
 impl Binder {
-    pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
+    pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
             // literal
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
