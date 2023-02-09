@@ -175,7 +175,7 @@ impl LogicalAgg {
         // having group key, is not simple agg. we will just use shuffle agg
         // TODO(stonepage): in some situation the 2-phase agg is better. maybe some switch or
         // hints for it.
-        if !self.group_key().is_empty() {
+        if !self.group_key().is_empty() && !self.force_two_phase_agg() {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -230,6 +230,14 @@ impl LogicalAgg {
         self.agg_calls()
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    fn force_two_phase_agg(&self) -> bool {
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_force_two_phase_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
