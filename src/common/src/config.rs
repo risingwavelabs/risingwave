@@ -635,7 +635,7 @@ mod default {
         use crate::config::AsyncStackTraceOption;
 
         pub fn barrier_interval_ms() -> u32 {
-            50
+            1000
         }
 
         pub fn in_flight_barrier_nums() -> usize {
