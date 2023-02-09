@@ -100,7 +100,6 @@ impl LogicalAgg {
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
-        println!("generate vnode twophase streaming");
         let input_fields = stream_input.schema().fields();
         let input_col_num = input_fields.len();
 
@@ -125,7 +124,6 @@ impl LogicalAgg {
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
-        println!("local_group_key: {:?}", &local_group_key);
         let local_agg = StreamHashAgg::new(
             LogicalAgg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
