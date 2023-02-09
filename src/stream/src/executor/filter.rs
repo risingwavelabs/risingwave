@@ -15,10 +15,10 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 
 use super::{
@@ -97,7 +97,7 @@ impl SimpleFilterExecutor {
         });
 
         if let ArrayImpl::Bool(bool_array) = &*filter {
-            for (op, res) in ops.into_iter().zip_eq(bool_array.iter()) {
+            for (op, res) in ops.into_iter().zip_eq_debug(bool_array.iter()) {
                 // SAFETY: ops.len() == pred_output.len() == visibility.len()
                 let res = res.unwrap_or(false);
                 match op {

@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -372,6 +372,7 @@ pub enum Expr {
 }
 
 impl fmt::Display for Expr {
+    #[expect(clippy::disallowed_methods, reason = "use zip_eq")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),

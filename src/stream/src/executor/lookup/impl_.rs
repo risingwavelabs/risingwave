@@ -19,6 +19,7 @@ use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -312,7 +313,7 @@ impl<S: StateStore> LookupExecutor<S> {
                         arrange_to_output.clone(),
                     );
 
-                    for (op, row) in ops.iter().zip_eq(chunk.rows()) {
+                    for (op, row) in ops.iter().zip_eq_debug(chunk.rows()) {
                         for matched_row in self
                             .lookup_one_row(&row, self.last_barrier.as_ref().unwrap().epoch)
                             .await?

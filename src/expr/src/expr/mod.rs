@@ -110,10 +110,10 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength
         | BoolOut | OctetLength | BitLength | ToTimestamp => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
-        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
+        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
         | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
+        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
             build_nullable_binary_expr_prost(prost)
         }
         ToChar => build_to_char_expr(prost),
