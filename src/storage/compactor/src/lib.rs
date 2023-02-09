@@ -120,7 +120,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             compactor_serve(listen_addr, advertise_addr, opts).await;
 
         join_handle.await.unwrap();
-        observer_join_handle.await.unwrap();
+        observer_join_handle.abort();
     })
 }
 

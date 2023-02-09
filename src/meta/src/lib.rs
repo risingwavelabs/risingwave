@@ -216,7 +216,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, leader_lost_handle, _shutdown_send) = rpc_serve(
+        let (join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -245,6 +245,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 bloom_false_positive: config.storage.bloom_false_positive,
                 state_store: opts.state_store,
                 data_directory: config.storage.data_directory,
+                periodic_space_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_space_reclaim_compaction_interval_sec,
             },
         )
         .await
@@ -252,8 +255,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         if let Some(leader_lost_handle) = leader_lost_handle {
             tokio::select! {
-                _ = join_handle => {},
-                _ = leader_lost_handle => {},
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("receive ctrl+c");
+                    shutdown_send.send(()).unwrap();
+                    join_handle.await.unwrap();
+                    leader_lost_handle.abort();
+                },
             }
         } else {
             join_handle.await.unwrap();

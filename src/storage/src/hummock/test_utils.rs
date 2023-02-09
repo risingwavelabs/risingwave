@@ -18,11 +18,9 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
-use risingwave_pb::meta::SystemParams;
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
@@ -37,37 +35,29 @@ use crate::hummock::{
     SstableStoreRef, SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
+use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
 
-pub fn default_config_for_test() -> (StorageConfig, SystemParams) {
-    (
-        StorageConfig {
-            sstable_size_mb: 4,
-            block_size_kb: 64,
-            bloom_false_positive: 0.1,
-            share_buffers_sync_parallelism: 2,
-            share_buffer_compaction_worker_threads_number: 1,
-            shared_buffer_capacity_mb: 64,
-            data_directory: "hummock_001".to_string(),
-            write_conflict_detection_enabled: true,
-            block_cache_capacity_mb: 64,
-            meta_cache_capacity_mb: 64,
-            disable_remote_compactor: false,
-            enable_local_spill: false,
-            local_object_store: "memory".to_string(),
-            share_buffer_upload_concurrency: 1,
-            compactor_memory_limit_mb: 64,
-            sstable_id_remote_fetch_number: 1,
-            ..Default::default()
-        },
-        SystemParams {
-            sstable_size_mb: 4,
-            block_size_kb: 64,
-            bloom_false_positive: 0.1,
-            data_directory: "hummock_001".to_string(),
-            ..Default::default()
-        },
-    )
+pub fn default_opts_for_test() -> StorageOpts {
+    StorageOpts {
+        sstable_size_mb: 4,
+        block_size_kb: 64,
+        bloom_false_positive: 0.1,
+        share_buffers_sync_parallelism: 2,
+        share_buffer_compaction_worker_threads_number: 1,
+        shared_buffer_capacity_mb: 64,
+        data_directory: "hummock_001".to_string(),
+        write_conflict_detection_enabled: true,
+        block_cache_capacity_mb: 64,
+        meta_cache_capacity_mb: 64,
+        disable_remote_compactor: false,
+        enable_local_spill: false,
+        local_object_store: "memory".to_string(),
+        share_buffer_upload_concurrency: 1,
+        compactor_memory_limit_mb: 64,
+        sstable_id_remote_fetch_number: 1,
+        ..Default::default()
+    }
 }
 
 pub fn gen_dummy_batch(n: u64) -> Vec<(Bytes, StorageValue)> {

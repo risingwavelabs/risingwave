@@ -17,7 +17,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
@@ -27,6 +26,7 @@ use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
@@ -244,7 +244,7 @@ impl Sink for RemoteSink {
             let mut map = serde_json::Map::new();
             row_ref
                 .iter()
-                .zip_eq(self.schema.fields.iter())
+                .zip_eq_fast(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));
                 });

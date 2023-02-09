@@ -21,8 +21,8 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::generic;
 use super::utils::IndicesDisplay;
+use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -150,3 +150,5 @@ impl StreamNode for StreamDynamicFilter {
         })
     }
 }
+
+impl ExprRewritable for StreamDynamicFilter {}

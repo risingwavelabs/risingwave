@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::literal_parsing;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -172,7 +173,7 @@ impl FunctionCall {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq(fields.to_vec())
+                    .zip_eq_fast(fields.to_vec())
                     .map(|(e, t)| Self::new_cast(e, t, allows))
                     .collect::<Result<Vec<_>>>()?;
                 let return_type = DataType::new_struct(

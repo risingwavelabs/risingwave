@@ -24,7 +24,6 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_pb::meta::SystemParams;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -34,6 +33,7 @@ use super::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
+use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
@@ -51,14 +51,14 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
-impl From<&SystemParams> for SstableBuilderOptions {
-    fn from(params: &SystemParams) -> SstableBuilderOptions {
-        let capacity = (params.sstable_size_mb as usize) * (1 << 20);
+impl From<&StorageOpts> for SstableBuilderOptions {
+    fn from(options: &StorageOpts) -> SstableBuilderOptions {
+        let capacity = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
-            block_capacity: (params.block_size_kb as usize) * (1 << 10),
+            block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: params.bloom_false_positive,
+            bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
         }
     }

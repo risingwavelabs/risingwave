@@ -109,6 +109,9 @@ pub struct MetaOpts {
 
     /// Remote directory for storing data and metadata objects.
     pub data_directory: String,
+
+    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -136,6 +139,7 @@ impl MetaOpts {
             bloom_false_positive: 0.001,
             state_store: None,
             data_directory: "hummock_001".to_string(),
+            periodic_space_reclaim_compaction_interval_sec: 60,
         }
     }
 }

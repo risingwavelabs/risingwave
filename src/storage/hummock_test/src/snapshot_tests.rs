@@ -22,7 +22,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::*;
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
@@ -274,9 +274,7 @@ async fn test_snapshot_range_scan_inner(
 #[ignore]
 async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
     let sstable_store = mock_sstable_store();
-    let (storage_config, system_params) = default_config_for_test();
-    let storage_config = Arc::new(storage_config);
-    let system_params = Arc::new(system_params);
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -286,8 +284,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
 
     // TODO: may also test for v2 when the unit test is enabled.
     let hummock_storage = HummockStorageV1::new(
-        storage_config,
-        system_params,
+        hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),

@@ -3,13 +3,14 @@ name = "risingwave_sqlparser_test_runner"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
-itertools = "0.10"
 risingwave_sqlparser = { path = "../" }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-tempfile = "3"
 walkdir = "2"
 
 [target.'cfg(not(madsim))'.dependencies]

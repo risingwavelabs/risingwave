@@ -21,14 +21,12 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_pb::hummock::{version_update_payload, SstableInfo};
-use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::watch;
@@ -38,6 +36,7 @@ mod block_cache;
 pub use block_cache::*;
 
 use crate::hummock::store::state_store::LocalHummockStorage;
+use crate::opts::StorageOpts;
 
 #[cfg(target_os = "linux")]
 pub mod file_cache;
@@ -149,8 +148,7 @@ impl HummockStorage {
     /// Creates a [`HummockStorage`].
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        options: Arc<StorageConfig>,
-        system_params: Arc<SystemParams>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -192,7 +190,6 @@ impl HummockStorage {
 
         let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
-            system_params,
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
@@ -321,15 +318,13 @@ impl HummockStorage {
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
-        options: Arc<StorageConfig>,
-        system_params: Arc<SystemParams>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
     ) -> HummockResult<Self> {
         Self::new(
             options,
-            system_params,
             sstable_store,
             BackupReader::unused(),
             hummock_meta_client,
@@ -341,12 +336,8 @@ impl HummockStorage {
         .await
     }
 
-    pub fn storage_config(&self) -> &Arc<StorageConfig> {
-        &self.context.storage_config
-    }
-
-    pub fn system_params(&self) -> &Arc<SystemParams> {
-        &self.context.system_params
+    pub fn storage_opts(&self) -> &Arc<StorageOpts> {
+        &self.context.storage_opts
     }
 
     pub fn version_reader(&self) -> &HummockVersionReader {
@@ -507,7 +498,7 @@ pub fn get_from_batch(
 
 #[derive(Clone)]
 pub struct HummockStorageV1 {
-    options: Arc<StorageConfig>,
+    options: Arc<StorageOpts>,
 
     local_version_manager: LocalVersionManagerRef,
 
@@ -533,8 +524,7 @@ impl HummockStorageV1 {
     /// Creates a [`HummockStorageV1`].
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        options: Arc<StorageConfig>,
-        system_params: Arc<SystemParams>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
@@ -578,7 +568,6 @@ impl HummockStorageV1 {
 
         let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
             options.clone(),
-            system_params,
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
@@ -587,7 +576,7 @@ impl HummockStorageV1 {
             CompactorRuntimeConfig::default(),
         ));
 
-        let buffer_tracker = BufferTracker::from_storage_config(&options);
+        let buffer_tracker = BufferTracker::from_storage_opts(&options);
 
         let local_version_manager =
             LocalVersionManager::new(pinned_version.clone(), compactor_context, buffer_tracker);
@@ -637,7 +626,7 @@ impl HummockStorageV1 {
         Ok(instance)
     }
 
-    pub fn options(&self) -> &Arc<StorageConfig> {
+    pub fn options(&self) -> &Arc<StorageOpts> {
         &self.options
     }
 

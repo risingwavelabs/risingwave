@@ -99,7 +99,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             continue;
         }
         // XXX: hack for kafka source test
-        let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
+        let tempfile = (path.ends_with("kafka.slt") || path.ends_with("kafka_batch.slt"))
+            .then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             if let sqllogictest::Record::Halt { .. } = record {

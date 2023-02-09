@@ -23,7 +23,7 @@ use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
@@ -51,9 +51,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let batches = gen_interleave_shared_buffer_batch_iter(10000, 100);
     let sstable_store = mock_sstable_store();
-    let (storage_config, system_params) = default_config_for_test();
-    let storage_config = Arc::new(storage_config);
-    let system_params = Arc::new(system_params);
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         runtime.block_on(setup_compute_env(8080));
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -63,8 +61,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let global_hummock_storage = runtime.block_on(async {
         HummockStorage::for_test(
-            storage_config,
-            system_params,
+            hummock_options,
             sstable_store,
             meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref, worker_node),

@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::compact_task;
 
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
@@ -145,9 +146,9 @@ async fn compact_shared_buffer(
         splits.last_mut().unwrap().right = key_before_last.clone();
         splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
     };
-    let sstable_size = (context.system_params.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
     let parallelism = std::cmp::min(
-        context.storage_config.share_buffers_sync_parallelism as u64,
+        context.storage_opts.share_buffers_sync_parallelism as u64,
         size_and_start_user_keys.len() as u64,
     );
     let sub_compaction_data_size = if compact_data_size > sstable_size && parallelism > 1 {
@@ -296,16 +297,19 @@ impl SharedBufferCompactRunner {
         context: Arc<CompactorContext>,
         sub_compaction_sstable_size: usize,
     ) -> Self {
-        let mut options: SstableBuilderOptions = context.system_params.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
         let compactor = Compactor::new(
             context,
             options,
-            key_range,
-            CachePolicy::Fill,
-            GC_DELETE_KEYS_FOR_FLUSH,
-            GC_WATERMARK_FOR_FLUSH,
-            None,
+            super::TaskConfig {
+                key_range,
+                cache_policy: CachePolicy::Fill,
+                gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
+                watermark: GC_WATERMARK_FOR_FLUSH,
+                stats_target_table_ids: None,
+                task_type: compact_task::TaskType::SharedBuffer,
+            },
         );
         Self {
             compactor,

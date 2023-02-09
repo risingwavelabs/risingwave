@@ -18,9 +18,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
-use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, LocalPickerStatistic};
+use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct MinOverlappingPicker {
@@ -97,7 +96,7 @@ impl MinOverlappingPicker {
 
 impl CompactionPicker for MinOverlappingPicker {
     fn pick_compaction(
-        &self,
+        &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
@@ -143,7 +142,7 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let picker =
+        let mut picker =
             MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
@@ -219,7 +218,7 @@ pub mod tests {
 
     #[test]
     fn test_expand_l1_files() {
-        let picker =
+        let mut picker =
             MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
