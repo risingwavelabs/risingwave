@@ -27,6 +27,7 @@ pub mod env_var;
 pub mod epoch;
 mod future_utils;
 pub mod hash_util;
+pub mod iter_util;
 pub mod ordered;
 pub mod prost;
 pub mod resource_util;

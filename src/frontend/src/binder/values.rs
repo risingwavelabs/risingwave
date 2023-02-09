@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
@@ -132,7 +133,7 @@ impl Binder {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..num_columns)
+                .zip_eq_fast(0..num_columns)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );
@@ -163,7 +164,7 @@ impl Binder {
 #[cfg(test)]
 mod tests {
 
-    use itertools::zip_eq;
+    use risingwave_common::util::iter_util::zip_eq_fast;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
@@ -185,14 +186,14 @@ mod tests {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..n_cols)
+                .zip_eq_fast(0..n_cols)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(0, col_id)))
                 .collect(),
         );
 
         assert_eq!(res.0.schema, schema);
         for vec in res.0.rows {
-            for (expr, ty) in zip_eq(vec, schema.data_types()) {
+            for (expr, ty) in zip_eq_fast(vec, schema.data_types()) {
                 assert_eq!(expr.return_type(), ty);
             }
         }

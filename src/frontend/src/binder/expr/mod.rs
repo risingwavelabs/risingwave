@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::{zip_eq, Itertools};
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
     TrimWhereField, UnaryOperator,
@@ -347,7 +348,7 @@ impl Binder {
             .collect::<Result<_>>()?;
         let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
 
-        for (condition, result) in zip_eq(conditions, results_expr) {
+        for (condition, result) in zip_eq_fast(conditions, results_expr) {
             let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),

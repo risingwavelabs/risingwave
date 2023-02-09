@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
@@ -126,7 +126,7 @@ impl Binder {
                             .schema()
                             .fields
                             .iter()
-                            .zip_eq(right.schema().fields.iter())
+                            .zip_eq_fast(right.schema().fields.iter())
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
