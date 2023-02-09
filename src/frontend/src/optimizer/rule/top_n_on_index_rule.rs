@@ -32,6 +32,9 @@ impl Rule for TopNOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_top_n: &LogicalTopN = plan.as_logical_top_n()?;
         let logical_scan: LogicalScan = logical_top_n.input().as_logical_scan()?.to_owned();
+        if !logical_scan.predicate().always_true() {
+            return None;
+        }
         let order = logical_top_n.topn_order();
         if order.field_order.is_empty() {
             return None;
