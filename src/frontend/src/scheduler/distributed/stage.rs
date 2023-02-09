@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use futures::stream::Fuse;
 use futures::{stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
@@ -368,6 +369,7 @@ impl StageRunner {
         // Process the stream until finished.
         let mut running_task_cnt = 0;
         let mut finished_task_cnt = 0;
+        let mut finished_task_cnt_id = HashSet::new();
         let mut sent_signal_to_next = false;
         let mut shutdown_rx = shutdown_rx;
         // This loop will stops once receive a stop message, otherwise keep processing status
@@ -407,12 +409,18 @@ impl StageRunner {
 
                                 TaskStatusProst::Finished => {
                                     finished_task_cnt += 1;
+                                    finished_task_cnt_id.insert(status.task_info.as_ref().unwrap
+                                    ().task_id.clone().unwrap().task_id);
                                     assert!(finished_task_cnt <= self.tasks.keys().len());
+                                    if finished_task_cnt_id.len() > self.tasks.keys().len() {
+                                    let total_task_cnt = self.tasks.keys().len();
+                                    println!("Finished task count: {finished_task_cnt}, total \
+                                        task count: {total_task_cnt}");
+                                    }
                                     if finished_task_cnt == self.tasks.keys().len() {
-                                        assert!(sent_signal_to_next);
-                                        // All tasks finished without failure, we should not
-                                    // break this lop
-
+                                        // All tasks finished without failure, we should not break
+                                    // this loop
+                                        self.notify_stage_completed().await;
                                     }
                                 }
 
@@ -714,7 +722,7 @@ impl StageRunner {
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
-    ) -> SchedulerResult<Streaming<TaskInfoResponse>> {
+    ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let worker_node_addr = worker
             .unwrap_or(self.worker_node_manager.next_random()?)
             .host
@@ -730,7 +738,8 @@ impl StageRunner {
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| anyhow!(e))?
+            .fuse();
 
         self.tasks[&t_id].inner.store(Arc::new(TaskStatus {
             _task_id: t_id,

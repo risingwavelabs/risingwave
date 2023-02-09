@@ -288,6 +288,7 @@ impl QueryRunner {
                 }
                 Stage(StageEvent::Completed(_)) => {
                     finished_stage_cnt += 1;
+                    assert!(finished_stage_cnt <= self.stage_executions.len());
                     if finished_stage_cnt == self.stage_executions.len() {
                         // Now all stages completed, we should remove all
                         self.clean_all_stages(None).await;
