@@ -32,7 +32,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 17] = [
+const CONFIG_KEYS: [&str; 18] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -50,6 +50,7 @@ const CONFIG_KEYS: [&str; 17] = [
     "STREAMING_PARALLELISM",
     "RW_STREAMING_ENABLE_DELTA_JOIN",
     "RW_ENABLE_TWO_PHASE_AGG",
+    "RW_FORCE_TWO_PHASE_AGG",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -71,6 +72,7 @@ const TIMEZONE: usize = 13;
 const STREAMING_PARALLELISM: usize = 14;
 const STREAMING_ENABLE_DELTA_JOIN: usize = 15;
 const ENABLE_TWO_PHASE_AGG: usize = 16;
+const FORCE_TWO_PHASE_AGG: usize = 17;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -268,6 +270,7 @@ type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
+type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, true>;
 
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -327,8 +330,14 @@ pub struct ConfigMap {
     /// Enable delta join in streaming query. Defaults to false.
     streaming_enable_delta_join: StreamingEnableDeltaJoin,
 
-    /// Enable two phase agg. Defaults to true.
+    /// Enable two phase agg optimization. Defaults to true.
+    /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
     enable_two_phase_agg: EnableTwoPhaseAgg,
+
+    /// Force two phase agg optimization whenever there's a choice between
+    /// optimizations. Defaults to false.
+    /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
+    force_two_phase_agg: ForceTwoPhaseAgg,
 }
 
 impl ConfigMap {
@@ -372,6 +381,14 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
+            if *self.enable_two_phase_agg {
+                self.force_two_phase_agg = ConfigBool(false);
+            }
+        } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
+            self.force_two_phase_agg = val.as_slice().try_into()?;
+            if *self.force_two_phase_agg {
+                self.enable_two_phase_agg = ConfigBool(true);
+            }
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -414,6 +431,8 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             Ok(self.enable_two_phase_agg.to_string())
+        } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
+            Ok(self.force_two_phase_agg.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -501,6 +520,11 @@ impl ConfigMap {
                 setting : self.enable_two_phase_agg.to_string(),
                 description: String::from("Enable two phase aggregation.")
             },
+            VariableInfo{
+                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
+                setting : self.enable_two_phase_agg.to_string(),
+                description: String::from("Force two phase aggregation.")
+            },
         ]
     }
 
@@ -576,5 +600,9 @@ impl ConfigMap {
 
     pub fn get_enable_two_phase_agg(&self) -> bool {
         *self.enable_two_phase_agg
+    }
+
+    pub fn get_force_two_phase_agg(&self) -> bool {
+        *self.force_two_phase_agg
     }
 }
