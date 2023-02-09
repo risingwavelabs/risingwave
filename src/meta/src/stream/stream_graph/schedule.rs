@@ -32,7 +32,8 @@ use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
-use super::{CompleteStreamFragmentGraph, GlobalFragmentId as Id};
+use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
+use crate::stream::stream_graph::id::GlobalFragmentId as Id;
 use crate::MetaResult;
 
 type HashMappingId = usize;
