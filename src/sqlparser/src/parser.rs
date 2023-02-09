@@ -2026,7 +2026,8 @@ impl Parser {
     }
 
     pub fn parse_optional_watermark(&mut self) -> Result<Option<SourceWatermark>, ParserError> {
-        if self.parse_keywords(&[Keyword::WATERMARK, Keyword::FOR]) {
+        if self.parse_keyword(Keyword::WATERMARK) {
+            self.expect_keyword(Keyword::FOR)?;
             let column = self.parse_identifier_non_reserved()?;
             self.expect_keyword(Keyword::AS)?;
             let expr = self.parse_expr()?;
