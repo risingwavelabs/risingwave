@@ -200,3 +200,9 @@ impl<'a> Iterator for RowRefIter<'a> {
 }
 
 unsafe impl TrustedLen for RowRefIter<'_> {}
+
+impl ExactSizeIterator for RowRefIter<'_> {
+    fn len(&self) -> usize {
+        self.columns.len()
+    }
+}

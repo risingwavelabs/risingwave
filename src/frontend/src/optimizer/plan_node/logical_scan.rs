@@ -257,6 +257,11 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn watermark_columns(&self) -> FixedBitSet {
+        let watermark_columns = &self.table_desc().watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    }
+
     pub fn to_index_scan(
         &self,
         index_name: &str,

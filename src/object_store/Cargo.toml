@@ -24,6 +24,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
 prometheus = { version = "0.13", features = ["process"] }
+random-string = "1.0"
 risingwave_common = { path = "../common" }
 spin = "0.9"
 tempfile = "3"

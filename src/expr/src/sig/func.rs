@@ -172,6 +172,7 @@ fn build_type_derive_map() -> FuncSigMap {
         &[T::Int16, T::Int32, T::Int64, T::Decimal],
     );
     map.insert(E::RoundDigit, vec![T::Decimal, T::Int32], T::Decimal);
+    map.insert(E::Pow, vec![T::Float64, T::Float64], T::Float64);
 
     // build bitwise operator
     // bitwise operator
@@ -270,6 +271,7 @@ fn build_type_derive_map() -> FuncSigMap {
     for e in [E::Replace, E::Translate] {
         map.insert(e, vec![T::Varchar, T::Varchar, T::Varchar], T::Varchar);
     }
+    map.insert(E::FormatType, vec![T::Int32, T::Int32], T::Varchar);
     map.insert(
         E::Overlay,
         vec![T::Varchar, T::Varchar, T::Int32],

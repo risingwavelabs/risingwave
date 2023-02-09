@@ -526,6 +526,7 @@ define_keywords!(
     VIEWS,
     VIRTUAL,
     VOLATILE,
+    WATERMARK,
     WHEN,
     WHENEVER,
     WHERE,

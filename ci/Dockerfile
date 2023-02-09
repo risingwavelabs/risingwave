@@ -12,6 +12,9 @@ RUN apt-get update -yy && \
 
 SHELL ["/bin/bash", "-c"]
 
+RUN echo export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64>>~/.bashrc
+RUN echo source ~/.bashrc>>~/.bashrc
+
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
@@ -27,9 +30,12 @@ ENV PATH /root/.cargo/bin/:$PATH
 RUN rustup component add rustfmt llvm-tools-preview clippy
 
 # install build tools
-RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache \
+RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache sccache \
     && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev dbadddb --bin sqllogictest --locked \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
+
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_BUCKET=ci-sccache-bucket

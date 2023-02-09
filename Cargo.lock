@@ -336,9 +336,9 @@ dependencies = [
 
 [[package]]
 name = "async-recursion"
-version = "1.0.0"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cda8f4bcc10624c4e85bc66b3f452cca98cfa5ca002dc83a16aad2367641bea"
+checksum = "3b015a331cc64ebd1774ba119538573603427eaace0a1950c423ab971f903796"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2108,6 +2108,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9b0705efd4599c15a38151f4721f7bc388306f61084d3bfd50bd07fbca5cb60"
 
 [[package]]
+name = "easy-ext"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49457524c7e65648794c98283282a0b7c73b10018e7091f1cdcfff314fd7ae59"
+
+[[package]]
 name = "either"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3589,9 +3595,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "150508f130d4ab8b00ff33bbe7d2f6276a943d8198efddb7c5a69c6b89ee6547"
+checksum = "ad8ec77ebfe5067154eb35baeb03c402e3c57a3db4866e9a1a276d40435c7fb8"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3617,9 +3623,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "399abea1dd4b45ed8564c67e400dfac5b65fe8f21356ea5f0cc32c793ea61285"
+checksum = "b25dd57e0c5b84c838451374177f34be28df7b7885d950f736d46937afc42e96"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3673,11 +3679,10 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.11"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95122ce38cd63608a480fa7ebd8216f79ba8228cea34744e1a93e9c49f21872"
+checksum = "ebc35d85610c81cdefc44f71aad0781b0093fa2d956360e418466cb1d5b1adf2"
 dependencies = [
- "futures-lite",
  "madsim",
  "tokio",
 ]
@@ -4295,9 +4300,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.24.0+1.1.1s"
+version = "111.25.0+1.1.1t"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3498f259dab01178c6228c6b00dcef0ed2a2d5e20d648c017861227773ea4abd"
+checksum = "3173cd3626c43e3854b1b727422a276e568d9ec5fe8cec197822cf52cfb743d6"
 dependencies = [
  "cc",
 ]
@@ -5345,6 +5350,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "random-string"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf4e63111ec5292d8af9c220f06fe3bb87991cc78b6f1f7e291d1ae6b8a60817"
+dependencies = [
+ "fastrand",
+]
+
+[[package]]
 name = "raw-cpuid"
 version = "10.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6123,6 +6137,7 @@ dependencies = [
  "arc-swap",
  "assert-impl",
  "assert_matches",
+ "async-recursion",
  "async-trait",
  "bk-tree",
  "byteorder",
@@ -6145,6 +6160,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
+ "petgraph",
  "pgwire",
  "pin-project-lite",
  "postgres-types",
@@ -6259,6 +6275,7 @@ dependencies = [
  "crc32fast",
  "crepe",
  "derivative",
+ "easy-ext",
  "either",
  "enum-as-inner",
  "fail",
@@ -6334,6 +6351,7 @@ dependencies = [
  "itertools",
  "madsim-tokio",
  "prometheus",
+ "random-string",
  "risingwave_common",
  "spin 0.9.4",
  "tempfile",
@@ -6363,6 +6381,7 @@ name = "risingwave_planner_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "backtrace",
  "console",
  "futures",
  "itertools",

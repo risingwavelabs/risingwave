@@ -20,6 +20,7 @@ clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 crepe = "0.1"
 derivative = "2"
+easy-ext = "1"
 either = "1"
 enum-as-inner = "0.5"
 etcd-client = { version = "0.2", package = "madsim-etcd-client" }

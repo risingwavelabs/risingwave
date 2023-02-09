@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -191,6 +191,28 @@ impl From<Vec<Ident>> for ObjectName {
     }
 }
 
+/// For array type `ARRAY[..]` or `[..]`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Array {
+    /// The list of expressions between brackets
+    pub elem: Vec<Expr>,
+
+    /// `true` for  `ARRAY[..]`, `false` for `[..]`
+    pub named: bool,
+}
+
+impl fmt::Display for Array {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}[{}]",
+            if self.named { "ARRAY" } else { "" },
+            display_comma_separated(&self.elem)
+        )
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -344,12 +366,13 @@ pub enum Expr {
     Row(Vec<Expr>),
     /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
     /// e.g. {1, 2, 3},
-    Array(Vec<Expr>),
+    Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
+    #[expect(clippy::disallowed_methods, reason = "use zip_eq")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
@@ -396,20 +419,14 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(
-                f,
-                "{} {} {}",
-                fmt_expr_with_paren(left),
-                op,
-                fmt_expr_with_paren(right)
-            ),
+            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
+                    write!(f, "{} {}", op, expr)
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -543,36 +560,9 @@ impl fmt::Display for Expr {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
-            Expr::Array(exprs) => write!(
-                f,
-                "ARRAY[{}]",
-                exprs
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice()
-                    .join(", ")
-            ),
+            Expr::Array(exprs) => write!(f, "{}", exprs),
         }
     }
-}
-
-/// Wrap complex expressions with necessary parentheses.
-/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
-fn fmt_expr_with_paren(e: &Expr) -> String {
-    use Expr as E;
-    match e {
-        E::BinaryOp { .. }
-        | E::UnaryOp { .. }
-        | E::IsNull(_)
-        | E::IsNotNull(_)
-        | E::IsFalse(_)
-        | E::IsTrue(_)
-        | E::IsNotTrue(_)
-        | E::IsNotFalse(_) => return format!("({})", e),
-        _ => {}
-    };
-    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
@@ -2297,5 +2287,26 @@ mod tests {
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1][1]", format!("{}", array_index2));
+    }
+
+    #[test]
+    /// issue: https://github.com/risingwavelabs/risingwave/issues/7635
+    fn test_nested_op_display() {
+        let binary_op = Expr::BinaryOp {
+            left: Box::new(Expr::Value(Value::Boolean(true))),
+            op: BinaryOperator::Or,
+            right: Box::new(Expr::IsNotFalse(Box::new(Expr::Value(Value::Boolean(
+                true,
+            ))))),
+        };
+        assert_eq!("true OR true IS NOT FALSE", format!("{}", binary_op));
+
+        let unary_op = Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: Box::new(Expr::IsNotFalse(Box::new(Expr::Value(Value::Boolean(
+                true,
+            ))))),
+        };
+        assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
     }
 }
