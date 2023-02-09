@@ -23,8 +23,9 @@ use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierScheduler;
-use crate::manager::{FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
+use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -35,6 +36,8 @@ where
 {
     env: MetaSrvEnv<S>,
     barrier_scheduler: BarrierScheduler<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
+    catalog_manager: CatalogManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -45,11 +48,15 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         barrier_scheduler: BarrierScheduler<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         StreamServiceImpl {
             env,
             barrier_scheduler,
+            stream_manager,
+            catalog_manager,
             fragment_manager,
         }
     }
@@ -70,6 +77,23 @@ where
             status: None,
             snapshot: Some(snapshot),
         }))
+    }
+
+    async fn cancel_creating_job(
+        &self,
+        request: Request<CancelCreatingJobRequest>,
+    ) -> TonicResponse<CancelCreatingJobResponse> {
+        let req = request.into_inner();
+        if let Some(table_id) = self
+            .catalog_manager
+            .find_creating_streaming_job_id(req.database_id, req.schema_id, req.name)
+            .await
+        {
+            self.stream_manager
+                .cancel_streaming_jobs(&table_id.into())
+                .await;
+        }
+        Ok(Response::new(CancelCreatingJobResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

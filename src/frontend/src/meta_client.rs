@@ -33,6 +33,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
+    async fn cancel_creating_job(&self, database_id: u32, schema_id: u32, name: &str)
+        -> Result<()>;
+
     async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -59,6 +62,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
         self.0.flush(checkpoint).await
+    }
+
+    async fn cancel_creating_job(
+        &self,
+        database_id: u32,
+        schema_id: u32,
+        name: &str,
+    ) -> Result<()> {
+        self.0
+            .cancel_creating_job(database_id, schema_id, name)
+            .await
     }
 
     async fn list_table_fragments(

@@ -582,7 +582,7 @@ where
             bail!("table is in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id);
+            database_core.mark_creating_streaming_job(table.id, key);
             for &dependent_relation_id in &table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
@@ -973,7 +973,7 @@ where
         } else {
             database_core.mark_creating(&source_key);
             database_core.mark_creating(&mview_key);
-            database_core.mark_creating_streaming_job(table.id);
+            database_core.mark_creating_streaming_job(table.id, mview_key);
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
@@ -1221,7 +1221,7 @@ where
             bail!("index already in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(index_table.id);
+            database_core.mark_creating_streaming_job(index_table.id, key);
             for &dependent_relation_id in &index_table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
@@ -1312,7 +1312,7 @@ where
             bail!("sink already in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(sink.id);
+            database_core.mark_creating_streaming_job(sink.id, key);
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
@@ -1479,6 +1479,19 @@ where
 
         all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
         Ok(all_streaming_jobs)
+    }
+
+    pub async fn find_creating_streaming_job_id(
+        &self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        name: String,
+    ) -> Option<TableId> {
+        self.core
+            .lock()
+            .await
+            .database
+            .find_creating_streaming_job_id(&(database_id, schema_id, name))
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

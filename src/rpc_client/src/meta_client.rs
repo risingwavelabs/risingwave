@@ -543,6 +543,21 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn cancel_creating_job(
+        &self,
+        database_id: u32,
+        schema_id: u32,
+        name: &str,
+    ) -> Result<()> {
+        let request = CancelCreatingJobRequest {
+            database_id,
+            schema_id,
+            name: name.to_string(),
+        };
+        let _ = self.inner.cancel_creating_job(request).await?;
+        Ok(())
+    }
+
     pub async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -1287,6 +1302,7 @@ macro_rules! for_all_meta_rpc {
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+             , { stream_client, cancel_creating_job, CancelCreatingJobRequest, CancelCreatingJobResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }

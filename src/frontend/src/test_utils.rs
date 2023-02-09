@@ -74,6 +74,10 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
         todo!()
     }
 
+    fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
+        todo!()
+    }
+
     fn end_session(&self, _session: &Self::Session) {
         todo!()
     }
@@ -655,6 +659,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
             committed_epoch: 0,
             current_epoch: 0,
         })
+    }
+
+    async fn cancel_creating_job(
+        &self,
+        _database_id: u32,
+        _schema_id: u32,
+        _name: &str,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn list_table_fragments(

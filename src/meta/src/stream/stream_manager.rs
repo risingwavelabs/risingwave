@@ -24,6 +24,8 @@ use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
+use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::Locations;
@@ -33,7 +35,7 @@ use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::SourceManagerRef;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -65,11 +67,55 @@ impl CreateStreamingJobContext {
     pub fn internal_tables(&self) -> Vec<Table> {
         self.internal_tables.values().cloned().collect()
     }
+}
 
-    pub fn internal_table_ids(&self) -> Vec<u32> {
-        self.internal_tables.keys().copied().collect()
+pub enum CreatingState {
+    Failed { reason: MetaError },
+    Canceling,
+    Created,
+}
+
+struct StreamingJobExecution {
+    id: TableId,
+    shutdown_tx: Option<Sender<CreatingState>>,
+}
+
+impl StreamingJobExecution {
+    fn new(id: TableId, shutdown_tx: Sender<CreatingState>) -> Self {
+        Self {
+            id,
+            shutdown_tx: Some(shutdown_tx),
+        }
     }
 }
+
+#[derive(Default)]
+struct CreatingStreamingJobInfo {
+    streaming_jobs: Mutex<HashMap<TableId, StreamingJobExecution>>,
+}
+
+impl CreatingStreamingJobInfo {
+    async fn add_job(&self, job: StreamingJobExecution) {
+        let mut jobs = self.streaming_jobs.lock().await;
+        jobs.insert(job.id, job);
+    }
+
+    async fn delete_job(&self, job_id: TableId) {
+        let mut jobs = self.streaming_jobs.lock().await;
+        jobs.remove(&job_id);
+    }
+
+    async fn cancel_jobs(&self, job_id: &TableId) {
+        let mut jobs = self.streaming_jobs.lock().await;
+        if let Some(job) = jobs.get_mut(job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
+                let _ = shutdown_tx.send(CreatingState::Canceling).await.inspect_err(|_| {
+                    tracing::warn!("failed to send canceling state");
+                });
+            }
+    }
+}
+
+type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
@@ -86,6 +132,9 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     /// Maintains streaming sources from external system like kafka
     pub(crate) source_manager: SourceManagerRef<S>,
+
+    /// Creating streaming job info.
+    creating_job_info: CreatingStreamingJobInfoRef,
 
     hummock_manager: HummockManagerRef<S>,
 }
@@ -109,6 +158,7 @@ where
             cluster_manager,
             source_manager,
             hummock_manager,
+            creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
         })
     }
 
@@ -121,21 +171,72 @@ where
     /// 3. Notify related worker nodes to update and build the actors.
     /// 4. Store related meta data.
     pub async fn create_streaming_job(
-        &self,
+        self: &Arc<Self>,
         table_fragments: TableFragments,
-        ctx: &CreateStreamingJobContext,
+        ctx: CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self
-            .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
-            .await
-        {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
+        let table_id = table_fragments.table_id();
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
+        let execution = StreamingJobExecution::new(table_id, sender.clone());
+        self.creating_job_info.add_job(execution).await;
+
+        let stream_manager = self.clone();
+        tokio::spawn(async move {
+            let mut revert_funcs = vec![];
+            let res = stream_manager
+                .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
+                .await;
+            match res {
+                Ok(_) => {
+                    let _ = sender
+                        .send(CreatingState::Created)
+                        .await
+                        .inspect_err(|_| tracing::warn!("failed to notify created: {table_id}"));
+                }
+                Err(err) => {
+                    for revert_func in revert_funcs.into_iter().rev() {
+                        revert_func.await;
+                    }
+                    let _ = sender
+                        .send(CreatingState::Failed { reason: err })
+                        .await
+                        .inspect_err(|_| tracing::warn!("failed to notify failed: {table_id}"));
+                }
             }
-            return Err(e);
+        });
+
+        let mut res = Ok(());
+        while let Some(state) = receiver.recv().await {
+            match state {
+                CreatingState::Failed { reason } => {
+                    res = Err(reason);
+                    break;
+                }
+                CreatingState::Canceling => {
+                    // try to cancel buffered creating command.
+                    if self
+                        .barrier_scheduler
+                        .try_cancel_scheduled_create(table_id)
+                        .await
+                    {
+                        res = Err(MetaError::cancelled("create".into()));
+                        break;
+                    }
+                    if let Ok(table_fragments) = self.fragment_manager.select_table_fragments_by_table_id(&table_id).await && !table_fragments.is_created() {
+                        // issue cancel streaming command.
+                        self.barrier_scheduler
+                            .run_command(Command::CancelStreamingJob(table_fragments))
+                            .await?;
+                        res = Err(MetaError::cancelled("create".into()));
+                        break;
+                    }
+                }
+                CreatingState::Created => break,
+            }
         }
-        Ok(())
+
+        self.creating_job_info.delete_job(table_id).await;
+        res
     }
 
     async fn create_streaming_job_impl(
@@ -149,7 +250,7 @@ where
             building_locations,
             existing_locations,
             ..
-        }: &CreateStreamingJobContext,
+        }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let actor_map = table_fragments.actor_map();
 
@@ -254,7 +355,7 @@ where
         // Register to compaction group beforehand.
         let hummock_manager_ref = self.hummock_manager.clone();
         let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(&table_fragments, table_properties)
+            .register_table_fragments(&table_fragments, &table_properties)
             .await?;
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
@@ -348,6 +449,10 @@ where
         }
 
         Ok(())
+    }
+
+    pub async fn cancel_streaming_jobs(&self, table_id: &TableId) {
+        self.creating_job_info.cancel_jobs(table_id).await;
     }
 }
 
@@ -486,7 +591,7 @@ mod tests {
     }
 
     struct MockServices {
-        global_stream_manager: GlobalStreamManager<MemStore>,
+        global_stream_manager: GlobalStreamManagerRef<MemStore>,
         catalog_manager: CatalogManagerRef<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
@@ -584,7 +689,7 @@ mod tests {
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 
             Ok(Self {
-                global_stream_manager: stream_manager,
+                global_stream_manager: Arc::new(stream_manager),
                 catalog_manager,
                 fragment_manager,
                 state,
@@ -642,7 +747,7 @@ mod tests {
                 .start_create_table_procedure(&table)
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, &ctx)
+                .create_streaming_job(table_fragments, ctx)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], &table)

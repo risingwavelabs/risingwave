@@ -101,6 +101,11 @@ pub enum Command {
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
     },
+    /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
+    /// table fragment.
+    ///
+    /// The collecting and cleaning part works exactly the same as `DropStreamingJobs` command.
+    CancelStreamingJob(TableFragments),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
@@ -135,6 +140,9 @@ impl Command {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
             Command::DropStreamingJobs(table_ids) => CommandChanges::DropTables(table_ids.clone()),
+            Command::CancelStreamingJob(table_fragments) => {
+                CommandChanges::DropTables(std::iter::once(table_fragments.table_id()).collect())
+            }
             Command::RescheduleFragment(reschedules) => {
                 let to_add = reschedules
                     .values()
@@ -266,6 +274,11 @@ where
                     actor_dispatchers,
                     actor_splits,
                 }))
+            }
+
+            Command::CancelStreamingJob(table_fragments) => {
+                let actors = table_fragments.actor_ids();
+                Some(Mutation::Stop(StopMutation { actors }))
             }
 
             Command::RescheduleFragment(reschedules) => {
@@ -411,6 +424,15 @@ where
         }
     }
 
+    /// For `CancelStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// returns an empty set.
+    pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
+        match &self.command {
+            Command::CancelStreamingJob(table_fragments) => table_fragments.chain_actor_ids(),
+            _ => Default::default(),
+        }
+    }
+
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
@@ -467,6 +489,32 @@ where
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(table_ids)
+                    .await?;
+            }
+
+            Command::CancelStreamingJob(table_fragments) => {
+                let node_actors = table_fragments.worker_actor_ids();
+                let futures = node_actors.iter().map(|(node_id, actors)| {
+                    let node = self.info.node_map.get(node_id).unwrap();
+                    let request_id = Uuid::new_v4().to_string();
+
+                    async move {
+                        let client = self.client_pool.get(node).await?;
+                        let request = DropActorsRequest {
+                            request_id,
+                            actor_ids: actors.to_owned(),
+                        };
+                        client.drop_actors(request).await
+                    }
+                });
+
+                try_join_all(futures).await?;
+
+                // Drop fragment info in meta store.
+                self.fragment_manager
+                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                        table_fragments.table_id(),
+                    )))
                     .await?;
             }
 

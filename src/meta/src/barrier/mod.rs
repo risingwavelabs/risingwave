@@ -215,6 +215,17 @@ where
         Ok(!self.finished_commands.is_empty())
     }
 
+    fn cancel_command(&mut self, cancelled_command: TrackingCommand<S>) {
+        if let Some(index) = self
+            .command_ctx_queue
+            .iter()
+            .position(|x| x.command_ctx.prev_epoch == cancelled_command.context.prev_epoch)
+        {
+            self.command_ctx_queue.remove(index);
+            self.remove_changes(cancelled_command.context.command.changes());
+        }
+    }
+
     /// Before resolving the actors to be sent or collected, we should first record the newly
     /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
     /// will return `true`.
@@ -249,10 +260,11 @@ where
     fn post_resolve(&mut self, command: &Command) {
         match command.changes() {
             CommandChanges::DropTables(tables) => {
-                assert!(
-                    self.creating_tables.is_disjoint(&tables),
-                    "conflict table in concurrent checkpoint"
-                );
+                // FIXME: avoid panic here!!!
+                // assert!(
+                //     self.creating_tables.is_disjoint(&tables),
+                //     "conflict table in concurrent checkpoint"
+                // );
                 assert!(
                     self.dropping_tables.is_disjoint(&tables),
                     "duplicated table in concurrent checkpoint"
@@ -892,6 +904,9 @@ where
                     notifier.notify_collected();
                 });
 
+                // Save `cancelled_command` for Create MVs.
+                let cancelled_command = tracker.cancel(&node.command_ctx);
+
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {
                     let mut commands = vec![];
@@ -919,6 +934,10 @@ where
                 if remaining {
                     assert!(!checkpoint);
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
+                }
+
+                if let Some(command) = cancelled_command {
+                    checkpoint_control.cancel_command(command);
                 }
 
                 node.timer.take().unwrap().observe_duration();

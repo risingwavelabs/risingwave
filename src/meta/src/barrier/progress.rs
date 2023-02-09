@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
@@ -107,6 +108,26 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         }
     }
 
+    /// Try to cancel a target create-mview command from track.
+    ///
+    /// If the actors to cancel is not empty, return the target command as it should be cancelled.
+    pub fn cancel(&mut self, context: &Arc<CommandContext<S>>) -> Option<TrackingCommand<S>> {
+        let actors_to_cancel = context.actors_to_cancel();
+        if !actors_to_cancel.is_empty() {
+            let epochs = actors_to_cancel
+                .into_iter()
+                .map(|actor_id| self.actor_map.get(&actor_id))
+                .collect_vec();
+            assert!(epochs.iter().all_equal());
+            // If the target command found in progress map, remove and return it, the command has
+            // been finished if not found.
+            if let Some(Some(epoch)) = epochs.first() {
+                return Some(self.progress_map.remove(epoch).unwrap().1);
+            }
+        }
+        None
+    }
+
     /// Add a new create-mview DDL command to track.
     ///
     /// If the actors to track is empty, return the given command as it can be finished immediately.
@@ -162,7 +183,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             }
             Entry::Vacant(_) => {
                 tracing::warn!(
-                    "update the progress of an inexistent create-mview DDL: {progress:?}"
+                    "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
                 );
                 None
             }

@@ -274,7 +274,6 @@ where
 
                 // Cancel request need this for identify and verification. According to postgres
                 // doc, it should be written to buffer after receive AuthenticationOk.
-                // let id = self.session_mgr.insert_session(session.clone());
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
@@ -313,6 +312,7 @@ where
     fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session_id = (m.target_process_id, m.target_secret_key);
         self.session_mgr.cancel_queries_in_session(session_id);
+        self.session_mgr.cancel_creating_jobs_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
