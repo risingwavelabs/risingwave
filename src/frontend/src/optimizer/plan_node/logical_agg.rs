@@ -100,6 +100,7 @@ impl LogicalAgg {
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
+        println!("generate vnode twophase streaming");
         let input_fields = stream_input.schema().fields();
         let input_col_num = input_fields.len();
 
@@ -124,6 +125,7 @@ impl LogicalAgg {
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
+        println!("local_group_key: {:?}", &local_group_key);
         let local_agg = StreamHashAgg::new(
             LogicalAgg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
@@ -162,7 +164,7 @@ impl LogicalAgg {
                             )
                         })
                         .collect(),
-                    self.group_key().to_vec(),
+                    (0..self.group_key().len()).collect(),
                     exchange,
                 ),
                 None,
@@ -175,7 +177,7 @@ impl LogicalAgg {
         // Shuffle agg if group key is present.
         // If we are forced to use two phase aggregation,
         // we should not do shuffle aggregation.
-        if !self.group_key().is_empty() && !self.force_two_phase_agg() {
+        if !self.group_key().is_empty() && !self.two_phase_agg_forced() {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -235,7 +237,7 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    fn force_two_phase_agg(&self) -> bool {
+    fn two_phase_agg_forced(&self) -> bool {
         self.base
             .ctx()
             .session_ctx()
@@ -243,21 +245,26 @@ impl LogicalAgg {
             .get_force_two_phase_agg()
     }
 
+    fn two_phase_agg_enabled(&self) -> bool {
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg()
+    }
+
     pub(crate) fn can_two_phase_agg(&self) -> bool {
-        self.agg_calls().iter().all(|call| {
-            matches!(
-                call.agg_kind,
-                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-            ) && !call.distinct
-            // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
-            //    && call.order_by_fields.is_empty()
-        }) && !self.is_agg_result_affected_by_order()
-            && self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_enable_two_phase_agg()
+        !self.agg_calls().is_empty()
+            && self.agg_calls().iter().all(|call| {
+                matches!(
+                    call.agg_kind,
+                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+                ) && !call.distinct
+                // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
+                //    && call.order_by_fields.is_empty()
+            })
+            && !self.is_agg_result_affected_by_order()
+            && self.two_phase_agg_enabled()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
