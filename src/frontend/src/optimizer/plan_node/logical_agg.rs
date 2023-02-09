@@ -150,6 +150,9 @@ impl LogicalAgg {
         } else {
             let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
+            // Local phase should have reordered the group keys into their required order.
+            // we can just follow it.
+            let group_key = (0..self.group_key().len()).collect();
             let global_agg = StreamHashAgg::new(
                 LogicalAgg::new(
                     self.agg_calls()
@@ -162,7 +165,7 @@ impl LogicalAgg {
                             )
                         })
                         .collect(),
-                    (0..self.group_key().len()).collect(),
+                    group_key,
                     exchange,
                 ),
                 None,
