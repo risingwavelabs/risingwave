@@ -16,7 +16,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use risingwave_common::config::RwConfig;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
@@ -37,6 +36,7 @@ use crate::monitor::{
     CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use crate::opts::StorageOpts;
 use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
@@ -455,8 +455,7 @@ impl StateStoreImpl {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
-        file_cache_dir: &str,
-        rw_config: &RwConfig,
+        opts: Arc<StorageOpts>,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
@@ -465,30 +464,23 @@ impl StateStoreImpl {
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        let config = Arc::new(rw_config.storage.clone());
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
 
         #[cfg(target_os = "linux")]
-        let tiered_cache = if file_cache_dir.is_empty() {
+        let tiered_cache = if opts.file_cache_dir.is_empty() {
             TieredCache::none()
         } else {
             use crate::hummock::file_cache::cache::FileCacheOptions;
             use crate::hummock::HummockError;
 
             let options = FileCacheOptions {
-                dir: file_cache_dir.to_string(),
-                capacity: config.file_cache.capacity_mb * 1024 * 1024,
-                total_buffer_capacity: config.file_cache.total_buffer_capacity_mb * 1024 * 1024,
-                cache_file_fallocate_unit: config.file_cache.cache_file_fallocate_unit_mb
-                    * 1024
-                    * 1024,
-                cache_meta_fallocate_unit: config.file_cache.cache_meta_fallocate_unit_mb
-                    * 1024
-                    * 1024,
-                cache_file_max_write_size: config.file_cache.cache_file_max_write_size_mb
-                    * 1024
-                    * 1024,
+                dir: opts.file_cache_dir.to_string(),
+                capacity: opts.file_cache_capacity_mb * 1024 * 1024,
+                total_buffer_capacity: opts.file_cache_total_buffer_capacity_mb * 1024 * 1024,
+                cache_file_fallocate_unit: opts.file_cache_file_fallocate_unit_mb * 1024 * 1024,
+                cache_meta_fallocate_unit: opts.file_cache_meta_fallocate_unit_mb * 1024 * 1024,
+                cache_file_max_write_size: opts.file_cache_file_max_write_size_mb * 1024 * 1024,
                 flush_buffer_hooks: vec![],
             };
             let metrics = Arc::new(tiered_cache_metrics_builder.file());
@@ -505,9 +497,9 @@ impl StateStoreImpl {
                     "Hummock",
                 )
                 .await;
-                let object_store = if config.enable_local_spill {
+                let object_store = if opts.enable_local_spill {
                     let local_object_store = parse_local_object_store(
-                        config.local_object_store.as_str(),
+                        opts.local_object_store.as_str(),
                         object_store_metrics.clone(),
                     );
                     ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
@@ -517,19 +509,23 @@ impl StateStoreImpl {
 
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),
-                    config.data_directory.to_string(),
-                    config.block_cache_capacity_mb * (1 << 20),
-                    config.meta_cache_capacity_mb * (1 << 20),
+                    opts.data_directory.to_string(),
+                    opts.block_cache_capacity_mb * (1 << 20),
+                    opts.meta_cache_capacity_mb * (1 << 20),
                     tiered_cache,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
 
-                if !config.enable_state_store_v1 {
-                    let backup_store = parse_meta_snapshot_storage(rw_config).await?;
+                if !opts.enable_state_store_v1 {
+                    let backup_store = parse_meta_snapshot_storage(
+                        &opts.backup_storage_url,
+                        &opts.backup_storage_directory,
+                    )
+                    .await?;
                     let backup_reader = BackupReader::new(backup_store);
                     let inner = HummockStorage::new(
-                        config.clone(),
+                        opts.clone(),
                         sstable_store,
                         backup_reader,
                         hummock_meta_client.clone(),
@@ -543,7 +539,7 @@ impl StateStoreImpl {
                     StateStoreImpl::hummock(inner, storage_metrics)
                 } else {
                     let inner = HummockStorageV1::new(
-                        config.clone(),
+                        opts.clone(),
                         sstable_store,
                         hummock_meta_client.clone(),
                         notification_client,

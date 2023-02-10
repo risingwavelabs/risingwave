@@ -180,11 +180,12 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{
+        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
