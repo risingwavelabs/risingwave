@@ -25,7 +25,7 @@ use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig, NO_OVERRIDE};
+use risingwave_common::config::{load_config, NO_OVERRIDE};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
@@ -47,6 +47,7 @@ use risingwave_storage::hummock::{
     HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
@@ -83,13 +84,12 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
     })
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let config = load_config(&opts.config_path, NO_OVERRIDE);
-    let mut storage_config = config.storage;
-    storage_config.enable_state_store_v1 = false;
+    let mut config = load_config(&opts.config_path, NO_OVERRIDE);
+    config.storage.enable_state_store_v1 = false;
     let compaction_config = CompactionConfigBuilder::new().build();
     compaction_test(
         compaction_config,
-        storage_config,
+        StorageOpts::from(&config),
         &opts.state_store,
         1000000,
         800,
@@ -99,7 +99,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
 
 async fn compaction_test(
     compaction_config: CompactionConfig,
-    storage_config: StorageConfig,
+    storage_config: StorageOpts,
     state_store_type: &str,
     test_range: u64,
     test_count: u64,
@@ -134,6 +134,7 @@ async fn compaction_test(
         append_only: false,
         row_id_index: None,
         version: None,
+        watermark_indices: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -572,7 +573,7 @@ impl CheckState for DeleteRangeState {
 }
 
 fn run_compactor_thread(
-    config: Arc<StorageConfig>,
+    config: Arc<StorageOpts>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
@@ -583,7 +584,7 @@ fn run_compactor_thread(
     tokio::sync::oneshot::Sender<()>,
 ) {
     let compactor_context = Arc::new(CompactorContext {
-        storage_config: config,
+        storage_opts: config,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
         compactor_metrics,
@@ -606,14 +607,14 @@ fn run_compactor_thread(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::config::StorageConfig;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use risingwave_storage::opts::StorageOpts;
 
     use super::compaction_test;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
-        let storage_config = StorageConfig {
+        let storage_opts = StorageOpts {
             enable_state_store_v1: false,
             ..Default::default()
         };
@@ -622,14 +623,8 @@ mod tests {
         compaction_config.level0_tier_compact_file_number = 2;
         compaction_config.max_bytes_for_level_base = 512 * 1024;
         compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
-        compaction_test(
-            compaction_config,
-            storage_config,
-            "hummock+memory",
-            10000,
-            60,
-        )
-        .await
-        .unwrap();
+        compaction_test(compaction_config, storage_opts, "hummock+memory", 10000, 60)
+            .await
+            .unwrap();
     }
 }

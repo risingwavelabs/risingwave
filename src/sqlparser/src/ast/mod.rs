@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -191,6 +191,28 @@ impl From<Vec<Ident>> for ObjectName {
     }
 }
 
+/// For array type `ARRAY[..]` or `[..]`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Array {
+    /// The list of expressions between brackets
+    pub elem: Vec<Expr>,
+
+    /// `true` for  `ARRAY[..]`, `false` for `[..]`
+    pub named: bool,
+}
+
+impl fmt::Display for Array {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}[{}]",
+            if self.named { "ARRAY" } else { "" },
+            display_comma_separated(&self.elem)
+        )
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -344,12 +366,13 @@ pub enum Expr {
     Row(Vec<Expr>),
     /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
     /// e.g. {1, 2, 3},
-    Array(Vec<Expr>),
+    Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
+    #[expect(clippy::disallowed_methods, reason = "use zip_eq")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
@@ -537,16 +560,7 @@ impl fmt::Display for Expr {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
-            Expr::Array(exprs) => write!(
-                f,
-                "ARRAY[{}]",
-                exprs
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice()
-                    .join(", ")
-            ),
+            Expr::Array(exprs) => write!(f, "{}", exprs),
         }
     }
 }
@@ -892,6 +906,7 @@ pub enum Statement {
         name: ObjectName,
         columns: Vec<Ident>,
         query: Box<Query>,
+        emit_mode: Option<EmitMode>,
         with_options: Vec<SqlOption>,
     },
     /// CREATE TABLE
@@ -1222,6 +1237,7 @@ impl fmt::Display for Statement {
                 query,
                 materialized,
                 with_options,
+                emit_mode,
             } => {
                 write!(
                     f,
@@ -1230,6 +1246,9 @@ impl fmt::Display for Statement {
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
                     name = name
                 )?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
@@ -1891,6 +1910,22 @@ pub struct SqlOption {
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} = {}", self.name, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum EmitMode {
+    Immediately,
+    OnWindowClose,
+}
+
+impl fmt::Display for EmitMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            EmitMode::Immediately => "IMMEDIATELY",
+            EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
     }
 }
 

@@ -25,6 +25,7 @@ use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 use super::vnode::{ParallelUnitId, VirtualNode};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
+use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
@@ -131,7 +132,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self.data
             .iter()
             .copied()
-            .zip_eq(
+            .zip_eq_debug(
                 std::iter::once(0)
                     .chain(self.original_indices.iter().copied().map(|i| i + 1))
                     .tuple_windows()
@@ -327,6 +328,7 @@ mod tests {
     use rand::Rng;
 
     use super::*;
+    use crate::util::iter_util::ZipEqDebug;
 
     struct Test;
     impl VnodeMappingItem for Test {
@@ -414,7 +416,7 @@ mod tests {
                 .collect();
             let vnode_mapping_2: Test2Mapping = vnode_mapping.transform(&transform_map);
 
-            for (item, item_2) in vnode_mapping.iter().zip_eq(vnode_mapping_2.iter()) {
+            for (item, item_2) in vnode_mapping.iter().zip_eq_debug(vnode_mapping_2.iter()) {
                 assert_eq!(item + 1, item_2);
             }
 

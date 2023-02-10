@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::SystemTime;
 
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
-use rdkafka::consumer::StreamConsumer;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
@@ -61,7 +61,10 @@ pub async fn producer(broker_addr: &str, datadir: String) {
     for file in std::fs::read_dir(datadir).unwrap() {
         let file = file.unwrap();
         let name = file.file_name().into_string().unwrap();
-        let (topic, partitions) = name.split_once('.').unwrap();
+        let Some((topic, partitions)) = name.split_once('.') else {
+            tracing::warn!("ignore file: {name:?}. expected format \"topic.partitions\"");
+            continue;
+        };
         admin
             .create_topics(
                 &[NewTopic::new(
@@ -75,29 +78,25 @@ pub async fn producer(broker_addr: &str, datadir: String) {
             .expect("failed to create topic");
 
         let content = std::fs::read(file.path()).unwrap();
-        // binary message data, a file is a message
-        if topic.ends_with("bin") {
+        let msgs: Box<dyn Iterator<Item = &[u8]> + Send> = if topic.ends_with("bin") {
+            // binary message data, a file is a message
+            Box::new(std::iter::once(content.as_slice()))
+        } else {
+            Box::new(content.split(|&b| b == b'\n'))
+        };
+        for msg in msgs {
             loop {
-                let record = BaseRecord::<(), _>::to(topic).payload(&content);
+                let ts = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64;
+                let record = BaseRecord::<(), _>::to(topic).payload(msg).timestamp(ts);
                 match producer.send(record) {
                     Ok(_) => break,
                     Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
                         producer.flush(None).await.expect("failed to flush");
                     }
                     Err((e, _)) => panic!("failed to send message: {}", e),
-                }
-            }
-        } else {
-            for line in content.split(|&b| b == b'\n') {
-                loop {
-                    let record = BaseRecord::<(), _>::to(topic).payload(line);
-                    match producer.send(record) {
-                        Ok(_) => break,
-                        Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
-                            producer.flush(None).await.expect("failed to flush");
-                        }
-                        Err((e, _)) => panic!("failed to send message: {}", e),
-                    }
                 }
             }
         }

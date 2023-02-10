@@ -511,7 +511,7 @@ pub fn get_compaction_group_ids(version: &HummockVersion) -> Vec<CompactionGroup
 }
 
 /// Gets all member table ids.
-pub fn get_member_table_ids(version: &HummockVersion) -> Vec<StateTableId> {
+pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
     version
         .levels
         .iter()

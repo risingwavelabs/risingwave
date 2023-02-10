@@ -26,6 +26,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::StreamSourceInfo;
 
 pub use self::csv_parser::CsvParserConfig;
@@ -189,12 +190,15 @@ impl OpAction for OpActionUpdate {
 }
 
 impl SourceStreamChunkRowWriter<'_> {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "FIXME: why zip_eq_fast leads to compile error?"
+    )]
     fn do_action<A: OpAction>(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
         let mut modify_col = vec![];
-
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())
@@ -251,7 +255,7 @@ impl SourceStreamChunkRowWriter<'_> {
     ) -> Result<WriteGuard> {
         self.descs
             .iter()
-            .zip_eq(self.builders.iter_mut())
+            .zip_eq_fast(self.builders.iter_mut())
             .for_each(|(desc, builder)| {
                 if let Some(output) = f(desc) {
                     builder.append_datum(output);

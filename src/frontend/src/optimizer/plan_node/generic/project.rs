@@ -18,6 +18,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, InputRef};
@@ -207,7 +208,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         && self
             .exprs
             .iter()
-            .zip_eq(self.input.schema().fields())
+            .zip_eq_fast(self.input.schema().fields())
             .enumerate()
             .all(|(i, (expr, field))| {
                 matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))

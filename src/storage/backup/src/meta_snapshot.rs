@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::hummock::{CompactionGroupConfig, HummockVersion, HummockVersionStats};
 use risingwave_pb::meta::TableFragments;
@@ -100,7 +101,7 @@ impl ClusterMetadata {
         let default_cf_values: Vec<Vec<u8>> = Self::decode_prost_message_list(&mut buf)?;
         let default_cf = default_cf_keys
             .into_iter()
-            .zip_eq(default_cf_values.into_iter())
+            .zip_eq_fast(default_cf_values.into_iter())
             .collect();
         let hummock_version = Self::decode_prost_message(&mut buf)?;
         let version_stats = Self::decode_prost_message(&mut buf)?;

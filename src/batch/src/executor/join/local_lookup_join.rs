@@ -25,6 +25,7 @@ use risingwave_common::hash::{
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::expr_unary::new_unary_expr;
@@ -114,6 +115,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             scan_ranges,
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
+            chunk_size: None,
         });
 
         Ok(row_seq_scan_node)
@@ -173,12 +175,12 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()
-            .zip_eq(
+            .zip_eq_fast(
                 self.outer_side_key_types
                     .iter()
                     .take(self.lookup_prefix_len),
             )
-            .zip_eq(
+            .zip_eq_fast(
                 self.inner_side_key_types
                     .iter()
                     .take(self.lookup_prefix_len),

@@ -24,6 +24,12 @@ message RowSeqScanNode {
   common.Buffer vnode_bitmap = 4;
   // Whether the order on output columns should be preserved.
   bool ordered = 5;
+
+  message ChunkSize {
+    uint32 chunk_size = 1;
+  }
+  // If along with `batch_limit`, `chunk_size` will be set.
+  ChunkSize chunk_size = 6;
 }
 
 message SysRowSeqScanNode {
