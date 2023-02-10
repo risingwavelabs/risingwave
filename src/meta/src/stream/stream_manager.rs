@@ -15,14 +15,15 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
+use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, HangingChannel,
+    UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
@@ -198,9 +199,13 @@ where
                         revert_func.await;
                     }
                     let _ = sender
-                        .send(CreatingState::Failed { reason: err })
+                        .send(CreatingState::Failed {
+                            reason: err.clone(),
+                        })
                         .await
-                        .inspect_err(|_| tracing::warn!("failed to notify failed: {table_id}"));
+                        .inspect_err(|_| {
+                            tracing::warn!("failed to notify failed: {table_id}, err: {err}")
+                        });
                 }
             }
         });
@@ -213,22 +218,61 @@ where
                     break;
                 }
                 CreatingState::Canceling => {
-                    // try to cancel buffered creating command.
-                    if self
-                        .barrier_scheduler
-                        .try_cancel_scheduled_create(table_id)
+                    if let Ok(table_fragments) = self
+                        .fragment_manager
+                        .select_table_fragments_by_table_id(&table_id)
                         .await
                     {
-                        res = Err(MetaError::cancelled("create".into()));
-                        break;
-                    }
-                    if let Ok(table_fragments) = self.fragment_manager.select_table_fragments_by_table_id(&table_id).await && !table_fragments.is_created() {
-                        // issue cancel streaming command.
-                        self.barrier_scheduler
-                            .run_command(Command::CancelStreamingJob(table_fragments))
-                            .await?;
-                        res = Err(MetaError::cancelled("create".into()));
-                        break;
+                        // try to cancel buffered creating command.
+                        if self
+                            .barrier_scheduler
+                            .try_cancel_scheduled_create(table_id.clone())
+                            .await
+                        {
+                            tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
+                            let node_actors = table_fragments.worker_actor_ids();
+                            let cluster_info =
+                                self.cluster_manager.get_streaming_cluster_info().await;
+                            let node_actors = node_actors
+                                .into_iter()
+                                .map(|(id, actor_ids)| {
+                                    (
+                                        cluster_info.worker_nodes.get(&id).cloned().unwrap(),
+                                        actor_ids,
+                                    )
+                                })
+                                .collect_vec();
+                            let futures = node_actors.into_iter().map(|(node, actor_ids)| {
+                                let request_id = Uuid::new_v4().to_string();
+                                async move {
+                                    let client = self.env.stream_client_pool().get(&node).await?;
+                                    let request = DropActorsRequest {
+                                        request_id,
+                                        actor_ids,
+                                    };
+                                    client.drop_actors(request).await
+                                }
+                            });
+                            try_join_all(futures).await?;
+
+                            self.fragment_manager
+                                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                                    table_id,
+                                )))
+                                .await?;
+                            res = Err(MetaError::cancelled("create".into()));
+                            break;
+                        }
+                        if !table_fragments.is_created() {
+                            tracing::debug!(
+                                "cancelling streaming job {table_id} by issue cancel command."
+                            );
+                            self.barrier_scheduler
+                                .run_command(Command::CancelStreamingJob(table_fragments))
+                                .await?;
+                            res = Err(MetaError::cancelled("create".into()));
+                            break;
+                        }
                     }
                 }
                 CreatingState::Created => break,

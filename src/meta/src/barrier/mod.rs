@@ -299,7 +299,7 @@ where
             self.creating_tables.contains(&table_id) || self.adding_actors.contains(&actor_id);
 
         match s {
-            ActorState::Inactive => adding,
+            ActorState::Inactive => adding && !removing,
             ActorState::Running => !removing,
             ActorState::Unspecified => unreachable!(),
         }
@@ -412,6 +412,9 @@ where
             CommandChanges::DropTables(table_ids) => {
                 assert!(self.dropping_tables.is_superset(&table_ids));
                 self.dropping_tables.retain(|a| !table_ids.contains(a));
+                // We should also clean the record in creating tables, because this changes could be
+                // issued by cancel command.
+                self.creating_tables.retain(|a| !table_ids.contains(a));
             }
             CommandChanges::Actor { to_add, to_remove } => {
                 assert!(self.adding_actors.is_superset(&to_add));
