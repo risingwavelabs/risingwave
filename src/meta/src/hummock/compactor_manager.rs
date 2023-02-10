@@ -396,6 +396,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
 
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactorManager;
 
@@ -412,7 +413,7 @@ mod tests {
             let task = hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
                 .unwrap()

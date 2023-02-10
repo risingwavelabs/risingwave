@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, SstableInfo};
 
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct SpaceReclaimCompactionPicker {
@@ -106,8 +106,6 @@ impl SpaceReclaimCompactionPicker {
 #[cfg(test)]
 mod test {
 
-    use std::sync::Arc;
-
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
@@ -118,20 +116,19 @@ mod test {
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
         generate_table_with_table_ids,
     };
-    use crate::hummock::compaction::level_selector::{
-        LevelSelector, SpaceReclaimCompactionSelector,
-    };
-    use crate::hummock::compaction::{selector_option, LocalSelectorStatistic, SelectorOption};
+    use crate::hummock::compaction::level_selector::SpaceReclaimCompactionSelector;
+    use crate::hummock::compaction::{LevelSelector, LocalSelectorStatistic};
+    use crate::hummock::compaction_group::CompactionGroup;
 
     #[test]
     fn test_space_reclaim_compaction_selector() {
         let max_space_reclaim_bytes = 400;
-        let config = Arc::new(
-            CompactionConfigBuilder::new()
-                .max_level(4)
-                .max_space_reclaim_bytes(max_space_reclaim_bytes)
-                .build(),
-        );
+        let config = CompactionConfigBuilder::new()
+            .max_level(4)
+            .max_space_reclaim_bytes(max_space_reclaim_bytes)
+            .build();
+        let mut group_config = CompactionGroup::new(1, config);
+
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![
@@ -169,15 +166,18 @@ mod test {
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
-        let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
-            compaction_config: config.clone(),
-            all_table_ids: HashSet::default(),
-        };
-        let mut selector = SpaceReclaimCompactionSelector::new();
+
+        let mut selector = SpaceReclaimCompactionSelector::default();
         {
             // pick space reclaim
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
@@ -216,7 +216,13 @@ mod test {
 
             // pick space reclaim
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
@@ -251,14 +257,15 @@ mod test {
                 }
             }
 
-            let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
-                compaction_config: config.clone(),
-                all_table_ids: HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9, 10]),
-            };
-            selector.try_update(SelectorOption::SpaceReclaim(selector_option));
-
+            group_config.member_table_ids = HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9, 10]);
             // pick space reclaim
-            let task = selector.pick_compaction(1, &levels, &mut levels_handler, &mut local_stats);
+            let task = selector.pick_compaction(
+                1,
+                &group_config,
+                &levels,
+                &mut levels_handler,
+                &mut local_stats,
+            );
             assert!(task.is_none());
         }
 
@@ -269,14 +276,16 @@ mod test {
                 }
             }
 
-            let selector_option = selector_option::SpaceReclaimCompactionSelectorOption {
-                compaction_config: config,
-                all_table_ids: HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9]),
-            };
-            selector.try_update(SelectorOption::SpaceReclaim(selector_option));
+            group_config.member_table_ids = HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9]);
             // pick space reclaim
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);

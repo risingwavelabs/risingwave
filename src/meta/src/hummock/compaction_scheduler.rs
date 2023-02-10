@@ -139,7 +139,7 @@ where
         ));
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut compaction_selectors = HashMap::default();
+        let mut compaction_selectors = Self::init_selectors();
 
         loop {
             let (compaction_group, task_type) = tokio::select! {
@@ -205,34 +205,28 @@ where
                     }
                 }
             };
-            let selector = Self::fetch_selector(&mut compaction_selectors, task_type);
+            let selector = compaction_selectors.get_mut(&task_type).unwrap();
             self.pick_and_assign(compaction_group, compactor, sched_channel.clone(), selector)
                 .await;
         }
     }
 
-    fn fetch_selector(
-        compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
-        task_type: compact_task::TaskType,
-    ) -> &mut Box<dyn LevelSelector> {
-        if !compaction_selectors.contains_key(&task_type) {
-            let new_selector: Box<dyn LevelSelector> = match task_type {
-                compact_task::TaskType::Dynamic => Box::new(DynamicLevelSelector::new()),
-
-                compact_task::TaskType::SpaceReclaim => {
-                    Box::new(SpaceReclaimCompactionSelector::new())
-                }
-
-                compact_task::TaskType::Ttl => Box::new(TtlCompactionSelector::new()),
-
-                _ => {
-                    panic!("Unsupported selector")
-                }
-            };
-            compaction_selectors.insert(task_type, new_selector);
-        }
-
-        compaction_selectors.get_mut(&task_type).unwrap()
+    fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
+        let mut compaction_selectors: HashMap<compact_task::TaskType, Box<dyn LevelSelector>> =
+            HashMap::default();
+        compaction_selectors.insert(
+            compact_task::TaskType::Dynamic,
+            Box::<DynamicLevelSelector>::default(),
+        );
+        compaction_selectors.insert(
+            compact_task::TaskType::SpaceReclaim,
+            Box::<SpaceReclaimCompactionSelector>::default(),
+        );
+        compaction_selectors.insert(
+            compact_task::TaskType::Ttl,
+            Box::<TtlCompactionSelector>::default(),
+        );
+        compaction_selectors
     }
 
     /// Tries to pick a compaction task, schedule it to a compactor.
@@ -383,11 +377,12 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::compaction_scheduler::{
         CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
     };
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::{CompactionPickParma, CompactionScheduler};
+    use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
     async fn test_pick_and_assign() {
@@ -414,7 +409,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -428,7 +423,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -446,7 +441,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -476,7 +471,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -520,7 +515,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -536,7 +531,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -554,7 +549,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::SendFailure(_)
@@ -580,7 +575,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -609,7 +604,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::Ok

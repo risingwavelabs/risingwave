@@ -33,8 +33,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
-    DynamicLevelSelector, LevelSelector, ManualCompactionSelector, SpaceReclaimCompactionSelector,
-    TtlCompactionSelector,
+    default_level_selector, DynamicLevelSelector, LevelSelector, ManualCompactionSelector,
+    SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction_group::CompactionGroup;

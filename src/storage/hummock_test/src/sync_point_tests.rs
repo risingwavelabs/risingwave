@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use risingwave_meta::hummock::compaction::ManualCompactionOption;
+use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
@@ -161,7 +161,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
     let mut task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            CompactionPickParma::new_base_parma(),
+            &mut default_level_selector(),
         )
         .await
         .unwrap()

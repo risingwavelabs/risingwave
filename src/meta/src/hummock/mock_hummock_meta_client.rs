@@ -38,7 +38,7 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::hummock::compaction::{
-    DynamicLevelSelector, LevelSelector, SpaceReclaimCompactionSelector,
+    default_level_selector, LevelSelector, SpaceReclaimCompactionSelector,
 };
 use crate::hummock::compaction_scheduler::CompactionRequestChannel;
 use crate::hummock::HummockManager;
@@ -63,9 +63,11 @@ impl MockHummockMetaClient {
     }
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
-        let mut selector: Box<dyn LevelSelector> = Box::new(DynamicLevelSelector::new());
         self.hummock_manager
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap_or(None)
     }
@@ -203,10 +205,11 @@ impl HummockMetaClient for MockHummockMetaClient {
                 sched_channel.unschedule(group);
 
                 let mut selector: Box<dyn LevelSelector> = match task_type {
-                    compact_task::TaskType::Dynamic => Box::new(DynamicLevelSelector::new()),
+                    compact_task::TaskType::Dynamic => default_level_selector(),
                     compact_task::TaskType::SpaceReclaim => {
-                        Box::new(SpaceReclaimCompactionSelector::new())
+                        Box::<SpaceReclaimCompactionSelector>::default()
                     }
+
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
