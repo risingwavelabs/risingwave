@@ -581,7 +581,7 @@ impl LogicalAggBuilder {
                 let input = inputs.iter().exactly_one().unwrap();
 
                 // sq_sum
-                let expr_sqr = ExprImpl::from(
+                let squared_input = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
                         vec![ExprImpl::from(input.clone()), ExprImpl::from(input.clone())],
@@ -589,15 +589,20 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
-                let expr_sqr_proj_index = self.input_proj_builder.add_expr(&expr_sqr).unwrap();
+                let squared_input_proj_index =
+                    self.input_proj_builder.add_expr(&squared_input).unwrap();
 
                 let sq_sum_return_type =
-                    AggCall::infer_return_type(&AggKind::Sum, &[expr_sqr.return_type()]).unwrap();
+                    AggCall::infer_return_type(&AggKind::Sum, &[squared_input.return_type()])
+                        .unwrap();
 
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: sq_sum_return_type.clone(),
-                    inputs: vec![InputRef::new(expr_sqr_proj_index, expr_sqr.return_type())],
+                    inputs: vec![InputRef::new(
+                        squared_input_proj_index,
+                        squared_input.return_type(),
+                    )],
                     distinct,
                     order_by_fields: order_by_fields.clone(),
                     filter: filter.clone(),
@@ -614,7 +619,6 @@ impl LogicalAggBuilder {
                 let sum_return_type =
                     AggCall::infer_return_type(&AggKind::Sum, &[input.return_type()]).unwrap();
 
-                // Rewrite avg to cast(sum as avg_return_type) / count.
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: sum_return_type.clone(),
@@ -649,42 +653,56 @@ impl LogicalAggBuilder {
                 )
                 .into();
 
-                // let
-
-                let sq_of_sums = ExprImpl::from(
-                    FunctionCall::new(ExprType::Multiply, vec![sum_expr.clone(), sum_expr.clone()])
-                        .unwrap(),
-                );
-
-                let divide_impl = ExprImpl::from(
+                let expr_impl = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Divide,
-                        vec![sq_of_sums.clone(), count_expr.clone()],
+                        vec![
+                            ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Subtract,
+                                    vec![
+                                        sq_sum_expr.clone(),
+                                        ExprImpl::from(
+                                            FunctionCall::new(
+                                                ExprType::Divide,
+                                                vec![
+                                                    ExprImpl::from(
+                                                        FunctionCall::new(
+                                                            ExprType::Multiply,
+                                                            vec![
+                                                                sum_expr.clone(),
+                                                                sum_expr.clone(),
+                                                            ],
+                                                        )
+                                                        .unwrap(),
+                                                    )
+                                                    .clone(),
+                                                    count_expr.clone(),
+                                                ],
+                                            )
+                                            .unwrap(),
+                                        ),
+                                    ],
+                                )
+                                .unwrap(),
+                            ),
+                            ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Subtract,
+                                    vec![
+                                        count_expr.clone(),
+                                        ExprImpl::from(Literal::new(
+                                            Datum::from(ScalarImpl::Int16(1)),
+                                            DataType::Int16,
+                                        )),
+                                    ],
+                                )
+                                .unwrap(),
+                            ),
+                        ],
                     )
                     .unwrap(),
                 );
-
-                let minus_impl = ExprImpl::from(
-                    FunctionCall::new(ExprType::Subtract, vec![sq_sum_expr.clone(), divide_impl])
-                        .unwrap(),
-                );
-
-                let one_impl = ExprImpl::from(Literal::new(
-                    Datum::from(ScalarImpl::Int16(1)),
-                    DataType::Int16,
-                ));
-
-                let stddev_pop_impl = ExprImpl::from(
-                    FunctionCall::new(ExprType::Subtract, vec![count_expr.clone(), one_impl])
-                        .unwrap(),
-                );
-
-                let expr_impl = ExprImpl::from(
-                    FunctionCall::new(ExprType::Divide, vec![minus_impl, stddev_pop_impl]).unwrap(),
-                );
-                // let expr_impl = ExprImpl::from(
-                //     FunctionCall::new(ExprType::Divide, vec![minus_impl, count_expr]).unwrap(),
-                // );
 
                 Ok(expr_impl)
             }

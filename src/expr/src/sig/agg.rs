@@ -152,7 +152,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             _ => {
                 println!("data type {:?}", input);
                 todo!("todo for stddev")
-            },
+            }
         },
 
         (AggKind::Stddev, _) => return None,
