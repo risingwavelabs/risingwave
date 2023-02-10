@@ -614,8 +614,12 @@ impl LocalStreamManagerCore {
                 StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
             })?;
             let mview_definition = &actor.mview_definition;
-            let actor_context =
-                ActorContext::create_with_counter(actor_id, self.total_mem_val.clone());
+            let actor_context = ActorContext::create_with_metrics(
+                actor_id,
+                actor.fragment_id,
+                self.total_mem_val.clone(),
+                self.streaming_metrics.clone(),
+            );
             let vnode_bitmap = actor
                 .vnode_bitmap
                 .as_ref()

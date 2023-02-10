@@ -1457,6 +1457,27 @@ def section_streaming_exchange(outer_panels):
     ]
 
 
+def section_streaming_errors(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming Errors",
+            [
+                panels.timeseries_count(
+                    "User Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            "error_type: {{error_type}}, error_msg: {{error_msg}}, fragment_id: {{fragment_id}}, executor_name: {{executor_name}}",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+
 def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2481,6 +2502,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_streaming_errors(panels),
         *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_compaction(panels),
