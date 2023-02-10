@@ -51,17 +51,12 @@ impl<S: MetaStore> SystemParamManager<S> {
         &self.params
     }
 
-    // Only compare params from CLI.
     fn validate_init_params(persisted: &SystemParams, init: &SystemParams) {
-        if persisted.sstable_size_mb != init.sstable_size_mb
-            || persisted.block_size_kb != init.block_size_kb
-            || persisted.bloom_false_positive != init.bloom_false_positive
-            || persisted.state_store != init.state_store
-            || persisted.data_directory != init.data_directory
-            || persisted.backup_storage_url != init.backup_storage_url
-            || persisted.backup_storage_directory != init.backup_storage_directory
-        {
-            tracing::warn!("System parameters from CLI differ from the persisted")
+        // Only compare params from CLI and config file.
+        // TODO: Currently all fields are from CLI/config, but after CLI becomes the only source of
+        // `init`, should only compare them
+        if persisted != init {
+            tracing::warn!("System parameters from CLI and config file differ from the persisted")
         }
     }
 
