@@ -666,7 +666,7 @@ mod tests {
 
     use super::HummockLevelsExt;
     use crate::compaction_group::hummock_version_ext::{
-        HummockVersionExt, HummockVersionUpdateExt,
+        build_initial_compaction_group_levels, HummockVersionExt, HummockVersionUpdateExt,
     };
 
     #[test]
@@ -681,6 +681,7 @@ mod tests {
                         sub_levels: vec![],
                         total_file_size: 0,
                     }),
+                    ..Default::default()
                 },
             )]),
             max_committed_epoch: 0,
@@ -724,17 +725,23 @@ mod tests {
             levels: HashMap::from_iter([
                 (
                     0,
-                    Levels::build_initial_levels(&CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    }),
+                    build_initial_compaction_group_levels(
+                        0,
+                        &CompactionConfig {
+                            max_level: 6,
+                            ..Default::default()
+                        },
+                    ),
                 ),
                 (
                     1,
-                    Levels::build_initial_levels(&CompactionConfig {
-                        max_level: 6,
-                        ..Default::default()
-                    }),
+                    build_initial_compaction_group_levels(
+                        1,
+                        &CompactionConfig {
+                            max_level: 6,
+                            ..Default::default()
+                        },
+                    ),
                 ),
             ]),
             max_committed_epoch: 0,
@@ -784,10 +791,13 @@ mod tests {
             ..Default::default()
         };
         version.apply_version_delta(&version_delta);
-        let mut cg1 = Levels::build_initial_levels(&CompactionConfig {
-            max_level: 6,
-            ..Default::default()
-        });
+        let mut cg1 = build_initial_compaction_group_levels(
+            1,
+            &CompactionConfig {
+                max_level: 6,
+                ..Default::default()
+            },
+        );
         cg1.levels[0] = Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
@@ -804,10 +814,13 @@ mod tests {
                 levels: HashMap::from_iter([
                     (
                         2,
-                        Levels::build_initial_levels(&CompactionConfig {
-                            max_level: 6,
-                            ..Default::default()
-                        }),
+                        build_initial_compaction_group_levels(
+                            2,
+                            &CompactionConfig {
+                                max_level: 6,
+                                ..Default::default()
+                            }
+                        ),
                     ),
                     (1, cg1,),
                 ]),

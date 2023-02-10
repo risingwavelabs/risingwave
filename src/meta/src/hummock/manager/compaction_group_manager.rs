@@ -549,7 +549,6 @@ mod tests {
                 .sum::<usize>()
         };
 
-        assert!(inner.read().await.index.is_empty());
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
         let table_properties = HashMap::from([(
@@ -589,14 +588,12 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(inner.read().await.index.len(), 2);
         assert_eq!(registered_number(inner.read().await.deref()), 2);
 
         // Test init
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();
-        assert_eq!(inner.read().await.index.len(), 2);
         assert_eq!(registered_number(inner.read().await.deref()), 2);
         assert_eq!(table_option_number(inner.read().await.deref()), 2);
 
@@ -607,7 +604,6 @@ mod tests {
             .unregister(None, &[2u32], env.meta_store())
             .await
             .unwrap();
-        assert_eq!(inner.read().await.index.len(), 1);
         assert_eq!(registered_number(inner.read().await.deref()), 1);
         assert_eq!(table_option_number(inner.read().await.deref()), 1);
 
@@ -615,7 +611,6 @@ mod tests {
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();
-        assert_eq!(inner.read().await.index.len(), 1);
         assert_eq!(registered_number(inner.read().await.deref()), 1);
         assert_eq!(table_option_number(inner.read().await.deref()), 1);
 
@@ -669,13 +664,18 @@ mod tests {
         // Test register_table_fragments
         let registered_number = || async {
             compaction_group_manager
-                .compaction_groups()
+                .list_compaction_groups()
                 .await
                 .iter()
                 .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
-        let group_number = || async { compaction_group_manager.compaction_groups().await.len() };
+        let group_number = || async {
+            compaction_group_manager
+                .list_compaction_groups()
+                .await
+                .len()
+        };
         assert_eq!(registered_number().await, 0);
         let mut table_properties = HashMap::from([(
             String::from(PROPERTIES_RETENTION_SECOND_KEY),
