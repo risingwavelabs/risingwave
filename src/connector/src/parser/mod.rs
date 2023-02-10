@@ -373,11 +373,11 @@ pub enum SpecificParserConfig {
     Csv(CsvParserConfig),
     Avro(AvroParserConfig),
     Protobuf(ProtobufParserConfig),
-    #[default]
     Json,
     DebeziumJson,
     Maxwell,
     CanalJson,
+    #[default]
     Native,
 }
 
