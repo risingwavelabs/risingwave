@@ -23,7 +23,7 @@ use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -503,9 +503,10 @@ impl HummockEventHandler {
 
                             let instance_id = self.generate_instance_id();
 
-                            info!(
+                            info_in_release!(
                                 "new read version registered: table_id: {}, instance_id: {}",
-                                table_id, instance_id
+                                table_id,
+                                instance_id
                             );
 
                             {
@@ -537,9 +538,10 @@ impl HummockEventHandler {
                             table_id,
                             instance_id,
                         } => {
-                            info!(
+                            info_in_release!(
                                 "read version deregister: table_id: {}, instance_id: {}",
-                                table_id, instance_id
+                                table_id,
+                                instance_id
                             );
                             let mut read_version_mapping_guard = self.read_version_mapping.write();
                             read_version_mapping_guard
