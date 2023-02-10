@@ -165,6 +165,9 @@ impl<S: MetaStore> HummockManager<S> {
         &self,
         pairs: &[(StateTableId, CompactionGroupId, TableOption)],
     ) -> Result<()> {
+        if pairs.is_empty() {
+            return Ok(());
+        }
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -260,6 +263,9 @@ impl<S: MetaStore> HummockManager<S> {
     /// Only Use [`unregister_table_ids`] only when [`TableFragments`] is unavailable.
     #[named]
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+        if table_ids.is_empty() {
+            return Ok(());
+        }
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
