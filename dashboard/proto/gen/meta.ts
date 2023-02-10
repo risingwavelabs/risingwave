@@ -537,16 +537,22 @@ export interface MembersResponse {
   members: MetaMember[];
 }
 
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields.
+ * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ */
 export interface SystemParams {
-  barrierIntervalMs: number;
-  checkpointFrequency: number;
-  sstableSizeMb: number;
-  blockSizeKb: number;
-  bloomFalsePositive: number;
-  stateStore: string;
-  dataDirectory: string;
-  backupStorageUrl: string;
-  backupStorageDirectory: string;
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -2341,30 +2347,30 @@ export const MembersResponse = {
 
 function createBaseSystemParams(): SystemParams {
   return {
-    barrierIntervalMs: 0,
-    checkpointFrequency: 0,
-    sstableSizeMb: 0,
-    blockSizeKb: 0,
-    bloomFalsePositive: 0,
-    stateStore: "",
-    dataDirectory: "",
-    backupStorageUrl: "",
-    backupStorageDirectory: "",
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
   };
 }
 
 export const SystemParams = {
   fromJSON(object: any): SystemParams {
     return {
-      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : 0,
-      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : 0,
-      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : 0,
-      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : 0,
-      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : 0,
-      stateStore: isSet(object.stateStore) ? String(object.stateStore) : "",
-      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : "",
-      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : "",
-      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : "",
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
     };
   },
 
@@ -2384,15 +2390,15 @@ export const SystemParams = {
 
   fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
     const message = createBaseSystemParams();
-    message.barrierIntervalMs = object.barrierIntervalMs ?? 0;
-    message.checkpointFrequency = object.checkpointFrequency ?? 0;
-    message.sstableSizeMb = object.sstableSizeMb ?? 0;
-    message.blockSizeKb = object.blockSizeKb ?? 0;
-    message.bloomFalsePositive = object.bloomFalsePositive ?? 0;
-    message.stateStore = object.stateStore ?? "";
-    message.dataDirectory = object.dataDirectory ?? "";
-    message.backupStorageUrl = object.backupStorageUrl ?? "";
-    message.backupStorageDirectory = object.backupStorageDirectory ?? "";
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
     return message;
   },
 };
