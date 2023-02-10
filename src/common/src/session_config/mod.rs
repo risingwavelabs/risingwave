@@ -381,7 +381,7 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
-            if *self.enable_two_phase_agg {
+            if !*self.enable_two_phase_agg {
                 self.force_two_phase_agg = ConfigBool(false);
             }
         } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
