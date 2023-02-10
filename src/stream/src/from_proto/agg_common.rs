@@ -142,9 +142,9 @@ pub async fn build_distinct_dedup_table_from_proto<S: StateStore>(
     if dedup_tables.is_empty() {
         return HashMap::new();
     }
-    futures::future::join_all(dedup_tables.iter().map(|(distinct_key, table_pb)| async {
+    futures::future::join_all(dedup_tables.iter().map(|(distinct_col, table_pb)| async {
         let table = StateTable::from_table_catalog(table_pb, store.clone(), vnodes.clone()).await;
-        (*distinct_key as usize, table)
+        (*distinct_col as usize, table)
     }))
     .await
     .into_iter()

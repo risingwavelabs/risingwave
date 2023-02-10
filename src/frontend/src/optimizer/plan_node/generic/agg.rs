@@ -384,7 +384,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .filter(|(_, call)| call.distinct) // only distinct agg calls need dedup table
             .into_group_map_by(|(_, call)| call.inputs[0].index) // a table per distinct key
             .into_iter()
-            .map(|(distinct_key, indices_and_calls)| {
+            .map(|(distinct_col, indices_and_calls)| {
                 let mut table_builder =
                     TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
@@ -392,7 +392,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     .group_key
                     .iter()
                     .copied()
-                    .chain(std::iter::once(distinct_key))
+                    .chain(std::iter::once(distinct_col))
                     .collect_vec();
                 for &idx in &included_upstream_cols {
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
@@ -402,11 +402,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 // Agg calls with same distinct key share the same dedup table, but they may have
                 // different filter conditions and different distinct row count. We add one column
                 // for each call in the dedup table.
-                // TODO(rctmp): output column mapping!
                 for (call_index, _) in indices_and_calls {
                     table_builder.add_column(&Field {
                         data_type: DataType::Int64,
-                        name: format!("count_for_call_{}", call_index),
+                        name: format!("row_count_for_call_{}", call_index),
                         sub_fields: vec![],
                         type_name: String::default(),
                     });
@@ -421,7 +420,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 }
                 let dist_key = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
                 let table = table_builder.build(dist_key);
-                (distinct_key, DistinctDedupTable { table, _todo: () })
+                (distinct_col, DistinctDedupTable { table, _todo: () })
             })
             .collect()
     }
