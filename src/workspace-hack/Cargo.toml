@@ -167,7 +167,7 @@ parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] 
 parking_lot_core = { version = "0.9", default-features = false, features = ["deadlock_detection"] }
 petgraph = { version = "0.6" }
 phf = { version = "0.11", features = ["uncased"] }
-phf_shared = { version = "0.11", features = ["uncased"] } .
+phf_shared = { version = "0.11", features = ["uncased"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
