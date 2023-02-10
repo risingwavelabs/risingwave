@@ -18,7 +18,7 @@ use std::{fmt, iter};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
@@ -661,7 +661,7 @@ impl LogicalAggBuilder {
                                 FunctionCall::new(
                                     ExprType::Subtract,
                                     vec![
-                                        sq_sum_expr.clone(),
+                                        sq_sum_expr,
                                         ExprImpl::from(
                                             FunctionCall::new(
                                                 ExprType::Divide,
@@ -669,14 +669,10 @@ impl LogicalAggBuilder {
                                                     ExprImpl::from(
                                                         FunctionCall::new(
                                                             ExprType::Multiply,
-                                                            vec![
-                                                                sum_expr.clone(),
-                                                                sum_expr.clone(),
-                                                            ],
+                                                            vec![sum_expr.clone(), sum_expr],
                                                         )
                                                         .unwrap(),
-                                                    )
-                                                    .clone(),
+                                                    ),
                                                     count_expr.clone(),
                                                 ],
                                             )
@@ -690,7 +686,7 @@ impl LogicalAggBuilder {
                                 FunctionCall::new(
                                     ExprType::Subtract,
                                     vec![
-                                        count_expr.clone(),
+                                        count_expr,
                                         ExprImpl::from(Literal::new(
                                             Datum::from(ScalarImpl::Int16(1)),
                                             DataType::Int16,
