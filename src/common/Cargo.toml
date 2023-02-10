@@ -65,7 +65,6 @@ url = "2"
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
 procfs = { version = "0.12", default-features = false }
 libc = "0.2"
 
