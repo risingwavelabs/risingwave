@@ -309,14 +309,18 @@ service MetaMemberService {
   rpc Members(MembersRequest) returns (MembersResponse);
 }
 
+// The schema for persisted system parameters.
+// Note on backward compatibility:
+// - Do not remove deprecated fields.
+// - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
 message SystemParams {
-  uint32 barrier_interval_ms = 1;
-  uint64 checkpoint_frequency = 2;
-  uint32 sstable_size_mb = 3;
-  uint32 block_size_kb = 4;
-  double bloom_false_positive = 5;
-  string state_store = 6;
-  string data_directory = 7;
-  string backup_storage_url = 8;
-  string backup_storage_directory = 9;
+  optional uint32 barrier_interval_ms = 1;
+  optional uint64 checkpoint_frequency = 2;
+  optional uint32 sstable_size_mb = 3;
+  optional uint32 block_size_kb = 4;
+  optional double bloom_false_positive = 5;
+  optional string state_store = 6;
+  optional string data_directory = 7;
+  optional string backup_storage_url = 8;
+  optional string backup_storage_directory = 9;
 }
