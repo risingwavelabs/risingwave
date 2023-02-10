@@ -292,9 +292,9 @@ impl ParseTo for CreateSourceStatement {
             if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
             {
-                return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to native".to_string()));
+                return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
             }
-            SourceSchema::DebeziumJson
+            SourceSchema::Native
         } else if connector.contains("datagen") {
             if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                 && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])

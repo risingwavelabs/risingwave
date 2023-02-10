@@ -66,7 +66,10 @@ pub fn new_combined_event(event: Event) -> CombinedEvent {
     }
 }
 
-pub(crate) fn get_event_data_types(event_type: Option<EventType>) -> Vec<DataType> {
+pub(crate) fn get_event_data_types(
+    event_type: Option<EventType>,
+    row_id_index: Option<usize>,
+) -> Vec<DataType> {
     let mut fields = match event_type {
         None => {
             vec![
@@ -80,8 +83,12 @@ pub(crate) fn get_event_data_types(event_type: Option<EventType>) -> Vec<DataTyp
         Some(EventType::Auction) => get_auction_struct_type().fields,
         Some(EventType::Bid) => get_bid_struct_type().fields,
     };
-    // _row_id
-    fields.push(DataType::Int64);
+
+    if let Some(row_id_index) = row_id_index {
+        // _row_id
+        fields.insert(row_id_index, DataType::Int64);
+    }
+
     fields
 }
 
@@ -179,8 +186,8 @@ pub(crate) fn get_bid_struct_type() -> StructType {
     }
 }
 
-pub(crate) fn combined_event_to_row(e: CombinedEvent) -> OwnedRow {
-    let fields = vec![
+pub(crate) fn combined_event_to_row(e: CombinedEvent, row_id_index: Option<usize>) -> OwnedRow {
+    let mut fields = vec![
         Some(ScalarImpl::Int64(e.event_type as i64)),
         e.person
             .map(person_to_datum)
@@ -191,21 +198,26 @@ pub(crate) fn combined_event_to_row(e: CombinedEvent) -> OwnedRow {
         e.bid
             .map(bid_to_datum)
             .map(|fields| StructValue::new(fields).into()),
-        // _row_id
-        None,
     ];
+
+    if let Some(row_id_index) = row_id_index {
+        // _row_id
+        fields.insert(row_id_index, None);
+    }
 
     OwnedRow::new(fields)
 }
 
-pub(crate) fn event_to_row(e: Event) -> OwnedRow {
+pub(crate) fn event_to_row(e: Event, row_id_index: Option<usize>) -> OwnedRow {
     let mut fields = match e {
         Event::Person(p) => person_to_datum(p),
         Event::Auction(a) => auction_to_datum(a),
         Event::Bid(b) => bid_to_datum(b),
     };
-    // _row_id
-    fields.push(None);
+    if let Some(row_id_index) = row_id_index {
+        // _row_id
+        fields.insert(row_id_index, None);
+    }
     OwnedRow::new(fields)
 }
 

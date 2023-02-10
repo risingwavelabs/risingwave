@@ -503,15 +503,15 @@ mod tests {
         let schema = Schema {
             fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
-        let row_id_index = Some(0);
+        let row_id_index = None;
         let pk_column_ids = vec![0];
         let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Json as i32,
+            row_format: ProstRowFormatType::Native as i32,
             ..Default::default()
         };
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let column_ids = vec![0, 1].into_iter().map(ColumnId::from).collect();
+        let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         // This datagen will generate 3 rows at one time.
         let properties: HashMap<String, String> = convert_args!(hashmap!(
@@ -598,7 +598,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Json as i32,
+            row_format: ProstRowFormatType::Native as i32,
             ..Default::default()
         };
         let properties = convert_args!(hashmap!(

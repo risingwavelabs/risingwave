@@ -49,8 +49,8 @@ pub struct NexmarkSplitReader {
     min_event_gap_in_ns: u64,
     max_chunk_size: u64,
 
+    row_id_index: Option<usize>,
     split_id: SplitId,
-    parser_config: ParserConfig,
     metrics: Arc<SourceMetrics>,
     source_info: SourceInfo,
 }
@@ -88,6 +88,12 @@ impl SplitReaderV2 for NexmarkSplitReader {
             generator = generator.with_type_filter(*event_type);
         }
 
+        let row_id_index = parser_config
+            .common
+            .rw_columns
+            .into_iter()
+            .position(|column| column.is_row_id);
+
         Ok(NexmarkSplitReader {
             generator,
             assigned_split,
@@ -97,7 +103,7 @@ impl SplitReaderV2 for NexmarkSplitReader {
             event_type: properties.table_type,
             use_real_time: properties.use_real_time,
             min_event_gap_in_ns: properties.min_event_gap_in_ns,
-            parser_config,
+            row_id_index,
             metrics,
             source_info,
         })
@@ -116,7 +122,7 @@ impl NexmarkSplitReader {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
         let start_ts = self.generator.timestamp();
-        let event_dtypes = get_event_data_types(self.event_type);
+        let event_dtypes = get_event_data_types(self.event_type, self.row_id_index);
         loop {
             let mut rows = vec![];
             while (rows.len() as u64) < self.max_chunk_size {
@@ -125,8 +131,8 @@ impl NexmarkSplitReader {
                 }
                 let event = self.generator.next().unwrap();
                 let row = match self.event_type {
-                    Some(_) => event_to_row(event),
-                    None => combined_event_to_row(new_combined_event(event)),
+                    Some(_) => event_to_row(event, self.row_id_index),
+                    None => combined_event_to_row(new_combined_event(event), self.row_id_index),
                 };
                 rows.push((Op::Insert, row));
             }
