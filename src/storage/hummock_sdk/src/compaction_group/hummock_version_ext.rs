@@ -519,6 +519,24 @@ pub fn get_member_table_ids(version: &HummockVersion) -> Vec<StateTableId> {
         .collect()
 }
 
+/// Gets all SST ids in `group_id`
+pub fn get_compaction_group_sst_ids(
+    version: &HummockVersion,
+    group_id: CompactionGroupId,
+) -> Vec<HummockSstableId> {
+    let group_levels = version.get_compaction_group_levels(group_id);
+    group_levels
+        .l0
+        .as_ref()
+        .unwrap()
+        .sub_levels
+        .iter()
+        .rev()
+        .chain(group_levels.levels.iter())
+        .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
+        .collect_vec()
+}
+
 pub fn new_sub_level(
     sub_level_id: u64,
     level_type: LevelType,

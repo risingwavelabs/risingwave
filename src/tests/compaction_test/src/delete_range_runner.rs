@@ -138,39 +138,38 @@ async fn compaction_test(
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
     delete_range_table.name = "delete-range-table".to_string();
-    // TODO resume test
-    // let mut group1 = CompactionGroup {
-    //     id: 3,
-    //     parent_id: 0,
-    //     member_table_ids: vec![1],
-    //     compaction_config: Some(compaction_config.clone()),
-    //     table_id_to_options: Default::default(),
-    // };
-    // group1.table_id_to_options.insert(
-    //     1,
-    //     TableOption {
-    //         retention_seconds: 0,
-    //     },
-    // );
-    // let mut group2 = CompactionGroup {
-    //     id: 4,
-    //     parent_id: 0,
-    //     member_table_ids: vec![2],
-    //     compaction_config: Some(compaction_config.clone()),
-    //     table_id_to_options: Default::default(),
-    // };
-    // group2.table_id_to_options.insert(
-    //     2,
-    //     TableOption {
-    //         retention_seconds: 0,
-    //     },
-    // );
-    // hummock_manager_ref
-    //     .init_metadata_for_version_replay(
-    //         vec![delete_key_table, delete_range_table],
-    //         vec![group1, group2],
-    //     )
-    //     .await?;
+    let mut group1 = CompactionGroup {
+        id: 3,
+        parent_id: 0,
+        member_table_ids: vec![1],
+        compaction_config: Some(compaction_config.clone()),
+        table_id_to_options: Default::default(),
+    };
+    group1.table_id_to_options.insert(
+        1,
+        TableOption {
+            retention_seconds: 0,
+        },
+    );
+    let mut group2 = CompactionGroup {
+        id: 4,
+        parent_id: 0,
+        member_table_ids: vec![2],
+        compaction_config: Some(compaction_config.clone()),
+        table_id_to_options: Default::default(),
+    };
+    group2.table_id_to_options.insert(
+        2,
+        TableOption {
+            retention_seconds: 0,
+        },
+    );
+    hummock_manager_ref
+        .init_metadata_for_version_replay(
+            vec![delete_key_table, delete_range_table],
+            vec![group1, group2],
+        )
+        .await?;
 
     let config = Arc::new(storage_config);
 

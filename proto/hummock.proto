@@ -277,9 +277,20 @@ message CompactStatus {
   repeated LevelHandler level_handlers = 2;
 }
 
-message CompactionGroup {
+// Config info of compaction group.
+message CompactionGroupConfig {
   uint64 id = 1;
   CompactionConfig compaction_config = 4;
+}
+
+// Complete info of compaction group.
+// The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
+message CompactionGroup {
+  uint64 id = 1;
+  uint64 parent_id = 2;
+  repeated uint32 member_table_ids = 3;
+  CompactionConfig compaction_config = 4;
+  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message CompactTaskAssignment {

@@ -24,12 +24,12 @@ use risingwave_pb::hummock::CompactionConfig;
 use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CompactionGroup {
+pub struct CompactionGroupConfig {
     pub(crate) group_id: CompactionGroupId,
     pub(crate) compaction_config: CompactionConfig,
 }
 
-impl CompactionGroup {
+impl CompactionGroupConfig {
     pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
         Self {
             group_id,
@@ -46,8 +46,8 @@ impl CompactionGroup {
     }
 }
 
-impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
-    fn from(compaction_group: &risingwave_pb::hummock::CompactionGroup) -> Self {
+impl From<&risingwave_pb::hummock::CompactionGroupConfig> for CompactionGroupConfig {
+    fn from(compaction_group: &risingwave_pb::hummock::CompactionGroupConfig) -> Self {
         Self {
             group_id: compaction_group.id,
             compaction_config: compaction_group
@@ -59,8 +59,8 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
     }
 }
 
-impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
-    fn from(compaction_group: &CompactionGroup) -> Self {
+impl From<&CompactionGroupConfig> for risingwave_pb::hummock::CompactionGroupConfig {
+    fn from(compaction_group: &CompactionGroupConfig) -> Self {
         Self {
             id: compaction_group.group_id,
             compaction_config: Some(compaction_group.compaction_config.clone()),
@@ -68,14 +68,14 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
     }
 }
 
-const HUMMOCK_COMPACTION_GROUP_CF_NAME: &str = "cf/hummock_compaction_group";
+const HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME: &str = "cf/hummock_compaction_group_config";
 
-impl MetadataModel for CompactionGroup {
+impl MetadataModel for CompactionGroupConfig {
     type KeyType = CompactionGroupId;
-    type ProstType = risingwave_pb::hummock::CompactionGroup;
+    type ProstType = risingwave_pb::hummock::CompactionGroupConfig;
 
     fn cf_name() -> String {
-        String::from(HUMMOCK_COMPACTION_GROUP_CF_NAME)
+        String::from(HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME)
     }
 
     fn to_protobuf(&self) -> Self::ProstType {

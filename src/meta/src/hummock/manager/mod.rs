@@ -27,7 +27,7 @@ use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, build_initial_compaction_group_levels,
+    add_new_sub_level, build_initial_compaction_group_levels, get_member_table_ids,
     try_get_compaction_group_id_by_table_id, HummockLevelsExt, HummockVersionExt,
     HummockVersionUpdateExt,
 };
@@ -809,7 +809,8 @@ where
                 start_time.elapsed()
             );
         } else {
-            let all_table_ids = self.all_table_ids().await;
+            let all_table_ids: HashSet<StateTableId> =
+                get_member_table_ids(&current_version).into_iter().collect();
             // to get all relational table_id from sst_info
             let table_ids = compact_task
                 .input_ssts
@@ -830,13 +831,13 @@ where
             }
 
             // build table_options
-            // TODO resume
-            // compact_task.table_options = group_config
-            //     .table_id_to_options()
-            //     .iter()
-            //     .filter(|id_to_option| compact_task.existing_table_ids.contains(id_to_option.0))
-            //     .map(|id_to_option| (*id_to_option.0, id_to_option.1.into()))
-            //     .collect();
+            compact_task.table_options = current_version
+                .get_compaction_group_levels(compaction_group_id)
+                .table_id_to_options
+                .iter()
+                .filter(|id_to_option| compact_task.existing_table_ids.contains(id_to_option.0))
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.clone()))
+                .collect();
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask = group_config.compaction_filter_mask;
             commit_multi_var!(self, None, Transaction::default(), compact_status)?;
@@ -1622,24 +1623,23 @@ where
             table.insert(self.env.meta_store()).await?;
         }
 
-        // TODO resume to fix compaction test
-        // for group in compaction_groups {
-        //     let mut tables = vec![];
-        //     for table_id in group.member_table_ids {
-        //         if let Some(option) = group.table_id_to_options.get(&table_id) {
-        //             tables.push((table_id as StateTableId, option.into()));
-        //         }
-        //     }
-        //     let group_config = group.compaction_config.clone().unwrap();
-        //     self.register_new_group_for_replay(group.id, group_config, &tables)
-        //         .await?;
-        // }
-
-        //     tracing::info!(
-        //         "Compaction group {}, registered table ids {:?}",
-        //         compaction_group_id,
-        //         table_ids
-        //     );
+        for group in compaction_groups {
+            let mut pairs = vec![];
+            for table_id in group.member_table_ids {
+                if let Some(option) = group.table_id_to_options.get(&table_id) {
+                    pairs.push((table_id as StateTableId, group.id, option.into()));
+                }
+            }
+            let group_config = group.compaction_config.clone().unwrap();
+            self.compaction_group_manager
+                .write()
+                .await
+                .init_compaction_config_for_replay(group.id, group_config, self.env.meta_store())
+                .await
+                .unwrap();
+            self.register_table_ids(&pairs).await?;
+            tracing::info!("Registered table ids {:?}", pairs);
+        }
 
         // Notify that tables have created
         for table in table_catalogs {

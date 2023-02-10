@@ -427,7 +427,7 @@ where
         &self,
         _request: Request<RiseCtlListCompactionGroupRequest>,
     ) -> Result<Response<RiseCtlListCompactionGroupResponse>, Status> {
-        todo!()
+        todo!("#7817")
         // let compaction_groups = self
         //     .hummock_manager
         //     .compaction_groups()
