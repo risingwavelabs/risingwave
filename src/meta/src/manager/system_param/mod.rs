@@ -37,7 +37,7 @@ impl<S: MetaStore> SystemParamManager<S> {
         let persisted = SystemParams::get(meta_store.as_ref()).await?;
 
         let params = if let Some(persisted) = persisted {
-            Self::validate_init_params(&persisted, &init_params)?;
+            Self::validate_init_params(&persisted, &init_params);
             persisted
         } else {
             SystemParams::insert(&init_params, meta_store.as_ref()).await?;
@@ -51,14 +51,17 @@ impl<S: MetaStore> SystemParamManager<S> {
         &self.params
     }
 
-    fn validate_init_params(persisted: &SystemParams, init: &SystemParams) -> MetaResult<()> {
-        // Do NOT compare deprecated fields.
-        if persisted != init {
-            Err(MetaError::system_param(
-                "System parameters from configuration differ from the persisted",
-            ))
-        } else {
-            Ok(())
+    // Only compare params from CLI.
+    fn validate_init_params(persisted: &SystemParams, init: &SystemParams) {
+        if persisted.sstable_size_mb != init.sstable_size_mb
+            || persisted.block_size_kb != init.block_size_kb
+            || persisted.bloom_false_positive != init.bloom_false_positive
+            || persisted.state_store != init.state_store
+            || persisted.data_directory != init.data_directory
+            || persisted.backup_storage_url != init.backup_storage_url
+            || persisted.backup_storage_directory != init.backup_storage_directory
+        {
+            tracing::warn!("System parameters from CLI differ from the persisted")
         }
     }
 

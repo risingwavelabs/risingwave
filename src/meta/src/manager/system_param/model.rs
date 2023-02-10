@@ -46,6 +46,7 @@ impl KvSingletonModel for SystemParams {
         SYSTEM_PARAM_CF_NAME.to_string()
     }
 
+    /// The undeprecated fields are guaranteed to be `Some`.
     async fn get<S>(store: &S) -> MetadataModelResult<Option<Self>>
     where
         S: MetaStore,
