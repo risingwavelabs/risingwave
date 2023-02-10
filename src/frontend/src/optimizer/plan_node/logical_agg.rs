@@ -18,10 +18,8 @@ use std::{fmt, iter};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
 use risingwave_expr::expr::AggKind;
-use sha2::digest::typenum::Exp;
-use risingwave_pb::expr::expr_node::Type::InputRef;
 
 use super::generic::{
     self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
@@ -582,10 +580,8 @@ impl LogicalAggBuilder {
             AggKind::Stddev => {
                 let input = inputs.iter().exactly_one().unwrap();
 
-                println!("input idx {} data {} return {} s {}", input.index, input.data_type, input.return_type(), input.to_string());
-
                 // sq_sum
-                let sq_expr = ExprImpl::from(
+                let expr_sqr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
                         vec![ExprImpl::from(input.clone()), ExprImpl::from(input.clone())],
@@ -593,75 +589,102 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
+                let expr_sqr_proj_index = self.input_proj_builder.add_expr(&expr_sqr).unwrap();
 
                 let sq_sum_return_type =
-                    AggCall::infer_return_type(&AggKind::Sum, &[sq_expr.return_type()]).unwrap();
+                    AggCall::infer_return_type(&AggKind::Sum, &[expr_sqr.return_type()]).unwrap();
 
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Sum,
                     return_type: sq_sum_return_type.clone(),
-                    inputs: inputs.clone(),
+                    inputs: vec![InputRef::new(expr_sqr_proj_index, expr_sqr.return_type())],
                     distinct,
                     order_by_fields: order_by_fields.clone(),
                     filter: filter.clone(),
                 });
 
-                let sq_sum = ExprImpl::from(InputRef::new(
+                let sq_sum_expr = ExprImpl::from(InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
                     sq_sum_return_type,
                 ))
                 .cast_implicit(return_type.clone())
                 .unwrap();
 
-                // sum_sq
-                let left_return_type =
-                    AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+                // sum
+                let sum_return_type =
+                    AggCall::infer_return_type(&AggKind::Sum, &[input.return_type()]).unwrap();
 
                 // Rewrite avg to cast(sum as avg_return_type) / count.
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Sum,
-                    return_type: left_return_type.clone(),
+                    return_type: sum_return_type.clone(),
                     inputs: inputs.clone(),
                     distinct,
                     order_by_fields: order_by_fields.clone(),
                     filter: filter.clone(),
                 });
-                let left = ExprImpl::from(InputRef::new(
+                let sum_expr = ExprImpl::from(InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
-                    left_return_type,
+                    sum_return_type,
                 ))
-                    .cast_implicit(return_type)
-                    .unwrap();
+                .cast_implicit(return_type)
+                .unwrap();
 
-                // n - 1
-                let right_return_type =
-                    AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()])
-                        .unwrap();
+                // count
+                let count_return_type =
+                    AggCall::infer_return_type(&AggKind::Count, &[input.return_type()]).unwrap();
 
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Count,
-                    return_type: right_return_type.clone(),
+                    return_type: count_return_type.clone(),
                     inputs,
                     distinct,
                     order_by_fields,
                     filter,
                 });
 
-                let right = InputRef::new(
+                let count_expr: ExprImpl = InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
-                    right_return_type,
+                    count_return_type,
+                )
+                .into();
+
+                // let
+
+                let sq_of_sums = ExprImpl::from(
+                    FunctionCall::new(ExprType::Multiply, vec![sum_expr.clone(), sum_expr.clone()])
+                        .unwrap(),
                 );
 
-                //   ExprImpl::from(FunctionCall::new(ExprType::Add, vec![]).unwrap())
+                let divide_impl = ExprImpl::from(
+                    FunctionCall::new(
+                        ExprType::Divide,
+                        vec![sq_of_sums.clone(), count_expr.clone()],
+                    )
+                    .unwrap(),
+                );
 
-                // let left = ExprImpl::from(
-                //     FunctionCall::new(ExprType::Add, vec![sq_sum.clone(), sq_sum.clone()])
-                //         .unwrap(),
-                // );
+                let minus_impl = ExprImpl::from(
+                    FunctionCall::new(ExprType::Subtract, vec![sq_sum_expr.clone(), divide_impl])
+                        .unwrap(),
+                );
+
+                let one_impl = ExprImpl::from(Literal::new(
+                    Datum::from(ScalarImpl::Int16(1)),
+                    DataType::Int16,
+                ));
+
+                let stddev_pop_impl = ExprImpl::from(
+                    FunctionCall::new(ExprType::Subtract, vec![count_expr.clone(), one_impl])
+                        .unwrap(),
+                );
 
                 let expr_impl = ExprImpl::from(
-                    FunctionCall::new(ExprType::Divide, vec![sq_sum, right.into()]).unwrap(),
+                    FunctionCall::new(ExprType::Divide, vec![minus_impl, stddev_pop_impl]).unwrap(),
                 );
+                // let expr_impl = ExprImpl::from(
+                //     FunctionCall::new(ExprType::Divide, vec![minus_impl, count_expr]).unwrap(),
+                // );
 
                 Ok(expr_impl)
             }
