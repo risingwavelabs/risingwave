@@ -918,6 +918,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f34fac4d7cdaefa2deded0eda2d5d59dbfd43370ff3f856209e72340ae84c294"
+dependencies = [
+ "futures",
+ "pin-project",
+ "rand 0.8.5",
+ "tokio",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -950,12 +962,6 @@ name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
-
-[[package]]
-name = "base64"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
 
 [[package]]
 name = "base64"
@@ -4123,14 +4129,14 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.24.6"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a657010a255640ce4b5e06b3bf275e3debe013208998cb22fa315eb40395919"
+checksum = "c40ed33cc9fed187ce8293587416e0afd6ac9fcde17f2a20ad0dca14dd685ebe"
 dependencies = [
  "anyhow",
  "async-compat",
  "async-trait",
- "backon",
+ "backon 0.2.0",
  "base64 0.21.0",
  "bincode 2.0.0-rc.2",
  "bytes",
@@ -4138,6 +4144,7 @@ dependencies = [
  "futures",
  "hdrs",
  "http",
+ "hyper",
  "log",
  "md-5",
  "once_cell",
@@ -5367,13 +5374,13 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.7.6"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "642e28b7bf97b5112610ee78c7128f67d8e73fb17c88ce6f5f67dc9816957d52"
+checksum = "7e0154ced5e44389686689a3c96c49ca5a70ad9c708e0989982adae2e0378bbf"
 dependencies = [
  "anyhow",
- "backon",
- "base64 0.20.0",
+ "backon 0.4.0",
+ "base64 0.21.0",
  "bytes",
  "dirs",
  "form_urlencoded",
