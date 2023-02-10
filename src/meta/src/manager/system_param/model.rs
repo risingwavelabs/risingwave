@@ -17,8 +17,8 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use risingwave_pb::meta::SystemParams;
 
-use super::{MetadataModel, MetadataModelError, MetadataModelResult};
-use crate::storage::{MetaStore, Snapshot, Transaction};
+use crate::model::{MetadataModelError, MetadataModelResult};
+use crate::storage::{MetaStore, Transaction};
 
 const SYSTEM_PARAM_CF_NAME: &str = "cf/system_params";
 
@@ -32,51 +32,29 @@ const DATA_DIRECTORY_KEY: &str = "data_directory";
 const BACKUP_STORAGE_URL_KEY: &str = "backup_storage_url";
 const BACKUP_STORAGE_DIRECTORY_KEY: &str = "backup_storage_directory";
 
+// A dummy trait to implement custom methods on `SystemParams`.
 #[async_trait]
-impl MetadataModel for SystemParams {
-    type KeyType = u32;
-    type ProstType = SystemParams;
+pub trait KvSingletonModel: Sized {
+    fn cf_name() -> String;
+    async fn get<S: MetaStore>(store: &S) -> MetadataModelResult<Option<Self>>;
+    async fn insert<S: MetaStore>(&self, store: &S) -> MetadataModelResult<()>;
+}
 
+#[async_trait]
+impl KvSingletonModel for SystemParams {
     fn cf_name() -> String {
         SYSTEM_PARAM_CF_NAME.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
-        // System params are stored as raw kv pairs.
-        unimplemented!()
-    }
-
-    fn from_protobuf(_prost: Self::ProstType) -> Self {
-        // System params are stored as raw kv pairs.
-        unimplemented!()
-    }
-
-    fn key(&self) -> MetadataModelResult<Self::KeyType> {
-        // System params are stored as raw kv pairs.
-        unimplemented!()
-    }
-
-    async fn list<S>(store: &S) -> MetadataModelResult<Vec<Self>>
+    async fn get<S>(store: &S) -> MetadataModelResult<Option<Self>>
     where
         S: MetaStore,
     {
         let kvs = store.list_cf(&Self::cf_name()).await?;
         if kvs.is_empty() {
-            Ok(vec![])
+            Ok(None)
         } else {
-            Ok(vec![system_param_from_kv(kvs)?])
-        }
-    }
-
-    async fn list_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Vec<Self>>
-    where
-        S: MetaStore,
-    {
-        let kvs = snapshot.list_cf(&Self::cf_name()).await?;
-        if kvs.is_empty() {
-            Ok(vec![])
-        } else {
-            Ok(vec![system_param_from_kv(kvs)?])
+            Ok(Some(system_param_from_kv(kvs)?))
         }
     }
 
@@ -149,13 +127,6 @@ impl MetadataModel for SystemParams {
             );
         });
         Ok(store.txn(txn).await?)
-    }
-
-    async fn delete<S>(_store: &S, _key: &Self::KeyType) -> MetadataModelResult<()>
-    where
-        S: MetaStore,
-    {
-        unimplemented!()
     }
 }
 

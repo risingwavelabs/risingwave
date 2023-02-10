@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod model;
+
 use std::sync::Arc;
 
 use risingwave_pb::meta::SystemParams;
 
+use self::model::KvSingletonModel;
 use super::MetaSrvEnv;
-use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
@@ -32,18 +34,11 @@ impl<S: MetaStore> SystemParamManager<S> {
     /// Return error if `init_params` conflict with persisted system params.
     pub async fn new(env: MetaSrvEnv<S>, init_params: SystemParams) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
-        let mut existing_params = SystemParams::list(meta_store.as_ref()).await?;
+        let persisted = SystemParams::get(meta_store.as_ref()).await?;
 
-        // System params are not versioned.
-        debug_assert!(existing_params.len() <= 1);
-
-        let params = if let Some(existing_params) = existing_params.pop() {
-            if init_params != existing_params {
-                return Err(MetaError::system_param(
-                    "System parameters from configuration differ from the persisted",
-                ));
-            }
-            existing_params
+        let params = if let Some(persisted) = persisted {
+            Self::validate_init_params(&persisted, &init_params)?;
+            persisted
         } else {
             SystemParams::insert(&init_params, meta_store.as_ref()).await?;
             init_params
@@ -54,6 +49,17 @@ impl<S: MetaStore> SystemParamManager<S> {
 
     pub fn get_params(&self) -> &SystemParams {
         &self.params
+    }
+
+    fn validate_init_params(persisted: &SystemParams, init: &SystemParams) -> MetaResult<()> {
+        // Do NOT compare deprecated fields.
+        if persisted != init {
+            Err(MetaError::system_param(
+                "System parameters from configuration differ from the persisted",
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     // TODO(zhidong): Support modifying fields
