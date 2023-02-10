@@ -173,34 +173,14 @@ pub fn compare_rows_in_chunk(
         let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx).array();
         let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx).array();
         macro_rules! gen_match {
-            ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
-                match ($lhs, $rhs) {
-                    $((ArrayImpl::$tt(lhs_inner), ArrayImpl::$tt(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
+            ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match (lhs_array.as_ref(), rhs_array.as_ref()) {
+                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
                     (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
                 }?
             }
         }
-        let (lhs_array, rhs_array) = (lhs_array.as_ref(), rhs_array.as_ref());
-        let res = gen_match!(
-            lhs_array,
-            rhs_array,
-            [
-                Int16,
-                Int32,
-                Int64,
-                Float32,
-                Float64,
-                Utf8,
-                Bool,
-                Decimal,
-                Interval,
-                NaiveDate,
-                NaiveDateTime,
-                NaiveTime,
-                Struct,
-                List
-            ]
-        );
+        let res = for_all_variants! { gen_match };
         if res != Ordering::Equal {
             return Ok(res);
         }
