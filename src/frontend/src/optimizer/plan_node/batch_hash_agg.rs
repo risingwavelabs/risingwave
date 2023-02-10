@@ -24,7 +24,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
@@ -83,13 +83,13 @@ impl ToDistributedBatch for BatchHashAgg {
             // partial agg
             let partial_agg: PlanRef = self.clone_with_input(new_input).into();
 
-            // enforce exchange on input to partial agg.
-            // If we are going to shuffle, we should do it early,
-            // So we can aggregate more data in parallel.
-            let input_fields = self.base.schema().fields();
-            let input_col_num = input_fields.len();
-            let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
-                .enforce_if_not_satisfies(partial_agg, &Order::any())?;
+            // insert exchange
+            let exchange = BatchExchange::new(
+                partial_agg,
+                Order::any(),
+                Distribution::HashShard((0..self.group_key().len()).collect()),
+            )
+            .into();
 
             // insert total agg
             let total_agg_types = self
