@@ -281,13 +281,7 @@ impl StreamMaterialize {
 
     /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
     pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        let Self {
-            base,
-            input,
-            mut table,
-        } = self;
-        table.properties = properties;
-        StreamSink::with_base(input, table, base)
+        StreamSink::new(self.input, self.table.to_sink_desc(properties))
     }
 }
 
