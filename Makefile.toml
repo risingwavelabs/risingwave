@@ -23,6 +23,7 @@ env_scripts = [
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
+is_hdfs_backend = get_env ENABLE_HDFS
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -38,8 +39,16 @@ if ${is_all_in_one_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
 end
+
+if ${is_hdfs_backend}
+  set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
+else
+  set_env BUILD_HDFS_BACKEND_CMD ""
+end
+
 ''',
 ]
+
 
 [config]
 default_to_workspace = false
@@ -314,7 +323,7 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
+cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
