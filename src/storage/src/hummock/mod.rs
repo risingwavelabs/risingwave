@@ -522,7 +522,6 @@ pub struct HummockStorageV1 {
 
 impl HummockStorageV1 {
     /// Creates a [`HummockStorageV1`].
-    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,

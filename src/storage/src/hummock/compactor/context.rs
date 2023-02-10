@@ -57,7 +57,6 @@ pub struct CompactorContext {
 }
 
 impl CompactorContext {
-    #[allow(clippy::too_many_arguments)]
     pub fn new_local_compact_context(
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
