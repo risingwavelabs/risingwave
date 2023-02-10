@@ -511,21 +511,11 @@ pub(crate) mod tests {
             )),
         );
 
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
+        get_compactor_context_with_filter_key_extractor_manager(
             storage,
             hummock_meta_client,
-            filter_key_extractor_manager.clone(),
-        );
-
-        let existing_table_id: u32 = 1;
-        // Only registered table_ids are accepted in commit_epoch
-        register_table_ids_to_compaction_group(
-            &hummock_manager_ref,
-            &[existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
+            filter_key_extractor_manager,
         )
-        .await;
-        compact_ctx
     }
 
     #[tokio::test]
@@ -674,18 +664,18 @@ pub(crate) mod tests {
         let existing_table_ids = 2;
         let kv_count: usize = 128;
         let mut epoch: u64 = 1;
+        register_table_ids_to_compaction_group(
+            &hummock_manager_ref,
+            &[drop_table_id, existing_table_ids],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         for index in 0..kv_count {
             let (table_id, storage) = if index % 2 == 0 {
                 (drop_table_id, &storage_1)
             } else {
                 (existing_table_ids, &storage_2)
             };
-            register_table_ids_to_compaction_group(
-                &hummock_manager_ref,
-                &[table_id],
-                StaticCompactionGroupId::StateDefault.into(),
-            )
-            .await;
             epoch += 1;
             let mut local = storage.start_write_batch(WriteOptions {
                 epoch,
@@ -818,11 +808,12 @@ pub(crate) mod tests {
             worker_node.id,
         ));
 
+        let existing_table_id = 2;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(2),
+            TableId::from(existing_table_id),
         )
         .await;
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
@@ -841,18 +832,11 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
-        let existing_table_id = 2;
         let kv_count = 11;
         // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        register_table_ids_to_compaction_group(
-            &hummock_manager_ref,
-            &[existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         let mut epoch_set = BTreeSet::new();
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;

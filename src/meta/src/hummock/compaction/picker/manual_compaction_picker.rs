@@ -396,6 +396,7 @@ pub mod tests {
         let mut levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let mut levels_handler = vec![
             LevelHandler::new(0),
@@ -581,6 +582,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
 
         let levels_handler = vec![
@@ -608,6 +610,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
 
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -627,6 +630,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let option = ManualCompactionOption {
@@ -1165,6 +1169,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
@@ -1266,6 +1271,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();

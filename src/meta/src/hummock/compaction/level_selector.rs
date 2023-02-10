@@ -817,6 +817,7 @@ pub mod tests {
         let mut levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
@@ -892,6 +893,7 @@ pub mod tests {
                 3,
                 10,
             ))),
+            ..Default::default()
         };
 
         let mut selector = DynamicLevelSelector::new(

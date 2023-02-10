@@ -13,11 +13,8 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
 pub use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 

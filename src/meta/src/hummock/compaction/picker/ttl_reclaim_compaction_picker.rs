@@ -150,6 +150,7 @@ mod test {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();

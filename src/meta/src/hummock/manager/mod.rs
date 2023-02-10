@@ -29,8 +29,8 @@ use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, build_initial_compaction_group_levels, get_member_table_ids,
-    try_get_compaction_group_id_by_table_id, HummockLevelsExt, HummockVersionExt,
+    add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
+    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
     HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
@@ -40,17 +40,15 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupConstruct,
-    GroupDelta, GroupDestroy, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot,
-    HummockVersion, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, LevelType,
+    version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{
@@ -60,8 +58,8 @@ use crate::hummock::compaction::{
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    remove_compaction_group_in_sst_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
+    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
+    trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
@@ -431,19 +429,6 @@ where
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        if let Some((_, last_version_delta)) = hummock_version_deltas.last_key_value() {
-            for (compaction_group_id, group_deltas) in last_version_delta.get_group_deltas() {
-                if group_deltas.get_group_deltas().iter().any(|group_delta| {
-                    matches!(
-                        group_delta.delta_type.as_ref().unwrap(),
-                        DeltaType::GroupDestroy(_)
-                    )
-                }) {
-                    remove_compaction_group_in_sst_stat(&self.metrics, *compaction_group_id);
-                }
-            }
-        }
-
         // Insert the initial version.
         let mut redo_state = if versions.is_empty() {
             let mut init_version = HummockVersion {
@@ -454,7 +439,7 @@ where
             };
             // Initialize independent levels via corresponding compaction groups' config.
             let default_compaction_config = CompactionConfigBuilder::new().build();
-            for group_id in vec![
+            for group_id in [
                 StaticCompactionGroupId::StateDefault as CompactionGroupId,
                 StaticCompactionGroupId::MaterializedView as CompactionGroupId,
             ] {
@@ -1481,20 +1466,14 @@ where
         }
 
         let old_version = &versioning.current_version;
-        let new_version_id = old_version.id + 1;
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
             &mut versioning.hummock_version_deltas,
-            new_version_id,
-            HummockVersionDelta {
-                prev_id: old_version.id,
-                safe_epoch: old_version.safe_epoch,
-                trivial_move: false,
-                ..Default::default()
-            },
+            old_version.id + 1,
+            build_version_delta_after_version(&old_version),
         );
+        new_version_delta.max_committed_epoch = epoch;
         let mut new_hummock_version = old_version.clone();
-        new_version_delta.id = new_version_id;
-        new_hummock_version.id = new_version_id;
+        new_hummock_version.id = new_version_delta.id;
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut branch_sstables = vec![];
         sstables.retain_mut(|local_sst_info| {
@@ -1610,7 +1589,6 @@ where
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        new_version_delta.max_committed_epoch = epoch;
         new_hummock_version.max_committed_epoch = epoch;
 
         // Apply stats changes.
@@ -1712,6 +1690,7 @@ where
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
+            assert_eq!(version_delta.prev_id, checkpoint.id);
             checkpoint.apply_version_delta(version_delta);
         }
         new_checkpoint_id = checkpoint.id;
@@ -1819,6 +1798,14 @@ where
     ) -> Result<()> {
         for table in &table_catalogs {
             table.insert(self.env.meta_store()).await?;
+        }
+        for group in &compaction_groups {
+            assert!(
+                group.id == StaticCompactionGroupId::NewCompactionGroup as u64
+                    || (group.id >= StaticCompactionGroupId::StateDefault as u64
+                        && group.id <= StaticCompactionGroupId::MaterializedView as u64),
+                "compaction group id should be either NewCompactionGroup to create new one, or predefined static ones."
+            );
         }
 
         for group in compaction_groups {
@@ -2137,6 +2124,7 @@ fn gen_version_delta<'a>(
     deterministic_mode: bool,
 ) -> HummockVersionDelta {
     let mut version_delta = HummockVersionDelta {
+        id: old_version.id + 1,
         prev_id: old_version.id,
         max_committed_epoch: old_version.max_committed_epoch,
         trivial_move,
@@ -2181,7 +2169,6 @@ fn gen_version_delta<'a>(
     group_deltas.push(group_delta);
     version_delta.gc_sst_ids.append(&mut gc_sst_ids);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
-    version_delta.id = old_version.id + 1;
     // Don't persist version delta generated by compaction to meta store in deterministic mode.
     // Because it will override existing version delta that has same ID generated in the data
     // ingestion phase.

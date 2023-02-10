@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
 
 use function_name::named;
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, get_compaction_group_sst_ids, get_member_table_ids,
-    try_get_compaction_group_id_by_table_id, HummockVersionExt, HummockVersionUpdateExt,
+    build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_sst_ids,
+    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
+    HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -28,18 +29,17 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
     CompactionConfig, CompactionGroup, GroupConstruct, GroupDelta, GroupDestroy, GroupMetaChange,
-    HummockVersionDelta, TableOption as ProstTableOption,
+    TableOption as ProstTableOption,
 };
 use tokio::sync::{OnceCell, RwLock};
 
-use super::versioning::Versioning;
 use super::write_lock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroupConfig;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
-use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction,
 };
@@ -70,7 +70,6 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     /// Gets compaction config for `compaction_group_id` if exists, or returns default.
-    #[named]
     pub async fn get_compaction_config(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -169,13 +168,14 @@ impl<S: MetaStore> HummockManager<S> {
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
 
-        for (table_id, new_compaction_group_id, _) in pairs.iter() {
-            if let Some(old_compaction_group_id) =
+        for (table_id, _, _) in pairs.iter() {
+            if let Some(old_group) =
                 try_get_compaction_group_id_by_table_id(&current_version, *table_id)
             {
-                if old_compaction_group_id != *new_compaction_group_id {
-                    return Err(Error::InvalidCompactionGroupMember(*table_id));
-                }
+                return Err(Error::CompactionGroupError(format!(
+                    "table {} already in group {}",
+                    *table_id, old_group
+                )));
             }
         }
         // All NewCompactionGroup pairs are mapped to one new compaction group.
@@ -183,12 +183,7 @@ impl<S: MetaStore> HummockManager<S> {
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
             &mut versioning.hummock_version_deltas,
             current_version.id + 1,
-            HummockVersionDelta {
-                prev_id: current_version.id,
-                safe_epoch: current_version.safe_epoch,
-                trivial_move: false,
-                ..Default::default()
-            },
+            build_version_delta_after_version(current_version),
         );
 
         for (table_id, raw_group_id, table_option) in pairs.iter() {
@@ -271,12 +266,7 @@ impl<S: MetaStore> HummockManager<S> {
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
             &mut versioning.hummock_version_deltas,
             current_version.id + 1,
-            HummockVersionDelta {
-                prev_id: current_version.id,
-                safe_epoch: current_version.safe_epoch,
-                trivial_move: false,
-                ..Default::default()
-            },
+            build_version_delta_after_version(&current_version),
         );
 
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
@@ -315,9 +305,10 @@ impl<S: MetaStore> HummockManager<S> {
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let groups_to_remove = modified_groups
             .into_iter()
-            .filter_map(|(k, v)| {
-                if v == 0 {
-                    return Some(k);
+            .filter_map(|(group_id, member_count)| {
+                if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
+                {
+                    return Some(group_id);
                 }
                 None
             })
@@ -529,7 +520,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_inner() {
-        let (env, hummock_manager_ref, ..) = setup_compute_env(8080).await;
+        let (env, ..) = setup_compute_env(8080).await;
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();

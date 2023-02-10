@@ -584,6 +584,18 @@ pub fn add_new_sub_level(
     l0.sub_levels.push(level);
 }
 
+pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVersionDelta {
+    HummockVersionDelta {
+        id: version.id + 1,
+        prev_id: version.id,
+        safe_epoch: version.safe_epoch,
+        trivial_move: false,
+        max_committed_epoch: version.max_committed_epoch,
+        group_deltas: Default::default(),
+        gc_sst_ids: vec![],
+    }
+}
+
 /// Delete sstables if the table id is in the id set.
 ///
 /// Return `true` if some sst is deleted, and `false` is the deletion is trivial

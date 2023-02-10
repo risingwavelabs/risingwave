@@ -27,6 +27,7 @@ use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, NO_OVERRIDE};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
 };
@@ -140,7 +141,7 @@ async fn compaction_test(
     delete_range_table.id = 2;
     delete_range_table.name = "delete-range-table".to_string();
     let mut group1 = CompactionGroup {
-        id: 3,
+        id: StaticCompactionGroupId::StateDefault as _,
         parent_id: 0,
         member_table_ids: vec![1],
         compaction_config: Some(compaction_config.clone()),
@@ -153,7 +154,7 @@ async fn compaction_test(
         },
     );
     let mut group2 = CompactionGroup {
-        id: 4,
+        id: StaticCompactionGroupId::MaterializedView as _,
         parent_id: 0,
         member_table_ids: vec![2],
         compaction_config: Some(compaction_config.clone()),
