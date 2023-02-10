@@ -167,10 +167,10 @@ async fn compaction_test(
         .await?;
 
     let system_params = SystemParams {
-        sstable_size_mb: 256,
-        block_size_kb: 1024,
-        bloom_false_positive: 0.001,
-        data_directory: "hummock_001".to_string(),
+        sstable_size_mb: Some(256),
+        block_size_kb: Some(1024),
+        bloom_false_positive: Some(0.001),
+        data_directory: Some("hummock_001".to_string()),
         ..Default::default()
     };
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
@@ -185,7 +185,7 @@ async fn compaction_test(
     .await;
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
-        system_params.data_directory.to_string(),
+        system_params.data_directory.unwrap(),
         config.storage.block_cache_capacity_mb * (1 << 20),
         config.storage.meta_cache_capacity_mb * (1 << 20),
         TieredCache::none(),

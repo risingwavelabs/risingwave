@@ -85,51 +85,69 @@ impl MetadataModel for SystemParams {
         S: MetaStore,
     {
         let mut txn = Transaction::default();
-        txn.put(
-            Self::cf_name(),
-            BARRIER_INTERVAL_MS_KEY.as_bytes().to_vec(),
-            self.barrier_interval_ms.to_string().into_bytes(),
-        );
-        txn.put(
-            Self::cf_name(),
-            CHECKPOINT_FREQUENCY_KEY.as_bytes().to_vec(),
-            self.checkpoint_frequency.to_string().into_bytes(),
-        );
-        txn.put(
-            Self::cf_name(),
-            SSTABLE_SIZE_MB_KEY.as_bytes().to_vec(),
-            self.sstable_size_mb.to_string().into_bytes(),
-        );
-        txn.put(
-            Self::cf_name(),
-            BLOCK_SIZE_KB_KEY.as_bytes().to_vec(),
-            self.block_size_kb.to_string().into_bytes(),
-        );
-        txn.put(
-            Self::cf_name(),
-            BLOOM_FALSE_POSITIVE_KEY.as_bytes().to_vec(),
-            self.bloom_false_positive.to_string().into_bytes(),
-        );
-        txn.put(
-            Self::cf_name(),
-            STATE_STORE_KEY.as_bytes().to_vec(),
-            self.state_store.as_bytes().to_vec(),
-        );
-        txn.put(
-            Self::cf_name(),
-            DATA_DIRECTORY_KEY.as_bytes().to_vec(),
-            self.data_directory.as_bytes().to_vec(),
-        );
-        txn.put(
-            Self::cf_name(),
-            BACKUP_STORAGE_URL_KEY.as_bytes().to_vec(),
-            self.backup_storage_url.as_bytes().to_vec(),
-        );
-        txn.put(
-            Self::cf_name(),
-            BACKUP_STORAGE_DIRECTORY_KEY.as_bytes().to_vec(),
-            self.backup_storage_directory.as_bytes().to_vec(),
-        );
+        self.barrier_interval_ms.inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                BARRIER_INTERVAL_MS_KEY.as_bytes().to_vec(),
+                v.to_string().into_bytes(),
+            );
+        });
+        self.checkpoint_frequency.inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                CHECKPOINT_FREQUENCY_KEY.as_bytes().to_vec(),
+                v.to_string().into_bytes(),
+            );
+        });
+        self.sstable_size_mb.inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                SSTABLE_SIZE_MB_KEY.as_bytes().to_vec(),
+                v.to_string().into_bytes(),
+            );
+        });
+        self.block_size_kb.inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                BLOCK_SIZE_KB_KEY.as_bytes().to_vec(),
+                v.to_string().into_bytes(),
+            );
+        });
+        self.bloom_false_positive.inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                BLOOM_FALSE_POSITIVE_KEY.as_bytes().to_vec(),
+                v.to_string().into_bytes(),
+            );
+        });
+        self.state_store.as_ref().inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                STATE_STORE_KEY.as_bytes().to_vec(),
+                v.as_bytes().to_vec(),
+            );
+        });
+        self.data_directory.as_ref().inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                DATA_DIRECTORY_KEY.as_bytes().to_vec(),
+                v.as_bytes().to_vec(),
+            );
+        });
+        self.backup_storage_url.as_ref().inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                BACKUP_STORAGE_URL_KEY.as_bytes().to_vec(),
+                v.as_bytes().to_vec(),
+            );
+        });
+        self.backup_storage_directory.as_ref().inspect(|v| {
+            txn.put(
+                Self::cf_name(),
+                BACKUP_STORAGE_DIRECTORY_KEY.as_bytes().to_vec(),
+                v.as_bytes().to_vec(),
+            );
+        });
         Ok(store.txn(txn).await?)
     }
 
@@ -141,6 +159,11 @@ impl MetadataModel for SystemParams {
     }
 }
 
+/// For each field in `SystemParams`, one of these rules apply:
+/// - Up-to-date: Required. If it is not present, may try to derive it from previous versions of
+///   this field.
+/// - Deprecated: Optional.
+/// - Unrecognized: Not allowed.
 fn system_param_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> MetadataModelResult<SystemParams> {
     let mut ret = SystemParams::default();
     let mut expected_keys: HashSet<_> = [
@@ -161,15 +184,15 @@ fn system_param_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> MetadataModelResult<Sys
         let k = String::from_utf8(k).unwrap();
         let v = String::from_utf8(v).unwrap();
         match k.as_str() {
-            BARRIER_INTERVAL_MS_KEY => ret.barrier_interval_ms = v.parse().unwrap(),
-            CHECKPOINT_FREQUENCY_KEY => ret.checkpoint_frequency = v.parse().unwrap(),
-            SSTABLE_SIZE_MB_KEY => ret.sstable_size_mb = v.parse().unwrap(),
-            BLOCK_SIZE_KB_KEY => ret.block_size_kb = v.parse().unwrap(),
-            BLOOM_FALSE_POSITIVE_KEY => ret.bloom_false_positive = v.parse().unwrap(),
-            STATE_STORE_KEY => ret.state_store = v,
-            DATA_DIRECTORY_KEY => ret.data_directory = v,
-            BACKUP_STORAGE_URL_KEY => ret.backup_storage_url = v,
-            BACKUP_STORAGE_DIRECTORY_KEY => ret.backup_storage_directory = v,
+            BARRIER_INTERVAL_MS_KEY => ret.barrier_interval_ms = Some(v.parse().unwrap()),
+            CHECKPOINT_FREQUENCY_KEY => ret.checkpoint_frequency = Some(v.parse().unwrap()),
+            SSTABLE_SIZE_MB_KEY => ret.sstable_size_mb = Some(v.parse().unwrap()),
+            BLOCK_SIZE_KB_KEY => ret.block_size_kb = Some(v.parse().unwrap()),
+            BLOOM_FALSE_POSITIVE_KEY => ret.bloom_false_positive = Some(v.parse().unwrap()),
+            STATE_STORE_KEY => ret.state_store = Some(v),
+            DATA_DIRECTORY_KEY => ret.data_directory = Some(v),
+            BACKUP_STORAGE_URL_KEY => ret.backup_storage_url = Some(v),
+            BACKUP_STORAGE_DIRECTORY_KEY => ret.backup_storage_directory = Some(v),
             _ => {
                 return Err(MetadataModelError::internal(format!(
                     "unrecognized system param {:?}",

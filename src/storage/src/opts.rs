@@ -73,14 +73,14 @@ impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
         let p = SystemParams {
-            barrier_interval_ms: c.streaming.barrier_interval_ms,
-            checkpoint_frequency: c.streaming.checkpoint_frequency as u64,
-            sstable_size_mb: c.storage.sstable_size_mb,
-            block_size_kb: c.storage.block_size_kb,
-            bloom_false_positive: c.storage.bloom_false_positive,
-            data_directory: c.storage.data_directory.clone(),
-            backup_storage_url: c.backup.storage_url.clone(),
-            backup_storage_directory: c.backup.storage_directory.clone(),
+            barrier_interval_ms: Some(c.streaming.barrier_interval_ms),
+            checkpoint_frequency: Some(c.streaming.checkpoint_frequency as u64),
+            sstable_size_mb: Some(c.storage.sstable_size_mb),
+            block_size_kb: Some(c.storage.block_size_kb),
+            bloom_false_positive: Some(c.storage.bloom_false_positive),
+            data_directory: Some(c.storage.data_directory.clone()),
+            backup_storage_url: Some(c.backup.storage_url.clone()),
+            backup_storage_directory: Some(c.backup.storage_directory.clone()),
             ..Default::default()
         };
         Self::from((&c, &p))
@@ -90,15 +90,15 @@ impl Default for StorageOpts {
 impl From<(&RwConfig, &SystemParams)> for StorageOpts {
     fn from((c, p): (&RwConfig, &SystemParams)) -> Self {
         Self {
-            sstable_size_mb: p.sstable_size_mb,
-            block_size_kb: p.block_size_kb,
-            bloom_false_positive: p.bloom_false_positive,
+            sstable_size_mb: p.sstable_size_mb.unwrap(),
+            block_size_kb: p.block_size_kb.unwrap(),
+            bloom_false_positive: p.bloom_false_positive.unwrap(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,
             share_buffer_compaction_worker_threads_number: c
                 .storage
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: c.storage.shared_buffer_capacity_mb,
-            data_directory: p.data_directory.clone(),
+            data_directory: p.data_directory.clone().unwrap(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: c.storage.block_cache_capacity_mb,
             meta_cache_capacity_mb: c.storage.meta_cache_capacity_mb,
@@ -118,8 +118,8 @@ impl From<(&RwConfig, &SystemParams)> for StorageOpts {
             file_cache_file_fallocate_unit_mb: c.storage.file_cache.cache_file_fallocate_unit_mb,
             file_cache_meta_fallocate_unit_mb: c.storage.file_cache.cache_meta_fallocate_unit_mb,
             file_cache_file_max_write_size_mb: c.storage.file_cache.cache_file_max_write_size_mb,
-            backup_storage_url: p.backup_storage_url.clone(),
-            backup_storage_directory: p.backup_storage_directory.clone(),
+            backup_storage_url: p.backup_storage_url.clone().unwrap(),
+            backup_storage_directory: p.backup_storage_directory.clone().unwrap(),
         }
     }
 }

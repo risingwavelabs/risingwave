@@ -101,14 +101,15 @@ pub async fn compute_node_serve(
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
 
     // TODO(zhidong): Only read from system params in v0.1.18.
-    let state_store_url = if system_params.state_store.is_empty() {
+    let state_store_url = system_params.state_store.as_ref().unwrap();
+    let state_store_url = if state_store_url.is_empty() {
         if let Some(s) = opts.state_store.as_ref() {
             s
         } else {
             panic!("State store url is neither specified from CLI args nor on meta node");
         }
     } else {
-        &system_params.state_store
+        state_store_url
     };
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
@@ -240,7 +241,7 @@ pub async fn compute_node_serve(
     let stream_mgr_clone = stream_mgr.clone();
     let mgr = GlobalMemoryManager::new(
         opts.total_memory_bytes,
-        system_params.barrier_interval_ms,
+        system_params.barrier_interval_ms.unwrap(),
         streaming_metrics.clone(),
     );
     // Run a background memory monitor

@@ -85,14 +85,15 @@ pub async fn compactor_serve(
     ));
 
     // TODO(zhidong): Only read from system params in v0.1.18.
-    let state_store_url = if system_params.state_store.is_empty() {
+    let state_store_url = system_params.state_store.as_ref().unwrap();
+    let state_store_url = if state_store_url.is_empty() {
         if let Some(s) = opts.state_store.as_ref() {
             s
         } else {
             panic!("State store url is neither specified from CLI args nor on meta node");
         }
     } else {
-        &system_params.state_store
+        state_store_url
     };
 
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
