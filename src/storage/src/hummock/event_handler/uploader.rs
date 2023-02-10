@@ -46,12 +46,22 @@ pub type SpawnUploadTask = Arc<
         + 'static,
 >;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct UploadTaskInfo {
     pub task_size: usize,
     pub epochs: Vec<HummockEpoch>,
     pub imm_ids: Vec<ImmId>,
     pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+}
+
+impl Debug for UploadTaskInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadTaskInfo")
+            .field("task_size", &self.task_size)
+            .field("epochs", &self.epochs)
+            .field("imm_ids", &self.imm_ids)
+            .finish()
+    }
 }
 
 /// A wrapper for a uploading task that compacts and uploads the imm payload. Task context are
