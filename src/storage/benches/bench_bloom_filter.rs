@@ -31,6 +31,7 @@ fn bench_bloom_filter_read(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(10244021u64);
     let data = Bloom::build_from_key_hashes(&data[..(TEST_COUNT / 2)], 14);
     let mut fp: usize = 0;
+    let mut negative_case = 0;
     let mut total_case = 0;
     let bloom = Bloom::new(&data);
     c.bench_function("bench_bloom_filter_read", |b| {
@@ -43,8 +44,11 @@ fn bench_bloom_filter_read(c: &mut Criterion) {
                 ));
                 if idx < TEST_COUNT / 2 {
                     assert!(!ret);
-                } else if !ret {
-                    fp += 1;
+                } else {
+                    negative_case += 1;
+                    if !ret {
+                        fp += 1;
+                    }
                 }
             }
             total_case += 100;
@@ -52,7 +56,7 @@ fn bench_bloom_filter_read(c: &mut Criterion) {
     });
     println!(
         "===bench_bloom_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (total_case as f64)
+        (fp as f64) * 100.0 / (negative_case as f64)
     );
 }
 
@@ -68,6 +72,7 @@ fn bench_xor_filter_read(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(10244021u64);
     filter.build_keys(&data[..(TEST_COUNT / 2)]);
     let mut fp: usize = 0;
+    let mut negative_case = 0;
     let mut total_case = 0;
     c.bench_function("bench_xor_filter_read", |b| {
         b.iter(|| {
@@ -79,8 +84,11 @@ fn bench_xor_filter_read(c: &mut Criterion) {
                 ));
                 if idx < TEST_COUNT / 2 {
                     assert!(ret);
-                } else if ret {
-                    fp += 1;
+                } else {
+                    negative_case += 1;
+                    if ret {
+                        fp += 1;
+                    }
                 }
             }
             total_case += 100;
@@ -88,7 +96,7 @@ fn bench_xor_filter_read(c: &mut Criterion) {
     });
     println!(
         "===bench_xor_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (total_case as f64)
+        (fp as f64) * 100.0 / (negative_case as f64)
     );
 }
 
