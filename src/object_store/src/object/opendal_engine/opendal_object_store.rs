@@ -283,7 +283,9 @@ mod tests {
         obj_store.delete(&path).await.unwrap();
     }
 
-    // opendal memory engine does not support delete objects.
+    // Currently OpenDAL does not support delete objects operation, but they are planning this
+    // feature. So let's not delete this unit test now. https://github.com/datafuselabs/opendal/issues/1279
+
     // #[tokio::test]
     // async fn test_memory_delete_objects() {
     //     let block1 = Bytes::from("123456");
