@@ -517,6 +517,7 @@ mod tests {
     use risingwave_common::catalog::{TableId, TableOption};
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
@@ -532,107 +533,56 @@ mod tests {
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();
-
-        let registered_number = |inner: &CompactionGroupManager<MemStore>| {
-            inner
-                .compaction_groups
-                .values()
-                .map(|cg| cg.member_table_ids.len())
-                .sum::<usize>()
-        };
-
-        let table_option_number = |inner: &CompactionGroupManager<MemStore>| {
-            inner
-                .compaction_groups
-                .values()
-                .map(|cg| cg.table_id_to_options().len())
-                .sum::<usize>()
-        };
-
-        assert_eq!(registered_number(inner.read().await.deref()), 0);
-
-        let table_properties = HashMap::from([(
-            String::from(PROPERTIES_RETENTION_SECOND_KEY),
-            String::from("300"),
-        )]);
-        let table_option = TableOption::build_table_option(&table_properties);
-
-        // Test register
+        assert!(inner.read().await.compaction_groups.is_empty());
         inner
             .write()
             .await
-            .register(
-                &hummock_manager_ref,
-                &mut Versioning::default(),
-                &mut [(
-                    1u32,
-                    StaticCompactionGroupId::StateDefault.into(),
-                    table_option,
-                )],
-                env.meta_store(),
-            )
+            .update_compaction_config(&[100, 200], &[], env.meta_store())
             .await
             .unwrap();
-        inner
-            .write()
-            .await
-            .register(
-                &hummock_manager_ref,
-                &mut Versioning::default(),
-                &mut [(
-                    2u32,
-                    StaticCompactionGroupId::MaterializedView.into(),
-                    table_option,
-                )],
-                env.meta_store(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(registered_number(inner.read().await.deref()), 2);
+        assert_eq!(inner.read().await.compaction_groups.len(), 2);
 
         // Test init
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();
-        assert_eq!(registered_number(inner.read().await.deref()), 2);
-        assert_eq!(table_option_number(inner.read().await.deref()), 2);
+        assert_eq!(inner.read().await.compaction_groups.len(), 2);
 
-        // Test unregister
         inner
             .write()
             .await
-            .unregister(None, &[2u32], env.meta_store())
+            .update_compaction_config(
+                &[100, 300],
+                &[MutableConfig::MaxSubCompaction(123)],
+                env.meta_store(),
+            )
             .await
             .unwrap();
-        assert_eq!(registered_number(inner.read().await.deref()), 1);
-        assert_eq!(table_option_number(inner.read().await.deref()), 1);
-
-        // Test init
-        let inner = HummockManager::build_compaction_group_manager(&env)
-            .await
-            .unwrap();
-        assert_eq!(registered_number(inner.read().await.deref()), 1);
-        assert_eq!(table_option_number(inner.read().await.deref()), 1);
-
-        // Test table_option_by_table_id
-        {
-            let table_option = inner
+        assert_eq!(inner.read().await.compaction_groups.len(), 3);
+        assert_eq!(
+            inner
                 .read()
                 .await
-                .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 1u32)
-                .unwrap();
-            assert_eq!(300, table_option.retention_seconds.unwrap());
-        }
-
-        {
-            // unregistered table_id
-            let table_option_default = inner
+                .get_compaction_config(100)
+                .max_sub_compaction,
+            123
+        );
+        assert_ne!(
+            inner
                 .read()
                 .await
-                .table_option_by_table_id(StaticCompactionGroupId::StateDefault.into(), 2u32);
-            assert!(table_option_default.is_ok());
-            assert_eq!(None, table_option_default.unwrap().retention_seconds);
-        }
+                .get_compaction_config(200)
+                .max_sub_compaction,
+            123
+        );
+        assert_eq!(
+            inner
+                .read()
+                .await
+                .get_compaction_config(300)
+                .max_sub_compaction,
+            123
+        );
     }
 
     #[tokio::test]
@@ -664,18 +614,14 @@ mod tests {
         // Test register_table_fragments
         let registered_number = || async {
             compaction_group_manager
-                .list_compaction_groups()
+                .list_compaction_group()
                 .await
                 .iter()
                 .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
-        let group_number = || async {
-            compaction_group_manager
-                .list_compaction_groups()
-                .await
-                .len()
-        };
+        let group_number =
+            || async { compaction_group_manager.list_compaction_group().await.len() };
         assert_eq!(registered_number().await, 0);
         let mut table_properties = HashMap::from([(
             String::from(PROPERTIES_RETENTION_SECOND_KEY),
