@@ -12,189 +12,139 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
+
 use criterion::{criterion_group, criterion_main, Criterion};
+use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_storage::hummock::sstable::{Bloom, Sstable};
+use risingwave_storage::hummock::sstable::Bloom;
 use xorf::{BinaryFuse16, BinaryFuse8, Filter};
 use xorfilter::Xor8;
 
-const TEST_COUNT: usize = 1024 * 16 * 2;
+const SAMPLE_SIZE: usize = 10_000_000;
 
-fn bench_bloom_filter_read(c: &mut Criterion) {
-    let mut origin_data = Vec::with_capacity(TEST_COUNT);
-    let mut data = Vec::with_capacity(TEST_COUNT);
-    for idx in 0..TEST_COUNT {
-        let key = format!("test_000001_{:08}", idx);
-        data.push(Sstable::hash_for_bloom_filter(key.as_bytes(), 0));
-        origin_data.push(key);
-    }
+fn bench_bloom_filter_read(_c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(10244021u64);
-    let data = Bloom::build_from_key_hashes(&data[..(TEST_COUNT / 2)], 14);
-    let mut fp: usize = 0;
-    let mut negative_case = 0;
-    let mut total_case = 0;
+
+    let keys: Vec<u32> = (0..SAMPLE_SIZE).map(|_| rng.next_u32()).collect();
+
+    let data = Bloom::build_from_key_hashes(&keys, 20);
     let bloom = Bloom::new(&data);
-    c.bench_function("bench_bloom_filter_read", |b| {
-        b.iter(|| {
-            for _ in 0..100 {
-                let idx = rng.next_u64() as usize % TEST_COUNT;
-                let ret = bloom.surely_not_have_hash(Sstable::hash_for_bloom_filter(
-                    origin_data[idx].as_bytes(),
-                    0,
-                ));
-                if idx < TEST_COUNT / 2 {
-                    assert!(!ret);
-                } else {
-                    negative_case += 1;
-                    if !ret {
-                        fp += 1;
-                    }
-                }
-            }
-            total_case += 100;
-        });
-    });
-    println!(
-        "===bench_bloom_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (negative_case as f64)
-    );
-    println!(
-        "===bench_bloom_filter_read bpe===: {}",
-        ((data.len() * 8) as f64) / ((TEST_COUNT / 2) as f64)
-    );
+
+    // no false negatives
+    for key in &keys {
+        assert!(!bloom.surely_not_have_hash(*key));
+    }
+
+    let keys = BTreeSet::from_iter(keys.into_iter());
+
+    // bits per entry
+    let bpe = ((data.len() * 8) as f64) / (SAMPLE_SIZE as f64);
+    println!("===bench_bloom_filter_read bpe===: {}", bpe);
+
+    let negatives = (0..SAMPLE_SIZE)
+        .map(|_| rng.next_u32())
+        .filter(|n| !keys.contains(n))
+        .collect_vec();
+
+    // false positive rate
+    let false_positives: usize = negatives
+        .iter()
+        .filter(|n| !bloom.surely_not_have_hash(**n))
+        .count();
+    let fp_rate: f64 = (false_positives * 100) as f64 / (negatives.len()) as f64;
+    println!("===bench_bloom_filter_read fpr===: {}%", fp_rate);
 }
 
-fn bench_xor_filter_read(c: &mut Criterion) {
-    let mut origin_data = Vec::with_capacity(TEST_COUNT);
-    let mut data = Vec::with_capacity(TEST_COUNT);
-    for idx in 0..TEST_COUNT {
-        let key = format!("test_000001_{:08}", idx);
-        data.push(Sstable::hash_for_bloom_filter_u64(key.as_bytes(), 0));
-        origin_data.push(key);
-    }
+fn bench_xor8_filter_read(_c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(10244021u64);
+
+    let keys: Vec<u64> = (0..SAMPLE_SIZE).map(|_| rng.next_u64()).collect();
     let mut filter = Xor8::new();
-    let mut rng = SmallRng::seed_from_u64(10244021u64);
-    filter.build_keys(&data[..(TEST_COUNT / 2)]);
-    let mut fp: usize = 0;
-    let mut negative_case = 0;
-    let mut total_case = 0;
-    c.bench_function("bench_xor_filter_read", |b| {
-        b.iter(|| {
-            for _ in 0..100 {
-                let idx = rng.next_u64() as usize % TEST_COUNT;
-                let ret = filter.contains_key(Sstable::hash_for_bloom_filter_u64(
-                    origin_data[idx].as_bytes(),
-                    0,
-                ));
-                if idx < TEST_COUNT / 2 {
-                    assert!(ret);
-                } else {
-                    negative_case += 1;
-                    if ret {
-                        fp += 1;
-                    }
-                }
-            }
-            total_case += 100;
-        });
-    });
-    println!(
-        "===bench_xor_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (negative_case as f64)
-    );
+    filter.build_keys(&keys);
+
+    // no false negatives
+    for key in &keys {
+        assert!(filter.contains_key(*key));
+    }
+
+    let keys = BTreeSet::from_iter(keys.into_iter());
+
+    let negatives = (0..SAMPLE_SIZE)
+        .map(|_| rng.next_u64())
+        .filter(|n| !keys.contains(n))
+        .collect_vec();
+
+    // false positive rate
+    let false_positives: usize = negatives
+        .iter()
+        .filter(|n| filter.contains_key(**n))
+        .count();
+    let fp_rate: f64 = (false_positives * 100) as f64 / (negatives.len()) as f64;
+    println!("===bench_xor8_filter_read fpr===: {}%", fp_rate);
 }
 
-fn bench_fuse8_filter_read(c: &mut Criterion) {
-    let mut origin_data = Vec::with_capacity(TEST_COUNT);
-    let mut data = Vec::with_capacity(TEST_COUNT);
-    for idx in 0..TEST_COUNT {
-        let key = format!("test_000001_{:08}", idx);
-        data.push(Sstable::hash_for_bloom_filter_u64(key.as_bytes(), 0));
-        origin_data.push(key);
-    }
+fn bench_fuse8_filter_read(_c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(10244021u64);
-    let filter = BinaryFuse8::try_from(&data[..(TEST_COUNT / 2)]).unwrap();
-    let mut fp: usize = 0;
-    let mut negative_case = 0;
-    let mut total_case = 0;
-    c.bench_function("bench_xor_filter_read", |b| {
-        b.iter(|| {
-            for _ in 0..100 {
-                let idx = rng.next_u64() as usize % TEST_COUNT;
-                let ret = filter.contains(&Sstable::hash_for_bloom_filter_u64(
-                    origin_data[idx].as_bytes(),
-                    0,
-                ));
-                if idx < TEST_COUNT / 2 {
-                    assert!(ret);
-                } else {
-                    negative_case += 1;
-                    if ret {
-                        fp += 1;
-                    }
-                }
-            }
-            total_case += 100;
-        });
-    });
-    println!(
-        "===bench_fuse8_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (negative_case as f64)
-    );
-    println!(
-        "===bench_fuse8_filter_read bpe===: {}",
-        ((filter.len() * 8) as f64) / ((TEST_COUNT / 2) as f64)
-    );
+
+    let keys: Vec<u64> = (0..SAMPLE_SIZE).map(|_| rng.next_u64()).collect();
+    let filter = BinaryFuse8::try_from(&keys).unwrap();
+
+    // no false negatives
+    for key in &keys {
+        assert!(filter.contains(key));
+    }
+
+    let keys = BTreeSet::from_iter(keys.into_iter());
+
+    // bits per entry
+    let bpe = ((filter.len() * 8) as f64) / (SAMPLE_SIZE as f64);
+    println!("===bench_fuse8_filter_read bpe===: {}", bpe);
+
+    let negatives = (0..SAMPLE_SIZE)
+        .map(|_| rng.next_u64())
+        .filter(|n| !keys.contains(n))
+        .collect_vec();
+
+    // false positive rate
+    let false_positives: usize = negatives.iter().filter(|n| filter.contains(n)).count();
+    let fp_rate: f64 = (false_positives * 100) as f64 / (negatives.len()) as f64;
+    println!("===bench_fuse8_filter_read fpr===: {}%", fp_rate);
 }
 
-fn bench_fuse16_filter_read(c: &mut Criterion) {
-    let mut origin_data = Vec::with_capacity(TEST_COUNT);
-    let mut data = Vec::with_capacity(TEST_COUNT);
-    for idx in 0..TEST_COUNT {
-        let key = format!("test_000001_{:08}", idx);
-        data.push(Sstable::hash_for_bloom_filter_u64(key.as_bytes(), 0));
-        origin_data.push(key);
-    }
+fn bench_fuse16_filter_read(_c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(10244021u64);
-    let filter = BinaryFuse16::try_from(&data[..(TEST_COUNT / 2)]).unwrap();
-    let mut fp: usize = 0;
-    let mut negative_case = 0;
-    let mut total_case = 0;
-    c.bench_function("bench_xor_filter_read", |b| {
-        b.iter(|| {
-            for _ in 0..100 {
-                let idx = rng.next_u64() as usize % TEST_COUNT;
-                let ret = filter.contains(&Sstable::hash_for_bloom_filter_u64(
-                    origin_data[idx].as_bytes(),
-                    0,
-                ));
-                if idx < TEST_COUNT / 2 {
-                    assert!(ret);
-                } else {
-                    negative_case += 1;
-                    if ret {
-                        fp += 1;
-                    }
-                }
-            }
-            total_case += 100;
-        });
-    });
-    println!(
-        "===bench_fuse16_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (negative_case as f64)
-    );
-    println!(
-        "===bench_fuse16_filter_read bpe===: {}",
-        ((filter.len() * 16) as f64) / ((TEST_COUNT / 2) as f64)
-    );
+
+    let keys: Vec<u64> = (0..SAMPLE_SIZE).map(|_| rng.next_u64()).collect();
+    let filter = BinaryFuse16::try_from(&keys).unwrap();
+
+    // no false negatives
+    for key in &keys {
+        assert!(filter.contains(key));
+    }
+
+    let keys = BTreeSet::from_iter(keys.into_iter());
+
+    // bits per entry
+    let bpe = ((filter.len() * 16) as f64) / (SAMPLE_SIZE as f64);
+    println!("===bench_fuse16_filter_read bpe===: {}", bpe);
+
+    let negatives = (0..SAMPLE_SIZE)
+        .map(|_| rng.next_u64())
+        .filter(|n| !keys.contains(n))
+        .collect_vec();
+
+    // false positive rate
+    let false_positives: usize = negatives.iter().filter(|n| filter.contains(n)).count();
+    let fp_rate: f64 = (false_positives * 100) as f64 / (negatives.len()) as f64;
+    println!("===bench_fuse16_filter_read fpr===: {}%", fp_rate);
 }
 
 criterion_group!(
     benches,
     bench_bloom_filter_read,
-    bench_xor_filter_read,
+    bench_xor8_filter_read,
     bench_fuse8_filter_read,
     bench_fuse16_filter_read,
 );
