@@ -755,7 +755,7 @@ where
         Ok(())
     }
 
-    async fn build_selector_option(
+    fn build_selector_option(
         &self,
         compaction_config: &CompactionConfig,
         compaction_pick_parma: CompactionPickParma,
@@ -770,7 +770,7 @@ where
             compact_task::TaskType::SpaceReclaim => SelectorOption::SpaceReclaim(
                 selector_option::SpaceReclaimCompactionSelectorOption {
                     compaction_config: Arc::new(compaction_config.clone()),
-                    all_table_ids: get_member_table_ids(&version),
+                    all_table_ids: get_member_table_ids(version),
                 },
             ),
 
@@ -842,9 +842,8 @@ where
         // avoid data loss, the selector_option must be constructed after the current_version is
         // obtained
         let task_type = compaction_pick_parma.task_type;
-        let selector_option = self
-            .build_selector_option(&group_config, compaction_pick_parma, &current_version)
-            .await;
+        let selector_option =
+            self.build_selector_option(&group_config, compaction_pick_parma, &current_version);
 
         // get selector
         let selector = Self::fetch_selector(
@@ -1221,16 +1220,8 @@ where
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction = compaction_guard.deref_mut();
         let start_time = Instant::now();
-        let compaction_groups: HashSet<_> =
-            HashSet::from_iter(self.compaction_group_ids().await.into_iter());
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-        for group_id in original_keys {
-            if !compaction_groups.contains(&group_id) {
-                compact_statuses.remove(group_id);
-                compaction.compaction_selectors.remove(&group_id);
-            }
-        }
         let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -1279,6 +1270,13 @@ where
             let mut versioning_guard = write_lock!(self, versioning).await;
             let versioning = versioning_guard.deref_mut();
             let current_version = &mut versioning.current_version;
+            // purge stale compact_status
+            for group_id in original_keys {
+                if !current_version.levels.contains_key(&group_id) {
+                    compact_statuses.remove(group_id);
+                    compaction.compaction_selectors.remove(&group_id);
+                }
+            }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 let is_expired = !current_version
                     .get_levels()
@@ -1469,7 +1467,7 @@ where
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
             &mut versioning.hummock_version_deltas,
             old_version.id + 1,
-            build_version_delta_after_version(&old_version),
+            build_version_delta_after_version(old_version),
         );
         new_version_delta.max_committed_epoch = epoch;
         let mut new_hummock_version = old_version.clone();
@@ -1760,6 +1758,7 @@ where
     }
 
     /// Gets current version without pinning it.
+    /// Should not be called inside [`HummockManager`], because it requests locks internally.
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version.clone()
@@ -1808,9 +1807,9 @@ where
             );
         }
 
-        for group in compaction_groups {
+        for group in &compaction_groups {
             let mut pairs = vec![];
-            for table_id in group.member_table_ids {
+            for table_id in group.member_table_ids.clone() {
                 if let Some(option) = group.table_id_to_options.get(&table_id) {
                     pairs.push((table_id as StateTableId, group.id, option.into()));
                 }
@@ -1838,9 +1837,8 @@ where
                 .await;
         }
 
-        let groups = self.compaction_group_ids().await;
         tracing::info!("Inited compaction groups:");
-        for group in groups {
+        for group in compaction_groups {
             tracing::info!("{:?}", group);
         }
         Ok(())

@@ -80,6 +80,7 @@ impl<S: MetaStore> HummockManager<S> {
             .get_compaction_config(compaction_group_id)
     }
 
+    /// Should not be called inside [`HummockManager`], because it requests locks internally.
     #[named]
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
         get_compaction_group_ids(&read_lock!(self, versioning).await.current_version)
@@ -120,7 +121,7 @@ impl<S: MetaStore> HummockManager<S> {
                 table_option,
             ));
         }
-        self.register_table_ids(&mut pairs).await?;
+        self.register_table_ids(&pairs).await?;
         Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
@@ -170,9 +171,9 @@ impl<S: MetaStore> HummockManager<S> {
 
         for (table_id, _, _) in pairs.iter() {
             if let Some(old_group) =
-                try_get_compaction_group_id_by_table_id(&current_version, *table_id)
+                try_get_compaction_group_id_by_table_id(current_version, *table_id)
             {
-                return Err(Error::CompactionGroupError(format!(
+                return Err(Error::CompactionGroup(format!(
                     "table {} already in group {}",
                     *table_id, old_group
                 )));
@@ -266,18 +267,18 @@ impl<S: MetaStore> HummockManager<S> {
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
             &mut versioning.hummock_version_deltas,
             current_version.id + 1,
-            build_version_delta_after_version(&current_version),
+            build_version_delta_after_version(current_version),
         );
 
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
             HashMap::new();
         // Remove member tables
         for table_id in table_ids.iter().unique() {
-            let group_id =
-                match try_get_compaction_group_id_by_table_id(&current_version, *table_id) {
-                    Some(group_id) => group_id,
-                    None => continue,
-                };
+            let group_id = match try_get_compaction_group_id_by_table_id(current_version, *table_id)
+            {
+                Some(group_id) => group_id,
+                None => continue,
+            };
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(group_id)
@@ -317,7 +318,7 @@ impl<S: MetaStore> HummockManager<S> {
             // We don't bother to add IntraLevelDelta to remove SSTs from group, because the entire
             // group is to be removed.
             // However, we need to take care of SST GC for the removed group.
-            for sst_id in get_compaction_group_sst_ids(&current_version, *group_id) {
+            for sst_id in get_compaction_group_sst_ids(current_version, *group_id) {
                 if drop_sst(&mut branched_ssts, *group_id, sst_id) {
                     new_version_delta.gc_sst_ids.push(sst_id);
                 }
@@ -503,20 +504,15 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap};
-    use std::ops::Deref;
 
-    use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
-    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
     use risingwave_pb::meta::table_fragments::Fragment;
 
-    use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
-    use crate::hummock::manager::versioning::Versioning;
     use crate::hummock::test_utils::setup_compute_env;
     use crate::hummock::HummockManager;
     use crate::model::TableFragments;
-    use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_inner() {

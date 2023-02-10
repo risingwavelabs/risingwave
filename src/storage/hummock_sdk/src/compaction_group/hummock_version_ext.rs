@@ -676,7 +676,6 @@ mod tests {
         HummockVersionDelta, IntraLevelDelta, Level, LevelType, OverlappingLevel, SstableInfo,
     };
 
-    use super::HummockLevelsExt;
     use crate::compaction_group::hummock_version_ext::{
         build_initial_compaction_group_levels, HummockVersionExt, HummockVersionUpdateExt,
     };

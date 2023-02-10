@@ -40,7 +40,7 @@ pub(crate) mod tests {
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
-    use risingwave_meta::storage::{MemStore, MetaStore};
+    use risingwave_meta::storage::MetaStore;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
@@ -497,10 +497,9 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) async fn prepare_compactor_and_filter(
+    pub(crate) fn prepare_compactor_and_filter(
         storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
-        hummock_manager_ref: HummockManagerRef<MemStore>,
         existing_table_id: u32,
     ) -> CompactorContext {
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
@@ -539,10 +538,8 @@ pub(crate) mod tests {
         let compact_ctx_existing_table_id = prepare_compactor_and_filter(
             &storage_existing_table_id,
             &hummock_meta_client,
-            hummock_manager_ref.clone(),
             existing_table_id,
-        )
-        .await;
+        );
 
         prepare_data(
             hummock_meta_client.clone(),
@@ -1162,13 +1159,8 @@ pub(crate) mod tests {
             TableId::from(existing_table_id),
         )
         .await;
-        let compact_ctx = prepare_compactor_and_filter(
-            &storage,
-            &hummock_meta_client,
-            hummock_manager_ref.clone(),
-            existing_table_id,
-        )
-        .await;
+        let compact_ctx =
+            prepare_compactor_and_filter(&storage, &hummock_meta_client, existing_table_id);
 
         prepare_data(hummock_meta_client.clone(), &storage, existing_table_id, 2).await;
         let mut local = storage.start_write_batch(WriteOptions {
