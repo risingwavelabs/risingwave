@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,7 +27,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 
-use super::{CompactionPickParma, Compactor};
+use super::Compactor;
+use crate::hummock::compaction::{
+    DynamicLevelSelector, LevelSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
+};
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
@@ -136,6 +139,7 @@ where
         ));
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut compaction_selectors = HashMap::default();
 
         loop {
             let (compaction_group, task_type) = tokio::select! {
@@ -201,26 +205,34 @@ where
                     }
                 }
             };
-
-            // Pick a task and assign it to this compactor.
-            let compaction_pick_param = match task_type {
-                compact_task::TaskType::Dynamic => CompactionPickParma::new_base_parma(),
-                compact_task::TaskType::SpaceReclaim => {
-                    CompactionPickParma::new_space_reclaim_parma()
-                }
-                compact_task::TaskType::Ttl => CompactionPickParma::new_ttl_reclaim_parma(),
-
-                _ => panic!("Error type when scheduler trigger compaction"),
-            };
-
-            self.pick_and_assign(
-                compaction_group,
-                compactor,
-                sched_channel.clone(),
-                compaction_pick_param,
-            )
-            .await;
+            let selector = Self::fetch_selector(&mut compaction_selectors, task_type);
+            self.pick_and_assign(compaction_group, compactor, sched_channel.clone(), selector)
+                .await;
         }
+    }
+
+    fn fetch_selector(
+        compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
+        task_type: compact_task::TaskType,
+    ) -> &mut Box<dyn LevelSelector> {
+        if !compaction_selectors.contains_key(&task_type) {
+            let new_selector: Box<dyn LevelSelector> = match task_type {
+                compact_task::TaskType::Dynamic => Box::new(DynamicLevelSelector::new()),
+
+                compact_task::TaskType::SpaceReclaim => {
+                    Box::new(SpaceReclaimCompactionSelector::new())
+                }
+
+                compact_task::TaskType::Ttl => Box::new(TtlCompactionSelector::new()),
+
+                _ => {
+                    panic!("Unsupported selector")
+                }
+            };
+            compaction_selectors.insert(task_type, new_selector);
+        }
+
+        compaction_selectors.get_mut(&task_type).unwrap()
     }
 
     /// Tries to pick a compaction task, schedule it to a compactor.
@@ -231,15 +243,10 @@ where
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
         sched_channel: Arc<CompactionRequestChannel>,
-        compaction_pick_parma: CompactionPickParma,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> ScheduleStatus {
         let schedule_status = self
-            .pick_and_assign_impl(
-                compaction_group,
-                compactor,
-                sched_channel,
-                compaction_pick_parma,
-            )
+            .pick_and_assign_impl(compaction_group, compactor, sched_channel, selector)
             .await;
 
         let cancel_state = match &schedule_status {
@@ -281,12 +288,12 @@ where
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
         sched_channel: Arc<CompactionRequestChannel>,
-        compaction_pick_parma: CompactionPickParma,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> ScheduleStatus {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
-            .get_compact_task(compaction_group, compaction_pick_parma)
+            .get_compact_task(compaction_group, selector)
             .await;
 
         let compact_task = match compact_task {

@@ -397,7 +397,7 @@ mod tests {
     use risingwave_pb::hummock::CompactTaskProgress;
 
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::{CompactionPickParma, CompactorManager};
+    use crate::hummock::CompactorManager;
 
     #[tokio::test]
     async fn test_compactor_manager() {

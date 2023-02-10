@@ -28,7 +28,7 @@ use risingwave_meta::hummock::compaction::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
-use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;

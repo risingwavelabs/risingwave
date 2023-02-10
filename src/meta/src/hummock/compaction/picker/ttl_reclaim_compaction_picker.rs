@@ -15,14 +15,16 @@
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::InputLevel;
 
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
+
+#[derive(Default)]
+pub struct TtlPickerState {
+    last_select_index: usize,
+}
 
 pub struct TtlReclaimCompactionPicker {
     max_ttl_reclaim_bytes: u64,
-
-    // state
-    last_select_index: usize,
     // todo: filter table option
 }
 
@@ -30,32 +32,31 @@ impl TtlReclaimCompactionPicker {
     pub fn new(max_ttl_reclaim_bytes: u64) -> Self {
         Self {
             max_ttl_reclaim_bytes,
-            last_select_index: 0,
         }
     }
 }
 
-impl CompactionPicker for TtlReclaimCompactionPicker {
-    fn pick_compaction(
-        &mut self,
+impl TtlReclaimCompactionPicker {
+    pub fn pick_compaction(
+        &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        _stats: &mut LocalPickerStatistic,
+        state: &mut TtlPickerState,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
         let reclaimed_level = levels.levels.last().unwrap();
         let mut select_input_ssts = vec![];
         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
-        if self.last_select_index >= reclaimed_level.table_infos.len() {
-            self.last_select_index = 0;
+        if state.last_select_index >= reclaimed_level.table_infos.len() {
+            state.last_select_index = 0;
         }
 
-        let start_indedx = self.last_select_index;
+        let start_indedx = state.last_select_index;
         let mut select_file_size = 0;
 
         for sst in &reclaimed_level.table_infos[start_indedx..] {
-            self.last_select_index += 1;
+            state.last_select_index += 1;
             if level_handler.is_pending_compact(&sst.id) {
                 continue;
             }

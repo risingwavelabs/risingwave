@@ -37,7 +37,9 @@ use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::CompactionPickParma;
+use crate::hummock::compaction::{
+    DynamicLevelSelector, LevelSelector, SpaceReclaimCompactionSelector,
+};
 use crate::hummock::compaction_scheduler::CompactionRequestChannel;
 use crate::hummock::HummockManager;
 use crate::storage::MemStore;
@@ -61,11 +63,9 @@ impl MockHummockMetaClient {
     }
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
+        let mut selector: Box<dyn LevelSelector> = Box::new(DynamicLevelSelector::new());
         self.hummock_manager
-            .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
-            )
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
             .await
             .unwrap_or(None)
     }
@@ -202,15 +202,15 @@ impl HummockMetaClient for MockHummockMetaClient {
             while let Some((group, task_type)) = sched_rx.recv().await {
                 sched_channel.unschedule(group);
 
-                let compaction_pick_param = match task_type {
-                    compact_task::TaskType::Dynamic => CompactionPickParma::new_base_parma(),
+                let mut selector: Box<dyn LevelSelector> = match task_type {
+                    compact_task::TaskType::Dynamic => Box::new(DynamicLevelSelector::new()),
                     compact_task::TaskType::SpaceReclaim => {
-                        CompactionPickParma::new_space_reclaim_parma()
+                        Box::new(SpaceReclaimCompactionSelector::new())
                     }
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group, compaction_pick_param)
+                    .get_compact_task(group, &mut selector)
                     .await
                     .unwrap()
                 {

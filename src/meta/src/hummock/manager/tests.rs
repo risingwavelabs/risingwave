@@ -36,9 +36,7 @@ use risingwave_pb::hummock::{
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{
-    start_compaction_scheduler, CompactionPickParma, CompactionScheduler, HummockManagerRef,
-};
+use crate::hummock::{start_compaction_scheduler, CompactionScheduler, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;

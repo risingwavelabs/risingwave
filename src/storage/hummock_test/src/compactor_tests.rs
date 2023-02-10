@@ -39,7 +39,7 @@ pub(crate) mod tests {
         register_table_ids_to_compaction_group, setup_compute_env,
         unregister_table_ids_from_compaction_group,
     };
-    use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
+    use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::{MemStore, MetaStore};
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;

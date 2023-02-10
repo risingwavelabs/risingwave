@@ -14,6 +14,7 @@
 
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 pub use risingwave_common::catalog::TableOption;
@@ -28,7 +29,7 @@ pub struct CompactionGroup {
     pub(crate) group_id: CompactionGroupId,
     pub(crate) parent_group_id: CompactionGroupId,
     pub(crate) member_table_ids: HashSet<StateTableId>,
-    pub(crate) compaction_config: CompactionConfig,
+    pub(crate) compaction_config: Arc<CompactionConfig>,
     pub(crate) table_id_to_options: HashMap<StateTableId, TableOption>,
 }
 
@@ -37,7 +38,7 @@ impl CompactionGroup {
         Self {
             group_id,
             member_table_ids: Default::default(),
-            compaction_config,
+            compaction_config: Arc::new(compaction_config),
             table_id_to_options: HashMap::default(),
             parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
         }
@@ -51,7 +52,7 @@ impl CompactionGroup {
         &self.member_table_ids
     }
 
-    pub fn compaction_config(&self) -> CompactionConfig {
+    pub fn compaction_config(&self) -> Arc<CompactionConfig> {
         self.compaction_config.clone()
     }
 
@@ -66,11 +67,13 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
             group_id: compaction_group.id,
             parent_group_id: compaction_group.parent_id,
             member_table_ids: compaction_group.member_table_ids.iter().cloned().collect(),
-            compaction_config: compaction_group
-                .compaction_config
-                .as_ref()
-                .cloned()
-                .unwrap(),
+            compaction_config: Arc::new(
+                compaction_group
+                    .compaction_config
+                    .as_ref()
+                    .cloned()
+                    .unwrap(),
+            ),
             table_id_to_options: compaction_group
                 .table_id_to_options
                 .iter()
@@ -90,7 +93,7 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
                 .iter()
                 .cloned()
                 .collect_vec(),
-            compaction_config: Some(compaction_group.compaction_config.clone()),
+            compaction_config: Some(compaction_group.compaction_config.as_ref().clone()),
             table_id_to_options: compaction_group
                 .table_id_to_options
                 .iter()
