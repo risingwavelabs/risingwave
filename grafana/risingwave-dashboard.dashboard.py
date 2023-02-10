@@ -1590,18 +1590,6 @@ def section_hummock(panels):
                     f"sum(rate({metric('state_store_iter_in_process_counts')}[$__rate_interval])) by(job,instance,table_id)",
                     "iter - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter false positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
             ],
         ),
         panels.timeseries_latency(
@@ -1717,8 +1705,16 @@ def section_hummock(panels):
                     "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter check count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
