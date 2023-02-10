@@ -101,7 +101,7 @@ impl<S: StateStore> AggGroup<S> {
         Ok(Self {
             group_key,
             states,
-            distinct_dedup: DistinctDeduplicater::new(), // TODO(rctmp)
+            distinct_dedup: DistinctDeduplicater::new(agg_calls), // TODO(rctmp)
             prev_outputs,
         })
     }
