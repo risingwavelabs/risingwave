@@ -427,18 +427,14 @@ where
         &self,
         _request: Request<RiseCtlListCompactionGroupRequest>,
     ) -> Result<Response<RiseCtlListCompactionGroupResponse>, Status> {
-        todo!("#7817")
-        // let compaction_groups = self
-        //     .hummock_manager
-        //     .compaction_groups()
-        //     .await
-        //     .iter()
-        //     .map(|cg| cg.into())
-        //     .collect_vec();
-        // Ok(Response::new(RiseCtlListCompactionGroupResponse {
-        //     status: None,
-        //     compaction_groups,
-        // }))
+        let compaction_groups = self
+            .hummock_manager
+            .list_compaction_group()
+            .await;
+        Ok(Response::new(RiseCtlListCompactionGroupResponse {
+            status: None,
+            compaction_groups,
+        }))
     }
 
     async fn rise_ctl_update_compaction_config(
