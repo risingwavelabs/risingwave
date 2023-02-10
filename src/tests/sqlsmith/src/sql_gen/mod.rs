@@ -203,6 +203,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             columns: vec![],
             query,
             with_options: vec![],
+            emit_mode: None,
         };
         (mview, table)
     }

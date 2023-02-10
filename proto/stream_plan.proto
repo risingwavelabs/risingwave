@@ -135,11 +135,20 @@ message SourceNode {
   StreamSource source_inner = 1;
 }
 
+message SinkDesc {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated plan_common.ColumnDesc columns = 4;
+  repeated plan_common.ColumnOrder pk = 5;
+  repeated uint32 stream_key = 6;
+  repeated uint32 distribution_key = 7;
+  bool append_only = 8;
+  map<string, string> properties = 9;
+}
+
 message SinkNode {
-  uint32 table_id = 1;
-  map<string, string> properties = 3;
-  repeated plan_common.Field fields = 4;
-  repeated uint32 sink_pk = 5;
+  SinkDesc sink_desc = 1;
 }
 
 message ProjectNode {
