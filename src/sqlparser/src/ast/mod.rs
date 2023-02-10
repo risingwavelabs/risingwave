@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -372,6 +372,7 @@ pub enum Expr {
 }
 
 impl fmt::Display for Expr {
+    #[expect(clippy::disallowed_methods, reason = "use zip_eq")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
@@ -905,6 +906,7 @@ pub enum Statement {
         name: ObjectName,
         columns: Vec<Ident>,
         query: Box<Query>,
+        emit_mode: Option<EmitMode>,
         with_options: Vec<SqlOption>,
     },
     /// CREATE TABLE
@@ -1235,6 +1237,7 @@ impl fmt::Display for Statement {
                 query,
                 materialized,
                 with_options,
+                emit_mode,
             } => {
                 write!(
                     f,
@@ -1243,6 +1246,9 @@ impl fmt::Display for Statement {
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
                     name = name
                 )?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
@@ -1904,6 +1910,22 @@ pub struct SqlOption {
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} = {}", self.name, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum EmitMode {
+    Immediately,
+    OnWindowClose,
+}
+
+impl fmt::Display for EmitMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            EmitMode::Immediately => "IMMEDIATELY",
+            EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
     }
 }
 

@@ -31,6 +31,7 @@ use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
 };
 
+use super::CompactionPickParma;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::TableOption;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
@@ -91,7 +92,10 @@ where
     }
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            CompactionPickParma::new_base_parma(),
+        )
         .await
         .unwrap()
         .unwrap();

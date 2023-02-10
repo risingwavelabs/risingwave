@@ -238,6 +238,8 @@ impl QueryRunner {
         let has_lookup_join_stage = self.query.has_lookup_join_stage();
         // To convince the compiler that `pinned_snapshot` will only be dropped once.
         let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
+
+        let mut finished_stage_cnt = 0usize;
         while let Some(msg_inner) = self.msg_receiver.recv().await {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
@@ -280,20 +282,50 @@ impl QueryRunner {
                         self.query.query_id, id, reason
                     );
 
-                    self.handle_cancel_or_failed_stage(reason).await;
+                    self.clean_all_stages(Some(reason)).await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
                 }
+                Stage(StageEvent::Completed(_)) => {
+                    finished_stage_cnt += 1;
+                    assert!(finished_stage_cnt <= self.stage_executions.len());
+                    if finished_stage_cnt == self.stage_executions.len() {
+                        // Now all stages completed, we should remove all
+                        self.clean_all_stages(None).await;
+                        break;
+                    }
+                }
                 QueryMessage::CancelQuery => {
-                    self.handle_cancel_or_failed_stage(SchedulerError::QueryCancelError)
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelError))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
                 }
-                rest => {
-                    unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
-                }
             }
+
+            // {
+            //     let mut graph = Graph::<String, String>::new();
+            //     let mut stage_id_to_node_id = HashMap::new();
+            //     for stage in &self.stage_executions {
+            //         let node_id = graph.add_node(format!("{} {}", stage.0,
+            // stage.1.state().await));         stage_id_to_node_id.insert(stage.0,
+            // node_id);     }
+            //
+            //     for stage in &self.stage_executions {
+            //         let stage_id = stage.0;
+            //         if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id)
+            // {             for child_stage in child_stages {
+            //                 graph.add_edge(
+            //                     stage_id_to_node_id.get(stage_id).unwrap().clone(),
+            //                     stage_id_to_node_id.get(child_stage).unwrap().clone(),
+            //                     "".to_string(),
+            //                 );
+            //             }
+            //         }
+            //     }
+            //     println!("Printing query execution {} states:", self.query.query_id());
+            //     println!("{}", Dot::with_config(&graph, &[Config::EdgeNoLabel]));
+            // }
         }
     }
 
@@ -346,30 +378,32 @@ impl QueryRunner {
 
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
-    async fn handle_cancel_or_failed_stage(mut self, reason: SchedulerError) {
-        let err_str = reason.to_string();
-        // Consume sender here and send error to root stage.
-        let root_stage_sender = mem::take(&mut self.root_stage_sender);
-        // It's possible we receive stage failed event message multi times and the
-        // sender has been consumed in first failed event.
-        if let Some(sender) = root_stage_sender {
-            if let Err(e) = sender.send(Err(reason)) {
-                warn!("Query execution dropped: {:?}", e);
-            } else {
-                debug!(
-                    "Root stage failure event for {:?} sent.",
-                    self.query.query_id
-                );
+    async fn clean_all_stages(mut self, error: Option<SchedulerError>) {
+        let error_msg = error.as_ref().map(|e| e.to_string());
+        if let Some(reason) = error {
+            // Consume sender here and send error to root stage.
+            let root_stage_sender = mem::take(&mut self.root_stage_sender);
+            // It's possible we receive stage failed event message multi times and the
+            // sender has been consumed in first failed event.
+            if let Some(sender) = root_stage_sender {
+                if let Err(e) = sender.send(Err(reason)) {
+                    warn!("Query execution dropped: {:?}", e);
+                } else {
+                    debug!(
+                        "Root stage failure event for {:?} sent.",
+                        self.query.query_id
+                    );
+                }
             }
-        }
 
-        // If root stage has been taken (None), then root stage is responsible for send error to
-        // Query Result Fetcher.
+            // If root stage has been taken (None), then root stage is responsible for send error to
+            // Query Result Fetcher.
+        }
 
         // Stop all running stages.
         for stage_execution in self.stage_executions.values() {
             // The stop is return immediately so no need to spawn tasks.
-            stage_execution.stop(err_str.clone()).await;
+            stage_execution.stop(error_msg.clone()).await;
         }
     }
 }

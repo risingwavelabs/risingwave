@@ -205,6 +205,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 backup_storage_url: config.backup.storage_url,
                 backup_storage_directory: config.backup.storage_directory,
+                periodic_space_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_space_reclaim_compaction_interval_sec,
             },
         )
         .await

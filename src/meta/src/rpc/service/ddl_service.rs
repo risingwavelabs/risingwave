@@ -501,10 +501,10 @@ where
         ))
     }
 
-    async fn java_get_table(
+    async fn get_table(
         &self,
-        request: Request<JavaGetTableRequest>,
-    ) -> Result<Response<JavaGetTableResponse>, Status> {
+        request: Request<GetTableRequest>,
+    ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
         let database = self
             .catalog_manager
@@ -519,9 +519,9 @@ where
                 .await
                 .into_iter()
                 .find(|t| t.name == req.table_name && t.database_id == db.id);
-            Ok(Response::new(JavaGetTableResponse { table }))
+            Ok(Response::new(GetTableResponse { table }))
         } else {
-            Ok(Response::new(JavaGetTableResponse { table: None }))
+            Ok(Response::new(GetTableResponse { table: None }))
         }
     }
 }
