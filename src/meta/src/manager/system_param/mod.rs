@@ -21,7 +21,7 @@ use risingwave_pb::meta::SystemParams;
 use self::model::KvSingletonModel;
 use super::MetaSrvEnv;
 use crate::storage::MetaStore;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub type SystemParamManagerRef<S> = Arc<SystemParamManager<S>>;
 

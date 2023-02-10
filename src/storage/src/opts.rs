@@ -81,7 +81,7 @@ impl Default for StorageOpts {
             data_directory: Some(c.storage.data_directory.clone()),
             backup_storage_url: Some(c.backup.storage_url.clone()),
             backup_storage_directory: Some(c.backup.storage_directory.clone()),
-            ..Default::default()
+            state_store: None, // unused
         };
         Self::from((&c, &p))
     }

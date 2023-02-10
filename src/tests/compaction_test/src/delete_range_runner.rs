@@ -171,6 +171,8 @@ async fn compaction_test(
         block_size_kb: Some(1024),
         bloom_false_positive: Some(0.001),
         data_directory: Some("hummock_001".to_string()),
+        backup_storage_url: Some("memory".to_string()),
+        backup_storage_directory: Some("backup".to_string()),
         ..Default::default()
     };
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
