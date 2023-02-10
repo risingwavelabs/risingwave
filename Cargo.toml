@@ -111,7 +111,7 @@ opt-level = 3
 # reasonable. The optimization level is customized to speed up the build.
 [profile.ci-sim]
 inherits = "dev"
-opt-level = 2
+opt-level = 3
 incremental = false
 
 # Patch third-party crates for deterministic simulation.
