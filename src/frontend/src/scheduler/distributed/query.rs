@@ -226,7 +226,7 @@ impl QueryExecution {
     }
 }
 
-impl Debug for QueryExecution {
+impl Debug for QueryRunner {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut graph = Graph::<String, String>::new();
         let mut stage_id_to_node_id = HashMap::new();
@@ -240,8 +240,8 @@ impl Debug for QueryExecution {
             if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id) {
                 for child_stage in child_stages {
                     graph.add_edge(
-                        stage_id_to_node_id.get(stage_id).unwrap().clone(),
-                        stage_id_to_node_id.get(child_stage).unwrap().clone(),
+                        *stage_id_to_node_id.get(stage_id).unwrap(),
+                        *stage_id_to_node_id.get(child_stage).unwrap(),
                         "".to_string(),
                     );
                 }
