@@ -6386,6 +6386,7 @@ dependencies = [
  "tracing",
  "uuid",
  "workspace-hack",
+ "xorf",
  "xxhash-rust",
  "zstd",
 ]
@@ -8599,6 +8600,16 @@ name = "xmlparser"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d25c75bf9ea12c4040a97f829154768bbbce366287e2dc044af160cd79a13fd"
+
+[[package]]
+name = "xorf"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57901b00e3f8e14f4d20b8955bf8087ecb545cfe2ed8741c2a2dbc89847a1a29"
+dependencies = [
+ "libm",
+ "rand 0.8.5",
+]
 
 [[package]]
 name = "xxhash-rust"

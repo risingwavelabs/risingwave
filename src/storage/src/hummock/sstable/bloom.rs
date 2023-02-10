@@ -55,6 +55,7 @@ impl<T: AsMut<[u8]>> BitSliceMut for T {
 }
 
 /// Bloom implements Bloom filter functionalities over a bit-slice of data.
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct BloomFilterReader {
     /// data of filter in bits
@@ -65,6 +66,7 @@ pub struct BloomFilterReader {
 
 impl BloomFilterReader {
     /// Creates a Bloom filter from a byte slice
+    #[allow(dead_code)]
     pub fn new(mut buf: Vec<u8>) -> Self {
         if buf.len() <= 1 {
             return Self { data: vec![], k: 0 };
@@ -74,10 +76,12 @@ impl BloomFilterReader {
         Self { data: buf, k }
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn get_raw_data(&self) -> &[u8] {
         &self.data
     }
@@ -89,6 +93,7 @@ impl BloomFilterReader {
     ///     the hash;
     ///   - if the return value is true, then the table may or may not have the user key that has
     ///     the hash actually, a.k.a. we don't know the answer.
+    #[allow(dead_code)]
     pub fn may_match(&self, mut h: u32) -> bool {
         if self.k > 30 || self.k == 00 {
             // potential new encoding for short Bloom filters
@@ -138,7 +143,7 @@ pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
 impl FilterBuilder for BloomFilterBuilder {
     fn add_key(&mut self, key: &[u8], table_id: u32) {
         self.key_hash_entries
-            .push(Sstable::hash_for_bloom_filter(key, table_id));
+            .push(Sstable::hash_for_bloom_filter_u32(key, table_id));
     }
 
     fn approximate_len(&self) -> usize {
