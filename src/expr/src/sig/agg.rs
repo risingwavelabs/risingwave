@@ -146,16 +146,16 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
 
         (AggKind::Sum, _) => return None,
 
-        // StdDev
-        (AggKind::Stddev, [input]) => match input {
-            DataType::Int32 => DataType::Float64,
-            _ => {
-                println!("data type {:?}", input);
-                todo!("todo for stddev")
+        // StdDev, stddev_pop and stddev_samp
+        (AggKind::StddevPop | AggKind::StddevSamp, [input]) => match input {
+            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
+                DataType::Decimal
             }
+            DataType::Float32 | DataType::Float64 => DataType::Float64,
+            _ => return None,
         },
 
-        (AggKind::Stddev, _) => return None,
+        (AggKind::StddevPop | AggKind::StddevSamp, _) => return None,
 
         (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
         (AggKind::Sum0, _) => return None,

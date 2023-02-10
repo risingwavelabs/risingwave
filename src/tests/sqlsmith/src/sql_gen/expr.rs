@@ -490,7 +490,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 filter,
                 order_by,
             ))),
-            AggKind::Stddev => todo!("stddev placeholder"),
+            AggKind::StddevPop | AggKind::StddevSamp => todo!("stddev placeholder"),
         }
     }
 }

@@ -577,10 +577,9 @@ impl LogicalAggBuilder {
             }
 
             // (sum(sq) - sum * sum / count) / (count - 1)
-            AggKind::Stddev => {
+            agg @ AggKind::StddevPop | agg @ AggKind::StddevSamp => {
                 let input = inputs.iter().exactly_one().unwrap();
 
-                // sq_sum
                 let squared_input = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
@@ -682,19 +681,24 @@ impl LogicalAggBuilder {
                                 )
                                 .unwrap(),
                             ),
-                            ExprImpl::from(
-                                FunctionCall::new(
-                                    ExprType::Subtract,
-                                    vec![
-                                        count_expr,
-                                        ExprImpl::from(Literal::new(
-                                            Datum::from(ScalarImpl::Int16(1)),
-                                            DataType::Int16,
-                                        )),
-                                    ],
-                                )
-                                .unwrap(),
-                            ),
+                            match agg {
+                                AggKind::StddevPop => count_expr,
+                                AggKind::StddevSamp => ExprImpl::from(
+                                    FunctionCall::new(
+                                        ExprType::Subtract,
+                                        vec![
+                                            count_expr,
+                                            ExprImpl::from(Literal::new(
+                                                Datum::from(ScalarImpl::Int16(1)),
+                                                DataType::Int16,
+                                            )),
+                                        ],
+                                    )
+                                    .unwrap(),
+                                ),
+
+                                _ => unreachable!(),
+                            },
                         ],
                     )
                     .unwrap(),

@@ -205,7 +205,8 @@ message AggCall {
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
     SUM0 = 10;
-    STDDEV = 11;
+    STDDEV_POP = 11;
+    STDDEV_SAMP = 12;
   }
   message Arg {
     InputRefExpr input = 1;
