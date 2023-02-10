@@ -874,7 +874,7 @@ description = "Run all streaming e2e tests"
 [tasks.slt-batch]
 category = "RiseDev - SQLLogicTest"
 extend = "slt"
-args = ["${@}", "./e2e_test/batch/**/*.slt"]
+args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]

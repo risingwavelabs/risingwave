@@ -8,14 +8,15 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-assert-impl = "0.1"
 async-recursion = "1.0.2"
 async-trait = "0.1"
 bk-tree = "0.4.0"
-byteorder = "1.4"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
 derivative = "2"
@@ -29,7 +30,6 @@ itertools = "0.10"
 maplit = "1"
 md5 = "0.7.0"
 num-integer = "0.1"
-num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
@@ -37,7 +37,6 @@ pgwire = { path = "../utils/pgwire" }
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.4" }
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.11"
 rand = "0.8"
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
@@ -51,7 +50,6 @@ risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
-serde_derive = "1"
 serde_json = "1"
 sha2 = "0.10.2"
 smallvec = { version = "1.6.1", features = ["serde"] }
