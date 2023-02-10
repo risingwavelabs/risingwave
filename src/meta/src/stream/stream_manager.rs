@@ -764,6 +764,8 @@ mod tests {
                 fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
+                state_table_ids: vec![0],
+                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );
