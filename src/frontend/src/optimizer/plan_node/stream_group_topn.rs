@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -36,15 +36,28 @@ impl StreamGroupTopN {
         assert!(!logical.group_key().is_empty());
         assert!(logical.limit() > 0);
         let input = logical.input();
+        let schema = input.schema().clone();
+
+        let watermark_columns = if input.append_only() {
+            input.watermark_columns().clone()
+        } else {
+            let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+            for &idx in logical.group_key() {
+                if input.watermark_columns().contains(idx) {
+                    watermark_columns.insert(idx);
+                }
+            }
+            watermark_columns
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
-            input.schema().clone(),
+            schema,
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             false,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamGroupTopN {
             base,
@@ -138,3 +151,5 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
         Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }
+
+impl ExprRewritable for StreamGroupTopN {}

@@ -21,8 +21,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::GenericPlanRef;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::Expr;
+use super::{ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -229,5 +229,23 @@ impl StreamNode for StreamDeltaJoin {
                 .map(|&x| x as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamDeltaJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+            self.eq_join_predicate.rewrite_exprs(r),
+        )
+        .into()
     }
 }

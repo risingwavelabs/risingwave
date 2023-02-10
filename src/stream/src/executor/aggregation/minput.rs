@@ -280,6 +280,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
@@ -646,7 +647,7 @@ mod tests {
 
             [chunk_1, chunk_2]
                 .into_iter()
-                .zip_eq([&mut state_1, &mut state_2])
+                .zip_eq_fast([&mut state_1, &mut state_2])
                 .try_for_each(|(chunk, state)| {
                     let (ops, columns, visibility) = chunk.into_inner();
                     let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();

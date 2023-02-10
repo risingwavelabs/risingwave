@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
 use pretty_bytes::converter::convert;
-use risingwave_batch::executor::BatchTaskMetrics;
+use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -27,6 +27,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -48,6 +49,7 @@ use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
@@ -75,15 +77,26 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
-    validate_compute_node_memory_config(opts.total_memory_bytes, &config.storage);
-    info!(
-        "Starting compute node with config {:?} with debug assertions {}",
-        config,
-        if cfg!(debug_assertions) { "on" } else { "off" }
+    let embedded_compactor_enabled = embedded_compactor_enabled(
+        &config.storage.state_store,
+        config.storage.disable_remote_compactor,
+    );
+    validate_compute_node_memory_config(
+        opts.total_memory_bytes,
+        embedded_compactor_enabled,
+        &config.storage,
     );
 
+    info!("Starting compute node",);
+    info!("> config: {:?}", config);
+    info!(
+        "> debug assertions: {}",
+        if cfg!(debug_assertions) { "on" } else { "off" }
+    );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
     // Initialize all the configs
-    let storage_config = Arc::new(config.storage.clone());
+    let storage_opts = Arc::new(StorageOpts::from(&config));
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
@@ -108,6 +121,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
@@ -125,8 +139,7 @@ pub async fn compute_node_serve(
 
     let state_store = StateStoreImpl::new(
         &config.storage.state_store,
-        &config.storage.file_cache.dir,
-        &config,
+        storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
@@ -153,13 +166,13 @@ pub async fn compute_node_serve(
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
 
-        if storage_config.embedded_compactor_enabled() {
+        if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
-                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
+                storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
-                storage_config,
+                storage_opts,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
@@ -205,7 +218,10 @@ pub async fn compute_node_serve(
     };
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
+    let batch_mgr = Arc::new(BatchManager::new(
+        config.batch.clone(),
+        batch_manager_metrics,
+    ));
     let stream_mgr = Arc::new(LocalStreamManager::new(
         advertise_addr.clone(),
         state_store.clone(),
@@ -337,9 +353,20 @@ pub async fn compute_node_serve(
 /// for other system usage. Otherwise, it is not allowed to start.
 fn validate_compute_node_memory_config(
     cn_total_memory_bytes: usize,
+    embedded_compactor_enabled: bool,
     storage_config: &StorageConfig,
 ) {
-    let storage_memory_mb = storage_config.total_storage_memory_limit_mb();
+    let storage_memory_mb = {
+        let total_memory = storage_config.block_cache_capacity_mb
+            + storage_config.meta_cache_capacity_mb
+            + storage_config.shared_buffer_capacity_mb
+            + storage_config.file_cache.total_buffer_capacity_mb;
+        if embedded_compactor_enabled {
+            total_memory + storage_config.compactor_memory_limit_mb
+        } else {
+            total_memory
+        }
+    };
     if storage_memory_mb << 20 > cn_total_memory_bytes {
         panic!(
             "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
@@ -355,4 +382,13 @@ fn validate_compute_node_memory_config(
             convert((storage_memory_mb << 20) as _)
         );
     }
+}
+
+/// Checks whether an embedded compactor starts with a compute node.
+fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: bool) -> bool {
+    // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
+    // along with the compute node.
+    state_store_url == "hummock+memory"
+        || state_store_url.starts_with("hummock+disk")
+        || disable_remote_compactor
 }
