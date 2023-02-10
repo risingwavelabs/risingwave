@@ -16,8 +16,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use rand::rngs::SmallRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_storage::hummock::sstable::{Bloom, Sstable};
-use xorf::{BinaryFuse16, BinaryFuse8, Filter};
-use xorfilter::Xor8;
+use xorf::{Filter, Xor16, Xor8};
 
 const TEST_COUNT: usize = 1024 * 16 * 2;
 
@@ -65,47 +64,7 @@ fn bench_bloom_filter_read(c: &mut Criterion) {
     );
 }
 
-fn bench_xor_filter_read(c: &mut Criterion) {
-    let mut origin_data = Vec::with_capacity(TEST_COUNT);
-    let mut data = Vec::with_capacity(TEST_COUNT);
-    for idx in 0..TEST_COUNT {
-        let key = format!("test_000001_{:08}", idx);
-        data.push(Sstable::hash_for_bloom_filter_u64(key.as_bytes(), 0));
-        origin_data.push(key);
-    }
-    let mut filter = Xor8::new();
-    let mut rng = SmallRng::seed_from_u64(10244021u64);
-    filter.build_keys(&data[..(TEST_COUNT / 2)]);
-    let mut fp: usize = 0;
-    let mut negative_case = 0;
-    let mut total_case = 0;
-    c.bench_function("bench_xor_filter_read", |b| {
-        b.iter(|| {
-            for _ in 0..100 {
-                let idx = rng.next_u64() as usize % TEST_COUNT;
-                let ret = filter.contains_key(Sstable::hash_for_bloom_filter_u64(
-                    origin_data[idx].as_bytes(),
-                    0,
-                ));
-                if idx < TEST_COUNT / 2 {
-                    assert!(ret);
-                } else {
-                    negative_case += 1;
-                    if ret {
-                        fp += 1;
-                    }
-                }
-            }
-            total_case += 100;
-        });
-    });
-    println!(
-        "===bench_xor_filter_read fpr===: {}%",
-        (fp as f64) * 100.0 / (negative_case as f64)
-    );
-}
-
-fn bench_fuse8_filter_read(c: &mut Criterion) {
+fn bench_xor8_filter_read(c: &mut Criterion) {
     let mut origin_data = Vec::with_capacity(TEST_COUNT);
     let mut data = Vec::with_capacity(TEST_COUNT);
     for idx in 0..TEST_COUNT {
@@ -114,11 +73,11 @@ fn bench_fuse8_filter_read(c: &mut Criterion) {
         origin_data.push(key);
     }
     let mut rng = SmallRng::seed_from_u64(10244021u64);
-    let filter = BinaryFuse8::try_from(&data[..(TEST_COUNT / 2)]).unwrap();
+    let filter = Xor8::from(&data[..(TEST_COUNT / 2)]);
     let mut fp: usize = 0;
     let mut negative_case = 0;
     let mut total_case = 0;
-    c.bench_function("bench_fuse8_filter_read", |b| {
+    c.bench_function("bench_xor8_filter_read", |b| {
         b.iter(|| {
             for _ in 0..100 {
                 let idx = rng.next_u64() as usize % TEST_COUNT;
@@ -139,16 +98,16 @@ fn bench_fuse8_filter_read(c: &mut Criterion) {
         });
     });
     println!(
-        "===bench_fuse8_filter_read fpr===: {}%",
+        "===bench_xor8_filter_read fpr===: {}%",
         (fp as f64) * 100.0 / (negative_case as f64)
     );
     println!(
-        "===bench_fuse8_filter_read bpe===: {}",
+        "===bench_xor8_filter_read bpe===: {}",
         ((filter.len() * 8) as f64) / ((TEST_COUNT / 2) as f64)
     );
 }
 
-fn bench_fuse16_filter_read(c: &mut Criterion) {
+fn bench_xor16_filter_read(c: &mut Criterion) {
     let mut origin_data = Vec::with_capacity(TEST_COUNT);
     let mut data = Vec::with_capacity(TEST_COUNT);
     for idx in 0..TEST_COUNT {
@@ -157,11 +116,11 @@ fn bench_fuse16_filter_read(c: &mut Criterion) {
         origin_data.push(key);
     }
     let mut rng = SmallRng::seed_from_u64(10244021u64);
-    let filter = BinaryFuse16::try_from(&data[..(TEST_COUNT / 2)]).unwrap();
+    let filter = Xor16::from(&data[..(TEST_COUNT / 2)]);
     let mut fp: usize = 0;
     let mut negative_case = 0;
     let mut total_case = 0;
-    c.bench_function("bench_fuse16_filter_read", |b| {
+    c.bench_function("bench_xor16_filter_read", |b| {
         b.iter(|| {
             for _ in 0..100 {
                 let idx = rng.next_u64() as usize % TEST_COUNT;
@@ -182,11 +141,11 @@ fn bench_fuse16_filter_read(c: &mut Criterion) {
         });
     });
     println!(
-        "===bench_fuse16_filter_read fpr===: {}%",
+        "===bench_xor16_filter_read fpr===: {}%",
         (fp as f64) * 100.0 / (negative_case as f64)
     );
     println!(
-        "===bench_fuse16_filter_read bpe===: {}",
+        "===bench_xor16_filter_read bpe===: {}",
         ((filter.len() * 16) as f64) / ((TEST_COUNT / 2) as f64)
     );
 }
@@ -194,8 +153,7 @@ fn bench_fuse16_filter_read(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_bloom_filter_read,
-    bench_xor_filter_read,
-    bench_fuse8_filter_read,
-    bench_fuse16_filter_read,
+    bench_xor8_filter_read,
+    bench_xor16_filter_read,
 );
 criterion_main!(benches);
