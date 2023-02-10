@@ -49,6 +49,12 @@ services:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230208_05
     volumes:
       - ..:/risingwave
+  
+  rw-build-env-hdfs:
+    # v20230209_01 is an image with hdfs environment, used in CI check.
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230209_01
+    volumes:
+      - ..:/risingwave
 
   regress-test-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230208_05
