@@ -22,6 +22,7 @@ use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::telemetry::report::start_telemetry_reporting;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -61,7 +62,7 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::telemetry::start_telemetry_reporting;
+use crate::telemetry::create_telemetry_report;
 use crate::{AsyncStackTraceOption, ComputeNodeOpts};
 
 /// Bootstraps the compute-node.
@@ -279,7 +280,10 @@ pub async fn compute_node_serve(
     let health_srv = HealthServiceImpl::new();
 
     // used for telemetry
-    sub_tasks.push(start_telemetry_reporting(meta_client.clone()));
+    sub_tasks.push(start_telemetry_reporting(
+        meta_client.clone(),
+        create_telemetry_report,
+    ));
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -855,6 +856,14 @@ impl HummockMetaClient for MetaClient {
             })
             .await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl TelemetryInfoFetcher for MetaClient {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<TelemetryInfoResponse> {
+        let info = self.get_telemetry_info().await?;
+        Ok(info)
     }
 }
 

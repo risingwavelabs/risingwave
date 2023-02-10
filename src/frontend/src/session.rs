@@ -33,6 +33,7 @@ use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::telemetry::report::start_telemetry_reporting;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -64,6 +65,7 @@ use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::telemetry::FrontendTelemetryReport;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -140,9 +142,7 @@ impl FrontendEnv {
         }
     }
 
-    pub async fn init(
-        opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
+    pub async fn init(opts: &FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
         let config = load_config(&opts.config_path);
         tracing::info!(
             "Starting frontend node with\nfrontend config {:?}",
@@ -176,6 +176,8 @@ impl FrontendEnv {
             Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
+        let mut join_handles = vec![heartbeat_join_handle];
+        let mut shutdown_senders = vec![heartbeat_shutdown_sender];
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
@@ -219,6 +221,7 @@ impl FrontendEnv {
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
                 .await;
         let observer_join_handle = observer_manager.start().await;
+        join_handles.push(observer_join_handle);
 
         meta_client.activate(&frontend_address).await?;
 
@@ -235,6 +238,13 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
+
+        // start a telemetry reporting thread
+        let (telemetry_join_handle, telemetry_shutdown_sender) =
+            start_telemetry_reporting(meta_client, FrontendTelemetryReport::new);
+        join_handles.push(telemetry_join_handle);
+        shutdown_senders.push(telemetry_shutdown_sender);
+
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
@@ -264,9 +274,8 @@ impl FrontendEnv {
                 batch_config,
                 source_metrics,
             },
-            observer_join_handle,
-            heartbeat_join_handle,
-            heartbeat_shutdown_sender,
+            join_handles,
+            shutdown_senders,
         ))
     }
 
@@ -475,9 +484,8 @@ impl SessionImpl {
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
-    _observer_join_handle: JoinHandle<()>,
-    _heartbeat_join_handle: JoinHandle<()>,
-    _heartbeat_shutdown_sender: Sender<()>,
+    _join_handles: Vec<JoinHandle<()>>,
+    _shutdown_senders: Vec<Sender<()>>,
     number: AtomicI32,
 }
 
@@ -585,13 +593,11 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 
 impl SessionManagerImpl {
     pub async fn new(opts: &FrontendOpts) -> Result<Self> {
-        let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
-            FrontendEnv::init(opts).await?;
+        let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
-            _observer_join_handle: join_handle,
-            _heartbeat_join_handle: heartbeat_join_handle,
-            _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
+            _join_handles: join_handles,
+            _shutdown_senders: shutdown_senders,
             number: AtomicI32::new(0),
         })
     }

@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+pub mod report;
+
+use anyhow::{anyhow, Result};
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
@@ -27,7 +29,7 @@ const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
 pub enum TelemetryNodeType {
     Meta,
     Compute,
-    Storage,
+    Frontend,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,6 +46,10 @@ pub struct TelemetryReportBase {
     pub time_stamp: u64,
     /// node_type is the node that creates the report
     pub node_type: TelemetryNodeType,
+}
+
+pub trait TelemetryReport {
+    fn to_json(&self) -> Result<String>;
 }
 
 #[derive(Debug, Serialize, Deserialize)]

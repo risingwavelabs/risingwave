@@ -48,7 +48,7 @@ struct TelemetryReport {
 /// creates a `TelemetryReport` object with system data, uptime, timestamp, and tracking ID.
 /// Finally, it posts the report to `TELEMETRY_REPORT_URL`.
 /// If an error occurs at any point in the process, it logs an error message.
-pub async fn start_telemetry_reporting(
+pub async fn start_meta_telemetry_reporting(
     meta_store: Arc<impl MetaStore>,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();

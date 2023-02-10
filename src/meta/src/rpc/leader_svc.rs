@@ -60,7 +60,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::report::start_telemetry_reporting;
+use crate::telemetry::report::start_meta_telemetry_reporting;
 use crate::{hummock, MetaResult};
 
 // simple wrapper containing election sync related objects
@@ -306,7 +306,7 @@ pub async fn start_leader_srv<S: MetaStore>(
     );
 
     // report telemetry only when it is etcd
-    sub_tasks.push(start_telemetry_reporting(meta_store.clone()).await);
+    sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await);
 
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
