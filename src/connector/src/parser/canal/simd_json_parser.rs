@@ -16,10 +16,10 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
     str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
 };
@@ -125,7 +125,7 @@ impl CanalJsonParser {
                     })?;
 
                 let results = before
-                    .zip_eq(after)
+                    .zip_eq_fast(after)
                     .map(|(before, after)| {
                         writer.update(|column| {
                             // in origin canal, old only contains the changed columns but data

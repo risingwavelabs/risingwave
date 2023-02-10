@@ -132,3 +132,9 @@ impl Iterator for FormatIterator<'_, '_> {
         )
     }
 }
+
+impl ExactSizeIterator for FormatIterator<'_, '_> {
+    fn len(&self) -> usize {
+        self.actual_len
+    }
+}

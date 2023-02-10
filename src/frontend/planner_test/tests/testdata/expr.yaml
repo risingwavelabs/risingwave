@@ -551,5 +551,4 @@
     └─BatchProject { exprs: [((1:Int32 + 2:Int32) + t.v1)] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: const_eval of division by 0 error
-  sql: |
-    select 1 / 0 t1;
+  sql: select 1 / 0 t1;

@@ -22,7 +22,6 @@ use async_stack_trace::StackTrace;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -44,6 +43,7 @@ use crate::hummock::store::version::{
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
+use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
 #[derive(Clone)]
@@ -54,7 +54,7 @@ pub struct BufferTracker {
 }
 
 impl BufferTracker {
-    pub fn from_storage_config(config: &StorageConfig) -> Self {
+    pub fn from_storage_opts(config: &StorageOpts) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
         Self::new(capacity, flush_threshold)
@@ -70,7 +70,7 @@ impl BufferTracker {
     }
 
     pub fn for_test() -> Self {
-        Self::from_storage_config(&StorageConfig::default())
+        Self::from_storage_opts(&StorageOpts::default())
     }
 
     pub fn get_buffer_size(&self) -> usize {
@@ -147,9 +147,9 @@ impl HummockEventHandler {
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
-        let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.storage_config);
+        let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
         let write_conflict_detector =
-            ConflictDetector::new_from_config(&compactor_context.storage_config);
+            ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
