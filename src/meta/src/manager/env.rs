@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use crate::manager::{
@@ -140,6 +141,22 @@ impl MetaOpts {
             state_store: None,
             data_directory: "hummock_001".to_string(),
             periodic_space_reclaim_compaction_interval_sec: 60,
+        }
+    }
+
+    pub fn init_system_params(&self) -> SystemParams {
+        // For fields not provided from CLI, use default values.
+        // For deprecated fields, use `None`.
+        SystemParams {
+            barrier_interval_ms: Some(self.barrier_interval.as_millis() as u32),
+            checkpoint_frequency: Some(self.checkpoint_frequency as u64),
+            sstable_size_mb: Some(self.sstable_size_mb),
+            bloom_false_positive: Some(self.bloom_false_positive),
+            block_size_kb: Some(self.block_size_kb),
+            state_store: Some(self.state_store.clone().unwrap_or_default()),
+            data_directory: Some(self.data_directory.clone()),
+            backup_storage_url: Some(self.backup_storage_url.clone()),
+            backup_storage_directory: Some(self.backup_storage_directory.clone()),
         }
     }
 }

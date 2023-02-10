@@ -33,7 +33,6 @@ use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
@@ -306,17 +305,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let init_system_param = SystemParams {
-        barrier_interval_ms: opts.barrier_interval.as_millis() as u32,
-        checkpoint_frequency: opts.checkpoint_frequency as u64,
-        sstable_size_mb: opts.sstable_size_mb,
-        bloom_false_positive: opts.bloom_false_positive,
-        block_size_kb: opts.block_size_kb,
-        state_store: opts.state_store.clone().unwrap_or_default(),
-        data_directory: opts.data_directory.clone(),
-        backup_storage_url: opts.backup_storage_url.clone(),
-        backup_storage_directory: opts.backup_storage_directory.clone(),
-    };
+    let init_system_param = opts.init_system_params();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
