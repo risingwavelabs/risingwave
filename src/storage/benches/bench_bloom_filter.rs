@@ -118,7 +118,7 @@ fn bench_fuse8_filter_read(c: &mut Criterion) {
     let mut fp: usize = 0;
     let mut negative_case = 0;
     let mut total_case = 0;
-    c.bench_function("bench_xor_filter_read", |b| {
+    c.bench_function("bench_fuse8_filter_read", |b| {
         b.iter(|| {
             for _ in 0..100 {
                 let idx = rng.next_u64() as usize % TEST_COUNT;
@@ -161,7 +161,7 @@ fn bench_fuse16_filter_read(c: &mut Criterion) {
     let mut fp: usize = 0;
     let mut negative_case = 0;
     let mut total_case = 0;
-    c.bench_function("bench_xor_filter_read", |b| {
+    c.bench_function("bench_fuse16_filter_read", |b| {
         b.iter(|| {
             for _ in 0..100 {
                 let idx = rng.next_u64() as usize % TEST_COUNT;
