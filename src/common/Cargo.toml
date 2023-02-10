@@ -10,6 +10,9 @@ repository = { workspace = true }
 [package.metadata.cargo-machete]
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
 arrow-array = "31"
@@ -33,7 +36,6 @@ humantime = "2.1"
 itertools = "0.10"
 itoa = "1.0"
 memcomparable = { version = "0.1", features = ["decimal"] }
-more-asserts = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
@@ -57,7 +59,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi
 toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-twox-hash = "1"
 url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -75,8 +76,10 @@ mach = "0.3.2"
 
 [dev-dependencies]
 criterion = "0.4"
+more-asserts = "0.3"
 rand = "0.8"
 tempfile = "3"
+twox-hash = "1"
 
 [[bench]]
 name = "bench_encoding"

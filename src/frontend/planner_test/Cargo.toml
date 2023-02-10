@@ -11,13 +11,15 @@ repository = { workspace = true }
 [package.metadata.cargo-machete]
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
 backtrace = "0.3.67"
 console = "0.15"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
-libtest-mimic = "0.6"
 risingwave_frontend = { path = ".." }
 risingwave_sqlparser = { path = "../../sqlparser" }
 serde = { version = "1", features = ["derive"] }
@@ -38,6 +40,7 @@ walkdir = "2"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+libtest-mimic = "0.6"
 tempfile = "3"
 
 [build-dependencies]

@@ -11,6 +11,9 @@ repository = { workspace = true }
 [package.metadata.cargo-machete]
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
 async-trait = "0.1"

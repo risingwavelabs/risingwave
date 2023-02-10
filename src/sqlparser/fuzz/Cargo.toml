@@ -7,6 +7,9 @@ publish = false
 [package.metadata.cargo-machete]
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 honggfuzz = "0.5.54"
 

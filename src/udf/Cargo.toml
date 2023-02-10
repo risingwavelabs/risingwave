@@ -7,6 +7,9 @@ edition = "2021"
 [package.metadata.cargo-machete]
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 arrow-array = "31"
 arrow-flight = "31"

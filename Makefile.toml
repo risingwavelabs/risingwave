@@ -504,12 +504,17 @@ set -e
 cargo install cargo-quickinstall --locked
 cargo quickinstall cargo-binstall
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
+
+# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
+echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
+cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
+echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
@@ -771,6 +776,21 @@ fi
 if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
 fi
+"""
+
+[tasks.check-udeps]
+category = "RiseDev - Check"
+description = "Check unused dependencies"
+env = { RUSTFLAGS = "--cfg tokio_unstable" }
+script = """
+#!/usr/bin/env bash
+
+# TODO: after cargo-machete supports excluding packages, we may use it instead of cargo udeps.
+# It's much faster so we can add it to CI and [tasks.check].
+
+echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
+
+cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
 

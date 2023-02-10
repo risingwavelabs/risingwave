@@ -7,6 +7,9 @@ edition = "2021"
 [package.metadata.cargo-machete]
 ignored = ["workspace-config", "workspace-hack", "task_stats_alloc", "serde"]
 
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-config", "workspace-hack", "task_stats_alloc", "serde"]
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
