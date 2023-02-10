@@ -394,6 +394,7 @@ impl<S: MetaStore> HummockManager<S> {
     }
 }
 
+// TODO #7817 remove stale config
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroupConfig>,

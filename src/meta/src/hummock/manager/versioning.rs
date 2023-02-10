@@ -111,12 +111,6 @@ impl Versioning {
         &mut self,
         delta_range: impl RangeBounds<HummockVersionId>,
     ) {
-        tracing::info!(
-            "{:#?} {:#?} {}",
-            delta_range.start_bound(),
-            delta_range.end_bound(),
-            self.hummock_version_deltas.len()
-        );
         for (_, delta) in self.hummock_version_deltas.range(delta_range) {
             if delta.trivial_move {
                 self.deltas_to_delete.push(delta.id);

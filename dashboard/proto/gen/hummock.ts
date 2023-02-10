@@ -92,7 +92,7 @@ export interface GroupConstruct {
   parentGroupId: number;
   tableIds: number[];
   groupId: number;
-  /** TODO try to remove `table_id_to_options` */
+  /** TODO #7817 try to remove `table_id_to_options` */
   tableIdToOptions: { [key: number]: TableOption };
 }
 
@@ -146,7 +146,7 @@ export interface HummockVersion_Levels {
   groupId: number;
   parentGroupId: number;
   memberTableIds: number[];
-  /** TODO avoid store it here */
+  /** TODO #7817 try to remove `table_id_to_options` */
   tableIdToOptions: { [key: number]: TableOption };
 }
 

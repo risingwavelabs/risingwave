@@ -59,7 +59,7 @@ message GroupConstruct {
   uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
   uint64 group_id = 4;
-  // TODO try to remove `table_id_to_options`
+  // TODO #7817 try to remove `table_id_to_options`
   map<uint32, TableOption> table_id_to_options = 5;
 }
 
@@ -92,7 +92,7 @@ message HummockVersion {
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
     repeated uint32 member_table_ids = 5;
-    // TODO avoid store it here
+    // TODO #7817 try to remove `table_id_to_options`
     map<uint32, TableOption> table_id_to_options = 6;
   }
   uint64 id = 1;
