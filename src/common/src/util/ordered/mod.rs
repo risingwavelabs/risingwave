@@ -16,10 +16,10 @@ mod serde;
 
 use std::cmp::Reverse;
 
-use itertools::Itertools;
 use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
+use super::iter_util::ZipEqFast;
 use crate::row::OwnedRow;
 use crate::types::{memcmp_serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
@@ -61,7 +61,7 @@ impl OrderedRow {
         OrderedRow(
             row.into_inner()
                 .into_iter()
-                .zip_eq(order_types.iter())
+                .zip_eq_fast(order_types.iter())
                 .map(|(datum, order_type)| match order_type {
                     OrderType::Ascending => NormalOrder(datum),
                     OrderType::Descending => ReversedOrder(Reverse(datum)),

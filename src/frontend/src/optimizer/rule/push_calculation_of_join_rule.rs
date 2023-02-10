@@ -14,6 +14,7 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::BoxedRule;
@@ -82,8 +83,8 @@ impl Rule for PushCalculationOfJoinRule {
         // replace chosen function calls.
         for (((index_of_func_call, ty), left_expr), right_expr) in indices_and_ty_of_func_calls
             .into_iter()
-            .zip_eq(&left_exprs)
-            .zip_eq(&right_exprs)
+            .zip_eq_fast(&left_exprs)
+            .zip_eq_fast(&right_exprs)
         {
             let left_input = if left_expr.as_input_ref().is_some() {
                 left_expr.clone()

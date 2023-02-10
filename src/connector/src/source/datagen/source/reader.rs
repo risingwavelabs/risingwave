@@ -19,8 +19,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::zip_eq;
 use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::util::iter_util::zip_eq_fast;
 
 use super::generator::DatagenEventGenerator;
 use crate::impl_common_split_reader_logic;
@@ -196,18 +196,19 @@ fn generator_from_data_type(
             FieldGeneratorImpl::with_varchar(length_value, random_seed)
         }
         DataType::Struct(struct_type) => {
-            let struct_fields = zip_eq(struct_type.field_names.clone(), struct_type.fields.clone())
-                .map(|(field_name, data_type)| {
-                    let gen = generator_from_data_type(
-                        data_type,
-                        fields_option_map,
-                        &format!("{}.{}", name, field_name),
-                        split_index,
-                        split_num,
-                    )?;
-                    Ok((field_name, gen))
-                })
-                .collect::<Result<_>>()?;
+            let struct_fields =
+                zip_eq_fast(struct_type.field_names.clone(), struct_type.fields.clone())
+                    .map(|(field_name, data_type)| {
+                        let gen = generator_from_data_type(
+                            data_type,
+                            fields_option_map,
+                            &format!("{}.{}", name, field_name),
+                            split_index,
+                            split_num,
+                        )?;
+                        Ok((field_name, gen))
+                    })
+                    .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields)
         }
         DataType::List { datatype } => {

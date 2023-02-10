@@ -20,7 +20,8 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     if digits < 0 {
         Decimal::zero()
     } else {
-        input.round_dp(digits as u32)
+        // rust_decimal can only handle up to 28 digits of scale
+        input.round_dp(std::cmp::min(digits as u32, 28))
     }
 }
 
@@ -77,6 +78,8 @@ mod tests {
         do_test("84818.33333333333333333333333", 4, "84818.3333");
         do_test("84818.15", 1, "84818.2");
         do_test("21.372736", -1, "0");
+        // Maximum of 28 digits
+        do_test("0", 340, &format!("0.{}", "0".repeat(28)));
     }
 
     #[test]

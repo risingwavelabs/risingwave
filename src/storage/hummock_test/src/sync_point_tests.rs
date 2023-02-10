@@ -28,7 +28,7 @@ use risingwave_meta::hummock::compaction::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
-use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
@@ -159,7 +159,10 @@ async fn test_syncpoints_test_local_notification_receiver() {
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
     let mut task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            CompactionPickParma::new_base_parma(),
+        )
         .await
         .unwrap()
         .unwrap();

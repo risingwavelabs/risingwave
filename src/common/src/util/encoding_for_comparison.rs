@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 
+use super::iter_util::ZipEqFast;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::OwnedRow;
@@ -48,7 +49,7 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Vec<Vec<u8>
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];
     for encoded_column in encoded_columns {
-        for (encoded_row, data) in encoded_chunk.iter_mut().zip_eq(encoded_column) {
+        for (encoded_row, data) in encoded_chunk.iter_mut().zip_eq_fast(encoded_column) {
             encoded_row.extend(data);
         }
     }

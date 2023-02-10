@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Dandandan <danielheres@gmail.com>"]
 edition = "2018"
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+
 [dependencies]
 risingwave_sqlparser = { path = "../" }
 
