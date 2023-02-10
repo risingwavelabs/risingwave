@@ -17,7 +17,7 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use opendal::services::memory;
+use opendal::services::Memory;
 use opendal::Operator;
 use tokio::io::AsyncRead;
 
@@ -42,9 +42,9 @@ impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
     pub fn new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
-        let mut builder = memory::Builder::default();
+        let builder = Memory::default();
 
-        let op: Operator = Operator::new(builder.build()?);
+        let op: Operator = Operator::create(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
