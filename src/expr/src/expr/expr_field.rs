@@ -17,7 +17,7 @@ use std::convert::TryFrom;
 use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -47,8 +47,15 @@ impl Expression for FieldExpression {
         }
     }
 
-    fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
-        Err(anyhow!("expects a struct array ref").into())
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let struct_datum = self.input.eval_row(input)?;
+        struct_datum
+            .map(|s| match s {
+                ScalarImpl::Struct(v) => Ok(v.fields()[self.index].clone()),
+                _ => Err(anyhow!("expects a struct array ref").into()),
+            })
+            .transpose()
+            .map(|x| x.flatten())
     }
 }
 

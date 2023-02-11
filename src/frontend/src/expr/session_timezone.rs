@@ -17,7 +17,7 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 
 pub use crate::expr::expr_rewriter::ExprRewriter;
 pub use crate::expr::function_call::FunctionCall;
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, Literal};
 
 /// `SessionTimezone` will be used to resolve session
 /// timezone-dependent casts, comparisons or arithmetic.
@@ -135,7 +135,90 @@ impl SessionTimezone {
                 None
             }
             // TODO: handle tstz-related arithmetic with timezone
-            ExprType::Add | ExprType::Subtract => None,
+            // We first translate to timestamp to handle years, months and days,
+            // then we translate back to timestamptz handle hours and milliseconds
+            //
+            // For performance concern, we assume that most the intervals are const-evaled.
+            //
+            // We impl the following expression tree:
+            //
+            //                    [+/-]
+            //                   /      \
+            //             timestamptz   [-]
+            //              /            /   \
+            //          [+/-]       interval  date_trunc
+            //          /    \                   /     \
+            //    timestamp  date_trunc       'day' interval
+            //        /        /     \
+            //  timestamptz  'day'  interval
+            //
+            //
+            // Const-evaled expr tree:
+            //
+            //                    [+/-]
+            //                   /      \
+            //             timestamptz   interval_non_date_part
+            //              /
+            //          [+/-]
+            //          /    \
+            //    timestamp  interval_date_part
+            //        /
+            //  timestamptz
+            ExprType::Subtract | ExprType::Add => {
+                assert_eq!(inputs.len(), 2);
+                let canonical_match = matches!(inputs[0].return_type(), DataType::Timestamptz)
+                    && matches!(inputs[1].return_type(), DataType::Interval);
+                let inverse_match = matches!(inputs[1].return_type(), DataType::Timestamptz)
+                    && matches!(inputs[0].return_type(), DataType::Interval);
+                assert!(!(inverse_match && func_type == ExprType::Subtract)); // This should never have been parsed.
+                if canonical_match || inverse_match {
+                    let (orig_timestamptz, interval) =
+                        if func_type == ExprType::Add && inverse_match {
+                            (inputs[1].clone(), inputs[0].clone())
+                        } else {
+                            (inputs[0].clone(), inputs[1].clone())
+                        };
+                    let interval_date_part: ExprImpl = FunctionCall::new_unchecked(
+                        ExprType::DateTrunc,
+                        vec![
+                            Literal::new(Some("day".into()), DataType::Varchar).into(),
+                            interval.clone(),
+                        ],
+                        DataType::Interval,
+                    )
+                    .into();
+                    let interval_non_date_part = FunctionCall::new_unchecked(
+                        ExprType::Subtract,
+                        vec![interval, interval_date_part.clone()],
+                        DataType::Interval,
+                    )
+                    .into();
+                    let timestamp = self
+                        .with_timezone(ExprType::Cast, &vec![orig_timestamptz], DataType::Timestamp)
+                        .unwrap();
+                    let timestamp_op_date_part = FunctionCall::new_unchecked(
+                        func_type,
+                        vec![timestamp, interval_date_part],
+                        DataType::Timestamp,
+                    )
+                    .into();
+                    let timestamptz = self
+                        .with_timezone(
+                            ExprType::Cast,
+                            &vec![timestamp_op_date_part],
+                            DataType::Timestamptz,
+                        )
+                        .unwrap();
+                    let timestamptz_op_non_date_part = FunctionCall::new_unchecked(
+                        func_type,
+                        vec![timestamptz, interval_non_date_part],
+                        DataType::Timestamptz,
+                    )
+                    .into();
+                    return Some(timestamptz_op_non_date_part);
+                }
+                None
+            }
             _ => None,
         }
     }

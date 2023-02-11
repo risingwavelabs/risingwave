@@ -10,10 +10,10 @@ extern "C" {
 /*
  * Class:     com_risingwave_java_binding_Binding
  * Method:    iteratorNew
- * Signature: ()J
+ * Signature: ([B)J
  */
 JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorNew
-  (JNIEnv *, jclass);
+  (JNIEnv *, jclass, jbyteArray);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
@@ -49,10 +49,50 @@ JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_rowIsNull
 
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetInt16Value
+ * Signature: (JI)S
+ */
+JNIEXPORT jshort JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt16Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetInt32Value
+ * Signature: (JI)I
+ */
+JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt32Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    rowGetInt64Value
  * Signature: (JI)J
  */
 JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt64Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetFloatValue
+ * Signature: (JI)F
+ */
+JNIEXPORT jfloat JNICALL Java_com_risingwave_java_binding_Binding_rowGetFloatValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetDoubleValue
+ * Signature: (JI)D
+ */
+JNIEXPORT jdouble JNICALL Java_com_risingwave_java_binding_Binding_rowGetDoubleValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetBooleanValue
+ * Signature: (JI)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_rowGetBooleanValue
   (JNIEnv *, jclass, jlong, jint);
 
 /*

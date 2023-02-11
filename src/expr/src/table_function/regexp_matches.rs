@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -73,7 +74,7 @@ impl TableFunction for RegexpMatches {
 
         match bitmap {
             Some(bitmap) => {
-                for (text, visible) in text_arr.iter().zip_eq(bitmap.iter()) {
+                for (text, visible) in text_arr.iter().zip_eq_debug(bitmap.iter()) {
                     let array = if !visible {
                         empty_array(self.return_type())
                     } else if let Some(text) = text {

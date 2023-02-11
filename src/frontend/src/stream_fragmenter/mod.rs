@@ -295,7 +295,6 @@ fn build_fragment(
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
                             dispatch_strategy: exchange_node_strategy,
-                            same_worker_node: false,
                             link_id: child_node.operator_id,
                         },
                     );
