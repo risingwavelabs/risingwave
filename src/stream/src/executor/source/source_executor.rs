@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::fmt::Formatter;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use leaky_bucket::RateLimiter;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
 };
@@ -260,6 +262,9 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
+        let mut max_message_per_sec = 1024;
+        let rate_limit_interval = Duration::from_millis(1000);
+
         core.split_state_store.init_epoch(barrier.epoch);
 
         core.stream_source_splits = boot_state
@@ -288,6 +293,13 @@ impl<S: StateStore> SourceExecutor<S> {
             .build_stream_source_reader(&source_desc, recover_state)
             .stack_trace("source_build_reader")
             .await?;
+
+        let mut rate_limiter = RateLimiter::builder()
+            .initial(max_message_per_sec)
+            .interval(rate_limit_interval)
+            .refill(max_message_per_sec)
+            .max(max_message_per_sec)
+            .build();
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
@@ -330,6 +342,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                     .await?;
                             }
+                            Mutation::SourceThrottle(rate_limit) => {
+                                if let Some(limit) = rate_limit.get(&self.ctx.id).cloned() {
+                                    max_message_per_sec = limit as usize;
+                                    rate_limiter = RateLimiter::builder()
+                                        .initial(max_message_per_sec)
+                                        .interval(rate_limit_interval)
+                                        .refill(max_message_per_sec)
+                                        .max(max_message_per_sec)
+                                        .build();
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -356,6 +379,8 @@ impl<S: StateStore> SourceExecutor<S> {
                     chunk,
                     split_offset_mapping,
                 }) => {
+                    rate_limiter.acquire(chunk.cardinality()).await;
+
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
                         // we can guarantee the source is not paused since it received stream

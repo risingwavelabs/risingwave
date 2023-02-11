@@ -40,8 +40,8 @@ use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage,
-    UpdateMutation, Watermark as ProstWatermark,
+    ResumeMutation, SourceChangeSplitMutation, SourceThrottleMutation, StopMutation,
+    StreamMessage as ProstStreamMessage, UpdateMutation, Watermark as ProstWatermark,
 };
 use smallvec::SmallVec;
 
@@ -222,6 +222,7 @@ pub enum Mutation {
     SourceChangeSplit(HashMap<ActorId, Vec<SplitImpl>>),
     Pause,
     Resume,
+    SourceThrottle(HashMap<ActorId, u32>),
 }
 
 #[derive(Debug, Clone)]
@@ -425,6 +426,11 @@ impl Mutation {
             }
             Mutation::Pause => ProstMutation::Pause(PauseMutation {}),
             Mutation::Resume => ProstMutation::Resume(ResumeMutation {}),
+            Mutation::SourceThrottle(rate_limit) => {
+                ProstMutation::RateLimit(SourceThrottleMutation {
+                    rate_limit: rate_limit.clone(),
+                })
+            }
         }
     }
 
@@ -432,6 +438,10 @@ impl Mutation {
         let mutation = match prost {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
+            }
+
+            ProstMutation::RateLimit(rate_limit) => {
+                Mutation::SourceThrottle(rate_limit.get_rate_limit().clone())
             }
 
             ProstMutation::Update(update) => Mutation::Update {
