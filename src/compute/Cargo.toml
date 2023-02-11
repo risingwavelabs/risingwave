@@ -8,7 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
 
 [dependencies]
 async-trait = "0.1"
