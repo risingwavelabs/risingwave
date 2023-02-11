@@ -6146,7 +6146,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "workspace-hack",
 ]
 
 [[package]]
