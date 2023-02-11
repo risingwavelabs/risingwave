@@ -227,6 +227,15 @@ export interface StopMutation {
   actors: number[];
 }
 
+export interface SourceThrottleMutation {
+  rateLimit: { [key: number]: number };
+}
+
+export interface SourceThrottleMutation_RateLimitEntry {
+  key: number;
+  value: number;
+}
+
 export interface UpdateMutation {
   /** Dispatcher updates. */
   dispatcherUpdate: UpdateMutation_DispatcherUpdate[];
@@ -300,7 +309,8 @@ export interface Barrier {
     | { $case: "update"; update: UpdateMutation }
     | { $case: "splits"; splits: SourceChangeSplitMutation }
     | { $case: "pause"; pause: PauseMutation }
-    | { $case: "resume"; resume: ResumeMutation };
+    | { $case: "resume"; resume: ResumeMutation }
+    | { $case: "rateLimit"; rateLimit: SourceThrottleMutation };
   /** Used for tracing. */
   span: Uint8Array;
   /** Whether this barrier do checkpoint */
@@ -1097,6 +1107,74 @@ export const StopMutation = {
   },
 };
 
+function createBaseSourceThrottleMutation(): SourceThrottleMutation {
+  return { rateLimit: {} };
+}
+
+export const SourceThrottleMutation = {
+  fromJSON(object: any): SourceThrottleMutation {
+    return {
+      rateLimit: isObject(object.rateLimit)
+        ? Object.entries(object.rateLimit).reduce<{ [key: number]: number }>((acc, [key, value]) => {
+          acc[Number(key)] = Number(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: SourceThrottleMutation): unknown {
+    const obj: any = {};
+    obj.rateLimit = {};
+    if (message.rateLimit) {
+      Object.entries(message.rateLimit).forEach(([k, v]) => {
+        obj.rateLimit[k] = Math.round(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceThrottleMutation>, I>>(object: I): SourceThrottleMutation {
+    const message = createBaseSourceThrottleMutation();
+    message.rateLimit = Object.entries(object.rateLimit ?? {}).reduce<{ [key: number]: number }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Number(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseSourceThrottleMutation_RateLimitEntry(): SourceThrottleMutation_RateLimitEntry {
+  return { key: 0, value: 0 };
+}
+
+export const SourceThrottleMutation_RateLimitEntry = {
+  fromJSON(object: any): SourceThrottleMutation_RateLimitEntry {
+    return { key: isSet(object.key) ? Number(object.key) : 0, value: isSet(object.value) ? Number(object.value) : 0 };
+  },
+
+  toJSON(message: SourceThrottleMutation_RateLimitEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = Math.round(message.value));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceThrottleMutation_RateLimitEntry>, I>>(
+    object: I,
+  ): SourceThrottleMutation_RateLimitEntry {
+    const message = createBaseSourceThrottleMutation_RateLimitEntry();
+    message.key = object.key ?? 0;
+    message.value = object.value ?? 0;
+    return message;
+  },
+};
+
 function createBaseUpdateMutation(): UpdateMutation {
   return { dispatcherUpdate: [], mergeUpdate: [], actorVnodeBitmapUpdate: {}, droppedActors: [], actorSplits: {} };
 }
@@ -1488,6 +1566,8 @@ export const Barrier = {
         ? { $case: "pause", pause: PauseMutation.fromJSON(object.pause) }
         : isSet(object.resume)
         ? { $case: "resume", resume: ResumeMutation.fromJSON(object.resume) }
+        : isSet(object.rateLimit)
+        ? { $case: "rateLimit", rateLimit: SourceThrottleMutation.fromJSON(object.rateLimit) }
         : undefined,
       span: isSet(object.span) ? bytesFromBase64(object.span) : new Uint8Array(),
       checkpoint: isSet(object.checkpoint) ? Boolean(object.checkpoint) : false,
@@ -1512,6 +1592,9 @@ export const Barrier = {
       (obj.pause = message.mutation?.pause ? PauseMutation.toJSON(message.mutation?.pause) : undefined);
     message.mutation?.$case === "resume" &&
       (obj.resume = message.mutation?.resume ? ResumeMutation.toJSON(message.mutation?.resume) : undefined);
+    message.mutation?.$case === "rateLimit" && (obj.rateLimit = message.mutation?.rateLimit
+      ? SourceThrottleMutation.toJSON(message.mutation?.rateLimit)
+      : undefined);
     message.span !== undefined &&
       (obj.span = base64FromBytes(message.span !== undefined ? message.span : new Uint8Array()));
     message.checkpoint !== undefined && (obj.checkpoint = message.checkpoint);
@@ -1549,6 +1632,16 @@ export const Barrier = {
       object.mutation?.$case === "resume" && object.mutation?.resume !== undefined && object.mutation?.resume !== null
     ) {
       message.mutation = { $case: "resume", resume: ResumeMutation.fromPartial(object.mutation.resume) };
+    }
+    if (
+      object.mutation?.$case === "rateLimit" &&
+      object.mutation?.rateLimit !== undefined &&
+      object.mutation?.rateLimit !== null
+    ) {
+      message.mutation = {
+        $case: "rateLimit",
+        rateLimit: SourceThrottleMutation.fromPartial(object.mutation.rateLimit),
+      };
     }
     message.span = object.span ?? new Uint8Array();
     message.checkpoint = object.checkpoint ?? false;
