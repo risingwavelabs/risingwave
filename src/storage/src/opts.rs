@@ -14,6 +14,7 @@
 
 use risingwave_common::config::RwConfig;
 use risingwave_pb::meta::SystemParams;
+use risingwave_rpc_client::SystemParamsReader;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
@@ -83,28 +84,28 @@ impl Default for StorageOpts {
             backup_storage_directory: Some(c.backup.storage_directory.clone()),
             state_store: None, // unused
         };
-        Self::from((&c, &p))
+        Self::from((&c, &p.into()))
     }
 }
 
-impl From<(&RwConfig, &SystemParams)> for StorageOpts {
-    fn from((c, p): (&RwConfig, &SystemParams)) -> Self {
+impl From<(&RwConfig, &SystemParamsReader)> for StorageOpts {
+    fn from((c, p): (&RwConfig, &SystemParamsReader)) -> Self {
         Self {
-            sstable_size_mb: p.sstable_size_mb.unwrap(),
-            block_size_kb: p.block_size_kb.unwrap(),
-            bloom_false_positive: p.bloom_false_positive.unwrap(),
+            sstable_size_mb: p.sstable_size_mb(),
+            block_size_kb: p.block_size_kb(),
+            bloom_false_positive: p.bloom_false_positive(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,
             share_buffer_compaction_worker_threads_number: c
                 .storage
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: c.storage.shared_buffer_capacity_mb,
-            data_directory: p.data_directory.clone().unwrap(),
+            data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: c.storage.block_cache_capacity_mb,
             meta_cache_capacity_mb: c.storage.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             enable_local_spill: c.storage.enable_local_spill,
-            local_object_store: c.storage.local_object_store.clone(),
+            local_object_store: c.storage.local_object_store.to_string(),
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: c.storage.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,
@@ -118,8 +119,8 @@ impl From<(&RwConfig, &SystemParams)> for StorageOpts {
             file_cache_file_fallocate_unit_mb: c.storage.file_cache.cache_file_fallocate_unit_mb,
             file_cache_meta_fallocate_unit_mb: c.storage.file_cache.cache_meta_fallocate_unit_mb,
             file_cache_file_max_write_size_mb: c.storage.file_cache.cache_file_max_write_size_mb,
-            backup_storage_url: p.backup_storage_url.clone().unwrap(),
-            backup_storage_directory: p.backup_storage_directory.clone().unwrap(),
+            backup_storage_url: p.backup_storage_url().to_string(),
+            backup_storage_directory: p.backup_storage_directory().to_string(),
         }
     }
 }

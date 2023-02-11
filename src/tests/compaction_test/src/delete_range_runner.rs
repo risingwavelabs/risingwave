@@ -174,7 +174,8 @@ async fn compaction_test(
         backup_storage_url: Some("memory".to_string()),
         backup_storage_directory: Some("backup".to_string()),
         ..Default::default()
-    };
+    }
+    .into();
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
@@ -187,7 +188,7 @@ async fn compaction_test(
     .await;
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
-        system_params.data_directory.unwrap(),
+        system_params.data_directory().to_string(),
         config.storage.block_cache_capacity_mb * (1 << 20),
         config.storage.meta_cache_capacity_mb * (1 << 20),
         TieredCache::none(),
