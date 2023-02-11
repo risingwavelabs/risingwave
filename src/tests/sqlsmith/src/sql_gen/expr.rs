@@ -86,9 +86,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
 
+        // NOTE:
+        // We generate AST first, then use its `Display` trait
+        // to generate an sql string.
+        // That may erase nesting context.
+        // For instance `IN(a, b)` is `a IN b`.
+        // this can lead to ambiguity, if `a` is an
+        // INFIX/POSTFIX compound expression too:
+        // - `a1 IN a2 IN b`
+        // - `a1 >= a2 IN b`
+        // ...
+        // We just nest compound expressions to avoid this.
         let range = if context.can_gen_agg() { 99 } else { 90 };
         match self.rng.gen_range(0..=range) {
-            0..=70 => self.gen_func(typ, context),
+            0..=70 => Expr::Nested(Box::new(self.gen_func(typ, context))),
             71..=80 => self.gen_exists(typ, context),
             81..=90 => self.gen_explicit_cast(typ, context),
             91..=99 => self.gen_agg(typ),
@@ -510,6 +521,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
         E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
+        E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
         E::CharLength => Some(Expr::Function(make_simple_func("char_length", &exprs))),
         E::Substr => Some(Expr::Function(make_simple_func("substr", &exprs))),

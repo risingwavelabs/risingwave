@@ -7,8 +7,8 @@ import com.risingwave.proto.Common.HostAddress;
 import com.risingwave.proto.Common.WorkerType;
 import com.risingwave.proto.DdlServiceGrpc;
 import com.risingwave.proto.DdlServiceGrpc.DdlServiceBlockingStub;
-import com.risingwave.proto.DdlServiceOuterClass.JavaGetTableRequest;
-import com.risingwave.proto.DdlServiceOuterClass.JavaGetTableResponse;
+import com.risingwave.proto.DdlServiceOuterClass.GetTableRequest;
+import com.risingwave.proto.DdlServiceOuterClass.GetTableResponse;
 import com.risingwave.proto.HeartbeatServiceGrpc;
 import com.risingwave.proto.HeartbeatServiceGrpc.HeartbeatServiceBlockingStub;
 import com.risingwave.proto.Hummock.HummockVersion;
@@ -97,13 +97,17 @@ public class MetaClient implements AutoCloseable {
     }
 
     public Table getTable(String databaseName, String tableName) {
-        JavaGetTableRequest req =
-                JavaGetTableRequest.newBuilder()
+        GetTableRequest req =
+                GetTableRequest.newBuilder()
                         .setDatabaseName(databaseName)
                         .setTableName(tableName)
                         .build();
-        JavaGetTableResponse resp = ddlStub.javaGetTable(req);
-        return resp.getTable();
+        GetTableResponse resp = ddlStub.getTable(req);
+        if (resp.hasTable()) {
+            return resp.getTable();
+        } else {
+            return null;
+        }
     }
 
     public ScheduledFuture<?> startHeartbeatLoop(Duration interval) {

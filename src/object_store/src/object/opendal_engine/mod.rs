@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
-use vergen::{vergen, Config, ShaKind};
+pub mod opendal_object_store;
+pub use opendal_object_store::*;
 
-fn main() -> Result<()> {
-    // Generate the default 'cargo:' instruction output
-    let mut conf = Config::default();
-    *conf.git_mut().sha_kind_mut() = ShaKind::Both;
-    vergen(conf)
-}
+#[cfg(feature = "hdfs-backend")]
+pub mod hdfs;
+#[cfg(feature = "hdfs-backend")]
+pub use hdfs::*;

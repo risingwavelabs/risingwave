@@ -24,6 +24,7 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -799,7 +800,7 @@ where
 
             for (actor_to_create, sample_actor) in actors_to_create
                 .iter()
-                .zip_eq(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
+                .zip_eq_debug(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
             {
                 let new_actor_id = actor_to_create.0;
                 let new_parallel_unit_id = actor_to_create.1;
