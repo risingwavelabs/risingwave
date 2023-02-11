@@ -112,5 +112,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill

@@ -114,7 +114,7 @@ echo "check mviews after cluster recovery"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
