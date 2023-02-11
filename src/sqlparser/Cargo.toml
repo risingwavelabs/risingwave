@@ -19,10 +19,10 @@ default = ["std"]
 std = []
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+ignored = ["workspace-hack"]
 
 [package.metadata.cargo-udeps.ignore]
-normal = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+normal = ["workspace-hack"]
 
 [dependencies]
 itertools = "0.10"
