@@ -20,10 +20,14 @@ export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
 
+echo "--- test"
+
 wget http://git.savannah.gnu.org/cgit/parallel.git/plain/src/parallel
 chmod 755 parallel
 
 echo $PATH 
+
+MADSIM_TEST_SEED=1 ./risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, ddl"
 seq $TEST_NUM | ./parallel --no-notice MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
