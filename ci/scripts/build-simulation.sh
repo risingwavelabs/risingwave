@@ -8,6 +8,9 @@ source ci/scripts/common.env.sh
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
+export CARGO_BUILD_TARGET="x86_64-unknown-linux-musl"
+rustup target add x86_64-unknown-linux-musl
+
 echo "--- Build deterministic simulation e2e test runner"
 cargo make sslt-build-all --profile ci-sim
 
