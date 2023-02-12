@@ -8,6 +8,7 @@ source ci/scripts/common.env.sh
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
+unset RUSTC_WRAPPER
 export CARGO_BUILD_TARGET="x86_64-unknown-linux-musl"
 rustup target add x86_64-unknown-linux-musl
 
