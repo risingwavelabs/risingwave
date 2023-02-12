@@ -20,7 +20,10 @@ export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
 
-sudo yum install -y parallel
+(wget -O - pi.dk/3 || lynx -source pi.dk/3 ||
+	curl pi.dk/3/ || fetch -o - http://pi.dk/3) > install.sh
+
+bash install.sh
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, ddl"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
