@@ -26,22 +26,22 @@ mkdir -p $LOGDIR
 bash install.sh
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, ddl"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, streaming"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/streaming-{}.log && rm $LOGDIR/streaming-{}.log'
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/streaming-{}.log && rm $LOGDIR/streaming-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, batch"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, kafka source"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation --kafka-datadir=./scripts/source/test_data ./e2e_test/source/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation --kafka-datadir=./scripts/source/test_data ./e2e_test/source/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel-20230122, streaming"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/parallel-20230122-streaming-{}.log && rm $LOGDIR/parallel-20230122-streaming-{}.log'
+echo "--- deterministic simulation e2e, ci-3cn-2fe, /var/lib/buildkite-agent/bin/parallel-20230122, streaming"
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR//var/lib/buildkite-agent/bin/parallel-20230122-streaming-{}.log && rm $LOGDIR//var/lib/buildkite-agent/bin/parallel-20230122-streaming-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel-20230122, batch"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-20230122-batch-{}.log && rm $LOGDIR/parallel-20230122-batch-{}.log'
+echo "--- deterministic simulation e2e, ci-3cn-2fe, /var/lib/buildkite-agent/bin/parallel-20230122, batch"
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR//var/lib/buildkite-agent/bin/parallel-20230122-batch-{}.log && rm $LOGDIR//var/lib/buildkite-agent/bin/parallel-20230122-batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing"
-seq $TEST_NUM | parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+seq $TEST_NUM | /var/lib/buildkite-agent/bin/parallel-20230122 MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
