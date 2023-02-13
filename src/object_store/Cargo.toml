@@ -39,5 +39,5 @@ tracing = "0.1"
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
-# [features]
-# hdfs-backend = ["opendal/services-hdfs"]
+[features]
+hdfs-backend = ["opendal/services-hdfs"]
