@@ -8612,7 +8612,6 @@ dependencies = [
  "regex",
  "regex-syntax",
  "reqwest",
- "ring",
  "rustls",
  "scopeguard",
  "serde",
