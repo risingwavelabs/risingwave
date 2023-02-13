@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -86,6 +86,7 @@ impl LogicalScan {
             table_desc,
             indexes,
             predicate,
+            chunk_size: None,
         };
 
         let schema = core.schema();
@@ -303,6 +304,20 @@ impl LogicalScan {
             self.ctx(),
             new_predicate,
         )
+    }
+
+    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
+    /// executor
+    pub fn set_chunk_size(&mut self, chunk_size: u32) {
+        self.core.chunk_size = Some(chunk_size);
+    }
+
+    pub fn chunk_size(&self) -> Option<u32> {
+        self.core.chunk_size
+    }
+
+    pub fn primary_key(&self) -> Vec<OrderPair> {
+        self.core.table_desc.pk.clone()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.

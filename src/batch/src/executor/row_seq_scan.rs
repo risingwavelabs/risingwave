@@ -241,7 +241,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let ordered = seq_scan_node.ordered;
 
         let epoch = source.epoch.clone();
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = if let Some(chunk_size_) = &seq_scan_node.chunk_size {
+            chunk_size_
+                .get_chunk_size()
+                .min(source.context.get_config().developer.batch_chunk_size as u32)
+        } else {
+            source.context.get_config().developer.batch_chunk_size as u32
+        };
         let metrics = source.context().task_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
@@ -262,7 +268,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_ranges,
                 ordered,
                 epoch,
-                chunk_size,
+                chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
             )))

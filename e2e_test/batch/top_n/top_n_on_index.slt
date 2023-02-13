@@ -1,0 +1,62 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(x int, y int);
+
+statement ok
+create index idx on t(x);
+
+statement ok
+create index idx2 on t(x desc);
+
+statement ok
+insert into t values (100, 3), (1, 0), (2, 3), (3, 4), (5, 4);
+
+query II
+select * from t order by x limit 1;
+----
+1 0
+
+query II
+select * from t order by x limit 3;
+----
+1 0
+2 3
+3 4
+
+query II
+select * from t order by x desc limit 1;
+----
+100 3
+
+query II
+select * from t order by x desc limit 3;
+----
+100 3
+5 4
+3 4
+
+statement ok
+create table t1(x int primary key, y int);
+
+statement ok
+insert into t1 values (100, 3), (1, 0), (2, 3), (3, 4), (5, 4);
+
+query II
+select * from t1 order by x limit 1;
+----
+1 0
+
+query II
+select * from t1 order by x limit 3;
+----
+1 0
+2 3
+3 4
+
+statement ok
+drop table t;
+
+statement ok
+drop table t1;

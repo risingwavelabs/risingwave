@@ -112,6 +112,7 @@ opt-level = 3
 [profile.ci-sim]
 inherits = "dev"
 opt-level = 2
+incremental = false
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

@@ -22,6 +22,9 @@ ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 auto_enums = { version = "0.7", features = ["futures"] }
+aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
+aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
+aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4" }
@@ -35,8 +38,6 @@ crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
-flate2 = { version = "1", features = ["zlib"] }
-frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
@@ -49,7 +50,6 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hdrhistogram = { version = "7" }
 hyper = { version = "0.14", features = ["full"] }
-indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -59,14 +59,13 @@ lexical-util = { version = "0.8", default-features = false, features = ["format"
 lexical-write-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
-libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+mime_guess = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
-nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
@@ -82,16 +81,17 @@ rand = { version = "0.8", features = ["small_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
-reqwest = { version = "0.11", features = ["json"] }
-ring = { version = "0.16", features = ["std"] }
+reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls-native-roots", "stream"] }
+rustls = { version = "0.20" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
-time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing", "serde"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
+tokio-rustls = { version = "0.23" }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
@@ -99,9 +99,14 @@ tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
+tracing-futures = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
+triomphe = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
+zstd = { version = "0.11" }
+zstd-safe = { version = "5", default-features = false, features = ["arrays", "legacy", "std", "zdict_builder"] }
+zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -109,6 +114,9 @@ anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 auto_enums = { version = "0.7", features = ["futures"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "std"] }
+aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
+aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
+aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
@@ -123,8 +131,6 @@ crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
-flate2 = { version = "1", features = ["zlib"] }
-frunk_core = { version = "0.4", default-features = false, features = ["std"] }
 futures = { version = "0.3" }
 futures-channel = { version = "0.3", features = ["sink"] }
 futures-core = { version = "0.3" }
@@ -137,7 +143,6 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hdrhistogram = { version = "7" }
 hyper = { version = "0.14", features = ["full"] }
-indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -147,14 +152,13 @@ lexical-util = { version = "0.8", default-features = false, features = ["format"
 lexical-write-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-write-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
 libc = { version = "0.2", features = ["extra_traits"] }
-libz-sys = { version = "1", default-features = false, features = ["libc"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
+mime_guess = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
-nom = { version = "7" }
 num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
@@ -171,17 +175,19 @@ rand = { version = "0.8", features = ["small_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
-reqwest = { version = "0.11", features = ["json"] }
-ring = { version = "0.16", features = ["std"] }
+reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls-native-roots", "stream"] }
+rustls = { version = "0.20" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
-smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
-time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing", "serde"] }
+time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
+tokio-rustls = { version = "0.23" }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
@@ -190,8 +196,13 @@ tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
+tracing-futures = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
+triomphe = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
+zstd = { version = "0.11" }
+zstd-safe = { version = "5", default-features = false, features = ["arrays", "legacy", "std", "zdict_builder"] }
+zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 ### END HAKARI SECTION
