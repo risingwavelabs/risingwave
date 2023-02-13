@@ -270,8 +270,8 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         .await
     }
 
-    /// Create a state table without distribution, used for unit tests.
-    pub async fn new_with_value_indices_without_distribution(
+    /// Create a state table without distribution, with given `value_indices`, used for unit tests.
+    pub async fn new_without_distribution_with_value_indices(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
@@ -308,27 +308,6 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             Distribution::fallback(),
             None,
             true,
-        )
-        .await
-    }
-
-    /// Create a state table with given `value_indices`, used for unit tests.
-    pub async fn new_without_distribution_partial(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        value_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-            Some(value_indices),
         )
         .await
     }
