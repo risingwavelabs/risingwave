@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod model;
+pub mod model;
 
 use std::sync::Arc;
 
 use risingwave_pb::meta::SystemParams;
 
-use self::model::KvSingletonModel;
+use self::model::SystemParamsModel;
 use super::MetaSrvEnv;
 use crate::storage::MetaStore;
 use crate::MetaResult;
