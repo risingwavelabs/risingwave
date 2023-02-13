@@ -38,7 +38,7 @@ pub struct AggGroup<S: StateStore> {
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
 
-    /// TODO(rctmp): comment
+    /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
 
     /// Previous outputs of managed states. Initializing with `None`.
@@ -101,7 +101,7 @@ impl<S: StateStore> AggGroup<S> {
         Ok(Self {
             group_key,
             states,
-            distinct_dedup: DistinctDeduplicater::new(agg_calls), // TODO(rctmp)
+            distinct_dedup: DistinctDeduplicater::new(agg_calls),
             prev_outputs,
         })
     }

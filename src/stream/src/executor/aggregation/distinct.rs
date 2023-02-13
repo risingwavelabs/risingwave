@@ -67,7 +67,6 @@ impl<S: StateStore> Deduplicater<S> {
         group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         assert_eq!(visibilities.len(), self.agg_call_indices.len());
-        println!("[rc] column: {:?}", column);
 
         // TODO(rc): move to field of `Deduplicater`
         let mut cache = HashMap::new();
@@ -98,7 +97,6 @@ impl<S: StateStore> Deduplicater<S> {
                             .collect()
                     },
                 );
-                println!("[rc] initial counts: {:?}", counts);
                 cache.insert(datum, counts);
                 cache.get_mut(&datum).unwrap()
             };
@@ -110,7 +108,6 @@ impl<S: StateStore> Deduplicater<S> {
                     for (i, vis) in visibilities.iter().enumerate() {
                         if vis.is_set(datum_idx) {
                             counts[i] += 1;
-                            println!("[rc] count up for datum {:?}, count: {}", datum, counts[i]);
                             if counts[i] > 1 {
                                 // duplicate, hide this one
                                 vis_masks_inv[i].set(datum_idx, true);
@@ -123,10 +120,6 @@ impl<S: StateStore> Deduplicater<S> {
                     for (i, vis) in visibilities.iter().enumerate() {
                         if vis.is_set(datum_idx) {
                             counts[i] -= 1;
-                            println!(
-                                "[rc] count down for datum {:?}, count: {}",
-                                datum, counts[i]
-                            );
                             debug_assert!(counts[i] >= 0);
                             if counts[i] > 0 {
                                 // still exists at least one duplicate, hide this one
@@ -138,8 +131,6 @@ impl<S: StateStore> Deduplicater<S> {
             }
         }
 
-        println!("[rc] count cache: {:?}", cache);
-        println!("[rc] change set: {:?}", old_rows);
         cache.into_iter().for_each(|(key, counts)| {
             let new_row = group_key.chain(row::once(key)).chain(OwnedRow::new(
                 counts.into_iter().map(ScalarImpl::from).map(Some).collect(),
@@ -158,7 +149,6 @@ impl<S: StateStore> Deduplicater<S> {
                 **vis = vis.as_ref() & VisRef::from(&mask);
             }
         }
-        println!("[rc] new visibilities: {:?}", visibilities);
 
         Ok(())
     }
@@ -204,6 +194,8 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         }
     }
 
+    /// Deduplicate the chunk for each agg call, by returning new visibilities
+    /// that hide duplicate rows.
     pub async fn dedup_chunk(
         &mut self,
         ops: &[Op],
@@ -239,6 +231,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             .collect())
     }
 
+    /// Flush dedup state caches to dedup tables.
     pub fn flush(
         &self,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
