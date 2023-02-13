@@ -47,7 +47,7 @@ macro_rules! for_all_undeprecated_params {
 }
 
 macro_rules! impl_system_params_to_kv {
-    ($({ $field:ident, $key:expr },)*) => {
+    ($({ $field:ident, $key:path },)*) => {
         /// All undeprecated fields are guaranteed to be contained in the returned map.
         /// Return error if there are missing fields.
         pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
@@ -67,58 +67,50 @@ macro_rules! impl_system_params_to_kv {
     };
 }
 
-/// For each field in `SystemParams`, one of these rules apply:
-/// - Up-to-date: Required. If it is not present, may try to derive it from previous versions of
-///   this field.
-/// - Deprecated: Optional.
-/// - Unrecognized: Not allowed.
-pub fn system_params_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<SystemParams> {
-    let mut ret = SystemParams::default();
-    let mut expected_keys: HashSet<_> = [
-        BARRIER_INTERVAL_MS_KEY,
-        CHECKPOINT_FREQUENCY_KEY,
-        SSTABLE_SIZE_MB_KEY,
-        BLOCK_SIZE_KB_KEY,
-        BLOOM_FALSE_POSITIVE_KEY,
-        STATE_STORE_KEY,
-        DATA_DIRECTORY_KEY,
-        BACKUP_STORAGE_URL_KEY,
-        BACKUP_STORAGE_DIRECTORY_KEY,
-    ]
-    .iter()
-    .cloned()
-    .collect();
-    for (k, v) in kvs {
-        let k = String::from_utf8(k).unwrap();
-        let v = String::from_utf8(v).unwrap();
-        match k.as_str() {
-            BARRIER_INTERVAL_MS_KEY => ret.barrier_interval_ms = Some(v.parse().unwrap()),
-            CHECKPOINT_FREQUENCY_KEY => ret.checkpoint_frequency = Some(v.parse().unwrap()),
-            SSTABLE_SIZE_MB_KEY => ret.sstable_size_mb = Some(v.parse().unwrap()),
-            BLOCK_SIZE_KB_KEY => ret.block_size_kb = Some(v.parse().unwrap()),
-            BLOOM_FALSE_POSITIVE_KEY => ret.bloom_false_positive = Some(v.parse().unwrap()),
-            STATE_STORE_KEY => ret.state_store = Some(v),
-            DATA_DIRECTORY_KEY => ret.data_directory = Some(v),
-            BACKUP_STORAGE_URL_KEY => ret.backup_storage_url = Some(v),
-            BACKUP_STORAGE_DIRECTORY_KEY => ret.backup_storage_directory = Some(v),
-            _ => {
+macro_rules! impl_system_params_from_kv {
+    ($({ $field:ident, $key:path },)*) => {
+        /// For each field in `SystemParams`, one of these rules apply:
+        /// - Up-to-date: Guaranteed to be `Some`. If it is not present, may try to derive it from previous
+        ///   versions of this field.
+        /// - Deprecated: Guaranteed to be `None`.
+        /// - Unrecognized: Not allowed.
+        pub fn system_params_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<SystemParams> {
+            let mut ret = SystemParams::default();
+            let mut expected_keys: HashSet<_> = [
+                $($key,)*
+            ]
+            .iter()
+            .cloned()
+            .collect();
+            for (k, v) in kvs {
+                let k = String::from_utf8(k).unwrap();
+                let v = String::from_utf8(v).unwrap();
+                match k.as_str() {
+                    $(
+                        $key => ret.$field = Some(v.parse().unwrap()),
+                    )*
+                    _ => {
+                        return Err(ErrorCode::SystemParamsError(format!(
+                            "unrecognized system param {:?}",
+                            k
+                        ))
+                        .into());
+                    }
+                }
+                expected_keys.remove(k.as_str());
+            }
+            if !expected_keys.is_empty() {
                 return Err(ErrorCode::SystemParamsError(format!(
-                    "unrecognized system param {:?}",
-                    k
+                    "missing system param {:?}",
+                    expected_keys
                 ))
                 .into());
             }
+            Ok(ret)
         }
-        expected_keys.remove(k.as_str());
-    }
-    if !expected_keys.is_empty() {
-        return Err(ErrorCode::SystemParamsError(format!(
-            "missing system param {:?}",
-            expected_keys
-        ))
-        .into());
-    }
-    Ok(ret)
+    };
 }
+
+for_all_undeprecated_params!(impl_system_params_from_kv);
 
 for_all_undeprecated_params!(impl_system_params_to_kv);
