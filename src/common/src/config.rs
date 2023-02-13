@@ -46,6 +46,7 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
+    // TODO(zhidong): warn deprecated config
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
@@ -256,14 +257,20 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Target size of the Sstable.
     #[serde(default = "default::storage::sst_size_mb")]
     pub sstable_size_mb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Size of each block in bytes in SST.
     #[serde(default = "default::storage::block_size_kb")]
     pub block_size_kb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// False positive probability of bloom filter.
     #[serde(default = "default::storage::bloom_false_positive")]
     pub bloom_false_positive: f64,
@@ -282,10 +289,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
 
-    /// State store url.
-    #[serde(default = "default::storage::state_store")]
-    pub state_store: String,
-
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
     pub data_directory: String,
@@ -442,9 +447,13 @@ impl Default for DeveloperConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote storage url for storing snapshots.
     #[serde(default = "default::backup::storage_url")]
     pub storage_url: String,
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing snapshots.
     #[serde(default = "default::backup::storage_directory")]
     pub storage_directory: String,
@@ -540,12 +549,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn state_store() -> String {
-            // May be problematic for multi-node deployment, but since we override it with CLI and
-            // it will be removed soon, it won't be a problem.
-            "hummock+memory".to_string()
         }
 
         pub fn data_directory() -> String {
