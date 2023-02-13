@@ -21,7 +21,7 @@ use crate::error::{ErrorCode, RwError};
 
 type Result<T> = core::result::Result<T, RwError>;
 
-// Includes deprecated params. Used to define key constans.
+// Includes deprecated params. Used to define key constants.
 macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
