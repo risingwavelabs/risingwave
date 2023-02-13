@@ -44,6 +44,21 @@ fn unix_epoch_days() -> i32 {
         .num_days_from_ce()
 }
 
+pub fn get_from_avro_record<'a>(avro_value: &'a Value, field_name: &str) -> Result<&'a Value> {
+    if let Value::Record(fields) = avro_value {
+        fields
+            .iter()
+            .find(|val| val.0.eq(field_name))
+            .map(|entry| &entry.1)
+            .ok_or_else(|| RwError::from(ProtocolError("no payload in debezium event".to_owned())))
+    } else {
+        Err(RwError::from(ProtocolError(format!(
+            "avro parse unexpected field {}",
+            field_name
+        ))))
+    }
+}
+
 impl_common_parser_logic!(AvroParser);
 
 #[derive(Debug)]
@@ -55,8 +70,8 @@ pub struct AvroParser {
 
 #[derive(Debug, Clone)]
 pub struct AvroParserConfig {
-    schema: Arc<Schema>,
-    schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
+    pub schema: Arc<Schema>,
+    pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
 }
 
 impl AvroParserConfig {
@@ -275,7 +290,7 @@ impl AvroParser {
 ///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
 ///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
 #[inline]
-fn from_avro_value(value: Value) -> Result<Datum> {
+pub fn from_avro_value(value: Value) -> Result<Datum> {
     let v = match value {
         Value::Null => {
             return Ok(None);

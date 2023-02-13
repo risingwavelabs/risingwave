@@ -13,6 +13,6 @@
 // limitations under the License.
 
 mod parser;
-mod schema_resolver;
+pub mod schema_resolver;
 
 pub use parser::*;
