@@ -494,8 +494,17 @@ where
 
     async fn replace_table_plan(
         &self,
-        _request: Request<ReplaceTablePlanRequest>,
+        request: Request<ReplaceTablePlanRequest>,
     ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
+        let req = request.into_inner();
+
+        let mut stream_job = StreamingJob::Table(None, req.table.unwrap());
+        let fragment_graph = req.fragment_graph.unwrap();
+
+        let _ = self
+            .replace_table_inner(&mut stream_job, fragment_graph)
+            .await?;
+
         Err(Status::unimplemented(
             "replace table plan is not implemented yet",
         ))
@@ -624,7 +633,7 @@ where
             .collect();
 
         let complete_graph =
-            CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
+            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?;
 
         // 7. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
@@ -810,6 +819,65 @@ where
         self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(version)
+    }
+
+    async fn replace_table_inner(
+        &self,
+        stream_job: &mut StreamingJob,
+        fragment_graph: StreamFragmentGraphProto,
+    ) -> MetaResult<()> {
+        let id = stream_job.id();
+
+        // 2. Get the env for streaming jobs.
+        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+
+        // 3. Build fragment graph.
+        let fragment_graph =
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+                .await?;
+        assert!(fragment_graph.internal_tables().is_empty());
+
+        // 4. Set the graph-related fields and freeze the `stream_job`.
+        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        let stream_job = &*stream_job;
+
+        // 5. Mark current relation as "creating" and add reference count to dependent relations.
+        // self.catalog_manager
+        //     .start_create_stream_job_procedure(stream_job)
+        //     .await?;
+
+        // 6. Resolve the downstream fragments, extend the fragment graph to a complete graph that
+        // contains all information needed for building the actor graph.
+        let downstream_fragments = self
+            .fragment_manager
+            .get_downstream_chain_fragments(id.into())
+            .await?;
+
+        let complete_graph =
+            CompleteStreamFragmentGraph::with_downstreams(fragment_graph, downstream_fragments)?;
+
+        // 7. Build the actor graph.
+        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let actor_graph_builder = ActorGraphBuilder::new(complete_graph, cluster_info, None)?;
+
+        let ActorGraphBuildResult {
+            graph,
+            building_locations,
+            existing_locations: _,
+            dispatchers: _,
+        } = actor_graph_builder
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .await?;
+
+        // 8. Build the table fragments structure that will be persisted in the stream manager, and
+        // the context that contains all information needed for building the actors on the compute
+        // nodes.
+        let table_fragments =
+            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+
+        println!("table fragments: {:?}", table_fragments);
+
+        Ok(())
     }
 
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {

@@ -166,6 +166,8 @@ pub(super) enum EdgeId {
         /// The ID of the downstream fragment.
         downstream_fragment_id: GlobalFragmentId,
     },
+
+    DownstreamExternal {},
 }
 
 /// The edge in the fragment graph.
@@ -372,7 +374,7 @@ impl CompleteStreamFragmentGraph {
 
     /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV. Returns an error if the upstream
     /// `Matererialize` is failed to resolve.
-    pub fn new(
+    pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
     ) -> MetaResult<Self> {
@@ -416,6 +418,56 @@ impl CompleteStreamFragmentGraph {
 
         let existing_fragments = upstream_mview_fragments
             .into_values()
+            .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
+            .collect();
+
+        Ok(Self {
+            building_graph: graph,
+            existing_fragments,
+            extra_downstreams,
+            extra_upstreams,
+        })
+    }
+
+    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table.
+    pub fn with_downstreams(
+        graph: StreamFragmentGraph,
+        downstream_fragments: Vec<Fragment>,
+    ) -> MetaResult<Self> {
+        let mut extra_downstreams = HashMap::new();
+        let mut extra_upstreams = HashMap::new();
+
+        let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+
+        // Build the extra edges between the `Materialize` and the downstream `Chain` of the
+        // existing materialized views.
+        for fragment in &downstream_fragments {
+            let id = GlobalFragmentId::new(fragment.fragment_id);
+
+            let edge = StreamFragmentEdge {
+                id: EdgeId::DownstreamExternal {},
+                // We always use `NoShuffle` for the exchange between the upstream `Materialize`
+                // and the downstream `Chain` of the new materialized view.
+                dispatch_strategy: DispatchStrategy {
+                    r#type: DispatcherType::NoShuffle as _,
+                    ..Default::default()
+                },
+            };
+
+            extra_downstreams
+                .entry(table_fragment_id)
+                .or_insert_with(HashMap::new)
+                .try_insert(id, edge.clone())
+                .unwrap();
+            extra_upstreams
+                .entry(id)
+                .or_insert_with(HashMap::new)
+                .try_insert(table_fragment_id, edge)
+                .unwrap();
+        }
+
+        let existing_fragments = downstream_fragments
+            .into_iter()
             .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
             .collect();
 

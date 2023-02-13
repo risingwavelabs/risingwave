@@ -249,6 +249,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn replace_table(&self, table: ProstTable, _graph: StreamFragmentGraph) -> Result<()> {
+        self.catalog.write().update_table(&table);
+        Ok(())
+    }
+
     async fn create_source(&self, source: ProstSource) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }

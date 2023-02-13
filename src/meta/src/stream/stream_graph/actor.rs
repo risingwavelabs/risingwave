@@ -247,8 +247,11 @@ impl ActorBuilder {
 /// to the upstream actors, by adding new dispatchers.
 #[derive(Default)]
 struct ExternalChange {
-    /// The new downstreams to be added.
+    /// The new downstreams to be added, indexed by the dispatcher ID.
     new_downstreams: HashMap<DispatcherId, Dispatcher>,
+
+    /// The new upstreams to be added (replaced), indexed by the upstream fragment ID.
+    new_upstreams: HashMap<FragmentId, ActorUpstream>,
 }
 
 impl ExternalChange {
@@ -256,6 +259,12 @@ impl ExternalChange {
     fn add_dispatcher(&mut self, dispatcher: Dispatcher) {
         self.new_downstreams
             .try_insert(dispatcher.dispatcher_id, dispatcher)
+            .unwrap();
+    }
+
+    fn add_upstream(&mut self, upstream: ActorUpstream) {
+        self.new_upstreams
+            .try_insert(upstream.fragment_id.as_global_id(), upstream)
             .unwrap();
     }
 }
@@ -381,7 +390,10 @@ impl ActorGraphBuildStateInner {
         if let Some(actor_builder) = self.actor_builders.get_mut(&actor_id) {
             actor_builder.add_upstream(upstream);
         } else {
-            unreachable!()
+            self.external_changes
+                .entry(actor_id)
+                .or_default()
+                .add_upstream(upstream);
         }
     }
 
@@ -553,6 +565,8 @@ pub struct ActorGraphBuilder {
     /// The pre-scheduled distribution for each building fragment.
     distributions: HashMap<GlobalFragmentId, Distribution>,
 
+    existing_distributions: HashMap<GlobalFragmentId, Distribution>,
+
     /// The complete fragment graph.
     fragment_graph: CompleteStreamFragmentGraph,
 
@@ -568,6 +582,8 @@ impl ActorGraphBuilder {
         cluster_info: StreamingClusterInfo,
         default_parallelism: Option<NonZeroUsize>,
     ) -> MetaResult<Self> {
+        let existing_distributions = fragment_graph.existing_distribution();
+
         // Schedule the distribution of all building fragments.
         let distributions = schedule::Scheduler::new(
             cluster_info.parallel_units.values().cloned(),
@@ -577,9 +593,19 @@ impl ActorGraphBuilder {
 
         Ok(Self {
             distributions,
+            existing_distributions,
             fragment_graph,
             cluster_info,
         })
+    }
+
+    /// Get the distribution of the given fragment. Will look up the distribution map of both the
+    /// building and existing fragments.
+    fn get_distribution(&self, fragment_id: GlobalFragmentId) -> &Distribution {
+        self.distributions
+            .get(&fragment_id)
+            .or_else(|| self.existing_distributions.get(&fragment_id))
+            .unwrap()
     }
 
     /// Convert the actor location map to the [`Locations`] struct.
@@ -668,6 +694,8 @@ impl ActorGraphBuilder {
             })
             .collect();
 
+        // TODO: extract merge update
+
         Ok(ActorGraphBuildResult {
             graph,
             building_locations,
@@ -696,16 +724,16 @@ impl ActorGraphBuilder {
         state: &mut ActorGraphBuildState,
     ) -> MetaResult<()> {
         let current_fragment = self.fragment_graph.get_fragment(fragment_id);
+        let distribution = self.get_distribution(fragment_id);
 
         // First, add or record the actors for the current fragment into the state.
-        let (distribution, actor_ids) = match current_fragment {
+        let actor_ids = match current_fragment {
             // For building fragments, we need to generate the actor builders.
             EitherFragment::Building(current_fragment) => {
                 let node = Arc::new(current_fragment.node.clone().unwrap());
-                let distribution = self.distributions[&fragment_id].clone();
                 let bitmaps = distribution.as_hash().map(|m| m.to_bitmaps());
 
-                let actor_ids = distribution
+                distribution
                     .parallel_units()
                     .map(|parallel_unit_id| {
                         let actor_id = state.next_actor_id();
@@ -721,37 +749,29 @@ impl ActorGraphBuilder {
 
                         actor_id
                     })
-                    .collect_vec();
-
-                (distribution, actor_ids)
+                    .collect_vec()
             }
 
             // For existing fragments, we only need to record the actor locations.
-            EitherFragment::Existing(existing_fragment) => {
-                let distribution = Distribution::from_fragment(&existing_fragment);
+            EitherFragment::Existing(existing_fragment) => existing_fragment
+                .actors
+                .iter()
+                .map(|a| {
+                    let actor_id = GlobalActorId::new(a.actor_id);
+                    let parallel_unit_id = match &distribution {
+                        Distribution::Singleton(parallel_unit_id) => *parallel_unit_id,
+                        Distribution::Hash(mapping) => mapping
+                            .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
+                            .unwrap(),
+                    };
 
-                let actor_ids = existing_fragment
-                    .actors
-                    .iter()
-                    .map(|a| {
-                        let actor_id = GlobalActorId::new(a.actor_id);
-                        let parallel_unit_id = match &distribution {
-                            Distribution::Singleton(parallel_unit_id) => *parallel_unit_id,
-                            Distribution::Hash(mapping) => mapping
-                                .get_matched(&Bitmap::from(a.get_vnode_bitmap().unwrap()))
-                                .unwrap(),
-                        };
+                    state
+                        .inner
+                        .record_external_location(actor_id, parallel_unit_id);
 
-                        state
-                            .inner
-                            .record_external_location(actor_id, parallel_unit_id);
-
-                        actor_id
-                    })
-                    .collect_vec();
-
-                (distribution, actor_ids)
-            }
+                    actor_id
+                })
+                .collect_vec(),
         };
 
         // Then, add links between the current fragment and its downstream fragments.
@@ -761,15 +781,13 @@ impl ActorGraphBuilder {
                 .get(&downstream_fragment_id)
                 .expect("downstream fragment not processed yet");
 
-            // TODO(bugen): For replacing fragments, it's possible that the downstream fragment is
-            // an external one. We should also record the external distribution then.
-            let downstream_distribution = &self.distributions[&downstream_fragment_id];
+            let downstream_distribution = self.get_distribution(downstream_fragment_id);
 
             state.inner.add_link(
                 FragmentLinkNode {
                     fragment_id,
                     actor_ids: &actor_ids,
-                    distribution: &distribution,
+                    distribution,
                 },
                 FragmentLinkNode {
                     fragment_id: downstream_fragment_id,
