@@ -244,7 +244,6 @@ async fn init_metadata_for_replay(
     meta_client.activate(advertise_addr).await.unwrap();
 
     let tables = meta_client.risectl_list_state_tables().await?;
-    let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
     let (new_meta_client, _) =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
@@ -254,8 +253,9 @@ async fn init_metadata_for_replay(
         *table_id = table_to_check.id;
     }
 
+    // No need to init compaction_groups, because it will be done when replaying version delta.
     new_meta_client
-        .init_metadata_for_replay(tables, compaction_groups)
+        .init_metadata_for_replay(tables, vec![])
         .await?;
 
     // shift the sst id to avoid conflict with the original meta node

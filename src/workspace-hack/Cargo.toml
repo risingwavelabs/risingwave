@@ -35,6 +35,7 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
+digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -63,7 +64,6 @@ lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] 
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
-mime_guess = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 num-bigint = { version = "0.4" }
@@ -81,17 +81,16 @@ rand = { version = "0.8", features = ["small_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
-reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls-native-roots", "stream"] }
-rustls = { version = "0.20" }
+reqwest = { version = "0.11", features = ["json"] }
+ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
-time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing", "serde"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
-tokio-rustls = { version = "0.23" }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
@@ -128,6 +127,7 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
+digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -156,7 +156,6 @@ lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] 
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
-mime_guess = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
 num-bigint = { version = "0.4" }
@@ -175,8 +174,8 @@ rand = { version = "0.8", features = ["small_rng"] }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
-reqwest = { version = "0.11", features = ["json", "multipart", "rustls-tls-native-roots", "stream"] }
-rustls = { version = "0.20" }
+reqwest = { version = "0.11", features = ["json"] }
+ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
@@ -184,10 +183,8 @@ socket2 = { version = "0.4", default-features = false, features = ["all"] }
 stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
-time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing", "serde"] }
-time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing", "serde"] }
+time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
-tokio-rustls = { version = "0.23" }
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
