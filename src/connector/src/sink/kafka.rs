@@ -253,10 +253,30 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         }
         Ok(())
     }
+}
+
+#[async_trait::async_trait]
+impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        if APPEND_ONLY {
+            self.append_only(chunk, &self.schema).await
+        } else {
+            // TODO: Distinguish "upsert" from "debezium" later.
+            self.debezium_update(
+                chunk,
+                &self.schema,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            )
+            .await
+        }
+    }
 
     // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
-    async fn begin_epoch_common(&mut self, epoch: u64) -> Result<()> {
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
         self.do_with_retry(|conductor| conductor.start_transaction())
             .await?;
@@ -264,7 +284,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         Ok(())
     }
 
-    async fn commit_common(&mut self) -> Result<()> {
+    async fn commit(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.flush()) // flush before commit
             .await?;
 
@@ -283,59 +303,12 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         Ok(())
     }
 
-    async fn abort_common(&mut self) -> Result<()> {
+    async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await?;
         tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
         self.in_transaction_epoch = None;
         Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl Sink for KafkaSink<true> {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        self.append_only(chunk, &self.schema).await
-    }
-
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.begin_epoch_common(epoch).await
-    }
-
-    async fn commit(&mut self) -> Result<()> {
-        self.commit_common().await
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        self.abort_common().await
-    }
-}
-
-#[async_trait::async_trait]
-impl Sink for KafkaSink<false> {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // TODO: Distinguish "upsert" from "debezium" later.
-        self.debezium_update(
-            chunk,
-            &self.schema,
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
-        )
-        .await
-    }
-
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.begin_epoch_common(epoch).await
-    }
-
-    async fn commit(&mut self) -> Result<()> {
-        self.commit_common().await
-    }
-
-    async fn abort(&mut self) -> Result<()> {
-        self.abort_common().await
     }
 }
 
@@ -606,7 +579,7 @@ mod test {
 
         for i in 0..10 {
             let mut fail_flag = false;
-            sink.begin_epoch_common(i).await?;
+            sink.begin_epoch(i).await?;
             for i in 0..100 {
                 match sink
                     .send(
