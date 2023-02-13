@@ -51,6 +51,7 @@ use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution
 use risingwave_storage::StateStore;
 use tracing::trace;
 
+use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -59,7 +60,10 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTable<
+    S: StateStore,
+    W: WatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+> {
     /// Id for this table.
     table_id: TableId,
 
@@ -119,12 +123,11 @@ pub struct StateTable<S: StateStore> {
     /// latest watermark
     cur_watermark: Option<ScalarImpl>,
 
-    /// number of commits with watermark since the last time we did state cleaning by watermark.
-    num_wmked_commits_since_last_clean: usize,
+    watermark_buffer_strategy: W,
 }
 
 // initialize
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     /// Create state table from table catalog and store.
     pub async fn from_table_catalog(
         table_catalog: &Table,
@@ -243,7 +246,7 @@ impl<S: StateStore> StateTable<S> {
             epoch: None,
             last_watermark: None,
             cur_watermark: None,
-            num_wmked_commits_since_last_clean: 0,
+            watermark_buffer_strategy: W::default(),
         }
     }
 
@@ -424,7 +427,7 @@ impl<S: StateStore> StateTable<S> {
             epoch: None,
             last_watermark: None,
             cur_watermark: None,
-            num_wmked_commits_since_last_clean: 0,
+            watermark_buffer_strategy: W::default(),
         }
     }
 
@@ -595,6 +598,7 @@ impl<S: StateStore> StateTable<S> {
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
+
 // write
 impl<S: StateStore> StateTable<S> {
     #[expect(clippy::boxed_local)]
@@ -750,9 +754,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
-        if self.cur_watermark.is_some() {
-            self.num_wmked_commits_since_last_clean += 1;
-        }
+        assert!(self.cur_watermark.is_none());
         self.update_epoch(new_epoch);
     }
 
@@ -762,15 +764,19 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Bytes, KeyOp>,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
-        let watermark = self.cur_watermark.as_ref().and_then(|cur_watermark_ref| {
-            self.num_wmked_commits_since_last_clean += 1;
-
-            if self.num_wmked_commits_since_last_clean >= STATE_CLEANING_PERIOD_EPOCH {
-                Some(cur_watermark_ref)
+        let watermark = {
+            if let Some(watermark) = self.cur_watermark.take() {
+                self.watermark_buffer_strategy.tick();
+                if !self.watermark_buffer_strategy.apply() {
+                    self.cur_watermark = Some(watermark);
+                    None
+                } else {
+                    Some(watermark)
+                }
             } else {
                 None
             }
-        });
+        };
 
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
@@ -835,10 +841,6 @@ impl<S: StateStore> StateTable<S> {
             }
         }
         write_batch.ingest().await?;
-        if watermark.is_some() {
-            self.last_watermark = self.cur_watermark.take();
-            self.num_wmked_commits_since_last_clean = 0;
-        }
         Ok(())
     }
 
@@ -950,7 +952,7 @@ fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U
 }
 
 // Iterator functions
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(row::empty()).await
