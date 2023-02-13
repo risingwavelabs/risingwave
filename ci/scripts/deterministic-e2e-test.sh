@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+echo "--- Begin deterministic-e2e-test.sh"
+
 source ci/scripts/common.env.sh
 
 echo "--- Download artifacts"

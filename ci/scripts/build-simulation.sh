@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+echo "--- Begin build-simulation.sh"
+
 source ci/scripts/common.env.sh
 
 echo "--- Generate RiseDev CI config"

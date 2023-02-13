@@ -25,9 +25,6 @@ done
 shift $((OPTIND -1))
 
 echo "--- Rust cargo-sort check"
-
-echo $BUILDKITE_PIPELINE_ID
-echo $BUILDKITE_ARTIFACT_UPLOAD_DESTINATION
 cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
