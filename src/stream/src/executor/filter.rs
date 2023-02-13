@@ -198,8 +198,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::test_utils::MockSource;
