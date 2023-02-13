@@ -36,3 +36,4 @@ RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-so
 
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
+ENV CARGO_INCREMENTAL=0

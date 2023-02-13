@@ -29,15 +29,15 @@ profile:
       # If you want to use other s3 compatible object store, open this flag:
       #   s3-compatible: false
 
+      # If you want to create CDC source table, uncomment the following line
+      # - use: connector-node
+
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
       #   unsafe-no-fsync: true
       - use: meta-node
       - use: compute-node
       - use: frontend
-
-      # If you want to create CDC source, uncomment the following line
-      # - use: connector-node
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
       # - use: compactor
@@ -663,7 +663,7 @@ template:
     enable-tiered-cache: false
 
     # RPC endpoint for connector node
-    connector-rpc-endpoint: "127.0.0.1:60061"
+    connector-rpc-endpoint: "127.0.0.1:50051"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -718,7 +718,7 @@ template:
     id: meta-node-${port}
 
     # RPC endpoint for connector node colocated with Meta
-    connector-rpc-endpoint: "127.0.0.1:60061"
+    connector-rpc-endpoint: "127.0.0.1:50051"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -835,7 +835,7 @@ template:
     address: "127.0.0.1"
 
     # Connector node listen port
-    port: 60061
+    port: 50051
 
     # Id of this instance
     id: connector-${port}

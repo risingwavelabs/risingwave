@@ -12,21 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(rustdoc::private_intra_doc_links)]
-#![feature(let_chains)]
-#![feature(fn_traits)]
-#![feature(assert_matches)]
-#![feature(lint_reasons)]
-#![feature(iterator_try_collect)]
-#![feature(exclusive_range_pattern)]
-#![feature(once_cell)]
-#![feature(try_blocks)]
+//! The entry point to combine all integration tests into a single binary.
+//!
+//! See [this post](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html)
+//! for the rationale behind this approach.
 
-mod error;
-pub mod expr;
-pub mod sig;
-pub mod table_function;
-pub mod vector_op;
-
-pub use error::{ExprError, Result};
-use risingwave_common::{bail, ensure};
+mod cascade_materialized_view;
+mod dynamic_filter;
+mod hello;
+mod nexmark_chaos;
+mod nexmark_q4;
+mod nexmark_source;
+mod singleton_migration;
+mod streaming_parallelism;
