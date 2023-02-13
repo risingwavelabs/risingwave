@@ -118,7 +118,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         )
         .await;
         let distinct_dedup_tables =
-            build_distinct_dedup_table_from_proto(node.get_dedup_tables(), store, vnodes).await;
+            build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
+                .await;
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,

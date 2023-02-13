@@ -50,7 +50,8 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             StateTable::from_table_catalog(node.get_result_table().unwrap(), store.clone(), None)
                 .await;
         let distinct_dedup_tables =
-            build_distinct_dedup_table_from_proto(node.get_dedup_tables(), store, None).await;
+            build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
+                .await;
 
         Ok(GlobalSimpleAggExecutor::new(
             params.actor_context,

@@ -537,7 +537,7 @@ pub fn to_stream_prost_body(
             let me = &me.core;
             let result_table = me.infer_result_table(base, None);
             let agg_states = me.infer_stream_agg_state(base, None);
-            let dedup_tables = me.infer_distinct_dedup_table(base, None);
+            let distinct_dedup_tables = me.infer_distinct_dedup_table(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
                 agg_calls: me
@@ -561,7 +561,7 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                dedup_tables: dedup_tables
+                distinct_dedup_tables: distinct_dedup_tables
                     .into_iter()
                     .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
@@ -586,7 +586,7 @@ pub fn to_stream_prost_body(
         Node::HashAgg(me) => {
             let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
             let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
-            let dedup_tables = me.core.infer_distinct_dedup_table(base, me.vnode_col_idx);
+            let distinct_dedup_tables = me.core.infer_distinct_dedup_table(base, me.vnode_col_idx);
 
             ProstNode::HashAgg(HashAggNode {
                 group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
@@ -607,7 +607,7 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                dedup_tables: dedup_tables
+                distinct_dedup_tables: distinct_dedup_tables
                     .into_iter()
                     .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
@@ -697,7 +697,7 @@ pub fn to_stream_prost_body(
                 agg_call_states: vec![],
                 result_table: None,
                 is_append_only: me.input.0.append_only,
-                dedup_tables: Default::default(),
+                distinct_dedup_tables: Default::default(),
             })
         }
         Node::Materialize(me) => {

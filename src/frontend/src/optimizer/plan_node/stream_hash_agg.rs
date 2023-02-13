@@ -106,7 +106,7 @@ impl StreamNode for StreamHashAgg {
         use risingwave_pb::stream_plan::*;
         let result_table = self.logical.infer_result_table(self.vnode_col_idx);
         let agg_states = self.logical.infer_stream_agg_state(self.vnode_col_idx);
-        let dedup_tables = self.logical.infer_distinct_dedup_table(self.vnode_col_idx);
+        let distinct_dedup_tables = self.logical.infer_distinct_dedup_table(self.vnode_col_idx);
 
         ProstStreamNode::HashAgg(HashAggNode {
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
@@ -126,7 +126,7 @@ impl StreamNode for StreamHashAgg {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            dedup_tables: dedup_tables
+            distinct_dedup_tables: distinct_dedup_tables
                 .into_iter()
                 .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                 .collect(),
