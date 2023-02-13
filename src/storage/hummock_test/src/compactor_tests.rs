@@ -34,12 +34,12 @@ pub(crate) mod tests {
         FullKeyFilterKeyExtractor,
     };
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
-    use risingwave_meta::hummock::compaction::ManualCompactionOption;
+    use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
         unregister_table_ids_from_compaction_group,
     };
-    use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
+    use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
     use risingwave_meta::storage::{MemStore, MetaStore};
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
@@ -73,7 +73,7 @@ pub(crate) mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
@@ -107,7 +107,7 @@ pub(crate) mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
@@ -232,7 +232,7 @@ pub(crate) mod tests {
         let mut compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap()
@@ -364,7 +364,7 @@ pub(crate) mod tests {
         let mut compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap()
@@ -446,7 +446,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap();
@@ -615,7 +615,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap();
@@ -773,7 +773,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap();
@@ -949,7 +949,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap();
@@ -1116,7 +1116,7 @@ pub(crate) mod tests {
         let compact_task = hummock_manager_ref
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap();

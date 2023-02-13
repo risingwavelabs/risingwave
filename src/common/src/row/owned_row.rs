@@ -26,7 +26,7 @@ use crate::util::value_encoding::deserialize_datum;
 
 /// An owned row type with a `Vec<Datum>`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct OwnedRow(Vec<Datum>); // made private to avoid abuse
+pub struct OwnedRow(Vec<Datum>);
 
 /// Do not implement `IndexMut` to make it immutable.
 impl ops::Index<usize> for OwnedRow {

@@ -552,6 +552,7 @@ pub fn new_date_trunc_expr(
     }
 }
 
+/// Create a new binary expression.
 pub fn new_binary_expr(
     expr_type: Type,
     ret: DataType,
