@@ -15,12 +15,14 @@ aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-smithy-types = { workspace = true }
+base64 = "0.21"
 bytes = { version = "1", features = ["serde"] }
 crc32fast = "1.3.2"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
+md-5 = "0.10"
 opendal = "0.26.2"
 prometheus = { version = "0.13", features = ["process"] }
 random-string = "1.0"
