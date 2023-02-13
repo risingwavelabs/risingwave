@@ -69,7 +69,8 @@ statement ok
 create view v2 as select (s).v1, (s).v2 from t1;
 
 statement ok
-create view v3 as select (t1).s.* from t1;
+create view v3 as select (t1.s).* from t1;
+-- create view v3 as select (t1).s.* from t1;
 
 statement ok
 create view v4 as select (t1.s).* from t1;

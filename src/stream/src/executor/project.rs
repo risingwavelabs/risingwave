@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
+use multimap::MultiMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -22,7 +23,7 @@ use risingwave_expr::expr::BoxedExpression;
 
 use super::{
     ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
-    SimpleExecutorWrapper, StreamExecutorResult,
+    SimpleExecutorWrapper, StreamExecutorResult, Watermark,
 };
 use crate::common::InfallibleExpression;
 
@@ -35,6 +36,7 @@ impl ProjectExecutor {
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         execuotr_id: u64,
+        watermark_derivations: MultiMap<usize, usize>,
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
@@ -43,7 +45,7 @@ impl ProjectExecutor {
         };
         SimpleExecutorWrapper {
             input,
-            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id),
+            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id, watermark_derivations),
         }
     }
 }
@@ -57,6 +59,9 @@ pub struct SimpleProjectExecutor {
 
     /// Expressions of the current projection.
     exprs: Vec<BoxedExpression>,
+    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// derivation expression is the project's expression itself.
+    watermark_derivations: MultiMap<usize, usize>,
 }
 
 impl SimpleProjectExecutor {
@@ -65,6 +70,7 @@ impl SimpleProjectExecutor {
         input_info: ExecutorInfo,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
+        watermark_derivations: MultiMap<usize, usize>,
     ) -> Self {
         let schema = Schema {
             fields: exprs
@@ -80,6 +86,7 @@ impl SimpleProjectExecutor {
                 identity: format!("ProjectExecutor {:X}", executor_id),
             },
             exprs,
+            watermark_derivations,
         }
     }
 }
@@ -112,6 +119,36 @@ impl SimpleExecutor for SimpleProjectExecutor {
         Ok(Some(new_chunk))
     }
 
+    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+        let out_col_indices = match self.watermark_derivations.get_vec(&watermark.col_idx) {
+            Some(v) => v,
+            None => return Ok(vec![]),
+        };
+        let mut ret = vec![];
+        for out_col_idx in out_col_indices {
+            let out_col_idx = *out_col_idx;
+            let derived_watermark = watermark.clone().transform_with_expr(
+                &self.exprs[out_col_idx],
+                out_col_idx,
+                |err| {
+                    self.ctx.on_compute_error(
+                        err,
+                        &(self.info.identity.to_string() + "(when computing watermark)"),
+                    )
+                },
+            );
+            if let Some(derived_watermark) = derived_watermark {
+                ret.push(derived_watermark);
+            } else {
+                warn!(
+                    "{} derive a NULL watermark with the expression {}!",
+                    self.info.identity, out_col_idx
+                );
+            }
+        }
+        Ok(ret)
+    }
+
     fn schema(&self) -> &Schema {
         &self.info.schema
     }
@@ -132,7 +169,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
+    use risingwave_expr::expr::{new_binary_expr, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::test_utils::MockSource;
@@ -176,6 +213,7 @@ mod tests {
             vec![],
             vec![test_expr],
             1,
+            MultiMap::new(),
         ));
         let mut project = project.execute();
 
@@ -200,6 +238,79 @@ mod tests {
             )
         );
 
+        assert!(project.next().await.unwrap().unwrap().is_stop());
+    }
+    #[tokio::test]
+    async fn test_watermark_projection() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+
+        let a_left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let a_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
+        let a_expr = new_binary_expr(
+            Type::Add,
+            DataType::Int64,
+            Box::new(a_left_expr),
+            Box::new(a_right_expr),
+        )
+        .unwrap();
+
+        let b_left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let b_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
+        let b_expr = new_binary_expr(
+            Type::Subtract,
+            DataType::Int64,
+            Box::new(b_left_expr),
+            Box::new(b_right_expr),
+        )
+        .unwrap();
+
+        let project = Box::new(ProjectExecutor::new(
+            ActorContext::create(123),
+            Box::new(source),
+            vec![],
+            vec![a_expr, b_expr],
+            1,
+            MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+        ));
+        let mut project = project.execute();
+
+        tx.push_int64_watermark(0, 100);
+
+        let w1 = project.next().await.unwrap().unwrap();
+        let w1 = w1.as_watermark().unwrap();
+        let w2 = project.next().await.unwrap().unwrap();
+        let w2 = w2.as_watermark().unwrap();
+        let (w1, w2) = if w1.col_idx < w2.col_idx {
+            (w1, w2)
+        } else {
+            (w2, w1)
+        };
+
+        assert_eq!(
+            w1,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(101)
+            }
+        );
+
+        assert_eq!(
+            w2,
+            &Watermark {
+                col_idx: 1,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(99)
+            }
+        );
+        tx.push_int64_watermark(1, 100);
+        tx.push_barrier(1, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }

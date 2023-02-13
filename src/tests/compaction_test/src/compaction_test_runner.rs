@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -24,10 +24,10 @@ use anyhow::anyhow;
 use bytes::{BufMut, BytesMut};
 use clap::Parser;
 use futures::TryStreamExt;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, StorageConfig};
+use risingwave_common::config::{load_config, NO_OVERRIDE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
@@ -35,8 +35,10 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
@@ -69,7 +71,7 @@ impl CompactionTestMetrics {
 /// `./risedev compaction-test --state-store hummock+s3://your-bucket -t <table_id>`
 pub async fn compaction_test_main(
     _listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: CompactionTestOpts,
 ) -> anyhow::Result<()> {
     let meta_listen_addr = opts
@@ -89,7 +91,7 @@ pub async fn compaction_test_main(
 
     let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
         opts.meta_address.clone(),
-        client_addr.to_string(),
+        advertise_addr.to_string(),
         opts.state_store.clone(),
         opts.config_path.clone(),
     );
@@ -100,7 +102,7 @@ pub async fn compaction_test_main(
     init_metadata_for_replay(
         original_meta_endpoint,
         &opts.meta_address,
-        &client_addr,
+        &advertise_addr,
         opts.ci_mode,
         &mut table_id,
     )
@@ -108,7 +110,7 @@ pub async fn compaction_test_main(
 
     assert_ne!(0, table_id, "Invalid table_id for correctness checking");
 
-    let version_deltas = pull_version_deltas(original_meta_endpoint, &client_addr).await?;
+    let version_deltas = pull_version_deltas(original_meta_endpoint, &advertise_addr).await?;
 
     tracing::info!(
         "Pulled delta logs from Meta: len(logs): {}",
@@ -132,7 +134,10 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(&meta_opts.config_path);
+    let config = load_config(
+        &meta_opts.config_path,
+        Some(meta_opts.override_opts.clone()),
+    );
     assert!(
         config.meta.enable_compaction_deterministic,
         "enable_compaction_deterministic should be set"
@@ -149,7 +154,7 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
 
 async fn start_compactor_node(
     meta_rpc_endpoint: String,
-    client_addr: String,
+    advertise_addr: String,
     state_store: String,
     config_path: String,
 ) {
@@ -157,8 +162,8 @@ async fn start_compactor_node(
         "compactor-node",
         "--host",
         "127.0.0.1:5550",
-        "--client-address",
-        &client_addr,
+        "--advertise-addr",
+        &advertise_addr,
         "--meta-address",
         &meta_rpc_endpoint,
         "--state-store",
@@ -171,7 +176,7 @@ async fn start_compactor_node(
 
 pub fn start_compactor_thread(
     meta_endpoint: String,
-    client_addr: String,
+    advertise_addr: String,
     state_store: String,
     config_path: String,
 ) -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
@@ -184,7 +189,7 @@ pub fn start_compactor_thread(
         runtime.block_on(async {
             tokio::spawn(async {
                 tracing::info!("Starting compactor node");
-                start_compactor_node(meta_endpoint, client_addr, state_store, config_path).await
+                start_compactor_node(meta_endpoint, advertise_addr, state_store, config_path).await
             });
             rx.recv().unwrap();
         });
@@ -214,7 +219,7 @@ fn start_replay_thread(
 async fn init_metadata_for_replay(
     cluster_meta_endpoint: &str,
     new_meta_endpoint: &str,
-    client_addr: &HostAddr,
+    advertise_addr: &HostAddr,
     ci_mode: bool,
     table_id: &mut u32,
 ) -> anyhow::Result<()> {
@@ -230,20 +235,20 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0) => {
             meta_client = ret.unwrap();
         },
     }
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned init worker id {}", worker_id);
-    meta_client.activate(client_addr).await.unwrap();
+    meta_client.activate(advertise_addr).await.unwrap();
 
     let tables = meta_client.risectl_list_state_tables().await?;
     let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
     let new_meta_client =
-        MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, client_addr, 0).await?;
-    new_meta_client.activate(client_addr).await.unwrap();
+        MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
+    new_meta_client.activate(advertise_addr).await.unwrap();
     if ci_mode {
         let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
         *table_id = table_to_check.id;
@@ -262,16 +267,20 @@ async fn init_metadata_for_replay(
 
 async fn pull_version_deltas(
     cluster_meta_endpoint: &str,
-    client_addr: &HostAddr,
+    advertise_addr: &HostAddr,
 ) -> anyhow::Result<Vec<HummockVersionDelta>> {
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client =
-        MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0)
-            .await?;
+    let meta_client = MetaClient::register_new(
+        cluster_meta_endpoint,
+        WorkerType::RiseCtl,
+        advertise_addr,
+        0,
+    )
+    .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned pull worker id {}", worker_id);
-    meta_client.activate(client_addr).await.unwrap();
+    meta_client.activate(advertise_addr).await.unwrap();
 
     let (handle, shutdown_tx) = MetaClient::start_heartbeat_loop(
         meta_client.clone(),
@@ -298,15 +307,15 @@ async fn start_replay(
     table_to_check: u32,
     version_delta_logs: Vec<HummockVersionDelta>,
 ) -> anyhow::Result<()> {
-    let client_addr = "127.0.0.1:7770".parse().unwrap();
+    let advertise_addr = "127.0.0.1:7770".parse().unwrap();
     tracing::info!(
-        "Start to replay. Client address is {}, Table id {}",
-        client_addr,
+        "Start to replay. Advertise address is {}, Table id {}",
+        advertise_addr,
         table_to_check
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config = load_config(&opts.config_path_for_meta);
+    let config = load_config(&opts.config_path_for_meta, NO_OVERRIDE);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
@@ -316,10 +325,11 @@ async fn start_replay(
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
     let meta_client =
-        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &client_addr, 0).await?;
+        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
+            .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
-    meta_client.activate(&client_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     let sub_tasks = vec![MetaClient::start_heartbeat_loop(
         meta_client.clone(),
@@ -340,9 +350,8 @@ async fn start_replay(
     }
 
     // Creates a hummock state store *after* we reset the hummock version
-    let storage_config = Arc::new(config.storage.clone());
-    let hummock =
-        create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
+    let storage_opts = Arc::new(StorageOpts::from(&config));
+    let hummock = create_hummock_store_with_metrics(&meta_client, storage_opts, &opts).await?;
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
@@ -611,7 +620,6 @@ async fn open_hummock_iters(
                     prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
-                    check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
                 },
@@ -627,7 +635,9 @@ pub async fn check_compaction_results(
     mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
     mut actual_resutls: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
-    let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
+    let combined = expect_results
+        .iter_mut()
+        .zip_eq_fast(actual_resutls.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {
         assert_eq!(e1, e2);
         tracing::info!(
@@ -661,29 +671,28 @@ pub async fn check_compaction_results(
 
 struct StorageMetrics {
     pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
+    pub storage_metrics: Arc<MonitoredStorageMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 }
 
 pub async fn create_hummock_store_with_metrics(
     meta_client: &MetaClient,
-    storage_config: Arc<StorageConfig>,
+    storage_opts: Arc<StorageOpts>,
     opts: &CompactionTestOpts,
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
     let metrics = StorageMetrics {
         hummock_metrics: Arc::new(HummockMetrics::unused()),
-        state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+        state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
-    };
-    let rw_config = RwConfig {
-        storage: storage_config.deref().clone(),
-        ..Default::default()
+        storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
+        compactor_metrics: Arc::new(CompactorMetrics::unused()),
     };
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
-        "",
-        &rw_config,
+        storage_opts,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),
@@ -692,13 +701,15 @@ pub async fn create_hummock_store_with_metrics(
         metrics.object_store_metrics.clone(),
         TieredCacheMetricsBuilder::unused(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        metrics.storage_metrics.clone(),
+        metrics.compactor_metrics.clone(),
     )
     .await?;
 
     if let Some(hummock_state_store) = state_store_impl.as_hummock() {
         Ok(hummock_state_store
             .clone()
-            .monitored(metrics.state_store_metrics))
+            .monitored(metrics.storage_metrics))
     } else {
         Err(anyhow!("only Hummock state store is supported!"))
     }

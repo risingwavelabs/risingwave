@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ pub mod pg_class;
 pub mod pg_collation;
 pub mod pg_database;
 pub mod pg_description;
+pub mod pg_enum;
 pub mod pg_index;
 pub mod pg_keywords;
 pub mod pg_matviews;
@@ -46,6 +47,7 @@ pub use pg_class::*;
 pub use pg_collation::*;
 pub use pg_database::*;
 pub use pg_description::*;
+pub use pg_enum::*;
 pub use pg_index::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
@@ -65,6 +67,7 @@ use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{NaiveDateTimeWrapper, ScalarImpl};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
 use serde_json::json;
@@ -250,6 +253,10 @@ impl SysCatalogReaderImpl {
         Ok(vec![])
     }
 
+    pub(crate) fn read_enum_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
     pub(super) fn read_roles_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.user_info_reader.read_guard();
         let users = reader.get_all_users();
@@ -276,7 +283,7 @@ impl SysCatalogReaderImpl {
         let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
 
         Ok(schemas
-            .zip_eq(schema_infos.iter())
+            .zip_eq_debug(schema_infos.iter())
             .flat_map(|(schema, schema_info)| {
                 // !!! If we need to add more class types, remember to update
                 // Catalog::get_id_by_class_name_inner accordingly.
@@ -439,7 +446,12 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(t.definition.clone().into())),
                             Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(json!(fragments).to_string().into())),
+                            Some(ScalarImpl::Utf8(
+                                fragments.get_env().unwrap().get_timezone().clone().into(),
+                            )),
+                            Some(ScalarImpl::Utf8(
+                                json!(fragments.get_fragments()).to_string().into(),
+                            )),
                         ]));
                     }
                 });

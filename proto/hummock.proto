@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "compactor.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message SstableInfo {
@@ -116,16 +117,10 @@ message HummockSnapshot {
   uint64 current_epoch = 2;
 }
 
-message PinVersionRequest {
-  uint32 context_id = 1;
-  uint64 last_pinned = 2;
-}
-
-message PinVersionResponse {
-  common.Status status = 1;
+message VersionUpdatePayload {
   oneof payload {
-    HummockVersionDeltas version_deltas = 2;
-    HummockVersion pinned_version = 3;
+    HummockVersionDeltas version_deltas = 1;
+    HummockVersion pinned_version = 2;
   }
 }
 
@@ -249,6 +244,18 @@ message CompactTask {
   map<uint32, TableOption> table_options = 17;
   uint64 current_epoch_time = 18;
   uint64 target_sub_level_id = 19;
+
+  enum TaskType {
+    TYPE_UNSPECIFIED = 0;
+    DYNAMIC = 1;
+    SPACE_RECLAIM = 2;
+    MANUAL = 3;
+    SHARED_BUFFER = 4;
+    TTL = 5;
+  }
+
+  // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
+  TaskType task_type = 20;
 }
 
 message LevelHandler {
@@ -513,6 +520,14 @@ message SetCompactorRuntimeConfigRequest {
 
 message SetCompactorRuntimeConfigResponse {}
 
+message PinVersionRequest {
+  uint32 context_id = 1;
+}
+
+message PinVersionResponse {
+  HummockVersion pinned_version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -541,6 +556,7 @@ service HummockManagerService {
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
+  rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
 }
 
 message CompactionConfig {
@@ -559,6 +575,7 @@ message CompactionConfig {
   uint64 target_file_size_base = 10;
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
+  uint64 max_space_reclaim_bytes = 13;
 }
 
 message TableStats {

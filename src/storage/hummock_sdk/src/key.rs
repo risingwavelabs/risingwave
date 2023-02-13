@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes};
 use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
 
 use crate::HummockEpoch;
 
@@ -349,12 +348,6 @@ impl CopyFromSlice for Bytes {
 /// identified by a [`TableId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TableKey<T: AsRef<[u8]>>(pub T);
-
-impl<T: AsRef<[u8]>> TableKey<T> {
-    pub fn dist_key(&self) -> &[u8] {
-        &self.0.as_ref()[VirtualNode::SIZE..]
-    }
-}
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

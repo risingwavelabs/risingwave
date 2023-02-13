@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
@@ -26,6 +26,7 @@ use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
@@ -46,10 +47,10 @@ use tonic::{Request, Status, Streaming};
 use crate::sink::{Result, Sink, SinkError};
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
+pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
 
-pub fn is_valid_remote_sink(sink_type: String) -> bool {
-    return VALID_REMOTE_SINKS.contains(&sink_type.as_str());
+pub fn is_valid_remote_sink(sink_type: &str) -> bool {
+    VALID_REMOTE_SINKS.contains(&sink_type)
 }
 
 #[derive(Clone, Debug)]
@@ -65,8 +66,8 @@ impl RemoteConfig {
             .expect("sink type must be specified")
             .to_string();
 
-        if !is_valid_remote_sink(sink_type.clone()) {
-            return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
+        if !is_valid_remote_sink(sink_type.as_str()) {
+            return Err(SinkError::Config(anyhow!("invalid sink type: {sink_type}")));
         }
 
         Ok(RemoteConfig {
@@ -84,7 +85,7 @@ enum ResponseStreamImpl {
 
 impl ResponseStreamImpl {
     pub async fn next(&mut self) -> Result<SinkResponse> {
-        return match self {
+        match self {
             ResponseStreamImpl::Grpc(ref mut response) => response
                 .next()
                 .await
@@ -95,7 +96,7 @@ impl ResponseStreamImpl {
                     SinkError::Remote("response stream closed unexpectedly".to_string())
                 })
             }
-        };
+        }
     }
 }
 
@@ -243,7 +244,7 @@ impl Sink for RemoteSink {
             let mut map = serde_json::Map::new();
             row_ref
                 .iter()
-                .zip_eq(self.schema.fields.iter())
+                .zip_eq_fast(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));
                 });

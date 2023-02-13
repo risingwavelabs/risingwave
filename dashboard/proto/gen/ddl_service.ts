@@ -217,6 +217,15 @@ export interface ReplaceTablePlanResponse {
   version: number;
 }
 
+export interface GetTableRequest {
+  databaseName: string;
+  tableName: string;
+}
+
+export interface GetTableResponse {
+  table: Table | undefined;
+}
+
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
   return { db: undefined };
 }
@@ -1331,6 +1340,55 @@ export const ReplaceTablePlanResponse = {
       ? Status.fromPartial(object.status)
       : undefined;
     message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetTableRequest(): GetTableRequest {
+  return { databaseName: "", tableName: "" };
+}
+
+export const GetTableRequest = {
+  fromJSON(object: any): GetTableRequest {
+    return {
+      databaseName: isSet(object.databaseName) ? String(object.databaseName) : "",
+      tableName: isSet(object.tableName) ? String(object.tableName) : "",
+    };
+  },
+
+  toJSON(message: GetTableRequest): unknown {
+    const obj: any = {};
+    message.databaseName !== undefined && (obj.databaseName = message.databaseName);
+    message.tableName !== undefined && (obj.tableName = message.tableName);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetTableRequest>, I>>(object: I): GetTableRequest {
+    const message = createBaseGetTableRequest();
+    message.databaseName = object.databaseName ?? "";
+    message.tableName = object.tableName ?? "";
+    return message;
+  },
+};
+
+function createBaseGetTableResponse(): GetTableResponse {
+  return { table: undefined };
+}
+
+export const GetTableResponse = {
+  fromJSON(object: any): GetTableResponse {
+    return { table: isSet(object.table) ? Table.fromJSON(object.table) : undefined };
+  },
+
+  toJSON(message: GetTableResponse): unknown {
+    const obj: any = {};
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetTableResponse>, I>>(object: I): GetTableResponse {
+    const message = createBaseGetTableResponse();
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     return message;
   },
 };

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,20 +29,20 @@ use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
     StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
-use crate::hash::vnode::VirtualNode;
+use crate::hash::VirtualNode;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 /// A wrapper for u64 hash result.
@@ -618,7 +618,7 @@ where
     A::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeySerializer,
 {
-    for (item, serializer) in array.iter().zip_eq(serializers.iter_mut()) {
+    for (item, serializer) in array.iter().zip_eq_debug(serializers.iter_mut()) {
         serializer.append(item);
     }
 }
@@ -719,7 +719,7 @@ impl HashKey for SerializedKey {
         for (datum_result, array_builder) in data_types
             .iter()
             .map(|ty| deserialize_datum(&mut key_buffer, ty))
-            .zip_eq(array_builders.iter_mut())
+            .zip_eq_fast(array_builders.iter_mut())
         {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
@@ -735,6 +735,8 @@ impl HashKey for SerializedKey {
 mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
+
+    use itertools::Itertools;
 
     use super::*;
     use crate::array;

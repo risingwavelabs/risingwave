@@ -8,9 +8,17 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 aho-corasick = "0.7"
 anyhow = "1"
+arrow-array = "31"
+arrow-schema = "31"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 dyn-clone = "1"
@@ -21,14 +29,13 @@ num-traits = "0.2"
 ouroboros = "0.15"
 parse-display = "0.6"
 paste = "1"
-prost = "0.11"
 regex = "1"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
-rust_decimal = "1"
+risingwave_udf = { path = "../udf" }
 speedate = "0.7.0"
 thiserror = "1"
-toml = "0.5"
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,12 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
+use super::generic::GenericPlanRef;
 use super::{
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
 };
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -87,7 +89,12 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(Expr::to_expr_proto)
+            .map(|expr| {
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(expr.clone())
+                    .to_expr_proto()
+            })
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
     }
@@ -97,5 +104,22 @@ impl ToLocalBatch for BatchProject {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchProject {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_project()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

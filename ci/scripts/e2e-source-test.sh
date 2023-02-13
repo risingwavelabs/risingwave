@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -31,13 +31,16 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Prepare data"
-cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
-cp src/source/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
-cp src/source/src/test_data/complex-schema ./proto-complex-schema
+cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
+cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
+cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -51,8 +54,7 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
-# install mysql client
-apt-get -y install mysql-client
+
 # import data to mysql
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
@@ -61,8 +63,28 @@ export PGPASSWORD='postgres';
 createdb -h db -U postgres cdc_test
 psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 
-# start cdc connector node
-nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-node.log 2>&1 &
+node_port=50051
+node_timeout=10
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+
+echo "waiting for connector node to start"
+start_time=$(date +%s)
+while :
+do
+    if nc -z localhost $node_port; then
+        echo "Port $node_port is listened! Connector Node is up!"
+        break
+    fi
+
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+    if [ $elapsed_time -ge $node_timeout ]; then
+        echo "Timeout waiting for port $node_port to be listened!"
+        exit 1
+    fi
+    sleep 0.1
+done
+
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe-with-recovery
 sleep 2
@@ -92,7 +114,7 @@ echo "check mviews after cluster recovery"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"

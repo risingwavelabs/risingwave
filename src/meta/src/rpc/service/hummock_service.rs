@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
@@ -243,7 +244,8 @@ where
             .add_compactor(context_id, req.max_concurrent_task_number);
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
-            self.hummock_manager.try_send_compaction_request(cg_id);
+            self.hummock_manager
+                .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
         self.hummock_manager
             .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
@@ -502,5 +504,21 @@ where
         self.compactor_manager
             .set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
+    }
+
+    async fn pin_version(
+        &self,
+        request: Request<PinVersionRequest>,
+    ) -> Result<Response<PinVersionResponse>, Status> {
+        let req = request.into_inner();
+        let payload = self.hummock_manager.pin_version(req.context_id).await?;
+        match payload {
+            Payload::PinnedVersion(version) => Ok(Response::new(PinVersionResponse {
+                pinned_version: Some(version),
+            })),
+            Payload::VersionDeltas(_) => {
+                unreachable!("pin_version should not return version delta")
+            }
+        }
     }
 }

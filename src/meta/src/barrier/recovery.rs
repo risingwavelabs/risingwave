@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,9 +44,9 @@ where
     S: MetaStore,
 {
     // Retry base interval in milliseconds.
-    const RECOVERY_RETRY_BASE_INTERVAL: u64 = 100;
+    const RECOVERY_RETRY_BASE_INTERVAL: u64 = 20;
     // Retry max interval.
-    const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(10);
+    const RECOVERY_RETRY_MAX_INTERVAL: Duration = Duration::from_secs(5);
 
     #[inline(always)]
     /// Initialize a retry strategy for operation in recovery.

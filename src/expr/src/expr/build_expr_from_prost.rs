@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::convert::TryFrom;
 
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
@@ -51,14 +49,13 @@ use super::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use super::expr_vnode::VnodeExpression;
-use super::{
+use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,
 };
 use crate::vector_op::to_char::compile_pattern_to_chrono;
 use crate::{bail, ensure, ExprError, Result};
 
-/// Build a [`BoxedExpression`] from prost [`ExprNode`].
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
@@ -68,10 +65,10 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength
         | BoolOut | OctetLength | BitLength | ToTimestamp => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
-        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
+        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
+        | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
+        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
             build_nullable_binary_expr_prost(prost)
         }
         ToChar => build_to_char_expr(prost),
@@ -110,16 +107,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
-        Now => {
-            let rex_node = try_match_expand!(prost.get_rex_node(), Ok)?;
-            let RexNode::FuncCall(func_call_node) = rex_node else {
-                bail!("Expected RexNode::FuncCall in Now");
-            };
-            let Option::Some(bind_timestamp) = func_call_node.children.first() else {
-                bail!("Expected epoch timestamp bound into Now");
-            };
-            LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
-        }
+        Now => build_now_expr(prost),
         Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
@@ -336,6 +324,17 @@ fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         let tmpl_expr = expr_build_from_prost(&children[1])?;
         Ok(new_to_char(data_expr, tmpl_expr, ret_type))
     }
+}
+
+pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let rex_node = try_match_expand!(prost.get_rex_node(), Ok)?;
+    let RexNode::FuncCall(func_call_node) = rex_node else {
+        bail!("Expected RexNode::FuncCall in Now");
+    };
+    let Some(bind_timestamp) = func_call_node.children.first() else {
+        bail!("Expected epoch timestamp bound into Now");
+    };
+    LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
 }
 
 pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 
 use super::{
     ActorContextRef, Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
-    StreamExecutorResult,
+    StreamExecutorResult, Watermark,
 };
 use crate::common::InfallibleExpression;
 
@@ -97,7 +97,7 @@ impl SimpleFilterExecutor {
         });
 
         if let ArrayImpl::Bool(bool_array) = &*filter {
-            for (op, res) in ops.into_iter().zip_eq(bool_array.iter()) {
+            for (op, res) in ops.into_iter().zip_eq_debug(bool_array.iter()) {
                 // SAFETY: ops.len() == pred_output.len() == visibility.len()
                 let res = res.unwrap_or(false);
                 match op {
@@ -172,6 +172,10 @@ impl SimpleExecutor for SimpleFilterExecutor {
         });
 
         Self::filter(chunk, pred_output)
+    }
+
+    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+        Ok(vec![watermark])
     }
 
     fn schema(&self) -> &Schema {

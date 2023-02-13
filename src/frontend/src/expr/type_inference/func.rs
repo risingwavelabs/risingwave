@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -43,7 +44,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
     let inputs_owned = std::mem::take(inputs);
     *inputs = inputs_owned
         .into_iter()
-        .zip_eq(&sig.inputs_type)
+        .zip_eq_fast(&sig.inputs_type)
         .map(|(expr, t)| {
             if DataTypeName::from(expr.return_type()) != *t {
                 return expr.cast_implicit((*t).into());
@@ -208,7 +209,7 @@ fn infer_struct_cast_target_type(
             let mut lcasts = false;
             let mut rcasts = false;
             tys.reserve(lty.len());
-            for (lf, rf) in lty.into_iter().zip_eq(rty) {
+            for (lf, rf) in lty.into_iter().zip_eq_fast(rty) {
                 let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
                 lcasts |= lcast;
                 rcasts |= rcast;
@@ -222,11 +223,11 @@ fn infer_struct_cast_target_type(
         }
         (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
             // If only one side is nested type, these two types can never be casted.
-            return Err(ErrorCode::BindError(format!(
+            Err(ErrorCode::BindError(format!(
                 "cannot infer type because unmatched types: left={:?} right={:?}",
                 l, r
             ))
-            .into());
+            .into())
         }
         (NestedType::Type(l), NestedType::Type(r)) => {
             // If both sides are concrete types, try cast in either direction.
@@ -662,7 +663,7 @@ fn top_matches<'a>(
         let mut n_exact = 0;
         let mut n_preferred = 0;
         let mut castable = true;
-        for (formal, actual) in sig.inputs_type.iter().zip_eq(inputs) {
+        for (formal, actual) in sig.inputs_type.iter().zip_eq_fast(inputs) {
             let Some(actual) = actual else { continue };
             if formal == actual {
                 n_exact += 1;
@@ -756,7 +757,7 @@ fn narrow_category<'a>(
         .filter(|sig| {
             sig.inputs_type
                 .iter()
-                .zip_eq(&categories)
+                .zip_eq_fast(&categories)
                 .all(|(formal, category)| {
                     // category.is_none() means the actual argument is non-null and skipped category
                     // selection.

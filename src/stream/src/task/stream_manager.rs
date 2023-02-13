@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use anyhow::{anyhow, Context};
 use async_recursion::async_recursion;
 use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
 use futures::FutureExt;
+use hytra::TrAdder;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
@@ -86,6 +87,8 @@ pub struct LocalStreamManagerCore {
 
     /// Watermark epoch number.
     watermark_epoch: AtomicU64Ref,
+
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -96,6 +99,8 @@ pub struct LocalStreamManager {
     state_store: StateStoreImpl,
     context: Arc<SharedContext>,
     streaming_metrics: Arc<StreamingMetrics>,
+
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 pub struct ExecutorParams {
@@ -152,6 +157,7 @@ impl LocalStreamManager {
             state_store: core.state_store.clone(),
             context: core.context.clone(),
             streaming_metrics: core.streaming_metrics.clone(),
+            total_mem_val: core.total_mem_val.clone(),
             core: Mutex::new(core),
         }
     }
@@ -311,7 +317,7 @@ impl LocalStreamManager {
 
     /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
-        self.core.lock().await.drop_all_actors();
+        self.core.lock().await.drop_all_actors().await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
@@ -331,15 +337,6 @@ impl LocalStreamManager {
     ) -> StreamResult<()> {
         let mut core = self.core.lock().await;
         core.update_actors(actors, hanging_channels)
-    }
-
-    /// This function was called while [`LocalStreamManager`] exited.
-    pub async fn wait_all(self) -> StreamResult<()> {
-        let handles = self.core.lock().await.take_all_handles()?;
-        for (_id, handle) in handles {
-            handle.await.unwrap();
-        }
-        Ok(())
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
@@ -370,6 +367,10 @@ impl LocalStreamManager {
     pub async fn set_watermark_epoch(&self, watermark_epoch: AtomicU64Ref) {
         let mut guard = self.core.lock().await;
         guard.watermark_epoch = watermark_epoch;
+    }
+
+    pub fn get_total_mem_val(&self) -> Arc<TrAdder<i64>> {
+        self.total_mem_val.clone()
     }
 }
 
@@ -430,17 +431,18 @@ impl LocalStreamManagerCore {
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            total_mem_val: Arc::new(TrAdder::new()),
         }
     }
 
     #[cfg(test)]
     fn for_test() -> Self {
-        use risingwave_storage::monitor::StateStoreMetrics;
+        use risingwave_storage::monitor::MonitoredStorageMetrics;
 
         let register = prometheus::Registry::new();
         let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::new_inner(
-            StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
+            StateStoreImpl::shared_in_memory_store(Arc::new(MonitoredStorageMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
             StreamingConfig::default(),
@@ -612,7 +614,8 @@ impl LocalStreamManagerCore {
                 StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
             })?;
             let mview_definition = &actor.mview_definition;
-            let actor_context = ActorContext::create(actor_id);
+            let actor_context =
+                ActorContext::create_with_counter(actor_id, self.total_mem_val.clone());
             let vnode_bitmap = actor
                 .vnode_bitmap
                 .as_ref()
@@ -636,7 +639,7 @@ impl LocalStreamManagerCore {
                 subtasks,
                 self.context.clone(),
                 self.streaming_metrics.clone(),
-                actor_context,
+                actor_context.clone(),
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
@@ -668,7 +671,9 @@ impl LocalStreamManagerCore {
                         metrics
                             .actor_memory_usage
                             .with_label_values(&[&actor_id_str])
-                            .set(bytes as i64)
+                            .set(bytes as i64);
+
+                        actor_context.store_mem_usage(bytes);
                     },
                 );
                 self.runtime.spawn(allocation_stated)
@@ -783,10 +788,15 @@ impl LocalStreamManagerCore {
     }
 
     /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
-    fn drop_all_actors(&mut self) {
-        for (actor_id, handle) in self.handles.drain() {
+    async fn drop_all_actors(&mut self) {
+        for (actor_id, handle) in &self.handles {
             tracing::debug!("force stopping actor {}", actor_id);
             handle.abort();
+        }
+        for (actor_id, handle) in self.handles.drain() {
+            tracing::debug!("join actor {}", actor_id);
+            let result = handle.await;
+            assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
         self.actors.clear();
         self.context.clear_channels();

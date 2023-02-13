@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use risingwave_pb::expr::expr_node::Type;
 
 use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
-use crate::expr::template::BinaryExpression;
+use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{template_fast, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
@@ -33,7 +33,9 @@ use crate::vector_op::extract::{
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
+use crate::vector_op::timestamptz::{
+    str_to_timestamptz, timestamp_at_time_zone, timestamptz_at_time_zone, timestamptz_to_string,
+};
 use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
@@ -286,6 +288,56 @@ macro_rules! gen_binary_expr_atm {
     };
 }
 
+/// `gen_binary_expr_atm` is similar to `gen_binary_expr_cmp`.
+///  `atm` means arithmetic here.
+/// They are differentiate cuz one type may not support atm and cmp at the same time. For example,
+/// Varchar can support compare but not arithmetic.
+/// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
+/// * `$i1`, `$i2`, `$rt`, `$func`: extra list passed to `$macro` directly
+macro_rules! gen_binary_expr_pow {
+    ($macro:ident, $l:expr, $r:expr, $ret:expr, $general_f:ident,) => {
+        $macro! {
+            [$l, $r, $ret],
+            { int16, int16, float64, $general_f },
+            { int16, int32, float64, $general_f },
+            { int16, int64, float64, $general_f },
+            { int16, float32, float64, $general_f },
+            { int16, float64, float64, $general_f },
+            { int32, int16, float64, $general_f },
+            { int32, int32, float64, $general_f },
+            { int32, int64, float64, $general_f },
+            { int32, float32, float64, $general_f },
+            { int32, float64, float64, $general_f },
+            { int64, int16, float64, $general_f },
+            { int64, int32, float64, $general_f },
+            { int64, int64, float64, $general_f },
+            { int64, float32, float64 , $general_f},
+            { int64, float64, float64, $general_f },
+            { float32, int16, float64, $general_f },
+            { float32, int32, float64, $general_f },
+            { float32, int64, float64 , $general_f},
+            { float32, float32, float64, $general_f },
+            { float32, float64, float64, $general_f },
+            { float64, int16, float64, $general_f },
+            { float64, int32, float64, $general_f },
+            { float64, int64, float64, $general_f },
+            { float64, float32, float64, $general_f },
+            { float64, float64, float64, $general_f },
+            { decimal, int16, float64, $general_f },
+            { decimal, int32, float64, $general_f },
+            { decimal, int64, float64, $general_f },
+            { decimal, float32, float64, $general_f },
+            { decimal, float64, float64, $general_f },
+            { int16, decimal, float64, $general_f },
+            { int32, decimal, float64, $general_f },
+            { int64, decimal, float64, $general_f },
+            { decimal, decimal, float64, $general_f },
+            { float32, decimal, float64, $general_f },
+            { float64, decimal, float64, $general_f },
+        }
+    };
+}
+
 /// `gen_binary_expr_bitwise` is similar to `gen_binary_expr_atm`.
 /// They are differentiate because bitwise operation only supports integral datatype.
 /// * `$general_f`: generic atm function (require a common ``TryInto`` type for two input)
@@ -409,6 +461,38 @@ fn build_at_time_zone_expr(
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?} AT TIME ZONE is not supported yet!",
                 l.return_type()
+            )))
+        }
+    };
+    Ok(expr)
+}
+
+fn build_cast_with_time_zone_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match (ret.clone(), l.return_type()) {
+        (DataType::Varchar, DataType::Timestamptz) => Box::new(BinaryBytesExpression::<
+            I64Array,
+            Utf8Array,
+            _,
+        >::new(
+            l, r, ret, timestamptz_to_string
+        )),
+        (DataType::Timestamptz, DataType::Varchar) => {
+            Box::new(BinaryExpression::<Utf8Array, Utf8Array, I64Array, _>::new(
+                l,
+                r,
+                ret,
+                str_to_timestamptz,
+            ))
+        }
+        _ => {
+            return Err(ExprError::UnsupportedFunction(format!(
+                "cannot cast at time zone (input type: {:?}, output type: {:?}",
+                l.return_type(),
+                ret,
             )))
         }
     };
@@ -629,8 +713,16 @@ pub fn new_binary_expr(
                 },
             }
         }
+        Type::Pow => {
+            gen_binary_expr_pow! {
+                gen_atm_impl,
+                l, r, ret,
+                general_pow,
+            }
+        }
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
+        Type::CastWithTimeZone => build_cast_with_time_zone_expr(ret, l, r)?,
         Type::RoundDigit => Box::new(template_fast::BinaryExpression::new(
             l,
             r,

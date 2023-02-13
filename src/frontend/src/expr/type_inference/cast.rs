@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::cast::*;
 
 use crate::expr::{Expr as _, ExprImpl};
@@ -153,7 +154,7 @@ fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> 
             // ... and all fields are castable
             lty.fields
                 .iter()
-                .zip_eq(rty.fields.iter())
+                .zip_eq_fast(rty.fields.iter())
                 .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic

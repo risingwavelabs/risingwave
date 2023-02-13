@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,23 +34,28 @@ impl Binder {
                 table_name,
                 columns,
                 source,
+                returning,
             } => Ok(BoundStatement::Insert(
-                self.bind_insert(table_name, columns, *source)?.into(),
+                self.bind_insert(table_name, columns, *source, returning)?
+                    .into(),
             )),
 
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => Ok(BoundStatement::Delete(
-                self.bind_delete(table_name, selection)?.into(),
+                self.bind_delete(table_name, selection, returning)?.into(),
             )),
 
             Statement::Update {
                 table_name,
                 assignments,
                 selection,
+                returning,
             } => Ok(BoundStatement::Update(
-                self.bind_update(table_name, assignments, selection)?.into(),
+                self.bind_update(table_name, assignments, selection, returning)?
+                    .into(),
             )),
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),

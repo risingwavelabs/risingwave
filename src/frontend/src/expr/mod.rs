@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+mod session_timezone;
 mod type_inference;
 mod utils;
 
@@ -49,6 +50,7 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
@@ -188,6 +190,23 @@ impl ExprImpl {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 
+    /// Shorthand to enforce implicit cast to boolean
+    pub fn enforce_bool_clause(self, clause: &str) -> Result<ExprImpl> {
+        if self.is_unknown() {
+            let inner = self.cast_implicit(DataType::Boolean)?;
+            return Ok(inner);
+        }
+        let return_type = self.return_type();
+        if return_type != DataType::Boolean {
+            bail!(
+                "argument of {} must be boolean, not type {:?}",
+                clause,
+                return_type
+            )
+        }
+        Ok(self)
+    }
+
     /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
     /// boolean is converted to a single char rather than full word.
     ///
@@ -219,7 +238,7 @@ impl ExprImpl {
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> Result<Datum> {
         assert!(self.is_const());
-        self.eval_row(OwnedRow::empty())
+        self.eval_row(&OwnedRow::empty())
     }
 }
 
@@ -507,17 +526,17 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
-        fn reverse_comparison(comparison: ExprType) -> ExprType {
-            match comparison {
-                ExprType::LessThan => ExprType::GreaterThan,
-                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
-                ExprType::GreaterThan => ExprType::LessThan,
-                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
-                _ => unreachable!(),
-            }
+    fn reverse_comparison(comparison: ExprType) -> ExprType {
+        match comparison {
+            ExprType::LessThan => ExprType::GreaterThan,
+            ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+            ExprType::GreaterThan => ExprType::LessThan,
+            ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            _ => unreachable!(),
         }
+    }
 
+    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self {
             match function_call.get_expr_type() {
                 ty @ (ExprType::LessThan
@@ -529,7 +548,7 @@ impl ExprImpl {
                         if x.index < y.index {
                             Some((*x, ty, *y))
                         } else {
-                            Some((*y, reverse_comparison(ty), *x))
+                            Some((*y, Self::reverse_comparison(ty), *x))
                         }
                     } else {
                         None
@@ -539,6 +558,61 @@ impl ExprImpl {
             }
         } else {
             None
+        }
+    }
+
+    // Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
+    // `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
+    // `InputRef` and contains no `now()`.
+    //
+    // Canonicalizes to the first ordering and returns (input_expr, cmp, now_expr)
+    pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0
+                        && op1.has_input_ref()
+                        && op2.count_nows() > 0
+                        && op2.is_now_offset()
+                    {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0
+                        && op2.has_input_ref()
+                        && op1.count_nows() > 0
+                        && op1.is_now_offset()
+                    {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    // Checks if expr is of the form `now() [+- const_expr]`
+    fn is_now_offset(&self) -> bool {
+        if let ExprImpl::FunctionCall(f) = self {
+            match f.get_expr_type() {
+                ExprType::Now => true,
+                ExprType::Add | ExprType::Subtract => {
+                    let (_, lhs, rhs) = f.clone().decompose_as_binary();
+                    lhs.as_function_call()
+                        .map(|f| f.get_expr_type() == ExprType::Now)
+                        .unwrap_or(false)
+                        && rhs.is_const()
+                }
+                _ => false,
+            }
+        } else {
+            false
         }
     }
 
@@ -795,6 +869,7 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 

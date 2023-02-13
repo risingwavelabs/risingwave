@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,19 +16,12 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(any(test, feature = "test"))]
-use prost::Message;
-use risingwave_pb::meta::MetaLeaderInfo;
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
 };
-#[cfg(any(test, feature = "test"))]
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
@@ -55,8 +48,6 @@ where
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    info: MetaLeaderInfo,
-
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -71,10 +62,6 @@ pub struct MetaOpts {
     pub barrier_interval: Duration,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    pub minimal_scheduling: bool,
-
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
@@ -107,6 +94,9 @@ pub struct MetaOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+
+    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -116,7 +106,6 @@ impl MetaOpts {
             enable_recovery,
             barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
-            minimal_scheduling: false,
             max_idle_ms: 0,
             checkpoint_frequency: 10,
             compaction_deterministic_test: false,
@@ -130,6 +119,7 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
+            periodic_space_reclaim_compaction_interval_sec: 60,
         }
     }
 }
@@ -138,7 +128,7 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -151,7 +141,6 @@ where
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info,
             opts: opts.into(),
         }
     }
@@ -195,10 +184,6 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
-
-    pub fn get_leader_info(&self) -> MetaLeaderInfo {
-        self.info.clone()
-    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -210,32 +195,7 @@ impl MetaSrvEnv<MemStore> {
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let leader_info = MetaLeaderInfo {
-            lease_id: 0,
-            node_address: "".to_string(),
-        };
-        let lease_info = MetaLeaseInfo {
-            leader: Some(leader_info.clone()),
-            lease_register_time: 0,
-            lease_expire_time: 10,
-        };
         let meta_store = Arc::new(MemStore::default());
-        meta_store
-            .put_cf(
-                META_CF_NAME,
-                META_LEADER_KEY.as_bytes().to_vec(),
-                leader_info.encode_to_vec(),
-            )
-            .await
-            .unwrap();
-        meta_store
-            .put_cf(
-                META_CF_NAME,
-                META_LEASE_KEY.as_bytes().to_vec(),
-                lease_info.encode_to_vec(),
-            )
-            .await
-            .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -247,7 +207,6 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info: leader_info,
             opts,
         }
     }

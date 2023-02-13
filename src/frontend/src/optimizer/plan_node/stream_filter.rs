@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,9 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{Expr, ExprImpl};
+use super::generic::GenericPlanRef;
+use super::{ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
@@ -75,7 +76,29 @@ impl_plan_tree_node_for_unary! { StreamFilter }
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::Filter(FilterNode {
-            search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
+            search_condition: Some(
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(ExprImpl::from(self.predicate().clone()))
+                    .to_expr_proto(),
+            ),
         })
+    }
+}
+
+impl ExprRewritable for StreamFilter {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_filter()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

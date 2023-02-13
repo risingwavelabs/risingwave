@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::vector_op::cast::literal_parsing;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
@@ -114,10 +116,25 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_nested(child, target, allows);
         }
+        if child.is_unknown() {
+            // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
+            let literal = child.as_literal().unwrap();
+            let datum = literal
+                .get_data()
+                .as_ref()
+                .map(|scalar| {
+                    let s = scalar.as_utf8();
+                    literal_parsing(&target, s)
+                })
+                .transpose();
+            if let Ok(datum) = datum {
+                return Ok(Literal::new(datum, target).into());
+            }
+            // else when eager parsing fails, just proceed as normal.
+            // Some callers are not ready to handle `'a'::int` error here.
+        }
         let source = child.return_type();
-        if child.is_null() {
-            Ok(Literal::new(None, target).into())
-        } else if source == target {
+        if source == target {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
@@ -156,7 +173,7 @@ impl FunctionCall {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq(fields.to_vec())
+                    .zip_eq_fast(fields.to_vec())
                     .map(|(e, t)| Self::new_cast(e, t, allows))
                     .collect::<Result<Vec<_>>>()?;
                 let return_type = DataType::new_struct(

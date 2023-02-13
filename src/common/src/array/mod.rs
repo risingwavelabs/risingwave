@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,6 +64,7 @@ pub use vis::{Vis, VisRef};
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
 use crate::types::*;
+use crate::util::iter_util::ZipEqDebug;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -308,9 +309,8 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-        use itertools::Itertools;
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
+        for (elem, visible) in self.iter().zip_eq_debug(visibility.iter()) {
             if visible {
                 builder.append(elem);
             }
@@ -702,7 +702,6 @@ impl PartialEq for ArrayImpl {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
     use super::*;
 
@@ -743,7 +742,7 @@ mod tests {
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
-        for (a, b) in a.iter().zip_eq(b.iter()) {
+        for (a, b) in a.iter().zip_eq_debug(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
                 _ => None,
@@ -780,9 +779,8 @@ mod tests {
 mod test_util {
     use std::hash::{BuildHasher, Hasher};
 
-    use itertools::Itertools;
-
     use super::Array;
+    use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &mut [H]) -> Vec<u64> {
         return hashers
@@ -808,8 +806,8 @@ mod test_util {
         itertools::cons_tuples(
             expects
                 .iter()
-                .zip_eq(hash_finish(&mut states_scalar[..]))
-                .zip_eq(hash_finish(&mut states_vec[..])),
+                .zip_eq_fast(hash_finish(&mut states_scalar[..]))
+                .zip_eq_fast(hash_finish(&mut states_vec[..])),
         )
         .all(|(a, b, c)| *a == b && b == c);
     }

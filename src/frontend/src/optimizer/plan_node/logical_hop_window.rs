@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
@@ -48,8 +48,8 @@ impl LogicalHopWindow {
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
-        let output_indices = output_indices
-            .unwrap_or_else(|| (0..input.schema().len() + 2).into_iter().collect_vec());
+        let output_indices =
+            output_indices.unwrap_or_else(|| (0..input.schema().len() + 2).collect_vec());
         let output_type = DataType::window_of(&time_col.data_type).unwrap();
         let original_schema: Schema = input
             .schema()
@@ -326,6 +326,8 @@ impl ColPrunable for LogicalHopWindow {
         new_hop.clone_with_output_indices(output_cols).into()
     }
 }
+
+impl ExprRewritable for LogicalHopWindow {}
 
 impl PredicatePushdown for LogicalHopWindow {
     /// Keep predicate on time window parameters (`window_start`, `window_end`),

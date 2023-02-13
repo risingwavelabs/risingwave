@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use bytes::Bytes;
 use nexmark::event::Event;
 
 use crate::source::nexmark::source::combined_event::CombinedEvent;
-use crate::source::{SourceMessage, SplitId};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
+
+#[derive(Clone, Debug)]
+pub struct NexmarkMeta {
+    pub timestamp: Option<i64>,
+}
 
 #[derive(Clone, Debug)]
 pub struct NexmarkMessage {
@@ -31,6 +38,14 @@ impl From<NexmarkMessage> for SourceMessage {
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.split_id,
+            meta: SourceMeta::Nexmark(NexmarkMeta {
+                timestamp: Some(
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as i64,
+                ),
+            }),
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,11 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
-    generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
@@ -105,7 +106,7 @@ impl LogicalSource {
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        generic::Source::infer_internal_table_catalog(&self.base)
+        generic::Source::infer_internal_table_catalog()
     }
 
     pub fn kafka_timestamp_range(&self) -> &(Bound<i64>, Bound<i64>) {
@@ -160,6 +161,8 @@ impl ColPrunable for LogicalSource {
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
+
+impl ExprRewritable for LogicalSource {}
 
 /// A util function to extract kafka offset timestamp range.
 ///
@@ -321,9 +324,9 @@ impl PredicatePushdown for LogicalSource {
     ) -> PlanRef {
         let mut range = self.kafka_timestamp_range;
 
-        // println!("Before predicate: {:?}", predicate);
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
+            let expr = self.base.ctx().expr_with_session_timezone(expr);
             if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
                 // Not recognized, so push back
                 new_conjunctions.push(e);
@@ -332,7 +335,6 @@ impl PredicatePushdown for LogicalSource {
 
         let new_source = self.clone_with_kafka_timestamp_range(range).into();
 
-        // println!("After predicate: {:?}", new_conjunctions);
         if new_conjunctions.is_empty() {
             new_source
         } else {
@@ -355,7 +357,10 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef = StreamSource::new(self.clone()).into();
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id{
+        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty(){
+            plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+        }
+        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
             plan = StreamRowIdGen::new(plan, row_id_index).into();
         }
         Ok(plan)

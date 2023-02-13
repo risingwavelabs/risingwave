@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,23 +14,22 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
-use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
-use crate::hummock::compactor::{compact, Context};
+use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
@@ -43,6 +42,7 @@ use crate::hummock::store::version::{
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
+use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
 #[derive(Clone)]
@@ -53,8 +53,8 @@ pub struct BufferTracker {
 }
 
 impl BufferTracker {
-    pub fn from_storage_config(config: &StorageConfig) -> Self {
-        let capacity = config.shared_buffer_capacity_mb as usize * (1 << 20);
+    pub fn from_storage_opts(config: &StorageOpts) -> Self {
+        let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
         Self::new(capacity, flush_threshold)
     }
@@ -69,7 +69,7 @@ impl BufferTracker {
     }
 
     pub fn for_test() -> Self {
-        Self::from_storage_config(&StorageConfig::default())
+        Self::from_storage_opts(&StorageOpts::default())
     }
 
     pub fn get_buffer_size(&self) -> usize {
@@ -99,7 +99,6 @@ pub struct HummockEventHandler {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-    seal_epoch: Arc<AtomicU64>,
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
@@ -113,7 +112,7 @@ pub struct HummockEventHandler {
 async fn flush_imms(
     payload: UploadTaskPayload,
     task_info: UploadTaskInfo,
-    compactor_context: Arc<crate::hummock::compactor::Context>,
+    compactor_context: Arc<crate::hummock::compactor::CompactorContext>,
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
         let _ = compactor_context
@@ -140,15 +139,15 @@ impl HummockEventHandler {
         hummock_event_tx: mpsc::UnboundedSender<HummockEvent>,
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
-        compactor_context: Arc<Context>,
+        compactor_context: Arc<CompactorContext>,
     ) -> Self {
-        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
-        let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
-        let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
+        let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
+        let write_conflict_detector =
+            ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
@@ -163,7 +162,6 @@ impl HummockEventHandler {
             hummock_event_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
-            seal_epoch,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
             read_version_mapping,
@@ -171,10 +169,6 @@ impl HummockEventHandler {
             last_instance_id: 0,
             sstable_id_manager,
         }
-    }
-
-    pub fn sealed_epoch(&self) -> Arc<AtomicU64> {
-        self.seal_epoch.clone()
     }
 
     pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {

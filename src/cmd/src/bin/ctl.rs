@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,9 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 
 use anyhow::Result;
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::enable_jemalloc_on_linux;
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -166,7 +167,7 @@ impl ProjectSetExecutor {
                             projected_row_id_builder.append(Some(i as i64));
                         }
 
-                        for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                        for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
                             match item {
                                 Either::Left(array_ref) => {
                                     builder.append_array(&array_ref);

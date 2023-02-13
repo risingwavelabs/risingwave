@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,5 +15,5 @@
 pub use s3::{S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 
 mod file_common;
-pub use file_common::{FsSplit, FsSplitReader};
+pub use file_common::FsSplit;
 mod s3;

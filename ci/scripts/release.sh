@@ -1,7 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
+
+echo "--- Check env"
+if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
+  exit 0
+fi
 
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
@@ -10,7 +15,9 @@ source ci/scripts/common.env.sh
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
-unzip -o protoc-3.15.8-linux-x86_64.zip -d /usr/local bin/protoc
+unzip -o protoc-3.15.8-linux-x86_64.zip -d protoc
+mv ./protoc/bin/protoc /usr/local/bin/
+mv ./protoc/include/* /usr/local/include/
 
 echo "--- Install lld"
 yum install -y centos-release-scl-rh
@@ -26,8 +33,13 @@ cargo build -p risingwave_cmd_all --features "static-link static-log-level" --pr
 cd target/release && chmod +x risingwave
 
 echo "--- Upload nightly binary to s3"
-tar -czvf risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz risingwave
-aws s3 cp risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+  tar -czvf risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz risingwave
+  aws s3 cp risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+elif [[ -n "${BINARY_NAME+x}" ]]; then
+    tar -czvf risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz risingwave
+    aws s3 cp risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+fi
 
 if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   echo "--- Install gh cli"

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
@@ -80,21 +81,11 @@ impl<S: StateStore> AggGroup<S> {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
-        let row_count = prev_outputs
-            .as_ref()
-            .and_then(|outputs| {
-                outputs[ROW_COUNT_COLUMN]
-                    .clone()
-                    .map(|x| x.into_int64() as usize)
-            })
-            .unwrap_or(0);
-
         let states =
             futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
                     &storages[idx],
-                    row_count,
                     prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                     pk_indices,
                     group_key.as_ref(),
@@ -135,8 +126,11 @@ impl<S: StateStore> AggGroup<S> {
         visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for ((state, storage), visibility) in
-            self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
+        for ((state, storage), visibility) in self
+            .states
+            .iter_mut()
+            .zip_eq_fast(storages)
+            .zip_eq_fast(visibilities)
         {
             state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
         }
@@ -150,7 +144,7 @@ impl<S: StateStore> AggGroup<S> {
         &self,
         storages: &mut [AggStateStorage<S>],
     ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
+        futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
             |(state, storage)| match state {
                 AggState::Table(state) => Some(state.flush_state_if_needed(
                     must_match!(storage, AggStateStorage::Table { table } => table),
@@ -191,7 +185,7 @@ impl<S: StateStore> AggGroup<S> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
-                .zip_eq(storages)
+                .zip_eq_fast(storages)
                 .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
@@ -237,7 +231,7 @@ impl<S: StateStore> AggGroup<S> {
                 // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
-                for (builder, new_value) in builders.iter_mut().zip_eq(curr_outputs.iter()) {
+                for (builder, new_value) in builders.iter_mut().zip_eq_fast(curr_outputs.iter()) {
                     trace!("append_datum (0 -> N): {:?}", new_value);
                     builder.append_datum(new_value);
                 }
@@ -251,7 +245,7 @@ impl<S: StateStore> AggGroup<S> {
 
                 for (builder, old_value) in builders
                     .iter_mut()
-                    .zip_eq(self.prev_outputs.as_ref().unwrap().iter())
+                    .zip_eq_fast(self.prev_outputs.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", old_value);
                     builder.append_datum(old_value);

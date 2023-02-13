@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use aws_sdk_kinesis::model::Record;
 use bytes::Bytes;
 
-use crate::source::{SourceMessage, SplitId};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
 pub struct KinesisMessage {
@@ -31,6 +31,7 @@ impl From<KinesisMessage> for SourceMessage {
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.shard_id,
+            meta: SourceMeta::Empty,
         }
     }
 }

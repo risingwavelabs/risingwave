@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ pub async fn handle_drop_sink(
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_sink(sink_id).await?;
+    catalog_writer.drop_sink(sink_id.sink_id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }

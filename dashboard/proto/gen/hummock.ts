@@ -166,13 +166,7 @@ export interface HummockSnapshot {
   currentEpoch: number;
 }
 
-export interface PinVersionRequest {
-  contextId: number;
-  lastPinned: number;
-}
-
-export interface PinVersionResponse {
-  status: Status | undefined;
+export interface VersionUpdatePayload {
   payload?: { $case: "versionDeltas"; versionDeltas: HummockVersionDeltas } | {
     $case: "pinnedVersion";
     pinnedVersion: HummockVersion;
@@ -292,6 +286,8 @@ export interface CompactTask {
   tableOptions: { [key: number]: TableOption };
   currentEpochTime: number;
   targetSubLevelId: number;
+  /** Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum */
+  taskType: CompactTask_TaskType;
 }
 
 export const CompactTask_TaskStatus = {
@@ -384,6 +380,65 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
     case CompactTask_TaskStatus.TRACK_SST_ID_FAILED:
       return "TRACK_SST_ID_FAILED";
     case CompactTask_TaskStatus.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+export const CompactTask_TaskType = {
+  TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
+  DYNAMIC: "DYNAMIC",
+  SPACE_RECLAIM: "SPACE_RECLAIM",
+  MANUAL: "MANUAL",
+  SHARED_BUFFER: "SHARED_BUFFER",
+  TTL: "TTL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type CompactTask_TaskType = typeof CompactTask_TaskType[keyof typeof CompactTask_TaskType];
+
+export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType {
+  switch (object) {
+    case 0:
+    case "TYPE_UNSPECIFIED":
+      return CompactTask_TaskType.TYPE_UNSPECIFIED;
+    case 1:
+    case "DYNAMIC":
+      return CompactTask_TaskType.DYNAMIC;
+    case 2:
+    case "SPACE_RECLAIM":
+      return CompactTask_TaskType.SPACE_RECLAIM;
+    case 3:
+    case "MANUAL":
+      return CompactTask_TaskType.MANUAL;
+    case 4:
+    case "SHARED_BUFFER":
+      return CompactTask_TaskType.SHARED_BUFFER;
+    case 5:
+    case "TTL":
+      return CompactTask_TaskType.TTL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return CompactTask_TaskType.UNRECOGNIZED;
+  }
+}
+
+export function compactTask_TaskTypeToJSON(object: CompactTask_TaskType): string {
+  switch (object) {
+    case CompactTask_TaskType.TYPE_UNSPECIFIED:
+      return "TYPE_UNSPECIFIED";
+    case CompactTask_TaskType.DYNAMIC:
+      return "DYNAMIC";
+    case CompactTask_TaskType.SPACE_RECLAIM:
+      return "SPACE_RECLAIM";
+    case CompactTask_TaskType.MANUAL:
+      return "MANUAL";
+    case CompactTask_TaskType.SHARED_BUFFER:
+      return "SHARED_BUFFER";
+    case CompactTask_TaskType.TTL:
+      return "TTL";
+    case CompactTask_TaskType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -694,6 +749,14 @@ export interface SetCompactorRuntimeConfigRequest {
 export interface SetCompactorRuntimeConfigResponse {
 }
 
+export interface PinVersionRequest {
+  contextId: number;
+}
+
+export interface PinVersionResponse {
+  pinnedVersion: HummockVersion | undefined;
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -706,6 +769,7 @@ export interface CompactionConfig {
   targetFileSizeBase: number;
   compactionFilterMask: number;
   maxSubCompaction: number;
+  maxSpaceReclaimBytes: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -1419,41 +1483,13 @@ export const HummockSnapshot = {
   },
 };
 
-function createBasePinVersionRequest(): PinVersionRequest {
-  return { contextId: 0, lastPinned: 0 };
+function createBaseVersionUpdatePayload(): VersionUpdatePayload {
+  return { payload: undefined };
 }
 
-export const PinVersionRequest = {
-  fromJSON(object: any): PinVersionRequest {
+export const VersionUpdatePayload = {
+  fromJSON(object: any): VersionUpdatePayload {
     return {
-      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
-      lastPinned: isSet(object.lastPinned) ? Number(object.lastPinned) : 0,
-    };
-  },
-
-  toJSON(message: PinVersionRequest): unknown {
-    const obj: any = {};
-    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
-    message.lastPinned !== undefined && (obj.lastPinned = Math.round(message.lastPinned));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
-    const message = createBasePinVersionRequest();
-    message.contextId = object.contextId ?? 0;
-    message.lastPinned = object.lastPinned ?? 0;
-    return message;
-  },
-};
-
-function createBasePinVersionResponse(): PinVersionResponse {
-  return { status: undefined, payload: undefined };
-}
-
-export const PinVersionResponse = {
-  fromJSON(object: any): PinVersionResponse {
-    return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       payload: isSet(object.versionDeltas)
         ? { $case: "versionDeltas", versionDeltas: HummockVersionDeltas.fromJSON(object.versionDeltas) }
         : isSet(object.pinnedVersion)
@@ -1462,9 +1498,8 @@ export const PinVersionResponse = {
     };
   },
 
-  toJSON(message: PinVersionResponse): unknown {
+  toJSON(message: VersionUpdatePayload): unknown {
     const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.payload?.$case === "versionDeltas" && (obj.versionDeltas = message.payload?.versionDeltas
       ? HummockVersionDeltas.toJSON(message.payload?.versionDeltas)
       : undefined);
@@ -1474,11 +1509,8 @@ export const PinVersionResponse = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
-    const message = createBasePinVersionResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
+  fromPartial<I extends Exact<DeepPartial<VersionUpdatePayload>, I>>(object: I): VersionUpdatePayload {
+    const message = createBaseVersionUpdatePayload();
     if (
       object.payload?.$case === "versionDeltas" &&
       object.payload?.versionDeltas !== undefined &&
@@ -2003,6 +2035,7 @@ function createBaseCompactTask(): CompactTask {
     tableOptions: {},
     currentEpochTime: 0,
     targetSubLevelId: 0,
+    taskType: CompactTask_TaskType.TYPE_UNSPECIFIED,
   };
 }
 
@@ -2036,6 +2069,9 @@ export const CompactTask = {
         : {},
       currentEpochTime: isSet(object.currentEpochTime) ? Number(object.currentEpochTime) : 0,
       targetSubLevelId: isSet(object.targetSubLevelId) ? Number(object.targetSubLevelId) : 0,
+      taskType: isSet(object.taskType)
+        ? compactTask_TaskTypeFromJSON(object.taskType)
+        : CompactTask_TaskType.TYPE_UNSPECIFIED,
     };
   },
 
@@ -2078,6 +2114,7 @@ export const CompactTask = {
     }
     message.currentEpochTime !== undefined && (obj.currentEpochTime = Math.round(message.currentEpochTime));
     message.targetSubLevelId !== undefined && (obj.targetSubLevelId = Math.round(message.targetSubLevelId));
+    message.taskType !== undefined && (obj.taskType = compactTask_TaskTypeToJSON(message.taskType));
     return obj;
   },
 
@@ -2107,6 +2144,7 @@ export const CompactTask = {
     );
     message.currentEpochTime = object.currentEpochTime ?? 0;
     message.targetSubLevelId = object.targetSubLevelId ?? 0;
+    message.taskType = object.taskType ?? CompactTask_TaskType.TYPE_UNSPECIFIED;
     return message;
   },
 };
@@ -4123,6 +4161,53 @@ export const SetCompactorRuntimeConfigResponse = {
   },
 };
 
+function createBasePinVersionRequest(): PinVersionRequest {
+  return { contextId: 0 };
+}
+
+export const PinVersionRequest = {
+  fromJSON(object: any): PinVersionRequest {
+    return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
+  },
+
+  toJSON(message: PinVersionRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
+    const message = createBasePinVersionRequest();
+    message.contextId = object.contextId ?? 0;
+    return message;
+  },
+};
+
+function createBasePinVersionResponse(): PinVersionResponse {
+  return { pinnedVersion: undefined };
+}
+
+export const PinVersionResponse = {
+  fromJSON(object: any): PinVersionResponse {
+    return { pinnedVersion: isSet(object.pinnedVersion) ? HummockVersion.fromJSON(object.pinnedVersion) : undefined };
+  },
+
+  toJSON(message: PinVersionResponse): unknown {
+    const obj: any = {};
+    message.pinnedVersion !== undefined &&
+      (obj.pinnedVersion = message.pinnedVersion ? HummockVersion.toJSON(message.pinnedVersion) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
+    const message = createBasePinVersionResponse();
+    message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
+      ? HummockVersion.fromPartial(object.pinnedVersion)
+      : undefined;
+    return message;
+  },
+};
+
 function createBaseCompactionConfig(): CompactionConfig {
   return {
     maxBytesForLevelBase: 0,
@@ -4136,6 +4221,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     targetFileSizeBase: 0,
     compactionFilterMask: 0,
     maxSubCompaction: 0,
+    maxSpaceReclaimBytes: 0,
   };
 }
 
@@ -4163,6 +4249,7 @@ export const CompactionConfig = {
       targetFileSizeBase: isSet(object.targetFileSizeBase) ? Number(object.targetFileSizeBase) : 0,
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
+      maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
     };
   },
 
@@ -4187,6 +4274,7 @@ export const CompactionConfig = {
     message.targetFileSizeBase !== undefined && (obj.targetFileSizeBase = Math.round(message.targetFileSizeBase));
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
+    message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
     return obj;
   },
 
@@ -4203,6 +4291,7 @@ export const CompactionConfig = {
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
+    message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
     return message;
   },
 };

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
-use futures::executor::block_on;
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::RwError;
-use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -116,10 +116,12 @@ impl ExecutionPlanNode {
 /// `BatchPlanFragmenter` splits a query plan into fragments.
 pub struct BatchPlanFragmenter {
     query_id: QueryId,
-    stage_graph_builder: StageGraphBuilder,
     next_stage_id: StageId,
     worker_node_manager: WorkerNodeManagerRef,
     catalog_reader: CatalogReader,
+
+    stage_graph_builder: Option<StageGraphBuilder>,
+    stage_graph: Option<StageGraph>,
 }
 
 impl Default for QueryId {
@@ -131,14 +133,36 @@ impl Default for QueryId {
 }
 
 impl BatchPlanFragmenter {
-    pub fn new(worker_node_manager: WorkerNodeManagerRef, catalog_reader: CatalogReader) -> Self {
-        Self {
+    pub fn new(
+        worker_node_manager: WorkerNodeManagerRef,
+        catalog_reader: CatalogReader,
+        batch_node: PlanRef,
+    ) -> SchedulerResult<Self> {
+        let mut plan_fragmenter = Self {
             query_id: Default::default(),
-            stage_graph_builder: StageGraphBuilder::new(),
+            stage_graph_builder: Some(StageGraphBuilder::new()),
             next_stage_id: 0,
             worker_node_manager,
             catalog_reader,
-        }
+            stage_graph: None,
+        };
+        plan_fragmenter.split_into_stage(batch_node)?;
+        Ok(plan_fragmenter)
+    }
+
+    /// Split the plan node into each stages, based on exchange node.
+    fn split_into_stage(&mut self, batch_node: PlanRef) -> SchedulerResult<()> {
+        let root_stage = self.new_stage(
+            batch_node,
+            Some(Distribution::Single.to_prost(1, &self.catalog_reader, &self.worker_node_manager)),
+        )?;
+        self.stage_graph = Some(
+            self.stage_graph_builder
+                .take()
+                .unwrap()
+                .build(root_stage.id),
+        );
+        Ok(())
     }
 }
 
@@ -200,19 +224,57 @@ impl Query {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SourceFetchInfo {
+    pub connector: ConnectorProperties,
+    pub timebound: (Option<i64>, Option<i64>),
+}
+
 #[derive(Clone, Debug)]
-pub struct SourceScanInfo {
+pub enum SourceScanInfo {
     /// Split Info
-    split_info: Vec<SplitImpl>,
+    Incomplete(SourceFetchInfo),
+    Complete(Vec<SplitImpl>),
 }
 
 impl SourceScanInfo {
-    pub fn new(split_info: Vec<SplitImpl>) -> Self {
-        Self { split_info }
+    pub fn new(fetch_info: SourceFetchInfo) -> Self {
+        Self::Incomplete(fetch_info)
     }
 
-    pub fn split_info(&self) -> &Vec<SplitImpl> {
-        &self.split_info
+    pub async fn complete(self) -> SchedulerResult<Self> {
+        let fetch_info = match self {
+            SourceScanInfo::Incomplete(fetch_info) => fetch_info,
+            SourceScanInfo::Complete(_) => {
+                unreachable!("Never call complete when SourceScanInfo is already complete")
+            }
+        };
+        let mut enumerator = SplitEnumeratorImpl::create(fetch_info.connector).await?;
+        let kafka_enumerator = match enumerator {
+            SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+            _ => {
+                return Err(SchedulerError::Internal(anyhow!(
+                    "Unsupported to query directly from this source"
+                )))
+            }
+        };
+        let split_info = kafka_enumerator
+            .list_splits_batch(fetch_info.timebound.0, fetch_info.timebound.1)
+            .await?
+            .into_iter()
+            .map(SplitImpl::Kafka)
+            .collect_vec();
+
+        Ok(SourceScanInfo::Complete(split_info))
+    }
+
+    pub fn split_info(&self) -> SchedulerResult<&Vec<SplitImpl>> {
+        match self {
+            Self::Incomplete(_) => Err(SchedulerError::Internal(anyhow!(
+                "Should not get split info from incomplete source scan info"
+            ))),
+            Self::Complete(split_info) => Ok(split_info),
+        }
     }
 }
 
@@ -270,16 +332,20 @@ pub enum PartitionInfo {
 }
 
 /// Fragment part of `Query`.
+#[derive(Clone)]
 pub struct QueryStage {
     pub query_id: QueryId,
     pub id: StageId,
     pub root: Arc<ExecutionPlanNode>,
-    pub exchange_info: ExchangeInfo,
-    pub parallelism: u32,
+    pub exchange_info: Option<ExchangeInfo>,
+    pub parallelism: Option<u32>,
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
     pub has_lookup_join: bool,
+
+    /// Used to generage exchange information when complete source scan information.
+    children_exhchange_distribution: Option<HashMap<StageId, Distribution>>,
 }
 
 impl QueryStage {
@@ -294,6 +360,48 @@ impl QueryStage {
     /// We need to delay epoch unpin util the end of the query.
     pub fn has_lookup_join(&self) -> bool {
         self.has_lookup_join
+    }
+
+    pub fn clone_with_exchange_info(&self, exchange_info: Option<ExchangeInfo>) -> Self {
+        if let Some(exchange_info) = exchange_info {
+            return Self {
+                query_id: self.query_id.clone(),
+                id: self.id,
+                root: self.root.clone(),
+                exchange_info: Some(exchange_info),
+                parallelism: self.parallelism,
+                table_scan_info: self.table_scan_info.clone(),
+                source_info: self.source_info.clone(),
+                has_lookup_join: self.has_lookup_join,
+                children_exhchange_distribution: self.children_exhchange_distribution.clone(),
+            };
+        }
+        self.clone()
+    }
+
+    pub fn clone_with_exchange_info_and_complete_source_info(
+        &self,
+        exchange_info: Option<ExchangeInfo>,
+        source_info: SourceScanInfo,
+    ) -> Self {
+        assert!(matches!(source_info, SourceScanInfo::Complete(_)));
+        let exchange_info = if let Some(exchange_info) = exchange_info {
+            Some(exchange_info)
+        } else {
+            self.exchange_info.clone()
+        };
+
+        Self {
+            query_id: self.query_id.clone(),
+            id: self.id,
+            root: self.root.clone(),
+            exchange_info,
+            parallelism: Some(source_info.split_info().unwrap().len() as u32),
+            table_scan_info: self.table_scan_info.clone(),
+            source_info: Some(source_info),
+            has_lookup_join: self.has_lookup_join,
+            children_exhchange_distribution: None,
+        }
     }
 }
 
@@ -327,22 +435,24 @@ struct QueryStageBuilder {
     query_id: QueryId,
     id: StageId,
     root: Option<Arc<ExecutionPlanNode>>,
-    parallelism: u32,
-    exchange_info: ExchangeInfo,
+    parallelism: Option<u32>,
+    exchange_info: Option<ExchangeInfo>,
 
     children_stages: Vec<QueryStageRef>,
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
     has_lookup_join: bool,
+
+    children_exhchange_distribution: HashMap<StageId, Distribution>,
 }
 
 impl QueryStageBuilder {
     fn new(
         id: StageId,
         query_id: QueryId,
-        parallelism: u32,
-        exchange_info: ExchangeInfo,
+        parallelism: Option<u32>,
+        exchange_info: Option<ExchangeInfo>,
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
         has_lookup_join: bool,
@@ -357,10 +467,16 @@ impl QueryStageBuilder {
             table_scan_info,
             source_info,
             has_lookup_join,
+            children_exhchange_distribution: HashMap::new(),
         }
     }
 
     fn finish(self, stage_graph_builder: &mut StageGraphBuilder) -> QueryStageRef {
+        let children_exhchange_distribution = if self.parallelism.is_none() {
+            Some(self.children_exhchange_distribution)
+        } else {
+            None
+        };
         let stage = Arc::new(QueryStage {
             query_id: self.query_id,
             id: self.id,
@@ -370,6 +486,7 @@ impl QueryStageBuilder {
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
             has_lookup_join: self.has_lookup_join,
+            children_exhchange_distribution,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -417,6 +534,95 @@ impl StageGraph {
         }
 
         ret.into_iter().rev()
+    }
+
+    async fn complete(
+        self,
+        catalog_reader: &CatalogReader,
+        worker_node_manager: &WorkerNodeManagerRef,
+    ) -> SchedulerResult<StageGraph> {
+        let mut complete_stages = HashMap::new();
+        self.complete_stage(
+            self.stages.get(&self.root_stage_id).unwrap().clone(),
+            None,
+            &mut complete_stages,
+            catalog_reader,
+            worker_node_manager,
+        )
+        .await?;
+        Ok(StageGraph {
+            root_stage_id: self.root_stage_id,
+            stages: complete_stages,
+            child_edges: self.child_edges,
+            parent_edges: self.parent_edges,
+        })
+    }
+
+    #[async_recursion]
+    async fn complete_stage(
+        &self,
+        stage: QueryStageRef,
+        exchange_info: Option<ExchangeInfo>,
+        complete_stages: &mut HashMap<StageId, QueryStageRef>,
+        catalog_reader: &CatalogReader,
+        worker_node_manager: &WorkerNodeManagerRef,
+    ) -> SchedulerResult<()> {
+        let parallelism = if stage.parallelism.is_some() {
+            // If the stage has parallelism, it means it's a complete stage.
+            complete_stages.insert(
+                stage.id,
+                Arc::new(stage.clone_with_exchange_info(exchange_info)),
+            );
+            None
+        } else {
+            assert!(matches!(
+                stage.source_info,
+                Some(SourceScanInfo::Incomplete(_))
+            ));
+            let complete_source_info = stage
+                .source_info
+                .as_ref()
+                .unwrap()
+                .clone()
+                .complete()
+                .await?;
+
+            let complete_stage = Arc::new(stage.clone_with_exchange_info_and_complete_source_info(
+                exchange_info,
+                complete_source_info,
+            ));
+            let parallelism = complete_stage.parallelism;
+            complete_stages.insert(stage.id, complete_stage);
+            parallelism
+        };
+
+        for child_stage_id in self.child_edges.get(&stage.id).unwrap_or(&HashSet::new()) {
+            let exchange_info = if let Some(parallelism) = parallelism {
+                let exchange_distribution = stage
+                    .children_exhchange_distribution
+                    .as_ref()
+                    .unwrap()
+                    .get(child_stage_id)
+                    .expect("Exchange distribution is not consistent with the stage graph");
+                Some(exchange_distribution.to_prost(
+                    parallelism,
+                    catalog_reader,
+                    worker_node_manager,
+                ))
+            } else {
+                None
+            };
+            self.complete_stage(
+                self.stages.get(child_stage_id).unwrap().clone(),
+                exchange_info,
+                complete_stages,
+                catalog_reader,
+                worker_node_manager,
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -466,20 +672,26 @@ impl StageGraphBuilder {
 }
 
 impl BatchPlanFragmenter {
-    /// Split the plan node into each stages, based on exchange node.
-    pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
-        let root_stage = self.new_stage(batch_node, Distribution::Single.to_prost(1, &self))?;
-        let stage_graph = self.stage_graph_builder.build(root_stage.id);
+    /// After split, the `stage_graph` in the framenter may has the stage with incomplete source
+    /// info, we need to fetch the source info to complete the stage in this function.
+    /// Why separate this two step(`split()` and `generate_complete_query()`)?
+    /// The step of fetching source info is a async operation so that we can't do it in the split
+    /// step.
+    pub async fn generate_complete_query(self) -> SchedulerResult<Query> {
+        let stage_graph = self.stage_graph.unwrap();
+        let new_stage_graph = stage_graph
+            .complete(&self.catalog_reader, &self.worker_node_manager)
+            .await?;
         Ok(Query {
-            stage_graph,
             query_id: self.query_id,
+            stage_graph: new_stage_graph,
         })
     }
 
     fn new_stage(
         &mut self,
         root: PlanRef,
-        exchange_info: ExchangeInfo,
+        exchange_info: Option<ExchangeInfo>,
     ) -> SchedulerResult<QueryStageRef> {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
@@ -518,8 +730,10 @@ impl BatchPlanFragmenter {
                     } else {
                         // System table
                     }
-                } else {
-                    // No table scan
+                } else if source_info.is_some() {
+                    return Err(SchedulerError::Internal(anyhow!(
+                        "The stage has single distribution, but contains a source operator"
+                    )));
                 }
                 1
             }
@@ -535,18 +749,23 @@ impl BatchPlanFragmenter {
                 {
                     has_lookup_join = true;
                     lookup_join_parallelism
-                } else if let Some(source_info) = &source_info {
-                    source_info.split_info().len()
+                } else if source_info.is_some() {
+                    0
                 } else {
                     self.worker_node_manager.worker_node_count()
                 }
             }
         };
+        let parallelism = if parallelism == 0 {
+            None
+        } else {
+            Some(parallelism as u32)
+        };
 
         let mut builder = QueryStageBuilder::new(
             next_stage_id,
             self.query_id.clone(),
-            parallelism as u32,
+            parallelism,
             exchange_info,
             table_scan_info,
             source_info,
@@ -555,7 +774,7 @@ impl BatchPlanFragmenter {
 
         self.visit_node(root, &mut builder, None)?;
 
-        Ok(builder.finish(&mut self.stage_graph_builder))
+        Ok(builder.finish(self.stage_graph_builder.as_mut().unwrap()))
     }
 
     fn visit_node(
@@ -592,9 +811,22 @@ impl BatchPlanFragmenter {
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) -> SchedulerResult<()> {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
-        let child_exchange_info = node.distribution().to_prost(builder.parallelism, self);
+        let child_exchange_info = if let Some(parallelism) = builder.parallelism {
+            Some(node.distribution().to_prost(
+                parallelism,
+                &self.catalog_reader,
+                &self.worker_node_manager,
+            ))
+        } else {
+            None
+        };
         let child_stage = self.new_stage(node.inputs()[0].clone(), child_exchange_info)?;
         execution_plan_node.source_stage_id = Some(child_stage.id);
+        if builder.parallelism.is_none() {
+            builder
+                .children_exhchange_distribution
+                .insert(child_stage.id, node.distribution().clone());
+        }
 
         if let Some(parent) = parent_exec_node {
             parent.children.push(Arc::new(execution_plan_node));
@@ -620,25 +852,11 @@ impl BatchPlanFragmenter {
             let source_catalog = source_node.logical().source_catalog();
             if let Some(source_catalog) = source_catalog {
                 let property = ConnectorProperties::extract(source_catalog.properties.clone())?;
-                let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
-                let kafka_enumerator = match enumerator {
-                    SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
-                    _ => {
-                        return Err(SchedulerError::Internal(anyhow!(
-                            "Unsupported to query directly from this source"
-                        )))
-                    }
-                };
                 let timestamp_bound = source_node.logical().kafka_timestamp_range_value();
-                // println!("Timestamp bound: {:?}", timestamp_bound);
-                let split_info = block_on(
-                    kafka_enumerator.list_splits_batch(timestamp_bound.0, timestamp_bound.1),
-                )?
-                .into_iter()
-                .map(SplitImpl::Kafka)
-                .collect_vec();
-                // println!("Split info: {:?}", split_info);
-                return Ok(Some(SourceScanInfo::new(split_info)));
+                return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
+                    connector: property,
+                    timebound: timestamp_bound,
+                })));
             }
         }
 
@@ -735,31 +953,19 @@ impl BatchPlanFragmenter {
     }
 }
 
-// TODO: let frontend store owner_mapping directly?
-fn vnode_mapping_to_owner_mapping(vnode_mapping: VnodeMapping) -> HashMap<ParallelUnitId, Bitmap> {
-    let mut m: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
-    let num_vnodes = vnode_mapping.len();
-    for (i, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
-        let bitmap = m
-            .entry(parallel_unit_id)
-            .or_insert_with(|| BitmapBuilder::zeroed(num_vnodes));
-        bitmap.set(i, true);
-    }
-    m.into_iter().map(|(k, v)| (k, v.finish())).collect()
-}
-
 /// Try to derive the partition to read from the scan range.
 /// It can be derived if the value of the distribution key is already known.
 fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
-    vnode_mapping: &VnodeMapping,
+    vnode_mapping: &ParallelUnitMapping,
 ) -> HashMap<ParallelUnitId, TablePartitionInfo> {
     let num_vnodes = vnode_mapping.len();
     let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
     if scan_ranges.is_empty() {
-        return vnode_mapping_to_owner_mapping(vnode_mapping.clone())
+        return vnode_mapping
+            .to_bitmaps()
             .into_iter()
             .map(|(k, vnode_bitmap)| {
                 (
@@ -781,9 +987,8 @@ fn derive_partitions(
         match vnode {
             None => {
                 // put this scan_range to all partitions
-                vnode_mapping_to_owner_mapping(vnode_mapping.clone())
-                    .into_iter()
-                    .for_each(|(parallel_unit_id, vnode_bitmap)| {
+                vnode_mapping.to_bitmaps().into_iter().for_each(
+                    |(parallel_unit_id, vnode_bitmap)| {
                         let (bitmap, scan_ranges) = partitions
                             .entry(parallel_unit_id)
                             .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
@@ -792,11 +997,12 @@ fn derive_partitions(
                             .enumerate()
                             .for_each(|(vnode, b)| bitmap.set(vnode, b));
                         scan_ranges.push(scan_range.to_protobuf());
-                    });
+                    },
+                );
             }
             // scan a single partition
             Some(vnode) => {
-                let parallel_unit_id = vnode_mapping[vnode.to_index()];
+                let parallel_unit_id = vnode_mapping[vnode];
                 let (bitmap, scan_ranges) = partitions
                     .entry(parallel_unit_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
@@ -873,12 +1079,12 @@ mod tests {
         assert_eq!(root_exchange.root.node_type(), PlanNodeType::BatchExchange);
         assert_eq!(root_exchange.root.source_stage_id, Some(1));
         assert!(matches!(root_exchange.root.node, NodeBody::Exchange(_)));
-        assert_eq!(root_exchange.parallelism, 1);
+        assert_eq!(root_exchange.parallelism, Some(1));
         assert!(!root_exchange.has_table_scan());
 
         let join_node = query.stage_graph.stages.get(&1).unwrap();
         assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
-        assert_eq!(join_node.parallelism, 3);
+        assert_eq!(join_node.parallelism, Some(3));
 
         assert!(matches!(join_node.root.node, NodeBody::HashJoin(_)));
         assert_eq!(join_node.root.source_stage_id, None);

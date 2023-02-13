@@ -64,6 +64,8 @@ export const ExprNode_Type = {
    * e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
    */
   TO_TIMESTAMP1: "TO_TIMESTAMP1",
+  /** CAST_WITH_TIME_ZONE - Performs a cast with additional timezone information. */
+  CAST_WITH_TIME_ZONE: "CAST_WITH_TIME_ZONE",
   /** CAST - other functions */
   CAST: "CAST",
   SUBSTR: "SUBSTR",
@@ -103,6 +105,7 @@ export const ExprNode_Type = {
   BIT_LENGTH: "BIT_LENGTH",
   OVERLAY: "OVERLAY",
   REGEXP_MATCH: "REGEXP_MATCH",
+  POW: "POW",
   /** IS_TRUE - Boolean comparison */
   IS_TRUE: "IS_TRUE",
   IS_NOT_TRUE: "IS_NOT_TRUE",
@@ -124,6 +127,7 @@ export const ExprNode_Type = {
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
+  FORMAT_TYPE: "FORMAT_TYPE",
   /**
    * VNODE - Non-pure functions below (> 600)
    * ------------------------
@@ -237,6 +241,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 107:
     case "TO_TIMESTAMP1":
       return ExprNode_Type.TO_TIMESTAMP1;
+    case 108:
+    case "CAST_WITH_TIME_ZONE":
+      return ExprNode_Type.CAST_WITH_TIME_ZONE;
     case 201:
     case "CAST":
       return ExprNode_Type.CAST;
@@ -333,6 +340,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 232:
     case "REGEXP_MATCH":
       return ExprNode_Type.REGEXP_MATCH;
+    case 233:
+    case "POW":
+      return ExprNode_Type.POW;
     case 301:
     case "IS_TRUE":
       return ExprNode_Type.IS_TRUE;
@@ -381,6 +391,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 533:
     case "ARRAY_PREPEND":
       return ExprNode_Type.ARRAY_PREPEND;
+    case 534:
+    case "FORMAT_TYPE":
+      return ExprNode_Type.FORMAT_TYPE;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -463,6 +476,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "DATE_TRUNC";
     case ExprNode_Type.TO_TIMESTAMP1:
       return "TO_TIMESTAMP1";
+    case ExprNode_Type.CAST_WITH_TIME_ZONE:
+      return "CAST_WITH_TIME_ZONE";
     case ExprNode_Type.CAST:
       return "CAST";
     case ExprNode_Type.SUBSTR:
@@ -527,6 +542,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "OVERLAY";
     case ExprNode_Type.REGEXP_MATCH:
       return "REGEXP_MATCH";
+    case ExprNode_Type.POW:
+      return "POW";
     case ExprNode_Type.IS_TRUE:
       return "IS_TRUE";
     case ExprNode_Type.IS_NOT_TRUE:
@@ -559,6 +576,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_APPEND";
     case ExprNode_Type.ARRAY_PREPEND:
       return "ARRAY_PREPEND";
+    case ExprNode_Type.FORMAT_TYPE:
+      return "FORMAT_TYPE";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:

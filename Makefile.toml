@@ -12,6 +12,7 @@ extend = [
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
+  { path = "src/java_binding/make-java-binding.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -22,6 +23,7 @@ env_scripts = [
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
+is_hdfs_backend = get_env ENABLE_HDFS
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -37,8 +39,16 @@ if ${is_all_in_one_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
 end
+
+if ${is_hdfs_backend}
+  set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
+else
+  set_env BUILD_HDFS_BACKEND_CMD ""
+end
+
 ''',
 ]
+
 
 [config]
 default_to_workspace = false
@@ -74,7 +84,7 @@ alias = "logs"
 category = "Misc"
 description = "Open logs with VSCode and dump in console"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 code "${PREFIX_LOG}" || true
@@ -99,7 +109,7 @@ echo ""
 category = "Misc"
 description = "List all nodes in the cluster"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
 '''
 
@@ -107,7 +117,7 @@ tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
 category = "Misc"
 description = "List --watch all nodes in the cluster"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
 '''
 
@@ -118,7 +128,7 @@ alias = "delete"
 category = "Misc"
 description = "Delete a node in the cluster"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 risedev_ls () {
   tmux list-windows -t risedev | grep -v active | cut -d'(' -f1
@@ -130,12 +140,12 @@ err () {
   exit 1
 }
 
-if [[ -z "$1" ]]; then 
+if [[ -z "$1" ]]; then
   echo "Please pass a parameter to this script, defining which node you want to delete"
   err
 fi
 
-if [[ -z $(risedev_ls | grep "$1" ) ]]; then 
+if [[ -z $(risedev_ls | grep "$1" ) ]]; then
   echo "Please select a node that is currently running"
   err
 fi
@@ -150,7 +160,7 @@ alias = "follow"
 category = "misc"
 description = "Follows the end of the logs of a specific component"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 if [[ -z "$1" ]]; then 
@@ -174,7 +184,7 @@ tail -f -n 5 ${PREFIX_LOG}/$1
 category = "Misc"
 description = "Check if there is panic in log or significant log size issue"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 for out_file in ${PREFIX_LOG}/*.log
@@ -197,7 +207,7 @@ category = "Misc"
 description = "Open rustdoc for risingwave"
 dependencies = ["build-docs"]
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 python -mwebbrowser file://$(pwd)/target/doc/index.html
@@ -208,7 +218,7 @@ category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
 condition = { env_not_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
@@ -225,7 +235,7 @@ category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 rm -rf "${PREFIX_BIN}/risingwave"
@@ -243,7 +253,7 @@ category = "RiseDev - Build"
 description = "Link all binaries to .bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 rm -rf "${PREFIX_USR_BIN}"
@@ -276,7 +286,7 @@ category = "RiseDev - Build"
 description = "Extract dashboard artifact"
 condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 # we allow this script to fail
 
@@ -292,7 +302,7 @@ category = "RiseDev - Build"
 description = "Build dashboard v2"
 condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 rm -rf "${PREFIX_UI}"
@@ -305,7 +315,7 @@ category = "RiseDev - Build"
 description = "Build Rust components"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
@@ -313,7 +323,7 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
+cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
@@ -323,7 +333,7 @@ category = "RiseDev - Build"
 description = "Clean Rust targets"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 cargo clean
 '''
@@ -334,7 +344,7 @@ description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -345,7 +355,7 @@ cargo doc --workspace --no-deps --document-private-items
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -375,7 +385,7 @@ category = "RiseDev - Prepare"
 description = "Create user profiles file if not exists"
 condition = { files_not_exist = ["${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml"] }
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 cat <<\EOF > "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml"
@@ -429,7 +439,7 @@ alias = "playground"
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -ex
 
@@ -440,7 +450,7 @@ RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISI
 category = "RiseDev - Start"
 description = "Start RiseCtl"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
 
@@ -475,7 +485,7 @@ args = ["dev", "ci-kafka"]
 category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 
 tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
 tmux kill-session -t risedev
@@ -496,20 +506,33 @@ dependencies = ["k", "clean-data"]
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-upgrades typos-cli
+cargo install cargo-quickinstall --locked
+cargo quickinstall cargo-binstall
+
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
+do
+  echo "install: $(tput setaf 4)$tool$(tput sgr0)"
+  cargo binstall -y --no-symlinks $tool
+  echo
+done
+
+# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
+echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
+cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
+echo
+
+# Tools that fallback to `cargo install` when using `cargo binstall`.
+# We directly use `cargo install` here to be faster.
+for tool in typos-cli sqllogictest-bin
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo install $tool --locked
   echo
 done
-
-echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
-echo
 
 echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
 tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
@@ -527,7 +550,7 @@ echo "check: $(tput setaf 4)protoc$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
 """
-description = "Install required tools to do pre-CI check and run e2e tests"
+description = "Install (or upgrade) required tools to do pre-CI check and run e2e tests"
 
 [tasks.warn-on-missing-tools]
 private = true
@@ -539,7 +562,7 @@ echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(t
 category = "RiseDev - Test"
 dependencies = ["warn-on-missing-tools"]
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 export CARGO_TARGET_DIR=target/coverage
@@ -551,7 +574,7 @@ description = "Run unit tests and report coverage"
 category = "RiseDev - Test"
 dependencies = ["warn-on-missing-tools"]
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo nextest run "$@"
@@ -564,7 +587,7 @@ description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo build \
@@ -588,7 +611,7 @@ description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo nextest run \
@@ -612,7 +635,7 @@ description = "Run integration scaling tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo nextest run \
@@ -626,7 +649,7 @@ description = "Archive integration scaling tests in deterministic simulation mod
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo nextest archive \
@@ -635,13 +658,25 @@ cargo nextest archive \
   "$@"
 """
 
+[tasks.scheck]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run cargo check in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/usr/bin/env bash
+set -e
+
+cargo check -p risingwave_simulation "$@"
+"""
+
 [tasks.sslt]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo run -p risingwave_simulation "$@"
@@ -653,7 +688,7 @@ description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo build -p risingwave_simulation --tests "$@"
@@ -665,7 +700,7 @@ description = "Run e2e tests in deterministic simulation mode and report code co
 dependencies = ["warn-on-missing-tools"]
 env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo llvm-cov run -p risingwave_simulation --html "$@"
@@ -675,7 +710,7 @@ cargo llvm-cov run -p risingwave_simulation --html "$@"
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 
@@ -689,7 +724,7 @@ test $? -eq 0 || exit 1
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
 
@@ -702,7 +737,7 @@ test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)car
 category = "RiseDev - Check"
 description = "Run cargo fmt check and attempt to fix"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo fmt$(tput sgr0) checks and attempting to fix"
 cargo fmt --all
@@ -713,18 +748,36 @@ test $? -eq 0 || exit 1
 category = "RiseDev - Check"
 description = "Run cargo clippy check"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
+[tasks.check-clippy-fix]
+category = "RiseDev - Check"
+description = "Run cargo clippy check and fixes all files (including dirty and staged)"
+script = """
+#!/usr/bin/env bash
+
+echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks and attempting to fix"
+if [ $# -gt 0 ]; then
+  ARGS=("$@")
+
+  echo "Applying clippy --fix for $@ (including dirty and staged files)"
+  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+else
+  echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
+  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+fi
+"""
+
 [tasks.check-typos]
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 if ! [ -x "$(command -v typos)" ]; then
   echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
   exit 1
@@ -732,6 +785,21 @@ fi
 if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
 fi
+"""
+
+[tasks.check-udeps]
+category = "RiseDev - Check"
+description = "Check unused dependencies"
+env = { RUSTFLAGS = "--cfg tokio_unstable" }
+script = """
+#!/usr/bin/env bash
+
+# TODO: after cargo-machete supports excluding packages, we may use it instead of cargo udeps.
+# It's much faster so we can add it to CI and [tasks.check].
+
+echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
+
+cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
 
@@ -746,7 +814,7 @@ dependencies = [
   "check-typos",
 ]
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
@@ -755,11 +823,32 @@ description = "Perform pre-CI checks and automatically fix cargo sort, cargo hak
 [tasks.c]
 alias = "check"
 
+[tasks.check-fix]
+category = "RiseDev - Check"
+dependencies = [
+  "warn-on-missing-tools",
+  "check-hakari",
+  "check-dep-sort",
+  "check-fmt",
+  "check-clippy-fix",
+  "check-typos",
+]
+script = """
+#!/usr/bin/env bash
+
+echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
+"""
+description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"
+
+[tasks.cf]
+alias = "check-fix"
+
+
 [tasks.install]
 category = "RiseDev - Prepare"
 description = "Install RiseDev to user local"
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 
@@ -775,7 +864,7 @@ then
 fi
 
 cat <<EOF > "${INSTALL_PATH}"
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 cd "$DIR"
 ./risedev "\\$@"
@@ -814,7 +903,7 @@ description = "Run all streaming e2e tests"
 [tasks.slt-batch]
 category = "RiseDev - SQLLogicTest"
 extend = "slt"
-args = ["${@}", "./e2e_test/batch/**/*.slt"]
+args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]
@@ -832,7 +921,7 @@ description = "Run all e2e tests"
 category = "RiseDev - SQLLogicTest"
 description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc comments"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 cargo run --bin risedev-docslt -- "$@"
 '''
@@ -841,7 +930,7 @@ cargo run --bin risedev-docslt -- "$@"
 category = "RiseDev - Compose"
 description = "Compose a docker-compose.yaml file"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 rm -rf ${PREFIX_DOCKER}/*
 mkdir -p "${PREFIX_DOCKER}"
@@ -853,7 +942,7 @@ echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0
 category = "RiseDev - Compose"
 description = "Compose a docker-compose.yaml deploy directory"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 rm -rf "${PREFIX_DOCKER}"/*
 mkdir -p "${PREFIX_DOCKER}"
@@ -866,7 +955,7 @@ echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput s
 category = "RiseDev - Compose"
 description = "Run deploy.sh"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 .risingwave/rw-docker/deploy.sh "$@"
@@ -881,7 +970,7 @@ cat .risingwave/rw-docker/_message.partial.sh
 category = "RiseDev - Compose"
 description = "Run deploy.sh"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cp -a .risingwave/rw-docker/* docker

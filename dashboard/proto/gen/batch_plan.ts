@@ -38,6 +38,12 @@ export interface RowSeqScanNode {
     | undefined;
   /** Whether the order on output columns should be preserved. */
   ordered: boolean;
+  /** If along with `batch_limit`, `chunk_size` will be set. */
+  chunkSize: RowSeqScanNode_ChunkSize | undefined;
+}
+
+export interface RowSeqScanNode_ChunkSize {
+  chunkSize: number;
 }
 
 export interface SysRowSeqScanNode {
@@ -101,17 +107,20 @@ export interface InsertNode {
    * be filled in streaming.
    */
   rowIdIndex: ColumnIndex | undefined;
+  returning: boolean;
 }
 
 export interface DeleteNode {
   /** Id of the table to perform deleting. */
   tableId: number;
+  returning: boolean;
 }
 
 export interface UpdateNode {
   /** Id of the table to perform updating. */
   tableId: number;
   exprs: ExprNode[];
+  returning: boolean;
 }
 
 export interface ValuesNode {
@@ -308,7 +317,6 @@ export interface PlanNode {
     | { $case: "values"; values: ValuesNode }
     | { $case: "hashJoin"; hashJoin: HashJoinNode }
     | { $case: "mergeSortExchange"; mergeSortExchange: MergeSortExchangeNode }
-    | { $case: "sortMergeJoin"; sortMergeJoin: SortMergeJoinNode }
     | { $case: "hopWindow"; hopWindow: HopWindowNode }
     | { $case: "tableFunction"; tableFunction: TableFunctionNode }
     | { $case: "sysRowSeqScan"; sysRowSeqScan: SysRowSeqScanNode }
@@ -412,7 +420,14 @@ export interface PlanFragment {
 }
 
 function createBaseRowSeqScanNode(): RowSeqScanNode {
-  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false };
+  return {
+    tableDesc: undefined,
+    columnIds: [],
+    scanRanges: [],
+    vnodeBitmap: undefined,
+    ordered: false,
+    chunkSize: undefined,
+  };
 }
 
 export const RowSeqScanNode = {
@@ -423,6 +438,7 @@ export const RowSeqScanNode = {
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
+      chunkSize: isSet(object.chunkSize) ? RowSeqScanNode_ChunkSize.fromJSON(object.chunkSize) : undefined,
     };
   },
 
@@ -443,6 +459,8 @@ export const RowSeqScanNode = {
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.ordered !== undefined && (obj.ordered = message.ordered);
+    message.chunkSize !== undefined &&
+      (obj.chunkSize = message.chunkSize ? RowSeqScanNode_ChunkSize.toJSON(message.chunkSize) : undefined);
     return obj;
   },
 
@@ -457,6 +475,31 @@ export const RowSeqScanNode = {
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
     message.ordered = object.ordered ?? false;
+    message.chunkSize = (object.chunkSize !== undefined && object.chunkSize !== null)
+      ? RowSeqScanNode_ChunkSize.fromPartial(object.chunkSize)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRowSeqScanNode_ChunkSize(): RowSeqScanNode_ChunkSize {
+  return { chunkSize: 0 };
+}
+
+export const RowSeqScanNode_ChunkSize = {
+  fromJSON(object: any): RowSeqScanNode_ChunkSize {
+    return { chunkSize: isSet(object.chunkSize) ? Number(object.chunkSize) : 0 };
+  },
+
+  toJSON(message: RowSeqScanNode_ChunkSize): unknown {
+    const obj: any = {};
+    message.chunkSize !== undefined && (obj.chunkSize = Math.round(message.chunkSize));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RowSeqScanNode_ChunkSize>, I>>(object: I): RowSeqScanNode_ChunkSize {
+    const message = createBaseRowSeqScanNode_ChunkSize();
+    message.chunkSize = object.chunkSize ?? 0;
     return message;
   },
 };
@@ -699,7 +742,7 @@ export const FilterNode = {
 };
 
 function createBaseInsertNode(): InsertNode {
-  return { tableId: 0, columnIndices: [], rowIdIndex: undefined };
+  return { tableId: 0, columnIndices: [], rowIdIndex: undefined, returning: false };
 }
 
 export const InsertNode = {
@@ -708,6 +751,7 @@ export const InsertNode = {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
       rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
   },
 
@@ -721,6 +765,7 @@ export const InsertNode = {
     }
     message.rowIdIndex !== undefined &&
       (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
 
@@ -731,34 +776,40 @@ export const InsertNode = {
     message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
       ? ColumnIndex.fromPartial(object.rowIdIndex)
       : undefined;
+    message.returning = object.returning ?? false;
     return message;
   },
 };
 
 function createBaseDeleteNode(): DeleteNode {
-  return { tableId: 0 };
+  return { tableId: 0, returning: false };
 }
 
 export const DeleteNode = {
   fromJSON(object: any): DeleteNode {
-    return { tableId: isSet(object.tableId) ? Number(object.tableId) : 0 };
+    return {
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      returning: isSet(object.returning) ? Boolean(object.returning) : false,
+    };
   },
 
   toJSON(message: DeleteNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<DeleteNode>, I>>(object: I): DeleteNode {
     const message = createBaseDeleteNode();
     message.tableId = object.tableId ?? 0;
+    message.returning = object.returning ?? false;
     return message;
   },
 };
 
 function createBaseUpdateNode(): UpdateNode {
-  return { tableId: 0, exprs: [] };
+  return { tableId: 0, exprs: [], returning: false };
 }
 
 export const UpdateNode = {
@@ -766,6 +817,7 @@ export const UpdateNode = {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       exprs: Array.isArray(object?.exprs) ? object.exprs.map((e: any) => ExprNode.fromJSON(e)) : [],
+      returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
   },
 
@@ -777,6 +829,7 @@ export const UpdateNode = {
     } else {
       obj.exprs = [];
     }
+    message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
 
@@ -784,6 +837,7 @@ export const UpdateNode = {
     const message = createBaseUpdateNode();
     message.tableId = object.tableId ?? 0;
     message.exprs = object.exprs?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.returning = object.returning ?? false;
     return message;
   },
 };
@@ -1839,8 +1893,6 @@ export const PlanNode = {
         ? { $case: "hashJoin", hashJoin: HashJoinNode.fromJSON(object.hashJoin) }
         : isSet(object.mergeSortExchange)
         ? { $case: "mergeSortExchange", mergeSortExchange: MergeSortExchangeNode.fromJSON(object.mergeSortExchange) }
-        : isSet(object.sortMergeJoin)
-        ? { $case: "sortMergeJoin", sortMergeJoin: SortMergeJoinNode.fromJSON(object.sortMergeJoin) }
         : isSet(object.hopWindow)
         ? { $case: "hopWindow", hopWindow: HopWindowNode.fromJSON(object.hopWindow) }
         : isSet(object.tableFunction)
@@ -1910,9 +1962,6 @@ export const PlanNode = {
     message.nodeBody?.$case === "mergeSortExchange" && (obj.mergeSortExchange = message.nodeBody?.mergeSortExchange
       ? MergeSortExchangeNode.toJSON(message.nodeBody?.mergeSortExchange)
       : undefined);
-    message.nodeBody?.$case === "sortMergeJoin" && (obj.sortMergeJoin = message.nodeBody?.sortMergeJoin
-      ? SortMergeJoinNode.toJSON(message.nodeBody?.sortMergeJoin)
-      : undefined);
     message.nodeBody?.$case === "hopWindow" &&
       (obj.hopWindow = message.nodeBody?.hopWindow ? HopWindowNode.toJSON(message.nodeBody?.hopWindow) : undefined);
     message.nodeBody?.$case === "tableFunction" && (obj.tableFunction = message.nodeBody?.tableFunction
@@ -1944,9 +1993,7 @@ export const PlanNode = {
 
   fromPartial<I extends Exact<DeepPartial<PlanNode>, I>>(object: I): PlanNode {
     const message = createBasePlanNode();
-    message.children = object.children?.map((e) =>
-      PlanNode.fromPartial(e)
-    ) || [];
+    message.children = object.children?.map((e) => PlanNode.fromPartial(e)) || [];
     if (
       object.nodeBody?.$case === "insert" && object.nodeBody?.insert !== undefined && object.nodeBody?.insert !== null
     ) {
@@ -2041,16 +2088,6 @@ export const PlanNode = {
       message.nodeBody = {
         $case: "mergeSortExchange",
         mergeSortExchange: MergeSortExchangeNode.fromPartial(object.nodeBody.mergeSortExchange),
-      };
-    }
-    if (
-      object.nodeBody?.$case === "sortMergeJoin" &&
-      object.nodeBody?.sortMergeJoin !== undefined &&
-      object.nodeBody?.sortMergeJoin !== null
-    ) {
-      message.nodeBody = {
-        $case: "sortMergeJoin",
-        sortMergeJoin: SortMergeJoinNode.fromPartial(object.nodeBody.sortMergeJoin),
       };
     }
     if (

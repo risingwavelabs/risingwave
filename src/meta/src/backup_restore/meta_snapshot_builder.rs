@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
 use risingwave_pb::user::UserInfo;

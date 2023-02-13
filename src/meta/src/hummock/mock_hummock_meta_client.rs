@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,14 +29,15 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    SubscribeCompactTasksResponse, VacuumTask,
+    compact_task, CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot,
+    HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use super::CompactionPickParma;
 use crate::hummock::compaction_scheduler::CompactionRequestChannel;
 use crate::hummock::HummockManager;
 use crate::storage::MemStore;
@@ -61,7 +62,10 @@ impl MockHummockMetaClient {
 
     pub async fn get_compact_task(&self) -> Option<CompactTask> {
         self.hummock_manager
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                CompactionPickParma::new_base_parma(),
+            )
             .await
             .unwrap_or(None)
     }
@@ -195,10 +199,18 @@ impl HummockMetaClient for MockHummockMetaClient {
         let hummock_manager_compact = self.hummock_manager.clone();
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
-            while let Some(group) = sched_rx.recv().await {
+            while let Some((group, task_type)) = sched_rx.recv().await {
                 sched_channel.unschedule(group);
+
+                let compaction_pick_param = match task_type {
+                    compact_task::TaskType::Dynamic => CompactionPickParma::new_base_parma(),
+                    compact_task::TaskType::SpaceReclaim => {
+                        CompactionPickParma::new_space_reclaim_parma()
+                    }
+                    _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
+                };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group)
+                    .get_compact_task(group, compaction_pick_param)
                     .await
                     .unwrap()
                 {

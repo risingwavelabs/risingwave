@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,12 +20,12 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown,
-    StreamTableScan, ToBatch, ToStream,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
@@ -86,6 +86,7 @@ impl LogicalScan {
             table_desc,
             indexes,
             predicate,
+            chunk_size: None,
         };
 
         let schema = core.schema();
@@ -116,7 +117,7 @@ impl LogicalScan {
         Self::new(
             table_name,
             is_sys_table,
-            (0..table_desc.columns.len()).into_iter().collect(),
+            (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
             ctx,
@@ -256,6 +257,11 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn watermark_columns(&self) -> FixedBitSet {
+        let watermark_columns = &self.table_desc().watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    }
+
     pub fn to_index_scan(
         &self,
         index_name: &str,
@@ -298,6 +304,20 @@ impl LogicalScan {
             self.ctx(),
             new_predicate,
         )
+    }
+
+    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
+    /// executor
+    pub fn set_chunk_size(&mut self, chunk_size: u32) {
+        self.core.chunk_size = Some(chunk_size);
+    }
+
+    pub fn chunk_size(&self) -> Option<u32> {
+        self.core.chunk_size
+    }
+
+    pub fn primary_key(&self) -> Vec<OrderPair> {
+        self.core.table_desc.pk.clone()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
@@ -450,6 +470,22 @@ impl ColPrunable for LogicalScan {
     }
 }
 
+impl ExprRewritable for LogicalScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
+    }
+}
+
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(
         &self,
@@ -570,9 +606,21 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        if !self.indexes().is_empty() {
+        // rewrite the condition before converting to batch as we will handle the expressions in a
+        // special way
+        let new_predicate = Condition {
+            conjunctions: self
+                .predicate()
+                .conjunctions
+                .iter()
+                .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
+                .collect(),
+        };
+        let new = self.clone_with_predicate(new_predicate);
+
+        if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(self.clone().into()) {
+            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
                     return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
@@ -586,12 +634,12 @@ impl ToBatch for LogicalScan {
                 }
             } else {
                 // Try to make use of index if it satisfies the required order
-                if let Some(plan_ref) = self.use_index_scan_if_order_is_satisfied(required_order) {
+                if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
                     return plan_ref;
                 }
             }
         }
-        self.to_batch_inner_with_required(required_order)
+        new.to_batch_inner_with_required(required_order)
     }
 }
 

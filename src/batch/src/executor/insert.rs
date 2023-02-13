@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,9 +45,11 @@ pub struct InsertExecutor {
     column_indices: Vec<usize>,
 
     row_id_index: Option<usize>,
+    returning: bool,
 }
 
 impl InsertExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         dml_manager: DmlManagerRef,
@@ -56,18 +58,25 @@ impl InsertExecutor {
         identity: String,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Self {
+        let table_schema = child.schema().clone();
         Self {
             table_id,
             dml_manager,
             child,
             chunk_size,
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
             column_indices,
             row_id_index,
+            returning,
         }
     }
 }
@@ -127,6 +136,9 @@ impl InsertExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
+            if self.returning {
+                yield data_chunk.clone();
+            }
             for chunk in builder.append_chunk(data_chunk) {
                 write_chunk(chunk)?;
             }
@@ -144,7 +156,7 @@ impl InsertExecutor {
             .sum::<usize>();
 
         // create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_inserted as i64));
 
@@ -187,6 +199,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .row_id_index
                 .as_ref()
                 .map(|index| index.index as _),
+            insert_node.returning,
         )))
     }
 }
@@ -258,12 +271,12 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
-        // to the `Weak` reference in `DmlManager`.
+        // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
+        // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
             .register_reader(table_id, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader_v2().into_stream_v2();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(
@@ -274,6 +287,7 @@ mod tests {
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
             row_id_index,
+            false,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
@@ -294,7 +308,7 @@ mod tests {
         let chunk = reader.next().await.unwrap()?;
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.chunk.columns()[0]
                 .array()
                 .as_int32()
                 .iter()
@@ -303,7 +317,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -321,7 +335,7 @@ mod tests {
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
         .into();
-        assert_eq!(*chunk.columns()[2].array(), array);
+        assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
@@ -332,7 +346,6 @@ mod tests {
                 None,
                 ReadOptions {
                     prefix_hint: None,
-                    check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,

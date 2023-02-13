@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,4 +106,4 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan, BatchSource }
+impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan, BatchSource, BatchInsert, BatchDelete, BatchUpdate }

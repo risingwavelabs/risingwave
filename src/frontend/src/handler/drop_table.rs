@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,10 +54,8 @@ pub async fn handle_drop_table(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
-        match table.table_type() {
-            // TODO(Yuanxin): Remove this `if` after unsupporting `CREATE MATERIALIZED SOURCE`.
-            TableType::Table if table.associated_source_id().is_none() => {}
-            _ => return Err(table.bad_drop_error()),
+        if table.table_type() != TableType::Table {
+            return Err(table.bad_drop_error());
         }
 
         (table.associated_source_id(), table.id())

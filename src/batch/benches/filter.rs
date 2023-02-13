@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
+use risingwave_common::enable_jemalloc_on_linux;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
@@ -26,12 +27,10 @@ use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
 use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
-use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
     const CHUNK_SIZE: usize = 1024;

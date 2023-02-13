@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
-use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
+use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
@@ -229,8 +229,8 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        MonitoredStateStore::new(self, stats)
+    fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
+        MonitoredStateStore::new(self, storage_metrics)
     }
 
     /// Clears contents in shared buffer.
@@ -240,6 +240,9 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
+
+    /// Validates whether store can serve `epoch` at the moment.
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
@@ -275,9 +278,8 @@ pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Vec<u8>>,
+    pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
-    pub check_bloom_filter: bool,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,

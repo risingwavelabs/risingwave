@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_meta::hummock::compaction::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
-use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
@@ -43,7 +43,7 @@ use serial_test::serial;
 use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
-use crate::get_test_notification_client;
+use crate::get_notification_client_for_test;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -159,7 +159,10 @@ async fn test_syncpoints_test_local_notification_receiver() {
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
     let mut task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            CompactionPickParma::new_base_parma(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -241,7 +244,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         &hummock_manager_ref,
         TableId::from(existing_table_id),
     )
@@ -330,7 +333,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     storage.wait_version(version).await;
     let read_options = ReadOptions {
         ignore_range_tombstone: false,
-        check_bloom_filter: false,
+
         prefix_hint: None,
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,

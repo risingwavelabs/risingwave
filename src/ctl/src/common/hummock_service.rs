@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_common::config::{RwConfig, StorageConfig};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -38,8 +39,10 @@ pub struct HummockServiceOpts {
 #[derive(Clone)]
 pub struct Metrics {
     pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
+    pub storage_metrics: Arc<MonitoredStorageMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 }
 
 impl HummockServiceOpts {
@@ -90,27 +93,24 @@ For `./risedev apply-compose-deploy` users,
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
         // FIXME: allow specify custom config
-        let config = StorageConfig {
+        let opts = StorageOpts {
             share_buffer_compaction_worker_threads_number: 0,
             ..Default::default()
         };
-        let rw_config = RwConfig {
-            storage: config.clone(),
-            ..Default::default()
-        };
 
-        tracing::info!("using Hummock config: {:#?}", config);
+        tracing::info!("using StorageOpts: {:#?}", opts);
 
         let metrics = Metrics {
             hummock_metrics: Arc::new(HummockMetrics::unused()),
-            state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+            state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
+            storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
         };
 
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
-            "",
-            &rw_config,
+            Arc::new(opts),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
                 metrics.hummock_metrics.clone(),
@@ -119,6 +119,8 @@ For `./risedev apply-compose-deploy` users,
             metrics.object_store_metrics.clone(),
             TieredCacheMetricsBuilder::unused(),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
+            metrics.storage_metrics.clone(),
+            metrics.compactor_metrics.clone(),
         )
         .await?;
 
@@ -126,7 +128,7 @@ For `./risedev apply-compose-deploy` users,
             Ok((
                 hummock_state_store
                     .clone()
-                    .monitored(metrics.state_store_metrics.clone()),
+                    .monitored(metrics.storage_metrics.clone()),
                 metrics,
             ))
         } else {

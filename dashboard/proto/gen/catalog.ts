@@ -14,11 +14,18 @@ export const protobufPackage = "catalog";
 
 /**
  * The rust prost library always treats uint64 as required and message as
- * optional. In order to allow `row_id_index` as optional field in
- * `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
+ * optional. In order to allow `row_id_index` as an optional field, we wrap
+ * uint64 inside this message.
  */
 export interface ColumnIndex {
   index: number;
+}
+
+export interface WatermarkDesc {
+  /** The column idx the watermark is on */
+  watermarkIdx: number;
+  /** The expression to calculate the watermark value. */
+  expr: ExprNode | undefined;
 }
 
 export interface StreamSourceInfo {
@@ -52,7 +59,14 @@ export interface Source {
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
   owner: number;
-  info: StreamSourceInfo | undefined;
+  info:
+    | StreamSourceInfo
+    | undefined;
+  /**
+   * Define watermarks on the source. The `repeated` is just for forward
+   * compatibility, currently, only one watermark on the source
+   */
+  watermarkDescs: WatermarkDesc[];
 }
 
 export interface Source_PropertiesEntry {
@@ -151,6 +165,7 @@ export interface Table {
   definition: string;
   handlePkConflict: boolean;
   readPrefixLenHint: number;
+  watermarkIndices: number[];
   /**
    * Per-table catalog version, used by schema change. `None` for internal tables and tests.
    * Not to be confused with the global catalog version for notification service.
@@ -282,6 +297,33 @@ export const ColumnIndex = {
   },
 };
 
+function createBaseWatermarkDesc(): WatermarkDesc {
+  return { watermarkIdx: 0, expr: undefined };
+}
+
+export const WatermarkDesc = {
+  fromJSON(object: any): WatermarkDesc {
+    return {
+      watermarkIdx: isSet(object.watermarkIdx) ? Number(object.watermarkIdx) : 0,
+      expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined,
+    };
+  },
+
+  toJSON(message: WatermarkDesc): unknown {
+    const obj: any = {};
+    message.watermarkIdx !== undefined && (obj.watermarkIdx = Math.round(message.watermarkIdx));
+    message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WatermarkDesc>, I>>(object: I): WatermarkDesc {
+    const message = createBaseWatermarkDesc();
+    message.watermarkIdx = object.watermarkIdx ?? 0;
+    message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
+    return message;
+  },
+};
+
 function createBaseStreamSourceInfo(): StreamSourceInfo {
   return {
     rowFormat: RowFormatType.ROW_UNSPECIFIED,
@@ -340,6 +382,7 @@ function createBaseSource(): Source {
     properties: {},
     owner: 0,
     info: undefined,
+    watermarkDescs: [],
   };
 }
 
@@ -361,6 +404,9 @@ export const Source = {
         : {},
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
     };
   },
 
@@ -390,6 +436,11 @@ export const Source = {
     }
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
     return obj;
   },
 
@@ -417,6 +468,7 @@ export const Source = {
     message.info = (object.info !== undefined && object.info !== null)
       ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
     return message;
   },
 };
@@ -741,6 +793,7 @@ function createBaseTable(): Table {
     definition: "",
     handlePkConflict: false,
     readPrefixLenHint: 0,
+    watermarkIndices: [],
     version: undefined,
   };
 }
@@ -782,6 +835,9 @@ export const Table = {
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      watermarkIndices: Array.isArray(object?.watermarkIndices)
+        ? object.watermarkIndices.map((e: any) => Number(e))
+        : [],
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -841,6 +897,11 @@ export const Table = {
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    if (message.watermarkIndices) {
+      obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
+    } else {
+      obj.watermarkIndices = [];
+    }
     message.version !== undefined &&
       (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
@@ -890,6 +951,7 @@ export const Table = {
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;

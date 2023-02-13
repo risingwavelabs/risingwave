@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ pub struct ComputeNodeConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
@@ -100,7 +101,9 @@ pub struct CompactorConfig {
     pub exporter_port: u16,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
+
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
     pub max_concurrent_task_number: u64,
@@ -219,6 +222,19 @@ pub struct AwsS3Config {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct OpendalConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+
+    pub id: String,
+    pub engine: String,
+    pub namenode: String,
+    pub root: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -312,6 +328,7 @@ pub enum ServiceConfig {
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Jaeger(JaegerConfig),
+    OpenDal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
     Pubsub(PubsubConfig),
@@ -340,6 +357,7 @@ impl ServiceConfig {
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
             Self::ConnectorNode(c) => &c.id,
+            Self::OpenDal(c) => &c.id,
         }
     }
 }

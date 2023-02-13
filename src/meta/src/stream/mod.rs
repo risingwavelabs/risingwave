@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod mapping;
 mod scale;
-mod scheduler;
 mod source_manager;
 mod stream_graph;
 mod stream_manager;
@@ -22,9 +20,7 @@ mod stream_manager;
 mod test_fragmenter;
 mod test_scale;
 
-pub use mapping::*;
 pub use scale::*;
-pub use scheduler::*;
 pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;

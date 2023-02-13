@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -397,7 +397,7 @@ mod tests {
     use risingwave_pb::hummock::CompactTaskProgress;
 
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::CompactorManager;
+    use crate::hummock::{CompactionPickParma, CompactorManager};
 
     #[tokio::test]
     async fn test_compactor_manager() {
@@ -410,7 +410,10 @@ mod tests {
             let _receiver = compactor_manager.add_compactor(context_id, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
-                .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+                .get_compact_task(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    CompactionPickParma::new_base_parma(),
+                )
                 .await
                 .unwrap()
                 .unwrap();

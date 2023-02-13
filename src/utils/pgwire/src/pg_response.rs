@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,21 +15,26 @@
 use std::fmt::Formatter;
 use std::pin::Pin;
 
-use futures::Stream;
+use futures::{Future, FutureExt, Stream, StreamExt};
 
+use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 pub type RowSet = Vec<Row>;
 pub type RowSetResult = Result<RowSet, BoxedError>;
+pub trait ValuesStream = Stream<Item = RowSetResult> + Unpin + Send;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
+    INSERT_RETURNING,
     DELETE,
+    DELETE_RETURNING,
     UPDATE,
+    UPDATE_RETURNING,
     SELECT,
     MOVE,
     FETCH,
@@ -83,22 +88,23 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-pub struct PgResponse<VS>
-where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
-{
+pub trait Callback = Future<Output = Result<(), BoxedError>> + Send;
+pub type BoxedCallback = Pin<Box<dyn Callback>>;
+
+pub struct PgResponse<VS> {
     stmt_type: StatementType,
     // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
     notice: Option<String>,
     values_stream: Option<VS>,
+    callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
 }
 
 impl<VS> std::fmt::Debug for PgResponse<VS>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: ValuesStream,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PgResponse")
@@ -121,13 +127,21 @@ impl StatementType {
                 | StatementType::COPY
                 | StatementType::FETCH
                 | StatementType::SELECT
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
     pub fn is_dml(&self) -> bool {
         matches!(
             self,
-            StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
+            StatementType::INSERT
+                | StatementType::DELETE
+                | StatementType::UPDATE
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
@@ -138,13 +152,25 @@ impl StatementType {
                 | StatementType::EXPLAIN
                 | StatementType::SHOW_COMMAND
                 | StatementType::DESCRIBE_TABLE
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
+        )
+    }
+
+    pub fn is_returning(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 }
 
 impl<VS> PgResponse<VS>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: ValuesStream,
 {
     pub fn empty_result(stmt_type: StatementType) -> Self {
         let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
@@ -154,6 +180,7 @@ where
             values_stream: None,
             row_desc: vec![],
             notice: None,
+            callback: None,
         }
     }
 
@@ -164,7 +191,12 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: Some(notice),
+            notice: if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
+            callback: None,
         }
     }
 
@@ -173,6 +205,39 @@ where
         row_cnt: Option<i32>,
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, None, None)
+    }
+
+    pub fn new_for_stream_extra(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+        notice: String,
+        callback: impl Callback + 'static,
+    ) -> Self {
+        Self::new_for_stream_inner(
+            stmt_type,
+            row_cnt,
+            values_stream,
+            row_desc,
+            if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
+            Some(callback.boxed()),
+        )
+    }
+
+    fn new_for_stream_inner(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+        notice: Option<String>,
+        callback: Option<BoxedCallback>,
     ) -> Self {
         assert!(
             stmt_type.is_query() ^ row_cnt.is_some(),
@@ -183,7 +248,8 @@ where
             row_cnt,
             values_stream: Some(values_stream),
             row_desc,
-            notice: None,
+            notice,
+            callback,
         }
     }
 
@@ -211,11 +277,23 @@ where
         self.row_desc.clone()
     }
 
-    pub fn values_stream(&mut self) -> Pin<&mut VS> {
-        Pin::new(
-            self.values_stream
-                .as_mut()
-                .expect("getting values from empty result"),
-        )
+    pub fn values_stream(&mut self) -> &mut VS {
+        self.values_stream.as_mut().expect("no values stream")
+    }
+
+    /// Run the callback if there is one.
+    ///
+    /// This should only be called after the values stream has been exhausted. Multiple calls to
+    /// this function will be no-ops.
+    pub async fn run_callback(&mut self) -> Result<(), PsqlError> {
+        // Check if the stream is exhausted.
+        if let Some(values_stream) = &mut self.values_stream {
+            assert!(values_stream.next().await.is_none());
+        }
+
+        if let Some(callback) = self.callback.take() {
+            callback.await.map_err(PsqlError::ExecuteError)?;
+        }
+        Ok(())
     }
 }
