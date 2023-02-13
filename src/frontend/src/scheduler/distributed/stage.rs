@@ -217,6 +217,7 @@ impl StageExecution {
                 *s = StageState::Started;
 
                 spawn(async move { runner.run(receiver).await });
+                tracing::trace!("Stage {:?}-{:?} started.",  self.stage.query_id.id, self.stage.id)
             }
             _ => {
                 unreachable!("Only expect to schedule stage once");
@@ -231,6 +232,7 @@ impl StageExecution {
             // None.
             if shutdown_tx.send(StageMessage::Stop(error)).is_err() {
                 // The stage runner handle has already closed. so do no-op.
+                tracing::trace!("Failed to send stop message stage: {:?}-{:?}", self.stage.query_id, self.stage.id);
             }
         }
     }
@@ -391,6 +393,7 @@ impl StageRunner {
                     // Received shutdown signal from query runner, should send abort RPC to all CNs.
                     // change state to aborted. Note that the task cancel can only happen after schedule all these tasks to CN.
                     // This can be an optimization for future: How to stop before schedule tasks.
+                    tracing::trace!("Stopping stage: {:?}-{:?}, task_num: {}", self.stage.query_id, self.stage.id, self.tasks.len());
                     self.abort_all_scheduled_tasks().await?;
                     break;
                 }
@@ -445,7 +448,8 @@ impl StageRunner {
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
-                         } else {
+                         } 
+                         else {
                             // After processing all stream status, we must have sent signal (Either Scheduled or
                             // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
                             if !sent_signal_to_next {
@@ -453,11 +457,12 @@ impl StageRunner {
                                 // In this case, batch query is expected to fail. Client in simulation test should retry this query (w/o kill nodes).
                                 return Err(TaskExecutionError("compute node lose connection before response".to_string()));
                             }
-                            break;
                     }
                 }
             }
         }
+
+        tracing::trace!("Stage runner [{:?}-{:?}] existed. ", self.stage.query_id, self.stage.id);
         Ok(())
     }
 
@@ -513,7 +518,7 @@ impl StageRunner {
         }
 
         if let Some(err) = terminated_chunk_stream.take_result() {
-            let stage_message = err.expect("Sender should always exist!");
+            let stage_message = err.expect("Sender should always exists!");
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
@@ -530,6 +535,8 @@ impl StageRunner {
         } else {
             self.notify_stage_completed().await;
         }
+
+        tracing::info!("Stage runner [{:?}-{:?}] existed. ", self.stage.query_id, self.stage.id);
 
         Ok(())
     }
@@ -701,23 +708,21 @@ impl StageRunner {
             let query_id = self.stage.query_id.id.clone();
             let stage_id = self.stage.id;
             let task_id = *task;
-            spawn(async move {
-                if let Err(e) = client
-                    .abort(AbortTaskRequest {
-                        task_id: Some(risingwave_pb::batch_plan::TaskId {
-                            query_id: query_id.clone(),
-                            stage_id,
-                            task_id,
-                        }),
-                    })
-                    .await
-                {
-                    error!(
-                        "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
-                        task_id, stage_id, query_id, e
-                    );
-                };
-            });
+            if let Err(e) = client
+                .abort(AbortTaskRequest {
+                    task_id: Some(risingwave_pb::batch_plan::TaskId {
+                        query_id: query_id.clone(),
+                        stage_id,
+                        task_id,
+                    }),
+                })
+                .await
+            {
+                error!(
+                    "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
+                    task_id, stage_id, query_id, e
+                );
+            };
         }
         Ok(())
     }

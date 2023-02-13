@@ -48,12 +48,12 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     targets
         // enable trace for most modules
         .with_target("risingwave_stream", Level::DEBUG)
-        .with_target("risingwave_batch", Level::DEBUG)
+        .with_target("risingwave_batch", Level::TRACE)
         .with_target("risingwave_storage", Level::DEBUG)
         .with_target("risingwave_sqlparser", Level::INFO)
         .with_target("risingwave_source", Level::INFO)
         .with_target("risingwave_connector", Level::INFO)
-        .with_target("risingwave_frontend", Level::INFO)
+        .with_target("risingwave_frontend", Level::TRACE)
         .with_target("risingwave_meta", Level::INFO)
         .with_target("risingwave_tracing", Level::INFO)
         .with_target("risingwave_compute", Level::INFO)
