@@ -13,13 +13,17 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
+use std::time::Duration;
+
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
+use tokio::time::sleep;
 use tokio_postgres::error::Error as PgError;
 
 use crate::validation::is_permissible_error;
 use crate::{
-    create_table_statement_to_table, mview_sql_gen, parse_sql, session_sql_gen, sql_gen, Table,
+    create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
+    sql_gen, Table,
 };
 
 /// e2e test runner for sqlsmith
@@ -29,9 +33,28 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     } else {
         rand::rngs::SmallRng::from_entropy()
     };
-    let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+    let (tables, base_tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+    tracing::info!("Created tables");
 
-    test_sqlsmith(client, &mut rng, tables.clone(), &setup_sql).await;
+    let row_count = 500;
+    client
+        .query("SET RW_IMPLICIT_FLUSH TO TRUE;", &[])
+        .await
+        .unwrap();
+    populate_tables(client, &mut rng, base_tables.clone(), row_count).await;
+    tracing::info!("Created base_tables");
+    // FIXME(noel): This is a hack, seems like flush is not working as expected.
+    sleep(Duration::from_secs(20)).await;
+
+    test_sqlsmith(
+        client,
+        &mut rng,
+        tables.clone(),
+        &setup_sql,
+        base_tables,
+        row_count,
+    )
+    .await;
     tracing::info!("Passed sqlsmith tests");
     test_batch_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
     tracing::info!("Passed batch queries");
@@ -41,13 +64,28 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     drop_tables(&mviews, testdata, client).await;
 }
 
+async fn populate_tables<R: Rng>(
+    client: &tokio_postgres::Client,
+    rng: &mut R,
+    base_tables: Vec<Table>,
+    row_count: usize,
+) {
+    let inserts = insert_sql_gen(rng, base_tables, row_count);
+    client.query(&inserts, &[]).await.unwrap();
+}
+
 /// Sanity checks for sqlsmith
 async fn test_sqlsmith<R: Rng>(
     client: &tokio_postgres::Client,
     rng: &mut R,
     tables: Vec<Table>,
     setup_sql: &str,
+    base_tables: Vec<Table>,
+    row_count: usize,
 ) {
+    // Test inserted rows should be same as population count.
+    test_population_count(client, base_tables, row_count).await;
+
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.20; // permit at most 20% of queries to be skipped.
     let sample_size = 50;
@@ -85,6 +123,25 @@ async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mu
     let session_sql = session_sql_gen(rng);
     tracing::info!("Executing: {}", session_sql);
     client.simple_query(session_sql.as_str()).await.unwrap();
+}
+
+async fn test_population_count(
+    client: &tokio_postgres::Client,
+    base_tables: Vec<Table>,
+    expected_count: usize,
+) {
+    let mut actual_count = 0;
+    for t in base_tables {
+        let q = format!("select * from {};", t.name);
+        let rows = client.simple_query(&q).await.unwrap();
+        actual_count += rows.len();
+    }
+    if actual_count != expected_count {
+        panic!(
+            "expected {} rows, only had {} rows",
+            expected_count, actual_count,
+        )
+    }
 }
 
 /// Test batch queries, returns skipped query statistics
@@ -143,16 +200,18 @@ async fn create_tables(
     rng: &mut impl Rng,
     testdata: &str,
     client: &tokio_postgres::Client,
-) -> (Vec<Table>, Vec<Table>, String) {
+) -> (Vec<Table>, Vec<Table>, Vec<Table>, String) {
     tracing::info!("Preparing tables...");
 
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(testdata);
     let statements = parse_sql(&sql);
-    let mut tables = statements
+    let mut tables = vec![];
+    let base_tables = statements
         .iter()
         .map(create_table_statement_to_table)
         .collect_vec();
+    tables.extend_from_slice(&base_tables);
 
     for stmt in &statements {
         let create_sql = stmt.to_string();
@@ -173,7 +232,7 @@ async fn create_tables(
             mviews.push(table);
         }
     }
-    (tables, mviews, setup_sql)
+    (tables, base_tables, mviews, setup_sql)
 }
 
 /// Drops mview tables.
