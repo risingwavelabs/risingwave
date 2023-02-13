@@ -184,7 +184,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .try_collect()?;
 
         // Materialize input chunk if needed.
-        // TODO(rctmp): need to ban distinct agg calls with MaterializedInput state
         storages
             .iter_mut()
             .zip_eq(visibilities.iter().map(Option::as_ref))
@@ -223,11 +222,14 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         epoch: EpochPair,
         storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         if *state_changed {
             let agg_group = agg_group.as_mut().unwrap();
-            agg_group.flush_state_if_needed(storages).await?;
+            agg_group
+                .flush_state_if_needed(storages, distinct_dedup_tables)
+                .await?;
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
@@ -345,6 +347,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         barrier.epoch,
                         &mut storages,
                         &mut result_table,
+                        &mut distinct_dedup_tables,
                         &mut state_changed,
                     )
                     .await?

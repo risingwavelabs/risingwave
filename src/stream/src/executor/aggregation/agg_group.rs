@@ -155,6 +155,7 @@ impl<S: StateStore> AggGroup<S> {
     pub async fn flush_state_if_needed(
         &self,
         storages: &mut [AggStateStorage<S>],
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
             |(state, storage)| match state {
@@ -166,6 +167,7 @@ impl<S: StateStore> AggGroup<S> {
             },
         ))
         .await?;
+        self.distinct_dedup.flush(distinct_dedup_tables)?;
         Ok(())
     }
 
