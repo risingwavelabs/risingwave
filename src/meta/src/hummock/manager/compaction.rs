@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
@@ -20,6 +21,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, Hummock
 use risingwave_pb::hummock::{compact_task, CompactTaskAssignment, CompactionConfig};
 
 use crate::hummock::compaction::{CompactStatus, LevelSelector};
+use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 use crate::model::BTreeMapTransaction;
@@ -115,11 +117,20 @@ where
     pub async fn get_compaction_config(
         &self,
         compaction_group_id: CompactionGroupId,
-    ) -> CompactionConfig {
+    ) -> Arc<CompactionConfig> {
         self.compaction_group(compaction_group_id)
             .await
             .expect("compaction group exists")
             .compaction_config()
+    }
+
+    pub async fn get_compaction_group(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> CompactionGroup {
+        self.compaction_group(compaction_group_id)
+            .await
+            .expect("compaction group exists")
     }
 
     #[named]

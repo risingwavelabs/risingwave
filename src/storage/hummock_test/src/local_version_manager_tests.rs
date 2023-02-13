@@ -73,7 +73,7 @@ pub async fn prepare_local_version_manager(
 
     let buffer_tracker = BufferTracker::from_storage_opts(&opt);
     let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
-        opt.clone(),
+        opt,
         sstable_store,
         hummock_meta_client,
         Arc::new(CompactorMetrics::unused()),

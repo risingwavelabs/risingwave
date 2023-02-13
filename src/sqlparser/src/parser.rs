@@ -1913,19 +1913,36 @@ impl Parser {
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
-        let source_schema = if let Some(opt) = option {
-            // Table is created with an external connector.
-            if opt.value.to_string().contains("-cdc") {
-                // cdc connectors
+        let connector = option.map(|opt| opt.value.to_string());
+        // row format for cdc source must be debezium json
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        let source_schema = if let Some(connector) = connector {
+            if connector.contains("-cdc") {
                 if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+                }
+                Some(SourceSchema::DebeziumJson)
+            } else if connector.contains("nexmark") {
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
+                }
+                Some(SourceSchema::Native)
+            } else if connector.contains("datagen") {
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
+                    Some(SourceSchema::parse_to(self)?)
                 } else {
-                    Some(SourceSchema::DebeziumJson)
+                    Some(SourceSchema::Native)
                 }
             } else {
-                // non-cdc connectors
+                // other connectors
                 self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
                 Some(SourceSchema::parse_to(self)?)
             }
