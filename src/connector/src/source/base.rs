@@ -101,6 +101,7 @@ pub enum SourceFormat {
     Maxwell,
     CanalJson,
     Csv,
+    Native,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
@@ -109,7 +110,7 @@ pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithSta
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
 /// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
     pub split_offset_mapping: Option<HashMap<SplitId, String>>,

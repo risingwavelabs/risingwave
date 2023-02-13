@@ -24,10 +24,7 @@ platforms = [
 # exact-versions = true
 
 [traversal-excludes]
-workspace-members = ["workspace-config"]
-
-[final-excludes]
-workspace-members = ["risingwave_object_store"]
+workspace-members = ["workspace-config", "risingwave_object_store"]
 third-party = [
     { name = "opendal" },
 ]
