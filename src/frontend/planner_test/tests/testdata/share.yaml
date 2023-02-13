@@ -17,7 +17,7 @@
     );
 - id: self_join
   before:
-    - create_sources
+  - create_sources
   sql: |
     select count(*) cnt from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2;
   batch_plan: |
@@ -64,7 +64,7 @@
                               └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
 - id: nexmark_q5
   before:
-    - create_sources
+  - create_sources
   sql: |
     SELECT AuctionBids.auction, AuctionBids.num FROM (
       SELECT
