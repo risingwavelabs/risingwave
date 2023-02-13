@@ -28,7 +28,7 @@ use crate::expr::{build_from_prost, BoxedExpression, Expression};
 use crate::{ExprError, Result};
 
 #[derive(Debug)]
-pub(crate) struct InExpression {
+pub struct InExpression {
     left: BoxedExpression,
     set: HashSet<Datum>,
     return_type: DataType,
