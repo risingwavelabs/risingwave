@@ -20,13 +20,13 @@ use anyhow::Context;
 use futures::executor::block_on;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -236,7 +236,7 @@ impl LocalQueryExecution {
                     let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
-                        (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
+                        (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,

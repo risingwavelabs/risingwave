@@ -18,6 +18,7 @@ use bytes::{Buf, Bytes};
 use itertools::Itertools;
 use risingwave_common::row::{Row, RowDeserializer};
 use risingwave_common::types::to_text::ToText;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
@@ -212,7 +213,7 @@ fn print_table_column(
         .collect_vec();
     let row_deserializer = RowDeserializer::new(data_types);
     let row = row_deserializer.deserialize(user_val)?;
-    for (c, v) in column_desc.iter().zip_eq(row.iter()) {
+    for (c, v) in column_desc.iter().zip_eq_fast(row.iter()) {
         println!("\t\t    column: {} {}", c, v.to_text());
     }
 

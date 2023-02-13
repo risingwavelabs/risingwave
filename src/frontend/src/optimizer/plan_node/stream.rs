@@ -17,6 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
@@ -345,7 +346,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core
 #[derive(Debug, Clone)]
 pub struct Sink {
     pub input: PlanRef,
-    pub sink_desc: TableCatalog,
+    pub sink_desc: SinkDesc,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
@@ -742,15 +743,7 @@ pub fn to_stream_prost_body(
                 .collect(),
         }),
         Node::Sink(me) => ProstNode::Sink(SinkNode {
-            table_id: me.sink_desc.id().into(),
-            properties: me.sink_desc.properties.inner().clone(),
-            fields: me
-                .sink_desc
-                .columns()
-                .iter()
-                .map(|c| Field::from(c.column_desc.clone()).to_prost())
-                .collect(),
-            sink_pk: me.sink_desc.pk().iter().map(|c| c.index as u32).collect(),
+            sink_desc: Some(me.sink_desc.to_proto()),
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;

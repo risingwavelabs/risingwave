@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::RowExt;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
@@ -186,7 +187,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // Materialize input chunk if needed.
         storages
             .iter_mut()
-            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
             .for_each(|(storage, visibility)| {
                 if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
@@ -319,10 +320,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-
+                Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
                         &ctx,

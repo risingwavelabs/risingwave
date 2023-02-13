@@ -163,7 +163,7 @@ async fn main() {
     );
 
     if let Some(datadir) = args.kafka_datadir {
-        cluster.create_kafka_producer(&datadir);
+        cluster.create_kafka_producer(&datadir).await;
     }
 
     if let Some(count) = args.sqlsmith {
@@ -201,4 +201,5 @@ async fn main() {
             })
             .await;
     }
+    cluster.graceful_shutdown().await;
 }

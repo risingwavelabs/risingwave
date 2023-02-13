@@ -19,10 +19,10 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstType;
 
+use super::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use super::template::{UnaryBytesExpression, UnaryExpression};
-use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::template_fast::BooleanUnaryExpression;
-use crate::expr::{template_fast, BoxedExpression, Expression};
+use super::template_fast::BooleanUnaryExpression;
+use super::{template_fast, BoxedExpression, Expression};
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
 use crate::vector_op::bitwise_op::general_bitnot;
@@ -121,6 +121,7 @@ macro_rules! gen_round_expr {
     };
 }
 
+/// Create a new unary expression.
 pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
@@ -351,7 +352,7 @@ mod tests {
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::FunctionCall;
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::super::*;
     use crate::expr::test_utils::{make_expression, make_input_ref};

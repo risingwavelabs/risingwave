@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroUsize;
+
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -28,11 +31,11 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
 };
-use crate::model::TableFragments;
+use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    visit_fragment, ActorGraphBuilder, CompleteStreamFragmentGraph, CreateStreamingJobContext,
-    GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
+    visit_fragment, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
+    CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -498,10 +501,10 @@ where
         ))
     }
 
-    async fn java_get_table(
+    async fn get_table(
         &self,
-        request: Request<JavaGetTableRequest>,
-    ) -> Result<Response<JavaGetTableResponse>, Status> {
+        request: Request<GetTableRequest>,
+    ) -> Result<Response<GetTableResponse>, Status> {
         let req = request.into_inner();
         let database = self
             .catalog_manager
@@ -516,9 +519,9 @@ where
                 .await
                 .into_iter()
                 .find(|t| t.name == req.table_name && t.database_id == db.id);
-            Ok(Response::new(JavaGetTableResponse { table }))
+            Ok(Response::new(GetTableResponse { table }))
         } else {
-            Ok(Response::new(JavaGetTableResponse { table: None }))
+            Ok(Response::new(GetTableResponse { table: None }))
         }
     }
 }
@@ -546,15 +549,14 @@ where
     ) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
 
-        let (mut ctx, table_fragments) =
-            self.prepare_stream_job(stream_job, fragment_graph).await?;
+        let (ctx, table_fragments) = self.prepare_stream_job(stream_job, fragment_graph).await?;
 
         let result = try {
             if let Some(source) = stream_job.source() {
                 self.source_manager.register_source(source).await?;
             }
             self.stream_manager
-                .create_streaming_job(table_fragments, &mut ctx)
+                .create_streaming_job(table_fragments, &ctx)
                 .await?;
         };
 
@@ -577,14 +579,15 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
-        // 2. Get the env for streaming jobs
-        let env = fragment_graph.get_env().unwrap().clone();
-        let default_parallelism =
-            if let Some(Parallelism { parallelism }) = fragment_graph.parallelism {
-                parallelism as usize
-            } else {
-                self.cluster_manager.get_active_parallel_unit_count().await
-            } as u32;
+        // 2. Get the env for streaming jobs.
+        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let default_parallelism = if let Some(Parallelism { parallelism }) =
+            fragment_graph.parallelism
+        {
+            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
+        } else {
+            None
+        };
 
         // 3. Build fragment graph.
         let fragment_graph =
@@ -594,7 +597,7 @@ where
 
         // 4. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
-        let dependent_relations = fragment_graph.dependent_relations();
+        let dependent_relations = fragment_graph.dependent_relations().clone();
         stream_job.set_dependent_relations(dependent_relations.clone());
 
         let stream_job = &*stream_job;
@@ -604,36 +607,55 @@ where
             .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        // 6. Build actor graph from the fragment graph.
-        // TODO: directly store the freezed `stream_job`.
-        let mut ctx = CreateStreamingJobContext {
-            streaming_definition: stream_job.mview_definition(),
-            table_properties: stream_job.properties(),
-            table_mview_map: self
-                .fragment_manager
-                .get_build_graph_info(dependent_relations)
-                .await?
-                .table_mview_actor_ids,
-            dependent_table_ids: dependent_relations.clone(),
-            internal_tables,
-            ..Default::default()
-        };
-
+        // 6. Resolve the upstream fragments, extend the fragment graph to a complete graph that
+        // contains all information needed for building the actor graph.
         let upstream_mview_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(dependent_relations)
+            .get_upstream_mview_fragments(&dependent_relations)
             .await?;
+        let upstream_mview_actors = upstream_mview_fragments
+            .iter()
+            .map(|(&table_id, fragment)| {
+                (
+                    table_id,
+                    fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
+                )
+            })
+            .collect();
+
         let complete_graph =
             CompleteStreamFragmentGraph::new(fragment_graph, upstream_mview_fragments)?;
 
-        // TODO(bugen): we should merge this step with the `Scheduler`.
-        let actor_graph_builder = ActorGraphBuilder::new(complete_graph, default_parallelism)?;
+        // 7. Build the actor graph.
+        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let actor_graph_builder =
+            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
-        let graph = actor_graph_builder
-            .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)
+        let ActorGraphBuildResult {
+            graph,
+            building_locations,
+            existing_locations,
+            dispatchers,
+        } = actor_graph_builder
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
             .await?;
 
-        // 7. mark creating tables, including internal tables and the table of the stream job.
+        // 8. Build the table fragments structure that will be persisted in the stream manager, and
+        // the context that contains all information needed for building the actors on the compute
+        // nodes.
+        let table_fragments =
+            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+
+        let ctx = CreateStreamingJobContext {
+            dispatchers,
+            upstream_mview_actors,
+            internal_tables,
+            building_locations,
+            existing_locations,
+            table_properties: stream_job.properties(),
+        };
+
+        // 9. Mark creating tables, including internal tables and the table of the stream job.
         // Note(bugen): should we take `Sink` into account as well?
         let creating_tables = ctx
             .internal_tables()
@@ -645,7 +667,7 @@ where
             .mark_creating_tables(&creating_tables)
             .await;
 
-        Ok((ctx, TableFragments::new(id.into(), graph, env)))
+        Ok((ctx, table_fragments))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.

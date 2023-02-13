@@ -340,9 +340,10 @@ where
         core.list_active_parallel_units()
     }
 
-    pub async fn get_active_parallel_unit_count(&self) -> usize {
+    /// Get the cluster info used for scheduling a streaming job.
+    pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
-        core.get_active_parallel_unit_count()
+        core.get_streaming_cluster_info()
     }
 
     /// Generate `parallel_degree` parallel units.
@@ -368,6 +369,16 @@ where
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
+}
+
+/// The cluster info used for scheduling a streaming job.
+#[derive(Debug, Clone)]
+pub struct StreamingClusterInfo {
+    /// All **active** compute nodes in the cluster.
+    pub worker_nodes: HashMap<u32, WorkerNode>,
+
+    /// All parallel units of the **active** compute nodes in the cluster.
+    pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
 pub struct ClusterManagerCore {
@@ -468,6 +479,26 @@ impl ClusterManagerCore {
             .collect()
     }
 
+    fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
+        let active_workers: HashMap<_, _> = self
+            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .into_iter()
+            .map(|w| (w.id, w))
+            .collect();
+
+        let active_parallel_units = self
+            .parallel_units
+            .iter()
+            .filter(|p| active_workers.contains_key(&p.worker_node_id))
+            .map(|p| (p.id, p.clone()))
+            .collect();
+
+        StreamingClusterInfo {
+            worker_nodes: active_workers,
+            parallel_units: active_parallel_units,
+        }
+    }
+
     fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
         const MONITORED_WORKER_TYPES: [WorkerType; 3] = [
             WorkerType::Compactor,
@@ -489,10 +520,6 @@ impl ClusterManagerCore {
             ret.entry(wt).or_insert(0);
         }
         ret
-    }
-
-    fn get_active_parallel_unit_count(&self) -> usize {
-        self.list_active_parallel_units().len()
     }
 }
 

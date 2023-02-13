@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
-use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamHopWindow`] represents a hop window table function.
@@ -91,3 +91,5 @@ impl StreamNode for StreamHopWindow {
         })
     }
 }
+
+impl ExprRewritable for StreamHopWindow {}

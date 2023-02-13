@@ -28,8 +28,10 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -43,8 +45,8 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
+./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-sink.log 2>&1 &
 sleep 1
 
 # prepare minio iceberg sink
@@ -93,5 +95,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill

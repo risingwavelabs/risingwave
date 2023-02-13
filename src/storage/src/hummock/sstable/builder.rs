@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
@@ -34,6 +33,7 @@ use super::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
+use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
@@ -51,8 +51,8 @@ pub struct SstableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
-impl From<&StorageConfig> for SstableBuilderOptions {
-    fn from(options: &StorageConfig) -> SstableBuilderOptions {
+impl From<&StorageOpts> for SstableBuilderOptions {
+    fn from(options: &StorageOpts) -> SstableBuilderOptions {
         let capacity = (options.sstable_size_mb as usize) * (1 << 20);
         SstableBuilderOptions {
             capacity,
@@ -183,22 +183,15 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        // Rotate block builder if the previous one has been built.
-        if self.block_builder.is_empty() {
-            self.block_metas.push(BlockMeta {
-                offset: self.writer.data_len() as u32,
-                len: 0,
-                smallest_key: full_key.encode(),
-                uncompressed_size: 0,
-            })
-        }
+        let mut is_new_table = false;
 
         // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
             let table_id = full_key.user_key.table_id.table_id();
-            if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
+            if is_new_table {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
@@ -222,6 +215,20 @@ impl<W: SstableWriter> SstableBuilder<W> {
         }
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;
+
+        if is_new_table && !self.block_builder.is_empty() {
+            self.build_block().await?;
+        }
+
+        // Rotate block builder if the previous one has been built.
+        if self.block_builder.is_empty() {
+            self.block_metas.push(BlockMeta {
+                offset: self.writer.data_len() as u32,
+                len: 0,
+                smallest_key: full_key.encode(),
+                uncompressed_size: 0,
+            })
+        }
 
         self.block_builder
             .add(self.raw_key.as_ref(), self.raw_value.as_ref());
