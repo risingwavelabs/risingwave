@@ -577,9 +577,10 @@ impl LogicalAggBuilder {
             }
 
             // (sum(sq) - sum * sum / count) / (count - 1)
-            agg @ AggKind::StddevPop | agg @ AggKind::StddevSamp => {
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 let input = inputs.iter().exactly_one().unwrap();
 
+                // first, we compute sum of squared as sum_sq
                 let squared_input = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
@@ -591,13 +592,13 @@ impl LogicalAggBuilder {
                 let squared_input_proj_index =
                     self.input_proj_builder.add_expr(&squared_input).unwrap();
 
-                let sq_sum_return_type =
+                let squared_sum_return_type =
                     AggCall::infer_return_type(&AggKind::Sum, &[squared_input.return_type()])
                         .unwrap();
 
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Sum,
-                    return_type: sq_sum_return_type.clone(),
+                    return_type: squared_sum_return_type.clone(),
                     inputs: vec![InputRef::new(
                         squared_input_proj_index,
                         squared_input.return_type(),
@@ -607,14 +608,14 @@ impl LogicalAggBuilder {
                     filter: filter.clone(),
                 });
 
-                let sq_sum_expr = ExprImpl::from(InputRef::new(
+                let squared_sum_expr = ExprImpl::from(InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
-                    sq_sum_return_type,
+                    squared_sum_return_type,
                 ))
                 .cast_implicit(return_type.clone())
                 .unwrap();
 
-                // sum
+                // after that, we compute sum
                 let sum_return_type =
                     AggCall::infer_return_type(&AggKind::Sum, &[input.return_type()]).unwrap();
 
@@ -633,7 +634,7 @@ impl LogicalAggBuilder {
                 .cast_implicit(return_type)
                 .unwrap();
 
-                // count
+                // then, we compute count
                 let count_return_type =
                     AggCall::infer_return_type(&AggKind::Count, &[input.return_type()]).unwrap();
 
@@ -652,7 +653,8 @@ impl LogicalAggBuilder {
                 )
                 .into();
 
-                let expr_impl = ExprImpl::from(
+                // we start with variance
+                let variance_expr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Divide,
                         vec![
@@ -660,7 +662,7 @@ impl LogicalAggBuilder {
                                 FunctionCall::new(
                                     ExprType::Subtract,
                                     vec![
-                                        sq_sum_expr,
+                                        squared_sum_expr,
                                         ExprImpl::from(
                                             FunctionCall::new(
                                                 ExprType::Divide,
@@ -672,6 +674,7 @@ impl LogicalAggBuilder {
                                                         )
                                                         .unwrap(),
                                                     ),
+                                                    // optimized to sum0
                                                     count_expr.clone(),
                                                 ],
                                             )
@@ -681,16 +684,16 @@ impl LogicalAggBuilder {
                                 )
                                 .unwrap(),
                             ),
-                            match agg {
-                                AggKind::StddevPop => count_expr.clone(),
-                                AggKind::StddevSamp => ExprImpl::from(
+                            match agg_kind {
+                                AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
+                                AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
                                     FunctionCall::new(
                                         ExprType::Subtract,
                                         vec![
                                             count_expr.clone(),
                                             ExprImpl::from(Literal::new(
-                                                Datum::from(ScalarImpl::Int16(1)),
-                                                DataType::Int16,
+                                                Datum::from(ScalarImpl::Int64(1)),
+                                                DataType::Int64,
                                             )),
                                         ],
                                     )
@@ -703,11 +706,14 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
-                let expr_impl1 = ExprImpl::from(
+                let stddev_expr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Pow,
                         vec![
-                            expr_impl,
+                            variance_expr.clone(),
+                            // TODO: Because pow only supports [float64, float64], so the case that
+                            // `variance_expr` is Decimal is not considered here, please modify me
+                            // after pow supports Decimal in the future
                             ExprImpl::from(Literal::new(
                                 Datum::from(ScalarImpl::Float64(OrderedF64::from(0.5))),
                                 DataType::Float64,
@@ -717,10 +723,10 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
-                match agg {
-                    AggKind::StddevPop => Ok(expr_impl1),
-                    AggKind::StddevSamp => {
-                        // ExprImpl::from()
+                match agg_kind {
+                    AggKind::VarPop => Ok(variance_expr),
+                    AggKind::StddevPop => Ok(stddev_expr),
+                    AggKind::StddevSamp | AggKind::VarSamp => {
                         let case_expr = ExprImpl::from(
                             FunctionCall::new(
                                 ExprType::Case,
@@ -738,16 +744,18 @@ impl LogicalAggBuilder {
                                         )
                                         .unwrap(),
                                     ),
-                                    ExprImpl::from(Literal::new(Datum::None, DataType::Float64)),
-                                    expr_impl1,
+                                    ExprImpl::from(Literal::new(None, DataType::Float64)),
+                                    match agg_kind {
+                                        AggKind::VarSamp => variance_expr,
+                                        AggKind::StddevSamp => stddev_expr,
+                                        _ => unreachable!(),
+                                    },
                                 ],
                             )
                             .unwrap(),
                         );
 
                         Ok(case_expr)
-
-                        // Ok(expr_impl1)
                     }
                     _ => unreachable!(),
                 }
