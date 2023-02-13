@@ -313,7 +313,7 @@ mod tests {
             }
 
             let n_columns = columns.len();
-            let table = StateTable::new_with_value_indices_without_distribution(
+            let table = StateTable::new_without_distribution_with_value_indices(
                 store.clone(),
                 TableId::new(2333),
                 columns,
