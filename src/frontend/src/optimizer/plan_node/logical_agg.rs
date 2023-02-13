@@ -576,7 +576,14 @@ impl LogicalAggBuilder {
                 ))
             }
 
+            // We compute `var_samp` as
             // (sum(sq) - sum * sum / count) / (count - 1)
+            // and `var_pop` as
+            // (sum(sq) - sum * sum / count) / count
+            // Since we don't have the square function, we use the plain Multiply for squaring,
+            // which is in a sense more general than the pow function, especially when calculating
+            // covariances in the future. Also we don't have the sqrt function for rooting, so we
+            // use pow(x, 0.5) to simulate
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 let input = inputs.iter().exactly_one().unwrap();
 
@@ -647,11 +654,10 @@ impl LogicalAggBuilder {
                     filter,
                 });
 
-                let count_expr: ExprImpl = InputRef::new(
+                let count_expr = ExprImpl::from(InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
                     count_return_type,
-                )
-                .into();
+                ));
 
                 // we start with variance
                 let mut target_expr = ExprImpl::from(
@@ -674,7 +680,6 @@ impl LogicalAggBuilder {
                                                         )
                                                         .unwrap(),
                                                     ),
-                                                    // optimized to sum0
                                                     count_expr.clone(),
                                                 ],
                                             )
@@ -713,7 +718,7 @@ impl LogicalAggBuilder {
                             vec![
                                 target_expr.clone(),
                                 // TODO: Because pow only supports [float64, float64], so the case
-                                // that `variance_expr` is Decimal
+                                // that `target_expr` is Decimal
                                 // is not considered here, please modify me
                                 // after pow supports Decimal in the future
                                 ExprImpl::from(Literal::new(
