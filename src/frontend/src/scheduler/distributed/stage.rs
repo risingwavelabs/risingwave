@@ -217,7 +217,11 @@ impl StageExecution {
                 *s = StageState::Started;
 
                 spawn(async move { runner.run(receiver).await });
-                tracing::trace!("Stage {:?}-{:?} started.",  self.stage.query_id.id, self.stage.id)
+                tracing::trace!(
+                    "Stage {:?}-{:?} started.",
+                    self.stage.query_id.id,
+                    self.stage.id
+                )
             }
             _ => {
                 unreachable!("Only expect to schedule stage once");
@@ -232,7 +236,11 @@ impl StageExecution {
             // None.
             if shutdown_tx.send(StageMessage::Stop(error)).is_err() {
                 // The stage runner handle has already closed. so do no-op.
-                tracing::trace!("Failed to send stop message stage: {:?}-{:?}", self.stage.query_id, self.stage.id);
+                tracing::trace!(
+                    "Failed to send stop message stage: {:?}-{:?}",
+                    self.stage.query_id,
+                    self.stage.id
+                );
             }
         }
     }
@@ -448,7 +456,7 @@ impl StageRunner {
                                     unimplemented!("Unexpected task status {:?}", status);
                                 }
                             }
-                         } 
+                         }
                          else {
                             // After processing all stream status, we must have sent signal (Either Scheduled or
                             // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
@@ -462,7 +470,11 @@ impl StageRunner {
             }
         }
 
-        tracing::trace!("Stage runner [{:?}-{:?}] existed. ", self.stage.query_id, self.stage.id);
+        tracing::trace!(
+            "Stage runner [{:?}-{:?}] existed. ",
+            self.stage.query_id,
+            self.stage.id
+        );
         Ok(())
     }
 
@@ -536,7 +548,11 @@ impl StageRunner {
             self.notify_stage_completed().await;
         }
 
-        tracing::info!("Stage runner [{:?}-{:?}] existed. ", self.stage.query_id, self.stage.id);
+        tracing::info!(
+            "Stage runner [{:?}-{:?}] existed. ",
+            self.stage.query_id,
+            self.stage.id
+        );
 
         Ok(())
     }
