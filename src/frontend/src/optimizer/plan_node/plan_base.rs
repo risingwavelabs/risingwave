@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derivative::Derivative;
 use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
@@ -23,18 +24,27 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct PlanBase {
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub id: PlanNodeId,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
     pub logical_pk: Vec<usize>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub order: Order,
     /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
     /// will not affect correctness, but insert unnecessary exchange in plan
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub dist: Distribution,
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.

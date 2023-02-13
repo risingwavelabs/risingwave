@@ -29,6 +29,7 @@
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -49,6 +50,12 @@ use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
+pub trait PlanNodeMeta {
+    fn node_type(&self) -> PlanNodeType;
+    fn plan_base(&self) -> &PlanBase;
+    fn convention(&self) -> Convention;
+}
+
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
@@ -56,6 +63,8 @@ use super::property::{Distribution, FunctionalDependencySet, Order};
 pub trait PlanNode:
     PlanTreeNode
     + DynClone
+    + DynEq
+    + DynHash
     + Debug
     + Display
     + Downcast
@@ -67,11 +76,23 @@ pub trait PlanNode:
     + ToProst
     + ToLocalBatch
     + PredicatePushdown
+    + PlanNodeMeta
 {
-    fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> &PlanBase;
-    fn convention(&self) -> Convention;
 }
+
+impl Hash for dyn PlanNode {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.dyn_hash(state);
+    }
+}
+
+impl PartialEq for dyn PlanNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.dyn_eq(other.as_dyn_eq())
+    }
+}
+
+impl Eq for dyn PlanNode {}
 
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
@@ -439,6 +460,7 @@ mod to_prost;
 pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
+mod merge_eq_nodes;
 
 pub mod generic;
 pub mod stream;
@@ -595,7 +617,7 @@ pub use stream_watermark_filter::StreamWatermarkFilter;
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -790,7 +812,7 @@ macro_rules! for_stream_plan_nodes {
 }
 
 /// impl [`PlanNodeType`] fn for each node.
-macro_rules! enum_plan_node_type {
+macro_rules! impl_plan_node_meta {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
@@ -799,7 +821,7 @@ macro_rules! enum_plan_node_type {
                 $( [<$convention $name>] ),*
             }
 
-            $(impl PlanNode for [<$convention $name>] {
+            $(impl PlanNodeMeta for [<$convention $name>] {
                 fn node_type(&self) -> PlanNodeType{
                     PlanNodeType::[<$convention $name>]
                 }
@@ -814,7 +836,17 @@ macro_rules! enum_plan_node_type {
     }
 }
 
-for_all_plan_nodes! { enum_plan_node_type }
+for_all_plan_nodes! { impl_plan_node_meta }
+
+macro_rules! impl_plan_node {
+    ($({ $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl PlanNode for [<$convention $name>] { })*
+        }
+    }
+}
+
+for_all_plan_nodes! { impl_plan_node }
 
 /// impl fn `plan_ref` for each node.
 macro_rules! impl_plan_ref {

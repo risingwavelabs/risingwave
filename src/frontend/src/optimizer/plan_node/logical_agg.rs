@@ -50,7 +50,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 /// functions in the `SELECT` clause.
 ///
 /// The output schema will first include the group key and then the aggregation calls.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
     pub base: PlanBase,
     core: generic::Agg<PlanRef>,

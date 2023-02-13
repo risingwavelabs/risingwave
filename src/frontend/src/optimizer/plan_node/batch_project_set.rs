@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::PlanRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
     pub base: PlanBase,
     logical: LogicalProjectSet,

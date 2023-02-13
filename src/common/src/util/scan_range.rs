@@ -27,7 +27,7 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum_into;
 
 /// See also [`ScanRangeProst`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),

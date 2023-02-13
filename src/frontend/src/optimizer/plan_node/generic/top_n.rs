@@ -23,7 +23,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Order;
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN<PlanRef> {
     pub input: PlanRef,
     pub limit: u64,

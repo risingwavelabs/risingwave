@@ -33,7 +33,7 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, R
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
     pub base: PlanBase,
     core: generic::Project<PlanRef>,

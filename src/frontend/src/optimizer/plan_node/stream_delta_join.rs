@@ -31,7 +31,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
     pub base: PlanBase,
     logical: LogicalJoin,

@@ -23,7 +23,7 @@ use super::{ExprRewritable, LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUn
 use crate::expr::{try_derive_watermark, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {
     pub base: PlanBase,
     logical: LogicalProjectSet,

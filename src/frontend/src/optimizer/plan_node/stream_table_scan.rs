@@ -33,7 +33,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
     pub base: PlanBase,
     logical: LogicalScan,

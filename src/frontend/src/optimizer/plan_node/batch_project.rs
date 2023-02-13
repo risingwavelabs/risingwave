@@ -29,7 +29,7 @@ use crate::optimizer::plan_node::ToLocalBatch;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProject {
     pub base: PlanBase,
     logical: LogicalProject,

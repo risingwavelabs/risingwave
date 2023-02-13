@@ -22,7 +22,7 @@ use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,

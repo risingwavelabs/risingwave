@@ -30,13 +30,13 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
-use crate::optimizer::plan_node::{PlanBase, PlanNode};
+use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::WithOptions;
 
 /// Materializes a stream.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
     pub base: PlanBase,
     /// Child of Materialize plan

@@ -46,7 +46,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// of the cartesian product of the two inputs; precisely which subset depends on the join
 /// condition. In addition, the output columns are a subset of the columns of the left and
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
     pub base: PlanBase,
     core: generic::Join<PlanRef>,
@@ -824,7 +824,7 @@ fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
 /// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
 ///    the equivalent in the other side.
 ///
-/// # Arguments
+/// #[derive(Debug, Clone, PartialEq, Eq, Hash)]Arguments
 ///
 /// Suppose we derive a predicate from the left side to be pushed to the right side.
 /// * `expr`: An expr from the left side.
@@ -881,7 +881,7 @@ fn derive_predicate_from_eq_condition(
 impl PredicatePushdown for LogicalJoin {
     /// Pushes predicates above and within a join node into the join node and/or its children nodes.
     ///
-    /// # Which predicates can be pushed
+    /// #[derive(Debug, Clone, PartialEq, Eq, Hash)]Which predicates can be pushed
     ///
     /// For inner join, we can do all kinds of pushdown.
     ///
@@ -890,7 +890,7 @@ impl PredicatePushdown for LogicalJoin {
     ///
     /// For left/right anti join, we can push filter to left/right, but on-clause can not be pushed
     ///
-    /// ## Outer Join
+    /// ##[derive(Debug, Clone, PartialEq, Eq, Hash)]Outer Join
     ///
     /// Preserved Row table
     /// : The table in an Outer Join that must return all rows.

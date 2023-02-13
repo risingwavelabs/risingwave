@@ -27,7 +27,7 @@ use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchInsert` implements [`LogicalInsert`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchInsert {
     pub base: PlanBase,
     logical: LogicalInsert,

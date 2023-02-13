@@ -28,7 +28,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
     pub base: PlanBase,
     logical: LogicalProject,

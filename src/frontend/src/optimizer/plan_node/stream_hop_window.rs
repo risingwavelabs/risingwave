@@ -21,7 +21,7 @@ use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUna
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamHopWindow`] represents a hop window table function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,

@@ -33,7 +33,7 @@ use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
     pub base: PlanBase,
     pub(super) core: generic::HopWindow<PlanRef>,

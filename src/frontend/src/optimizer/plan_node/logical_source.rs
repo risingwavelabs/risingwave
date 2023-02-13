@@ -46,7 +46,7 @@ use crate::TableCatalog;
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
     pub base: PlanBase,
     pub core: generic::Source,
@@ -169,13 +169,13 @@ impl ExprRewritable for LogicalSource {}
 /// Currently we only support limiting kafka offset timestamp range using literals, e.g. we only
 /// support expressions like `_rw_kafka_timestamp <= '2022-10-11 1:00:00+00:00'`.
 ///
-/// # Parameters
+/// #[derive(Debug, Clone, PartialEq, Eq, Hash)]Parameters
 ///
 /// * `expr`: Expression to be consumed.
 /// * `range`: Original timestamp range, if `expr` can be recognized, we will update `range`.
 /// * `schema`: Input schema.
 ///
-/// # Return Value
+/// #[derive(Debug, Clone, PartialEq, Eq, Hash)]Return Value
 ///
 /// If `expr` can be recognized and consumed by this function, then we return `None`.
 /// Otherwise `expr` is returned.

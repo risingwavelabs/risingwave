@@ -420,7 +420,7 @@ pub async fn handle_create_source(
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties,
+        properties: with_properties.into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,

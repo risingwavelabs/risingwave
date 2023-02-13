@@ -64,8 +64,8 @@ use crate::WithOptions;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(Default, PartialEq))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Default))]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -129,7 +129,7 @@ pub struct TableCatalog {
     pub watermark_columns: FixedBitSet,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TableType {
     /// Tables created by `CREATE TABLE`.
     Table,
@@ -170,7 +170,7 @@ impl TableType {
 }
 
 /// The version of a table, used by schema change. See [`ProstTableVersion`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
     pub next_column_id: ColumnId,
@@ -285,7 +285,8 @@ impl TableCatalog {
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
 
-        let table_options = TableOption::build_table_option(&self.properties);
+        let table_options =
+            TableOption::build_table_option(&self.properties.clone().into_iter().collect());
 
         TableDesc {
             table_id: self.id,
