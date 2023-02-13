@@ -3,7 +3,7 @@
 
 hakari-package = "workspace-hack"
 
-# Format for `workspace-hack = ...` lines in other Cargo.tomls. Requires cargo-hakari 0.9.8 or above.
+# Format for `workspace-hack = ...` lines in other Cargo.tomls. Requires cargo-hakari 0.9.22 or above.
 dep-format-version = "4"
 
 # Setting workspace.resolver = "2" in the root Cargo.toml is HIGHLY recommended.
