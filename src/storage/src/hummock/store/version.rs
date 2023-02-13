@@ -51,7 +51,9 @@ use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
     Sstable, SstableDeleteRangeIterator, SstableIterator,
 };
-use crate::monitor::{GetLocalMetricsGuard, HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{
+    GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
+};
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
@@ -759,13 +761,13 @@ impl HummockVersionReader {
         let table_id_string = table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let mut table_counts = 0;
-        let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+        let mut stats_guard =
+            MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), read_options.table_id);
 
         // 1. check staging data
         for imm in &imms {
             if imm.range_exists(&table_key_range) {
-                local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(true);
             }
         }
@@ -813,19 +815,12 @@ impl HummockVersionReader {
             table_counts += 1;
             if hit_sstable_bloom_filter(
                 self.sstable_store
-                    .sstable(local_sst, &mut local_stats)
+                    .sstable(local_sst, &mut stats_guard.local_stats)
                     .await?
                     .value(),
                 bloom_filter_prefix_hash,
-                &mut local_stats,
+                &mut stats_guard.local_stats,
             ) {
-                local_stats.report_bloom_filter_metrics(
-                    self.state_store_metrics.as_ref(),
-                    "may_exist",
-                    table_id_label,
-                    false,
-                );
-                local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(true);
             }
         }
@@ -846,19 +841,12 @@ impl HummockVersionReader {
                         table_counts += 1;
                         if hit_sstable_bloom_filter(
                             self.sstable_store
-                                .sstable(sstable_info, &mut local_stats)
+                                .sstable(sstable_info, &mut stats_guard.local_stats)
                                 .await?
                                 .value(),
                             bloom_filter_prefix_hash,
-                            &mut local_stats,
+                            &mut stats_guard.local_stats,
                         ) {
-                            local_stats.report_bloom_filter_metrics(
-                                self.state_store_metrics.as_ref(),
-                                "may_exist",
-                                table_id_label,
-                                false,
-                            );
-                            local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(true);
                         }
                     }
@@ -871,19 +859,12 @@ impl HummockVersionReader {
                         table_counts += 1;
                         if hit_sstable_bloom_filter(
                             self.sstable_store
-                                .sstable(table_info, &mut local_stats)
+                                .sstable(table_info, &mut stats_guard.local_stats)
                                 .await?
                                 .value(),
                             bloom_filter_prefix_hash,
-                            &mut local_stats,
+                            &mut stats_guard.local_stats,
                         ) {
-                            local_stats.report_bloom_filter_metrics(
-                                self.state_store_metrics.as_ref(),
-                                "may_exist",
-                                table_id_label,
-                                false,
-                            );
-                            local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(true);
                         }
                     }
@@ -891,17 +872,7 @@ impl HummockVersionReader {
             }
         }
 
-        self.state_store_metrics
-            .iter_merge_sstable_counts
-            .with_label_values(&[table_id_label, "surely-not-have"])
-            .observe(table_counts as f64);
-        local_stats.report_bloom_filter_metrics(
-            self.state_store_metrics.as_ref(),
-            "may_exist",
-            table_id_label,
-            true,
-        );
-        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
+        stats_guard.local_stats.may_exist_check_sstable_count = table_counts;
         Ok(false)
     }
 }
