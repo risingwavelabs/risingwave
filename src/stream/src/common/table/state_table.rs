@@ -790,7 +790,7 @@ impl<S: StateStore> StateTable<S> {
         };
         let range_end_suffix = watermark.map(|watermark| {
             serialize_pk(
-                row::once(Some(watermark.clone())),
+                row::once(Some(watermark)),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
