@@ -20,7 +20,7 @@ mod version;
 mod version_delta;
 mod version_stats;
 
-pub use compaction_group_config::CompactionGroupConfig;
+pub use compaction_group_config::CompactionGroup;
 pub use pinned_snapshot::*;
 pub use pinned_version::*;
 pub use version::*;

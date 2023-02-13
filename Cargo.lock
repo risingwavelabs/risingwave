@@ -4211,9 +4211,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.25.0+1.1.1t"
+version = "111.24.0+1.1.1s"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3173cd3626c43e3854b1b727422a276e568d9ec5fe8cec197822cf52cfb743d6"
+checksum = "3498f259dab01178c6228c6b00dcef0ed2a2d5e20d648c017861227773ea4abd"
 dependencies = [
  "cc",
 ]
@@ -8540,6 +8540,7 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "digest",
  "either",
  "fail",
  "fixedbitset",
@@ -8568,7 +8569,6 @@ dependencies = [
  "log",
  "madsim-tokio",
  "memchr",
- "mime_guess",
  "miniz_oxide",
  "multimap",
  "num-bigint",
@@ -8588,7 +8588,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "reqwest",
- "rustls",
+ "ring",
  "scopeguard",
  "serde",
  "smallvec",
@@ -8597,9 +8597,7 @@ dependencies = [
  "strum",
  "syn",
  "time 0.3.17",
- "time-macros",
  "tokio",
- "tokio-rustls",
  "tokio-stream",
  "tokio-util",
  "tonic",

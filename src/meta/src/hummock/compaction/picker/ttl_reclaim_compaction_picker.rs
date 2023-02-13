@@ -15,14 +15,16 @@
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::InputLevel;
 
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
+
+#[derive(Default)]
+pub struct TtlPickerState {
+    last_select_index: usize,
+}
 
 pub struct TtlReclaimCompactionPicker {
     max_ttl_reclaim_bytes: u64,
-
-    // state
-    last_select_index: usize,
     // todo: filter table option
 }
 
@@ -30,32 +32,31 @@ impl TtlReclaimCompactionPicker {
     pub fn new(max_ttl_reclaim_bytes: u64) -> Self {
         Self {
             max_ttl_reclaim_bytes,
-            last_select_index: 0,
         }
     }
 }
 
-impl CompactionPicker for TtlReclaimCompactionPicker {
-    fn pick_compaction(
-        &mut self,
+impl TtlReclaimCompactionPicker {
+    pub fn pick_compaction(
+        &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
-        _stats: &mut LocalPickerStatistic,
+        state: &mut TtlPickerState,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
         let reclaimed_level = levels.levels.last().unwrap();
         let mut select_input_ssts = vec![];
         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
-        if self.last_select_index >= reclaimed_level.table_infos.len() {
-            self.last_select_index = 0;
+        if state.last_select_index >= reclaimed_level.table_infos.len() {
+            state.last_select_index = 0;
         }
 
-        let start_indedx = self.last_select_index;
+        let start_indedx = state.last_select_index;
         let mut select_file_size = 0;
 
         for sst in &reclaimed_level.table_infos[start_indedx..] {
-            self.last_select_index += 1;
+            state.last_select_index += 1;
             if level_handler.is_pending_compact(&sst.id) {
                 continue;
             }
@@ -93,8 +94,6 @@ impl CompactionPicker for TtlReclaimCompactionPicker {
 #[cfg(test)]
 mod test {
 
-    use std::sync::Arc;
-
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
@@ -107,15 +106,15 @@ mod test {
     };
     use crate::hummock::compaction::level_selector::{LevelSelector, TtlCompactionSelector};
     use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::model::CompactionGroup;
 
     #[test]
     fn test_ttl_reclaim_compaction_selector() {
-        let config = Arc::new(
-            CompactionConfigBuilder::new()
-                .max_level(4)
-                .max_space_reclaim_bytes(400)
-                .build(),
-        );
+        let config = CompactionConfigBuilder::new()
+            .max_level(4)
+            .max_space_reclaim_bytes(400)
+            .build();
+        let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![
@@ -154,12 +153,17 @@ mod test {
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
-        let mut selector = TtlCompactionSelector::new(config);
-
+        let mut selector = TtlCompactionSelector::default();
         {
             // pick space reclaim
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
@@ -190,7 +194,13 @@ mod test {
 
             // pick space reclaim
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);

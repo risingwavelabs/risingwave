@@ -55,7 +55,7 @@ use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
-use risingwave_pb::meta::*;
+use risingwave_pb::meta::{SystemParams as ProstSystemParams, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -162,7 +162,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-    ) -> Result<Self> {
+    ) -> Result<(Self, SystemParamsReader)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
 
         let grpc_meta_client = GrpcMetaClient::new(addr_strategy).await?;
@@ -178,12 +178,16 @@ impl MetaClient {
         })
         .await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        Ok(Self {
-            worker_id: worker_node.id,
-            worker_type,
-            host_addr: addr.clone(),
-            inner: grpc_meta_client,
-        })
+        let system_params = resp.system_params.unwrap();
+        Ok((
+            Self {
+                worker_id: worker_node.id,
+                worker_type,
+                host_addr: addr.clone(),
+                inner: grpc_meta_client,
+            },
+            system_params.into(),
+        ))
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -894,6 +898,68 @@ impl HummockMetaClient for MetaClient {
             })
             .await?;
         Ok(())
+    }
+}
+
+/// A wrapper for [`risingwave_pb::meta::SystemParams`] for 2 purposes:
+/// - Avoid misuse of deprecated fields by hiding their getters.
+/// - Abstract fallback logic for fields that might not be provided by meta service due to backward
+///   compatibility.
+pub struct SystemParamsReader {
+    prost: ProstSystemParams,
+}
+
+impl From<ProstSystemParams> for SystemParamsReader {
+    fn from(prost: ProstSystemParams) -> Self {
+        Self { prost }
+    }
+}
+
+impl SystemParamsReader {
+    pub fn barrier_interval_ms(&self) -> u32 {
+        self.prost.barrier_interval_ms.unwrap()
+    }
+
+    pub fn checkpoint_frequency(&self) -> u64 {
+        self.prost.checkpoint_frequency.unwrap()
+    }
+
+    pub fn sstable_size_mb(&self) -> u32 {
+        self.prost.sstable_size_mb.unwrap()
+    }
+
+    pub fn block_size_kb(&self) -> u32 {
+        self.prost.block_size_kb.unwrap()
+    }
+
+    pub fn bloom_false_positive(&self) -> f64 {
+        self.prost.bloom_false_positive.unwrap()
+    }
+
+    // TODO(zhidong): Only read from system params in v0.1.18.
+    pub fn state_store<'a>(&'a self, from_local_config: Option<&'a String>) -> &'a str {
+        let from_prost = self.prost.state_store.as_ref().unwrap();
+        if from_prost.is_empty() {
+            if let Some(s) = from_local_config {
+                s
+            } else {
+                panic!("State store url is neither specified from CLI args nor on meta node");
+            }
+        } else {
+            from_prost
+        }
+    }
+
+    pub fn data_directory(&self) -> &str {
+        self.prost.data_directory.as_ref().unwrap()
+    }
+
+    pub fn backup_storage_url(&self) -> &str {
+        self.prost.backup_storage_url.as_ref().unwrap()
+    }
+
+    pub fn backup_storage_directory(&self) -> &str {
+        self.prost.backup_storage_directory.as_ref().unwrap()
     }
 }
 

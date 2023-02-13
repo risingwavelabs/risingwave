@@ -29,6 +29,7 @@ cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
 cargo hakari generate --diff
+cargo hakari verify
 
 echo "--- Rust format check"
 cargo fmt --all -- --check

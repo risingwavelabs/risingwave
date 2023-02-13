@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
+use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
@@ -37,7 +38,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
-use crate::hummock::model::CompactionGroupConfig;
+use crate::hummock::model::CompactionGroup;
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction,
@@ -68,15 +69,15 @@ impl<S: MetaStore> HummockManager<S> {
         Ok(compaction_group_manager)
     }
 
-    /// Gets compaction config for `compaction_group_id` if exists, or returns default.
-    pub async fn get_compaction_config(
+    /// Gets compaction group config for `compaction_group_id` if exists, or returns default.
+    pub async fn get_compaction_group_config(
         &self,
         compaction_group_id: CompactionGroupId,
-    ) -> CompactionConfig {
+    ) -> CompactionGroup {
         self.compaction_group_manager
             .read()
             .await
-            .get_compaction_config(compaction_group_id)
+            .get_compaction_group_config(compaction_group_id)
     }
 
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
@@ -216,7 +217,10 @@ impl<S: MetaStore> HummockManager<S> {
                         .compaction_group_manager
                         .read()
                         .await
-                        .get_compaction_config(group_id);
+                        .get_compaction_group_config(group_id)
+                        .compaction_config
+                        .as_ref()
+                        .clone();
                     group_deltas.push(GroupDelta {
                         delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
                             group_config: Some(config),
@@ -392,12 +396,13 @@ impl<S: MetaStore> HummockManager<S> {
                 .compaction_group_manager
                 .read()
                 .await
-                .get_compaction_config(levels.group_id);
+                .get_compaction_group_config(levels.group_id)
+                .compaction_config;
             let group = CompactionGroupInfo {
                 id: levels.group_id,
                 parent_id: levels.parent_group_id,
                 member_table_ids: levels.member_table_ids.clone(),
-                compaction_config: Some(config),
+                compaction_config: Some(config.as_ref().clone()),
             };
             compaction_groups.push(group);
         }
@@ -407,14 +412,14 @@ impl<S: MetaStore> HummockManager<S> {
 
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
-    compaction_groups: BTreeMap<CompactionGroupId, CompactionGroupConfig>,
+    compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
     default_config: CompactionConfig,
 }
 
 impl CompactionGroupManager {
     async fn init<S: MetaStore>(&mut self, meta_store: &S) -> Result<()> {
-        let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroupConfig> =
-            CompactionGroupConfig::list(meta_store)
+        let loaded_compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup> =
+            CompactionGroup::list(meta_store)
                 .await?
                 .into_iter()
                 .map(|cg| (cg.group_id(), cg))
@@ -425,11 +430,16 @@ impl CompactionGroupManager {
         Ok(())
     }
 
-    fn get_compaction_config(&self, compaction_group_id: CompactionGroupId) -> CompactionConfig {
+    fn get_compaction_group_config(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> CompactionGroup {
         self.compaction_groups
             .get(&compaction_group_id)
-            .map(|group| group.compaction_config.clone())
-            .unwrap_or_else(|| self.default_config.clone())
+            .cloned()
+            .unwrap_or_else(|| {
+                CompactionGroup::new(compaction_group_id, CompactionConfigBuilder::new().build())
+            })
     }
 
     async fn update_compaction_config<S: MetaStore>(
@@ -443,12 +453,15 @@ impl CompactionGroupManager {
             if !compaction_groups.contains_key(compaction_group_id) {
                 compaction_groups.insert(
                     *compaction_group_id,
-                    CompactionGroupConfig::new(*compaction_group_id, self.default_config.clone()),
+                    CompactionGroup::new(*compaction_group_id, self.default_config.clone()),
                 );
             }
-            let mut group = compaction_groups.get_mut(*compaction_group_id).unwrap();
-            let config = &mut group.compaction_config;
-            update_compaction_config(config, config_to_update);
+            let group = compaction_groups.get(compaction_group_id).unwrap();
+            let mut config = group.compaction_config.as_ref().clone();
+            update_compaction_config(&mut config, config_to_update);
+            let mut new_group = group.clone();
+            new_group.compaction_config = Arc::new(config);
+            compaction_groups.insert(*compaction_group_id, new_group);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -468,9 +481,9 @@ impl CompactionGroupManager {
         let insert = BTreeMapEntryTransaction::new_insert(
             &mut self.compaction_groups,
             group_id,
-            CompactionGroupConfig {
+            CompactionGroup {
                 group_id,
-                compaction_config: config,
+                compaction_config: Arc::new(config),
             },
         );
         let mut trx = Transaction::default();
@@ -587,7 +600,8 @@ mod tests {
             inner
                 .read()
                 .await
-                .get_compaction_config(100)
+                .get_compaction_group_config(100)
+                .compaction_config
                 .max_sub_compaction,
             123
         );
@@ -595,7 +609,8 @@ mod tests {
             inner
                 .read()
                 .await
-                .get_compaction_config(200)
+                .get_compaction_group_config(200)
+                .compaction_config
                 .max_sub_compaction,
             123
         );
@@ -603,7 +618,8 @@ mod tests {
             inner
                 .read()
                 .await
-                .get_compaction_config(300)
+                .get_compaction_group_config(300)
+                .compaction_config
                 .max_sub_compaction,
             123
         );

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
+use std::sync::Arc;
 
 pub use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -21,16 +22,16 @@ use risingwave_pb::hummock::CompactionConfig;
 use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CompactionGroupConfig {
+pub struct CompactionGroup {
     pub(crate) group_id: CompactionGroupId,
-    pub(crate) compaction_config: CompactionConfig,
+    pub(crate) compaction_config: Arc<CompactionConfig>,
 }
 
-impl CompactionGroupConfig {
+impl CompactionGroup {
     pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
         Self {
             group_id,
-            compaction_config,
+            compaction_config: Arc::new(compaction_config),
         }
     }
 
@@ -38,36 +39,38 @@ impl CompactionGroupConfig {
         self.group_id
     }
 
-    pub fn compaction_config(&self) -> CompactionConfig {
+    pub fn compaction_config(&self) -> Arc<CompactionConfig> {
         self.compaction_config.clone()
     }
 }
 
-impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroupConfig {
+impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
     fn from(compaction_group: &risingwave_pb::hummock::CompactionGroup) -> Self {
         Self {
             group_id: compaction_group.id,
-            compaction_config: compaction_group
-                .compaction_config
-                .as_ref()
-                .cloned()
-                .unwrap(),
+            compaction_config: Arc::new(
+                compaction_group
+                    .compaction_config
+                    .as_ref()
+                    .cloned()
+                    .unwrap(),
+            ),
         }
     }
 }
 
-impl From<&CompactionGroupConfig> for risingwave_pb::hummock::CompactionGroup {
-    fn from(compaction_group: &CompactionGroupConfig) -> Self {
+impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
+    fn from(compaction_group: &CompactionGroup) -> Self {
         Self {
             id: compaction_group.group_id,
-            compaction_config: Some(compaction_group.compaction_config.clone()),
+            compaction_config: Some(compaction_group.compaction_config.as_ref().clone()),
         }
     }
 }
 
 const HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME: &str = "cf/hummock_compaction_group_config";
 
-impl MetadataModel for CompactionGroupConfig {
+impl MetadataModel for CompactionGroup {
     type KeyType = CompactionGroupId;
     type ProstType = risingwave_pb::hummock::CompactionGroup;
 

@@ -14,7 +14,6 @@
 
 use core::panic;
 use std::borrow::{Borrow, BorrowMut};
-use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
@@ -52,8 +51,7 @@ use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{
-    create_overlap_strategy, selector_option, CompactStatus, DynamicLevelSelector, LevelSelector,
-    LocalSelectorStatistic, ManualCompactionOption, SelectorOption,
+    CompactStatus, LevelSelector, LocalSelectorStatistic, ManualCompactionOption,
 };
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -196,12 +194,10 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
-use self::compaction_group_manager::CompactionGroupManager;
-use super::compaction::{
-    ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
-};
+use super::compaction::ManualCompactionSelector;
 use super::Compactor;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
@@ -222,43 +218,6 @@ pub enum CompactionResumeTrigger {
     CompactorAddition { context_id: HummockContextId },
     /// A compaction task is reported when all compactors are not idle.
     TaskReport { original_task_num: usize },
-}
-
-#[derive(Clone)]
-pub struct CompactionPickParma {
-    pub task_type: compact_task::TaskType,
-
-    manual_compaction_option: Option<ManualCompactionOption>,
-}
-
-impl CompactionPickParma {
-    pub fn new_base_parma() -> Self {
-        Self {
-            task_type: compact_task::TaskType::Dynamic,
-            manual_compaction_option: None,
-        }
-    }
-
-    pub fn new_space_reclaim_parma() -> Self {
-        Self {
-            task_type: compact_task::TaskType::SpaceReclaim,
-            manual_compaction_option: None,
-        }
-    }
-
-    pub fn new_ttl_reclaim_parma() -> Self {
-        Self {
-            task_type: compact_task::TaskType::Ttl,
-            manual_compaction_option: None,
-        }
-    }
-
-    pub fn new_manual_parma(manual_compaction_option: ManualCompactionOption) -> Self {
-        Self {
-            task_type: compact_task::TaskType::Manual,
-            manual_compaction_option: Some(manual_compaction_option),
-        }
-    }
 }
 
 impl<S> HummockManager<S>
@@ -767,53 +726,14 @@ where
         Ok(())
     }
 
-    fn build_selector_option(
-        &self,
-        compaction_config: &CompactionConfig,
-        compaction_pick_parma: CompactionPickParma,
-        version: &HummockVersion,
-    ) -> SelectorOption {
-        match compaction_pick_parma.task_type {
-            compact_task::TaskType::Dynamic => {
-                SelectorOption::Dynamic(selector_option::DynamicLevelSelectorOption {
-                    compaction_config: Arc::new(compaction_config.clone()),
-                })
-            }
-            compact_task::TaskType::SpaceReclaim => SelectorOption::SpaceReclaim(
-                selector_option::SpaceReclaimCompactionSelectorOption {
-                    compaction_config: Arc::new(compaction_config.clone()),
-                    all_table_ids: get_member_table_ids(version),
-                },
-            ),
-
-            compact_task::TaskType::Ttl => {
-                SelectorOption::Ttl(selector_option::TtlCompactionSelectorOption {
-                    compaction_config: Arc::new(compaction_config.clone()),
-                })
-            }
-
-            compact_task::TaskType::Manual => {
-                SelectorOption::Manual(selector_option::ManualCompactionSelectorOption {
-                    compaction_config: Arc::new(compaction_config.clone()),
-                    option: compaction_pick_parma.manual_compaction_option.unwrap(),
-                })
-            }
-
-            _ => {
-                panic!("SharedBuffer compaction not expected")
-            }
-        }
-    }
-
     #[named]
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
-        compaction_pick_parma: CompactionPickParma,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> Result<Option<CompactTask>> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
-        let compaction_selectors = &mut compaction.compaction_selectors;
         let compaction_statuses = &mut compaction.compaction_statuses;
 
         let start_time = Instant::now();
@@ -824,9 +744,13 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
 
-        let group_config = self.get_compaction_config(compaction_group_id).await;
-        self.precheck_compaction_group(compaction_group_id, compaction_statuses, &group_config)
-            .await?;
+        let group_config = self.get_compaction_group_config(compaction_group_id).await;
+        self.precheck_compaction_group(
+            compaction_group_id,
+            compaction_statuses,
+            &group_config.compaction_config,
+        )
+        .await?;
 
         let mut compact_status = match compaction.compaction_statuses.get_mut(&compaction_group_id)
         {
@@ -850,28 +774,13 @@ where
             return Ok(None);
         }
 
-        // selector_option will carry some information and affect the selection of compact_task. To
-        // avoid data loss, the selector_option must be constructed after the current_version is
-        // obtained
-        let task_type = compaction_pick_parma.task_type;
-        let selector_option =
-            self.build_selector_option(&group_config, compaction_pick_parma, &current_version);
-
-        // get selector
-        let selector = Self::fetch_selector(
-            compaction_selectors,
-            compaction_group_id,
-            task_type,
-            selector_option,
-        );
-
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
-            compaction_group_id,
+            &group_config,
             &mut stats,
             selector,
         );
@@ -927,7 +836,8 @@ where
                 .map(|(k, v)| (*k, v.into()))
                 .collect();
             compact_task.current_epoch_time = Epoch::now().0;
-            compact_task.compaction_filter_mask = group_config.compaction_filter_mask;
+            compact_task.compaction_filter_mask =
+                group_config.compaction_config.compaction_filter_mask;
             commit_multi_var!(self, None, Transaction::default(), compact_status)?;
 
             // this task has been finished.
@@ -995,88 +905,17 @@ where
         Ok(())
     }
 
-    fn fetch_selector(
-        compaction_selectors: &mut HashMap<
-            CompactionGroupId,
-            HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
-        >,
-        compaction_group_id: CompactionGroupId,
-        task_type: compact_task::TaskType,
-        selector_option: SelectorOption,
-    ) -> &mut Box<dyn LevelSelector> {
-        match compaction_selectors
-            .entry(compaction_group_id)
-            .or_default()
-            .entry(task_type)
-        {
-            Occupied(mut selector) => selector.get_mut().try_update(selector_option),
-
-            Vacant(entry) => {
-                let new_selector: Box<dyn LevelSelector> = match task_type {
-                    compact_task::TaskType::Dynamic => {
-                        let selector_option =
-                            selector_option.as_dynamic().expect("tried to as_dynamic");
-                        Box::new(DynamicLevelSelector::new(
-                            selector_option.compaction_config.clone(),
-                            create_overlap_strategy(
-                                selector_option.compaction_config.compaction_mode(),
-                            ),
-                        ))
-                    }
-
-                    compact_task::TaskType::Manual => {
-                        let selector_option =
-                            selector_option.as_manual().expect("tried to as_dynamic");
-                        Box::new(ManualCompactionSelector::new(
-                            selector_option.compaction_config.clone(),
-                            create_overlap_strategy(
-                                selector_option.compaction_config.compaction_mode(),
-                            ),
-                            selector_option.option,
-                        ))
-                    }
-
-                    compact_task::TaskType::SpaceReclaim => {
-                        let selector_option = selector_option
-                            .as_space_reclaim()
-                            .expect("tried to as_space_reclaim");
-                        Box::new(SpaceReclaimCompactionSelector::new(selector_option))
-                    }
-
-                    compact_task::TaskType::Ttl => {
-                        let selector_option = selector_option.as_ttl().expect("tried to as_ttl");
-                        Box::new(TtlCompactionSelector::new(
-                            selector_option.compaction_config,
-                        ))
-                    }
-
-                    _ => {
-                        panic!()
-                    }
-                };
-
-                entry.insert(new_selector);
-            }
-        }
-
-        compaction_selectors
-            .get_mut(&compaction_group_id)
-            .unwrap()
-            .get_mut(&task_type)
-            .unwrap()
-    }
-
     pub async fn get_compact_task(
         &self,
         compaction_group_id: CompactionGroupId,
-        compaction_pick_parma: CompactionPickParma,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> Result<Option<CompactTask>> {
         fail_point!("fp_get_compact_task", |_| Err(Error::MetaStore(
             anyhow::anyhow!("failpoint metastore error")
         )));
 
         while let Some(task) = self
-            .get_compact_task_impl(compaction_group_id, compaction_pick_parma.clone())
+            .get_compact_task_impl(compaction_group_id, selector)
             .await?
         {
             if let TaskStatus::Pending = task.task_status() {
@@ -1093,11 +932,10 @@ where
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: ManualCompactionOption,
     ) -> Result<Option<CompactTask>> {
-        self.get_compact_task(
-            compaction_group_id,
-            CompactionPickParma::new_manual_parma(manual_compaction_option),
-        )
-        .await
+        let mut selector: Box<dyn LevelSelector> =
+            Box::new(ManualCompactionSelector::new(manual_compaction_option));
+        self.get_compact_task(compaction_group_id, &mut selector)
+            .await
     }
 
     #[named]

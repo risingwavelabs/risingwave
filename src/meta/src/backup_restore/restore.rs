@@ -21,7 +21,7 @@ use risingwave_common::config::MetaBackend;
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
 use crate::dispatch_meta_store;
-use crate::hummock::model::CompactionGroupConfig;
+use crate::hummock::model::CompactionGroup;
 use crate::model::{MetadataModel, TableFragments};
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
@@ -93,7 +93,7 @@ async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -
             .metadata
             .compaction_groups
             .into_iter()
-            .map(CompactionGroupConfig::from_protobuf)
+            .map(CompactionGroup::from_protobuf)
             .collect_vec(),
     )
     .await?;
@@ -196,6 +196,7 @@ mod tests {
     use std::collections::HashMap;
 
     use clap::Parser;
+    use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
     use risingwave_pb::hummock::HummockVersion;
 
@@ -303,7 +304,13 @@ mod tests {
         .await
         .unwrap();
         dispatch_meta_store!(empty_meta_store, store, {
-            let mut kvs = store.list_cf(DEFAULT_COLUMN_FAMILY).await.unwrap();
+            let mut kvs = store
+                .list_cf(DEFAULT_COLUMN_FAMILY)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect_vec();
             kvs.sort();
             assert_eq!(
                 kvs,
