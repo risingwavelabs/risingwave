@@ -115,7 +115,7 @@ impl SinkExecutor {
                                 "transaction abort due to empty epoch, epoch: {:?}",
                                 epoch
                             );
-                        } else {
+                        } else if barrier.checkpoint {
                             let start_time = Instant::now();
                             sink.commit().await?;
                             self.metrics

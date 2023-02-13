@@ -173,14 +173,11 @@ impl RemoteSink {
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
 
-        let mut response = tokio::time::timeout(
-            Duration::from_secs(3),
-            client.sink_stream(Request::new(UnboundedReceiverStream::new(request_receiver))),
-        )
-        .await
-        .map_err(|e| SinkError::Remote(format!("failed to start sink: {:?}", e)))?
-        .map_err(|e| SinkError::Remote(format!("{:?}", e)))?
-        .into_inner();
+        let mut response = client
+            .sink_stream(Request::new(UnboundedReceiverStream::new(request_receiver)))
+            .await
+            .map_err(|e| SinkError::Remote(format!("failed to start sink: {:?}", e)))?
+            .into_inner();
         let _ = response.next().await.unwrap();
 
         Ok(RemoteSink {
