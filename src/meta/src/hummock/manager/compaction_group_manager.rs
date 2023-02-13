@@ -140,6 +140,8 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     /// Unregisters stale members and groups
+    /// The caller should ensure [`table_fragments_list`] remain unchanged during [`purge`].
+    /// Currently [`purge`] is only called during meta service start ups.
     #[named]
     pub async fn purge(&self, table_fragments_list: &[TableFragments]) -> Result<()> {
         let valid_ids = table_fragments_list
@@ -349,11 +351,23 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
-        for group_id in groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, group_id);
+        for group_id in &groups_to_remove {
+            remove_compaction_group_in_sst_stat(&self.metrics, *group_id);
         }
         self.notify_last_version_delta(versioning);
 
+        // Purge may cause write to meta store. If it hurts performance while holding versioning
+        // lock, consider to make it in batch.
+        self.compaction_group_manager
+            .write()
+            .await
+            .purge(
+                &get_compaction_group_ids(&versioning.current_version),
+                self.env.meta_store(),
+            )
+            .await
+            .inspect_err(|e| tracing::warn!("failed to purge stale compaction group config. {}", e))
+            .ok();
         Ok(())
     }
 
@@ -400,7 +414,6 @@ impl<S: MetaStore> HummockManager<S> {
     }
 }
 
-// TODO #7817 remove stale config
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroupConfig>,
@@ -473,6 +486,32 @@ impl CompactionGroupManager {
         insert.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
         insert.commit();
+        Ok(())
+    }
+
+    /// Removes stale group configs.
+    async fn purge<S: MetaStore>(
+        &mut self,
+        existing_groups: &[CompactionGroupId],
+        meta_store: &S,
+    ) -> Result<()> {
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let stale_group = compaction_groups
+            .tree_ref()
+            .keys()
+            .cloned()
+            .filter(|k| !existing_groups.contains(k))
+            .collect_vec();
+        if stale_group.is_empty() {
+            return Ok(());
+        }
+        for group in stale_group {
+            compaction_groups.remove(group);
+        }
+        let mut trx = Transaction::default();
+        compaction_groups.apply_to_txn(&mut trx)?;
+        meta_store.txn(trx).await?;
+        compaction_groups.commit();
         Ok(())
     }
 }
