@@ -84,10 +84,6 @@ impl<S: StateStore> Deduplicater<S> {
                 let counts_row: Option<OwnedRow> = dedup_table
                     .get_row(group_key.chain(row::once(datum)))
                     .await?;
-                println!(
-                    "[rc] load counts for distinct key {:?} from dedup_table: {:?}",
-                    datum, counts_row
-                );
                 let counts = counts_row.map_or_else(
                     || vec![0; self.agg_call_indices.len()],
                     |r| {
