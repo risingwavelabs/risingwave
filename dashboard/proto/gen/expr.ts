@@ -845,10 +845,6 @@ export const ExprNode = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ExprNode>, I>>(base?: I): ExprNode {
-    return ExprNode.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ExprNode>, I>>(object: I): ExprNode {
     const message = createBaseExprNode();
     message.exprType = object.exprType ?? ExprNode_Type.UNSPECIFIED;
@@ -913,10 +909,6 @@ export const TableFunction = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<TableFunction>, I>>(base?: I): TableFunction {
-    return TableFunction.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<TableFunction>, I>>(object: I): TableFunction {
     const message = createBaseTableFunction();
     message.functionType = object.functionType ?? TableFunction_Type.UNSPECIFIED;
@@ -941,10 +933,6 @@ export const InputRefExpr = {
     const obj: any = {};
     message.columnIdx !== undefined && (obj.columnIdx = Math.round(message.columnIdx));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<InputRefExpr>, I>>(base?: I): InputRefExpr {
-    return InputRefExpr.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<InputRefExpr>, I>>(object: I): InputRefExpr {
@@ -977,10 +965,6 @@ export const ProjectSetSelectItem = {
       ? TableFunction.toJSON(message.selectItem?.tableFunction)
       : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ProjectSetSelectItem>, I>>(base?: I): ProjectSetSelectItem {
-    return ProjectSetSelectItem.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ProjectSetSelectItem>, I>>(object: I): ProjectSetSelectItem {
@@ -1021,10 +1005,6 @@ export const FunctionCall = {
       obj.children = [];
     }
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<FunctionCall>, I>>(base?: I): FunctionCall {
-    return FunctionCall.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<FunctionCall>, I>>(object: I): FunctionCall {
@@ -1079,10 +1059,6 @@ export const AggCall = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<AggCall>, I>>(base?: I): AggCall {
-    return AggCall.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<AggCall>, I>>(object: I): AggCall {
     const message = createBaseAggCall();
     message.type = object.type ?? AggCall_Type.UNSPECIFIED;
@@ -1118,10 +1094,6 @@ export const AggCall_Arg = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<AggCall_Arg>, I>>(base?: I): AggCall_Arg {
-    return AggCall_Arg.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<AggCall_Arg>, I>>(object: I): AggCall_Arg {
     const message = createBaseAggCall_Arg();
     message.input = (object.input !== undefined && object.input !== null)
@@ -1153,10 +1125,6 @@ export const AggCall_OrderByField = {
     message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
     message.nullsFirst !== undefined && (obj.nullsFirst = message.nullsFirst);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<AggCall_OrderByField>, I>>(base?: I): AggCall_OrderByField {
-    return AggCall_OrderByField.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<AggCall_OrderByField>, I>>(object: I): AggCall_OrderByField {
@@ -1202,10 +1170,6 @@ export const UserDefinedFunction = {
     message.language !== undefined && (obj.language = message.language);
     message.path !== undefined && (obj.path = message.path);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<UserDefinedFunction>, I>>(base?: I): UserDefinedFunction {
-    return UserDefinedFunction.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UserDefinedFunction>, I>>(object: I): UserDefinedFunction {

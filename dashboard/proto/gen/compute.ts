@@ -24,10 +24,6 @@ export const ShowConfigRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ShowConfigRequest>, I>>(base?: I): ShowConfigRequest {
-    return ShowConfigRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ShowConfigRequest>, I>>(_: I): ShowConfigRequest {
     const message = createBaseShowConfigRequest();
     return message;
@@ -51,10 +47,6 @@ export const ShowConfigResponse = {
     message.batchConfig !== undefined && (obj.batchConfig = message.batchConfig);
     message.streamConfig !== undefined && (obj.streamConfig = message.streamConfig);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ShowConfigResponse>, I>>(base?: I): ShowConfigResponse {
-    return ShowConfigResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ShowConfigResponse>, I>>(object: I): ShowConfigResponse {

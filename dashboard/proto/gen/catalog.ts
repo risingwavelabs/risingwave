@@ -290,10 +290,6 @@ export const ColumnIndex = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ColumnIndex>, I>>(base?: I): ColumnIndex {
-    return ColumnIndex.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
     const message = createBaseColumnIndex();
     message.index = object.index ?? 0;
@@ -318,10 +314,6 @@ export const WatermarkDesc = {
     message.watermarkIdx !== undefined && (obj.watermarkIdx = Math.round(message.watermarkIdx));
     message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<WatermarkDesc>, I>>(base?: I): WatermarkDesc {
-    return WatermarkDesc.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<WatermarkDesc>, I>>(object: I): WatermarkDesc {
@@ -364,10 +356,6 @@ export const StreamSourceInfo = {
     message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
     message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<StreamSourceInfo>, I>>(base?: I): StreamSourceInfo {
-    return StreamSourceInfo.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<StreamSourceInfo>, I>>(object: I): StreamSourceInfo {
@@ -456,10 +444,6 @@ export const Source = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Source>, I>>(base?: I): Source {
-    return Source.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Source>, I>>(object: I): Source {
     const message = createBaseSource();
     message.id = object.id ?? 0;
@@ -503,10 +487,6 @@ export const Source_PropertiesEntry = {
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Source_PropertiesEntry>, I>>(base?: I): Source_PropertiesEntry {
-    return Source_PropertiesEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Source_PropertiesEntry>, I>>(object: I): Source_PropertiesEntry {
@@ -606,10 +586,6 @@ export const Sink = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Sink>, I>>(base?: I): Sink {
-    return Sink.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Sink>, I>>(object: I): Sink {
     const message = createBaseSink();
     message.id = object.id ?? 0;
@@ -651,10 +627,6 @@ export const Sink_PropertiesEntry = {
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Sink_PropertiesEntry>, I>>(base?: I): Sink_PropertiesEntry {
-    return Sink_PropertiesEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Sink_PropertiesEntry>, I>>(object: I): Sink_PropertiesEntry {
@@ -718,10 +690,6 @@ export const Index = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Index>, I>>(base?: I): Index {
-    return Index.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Index>, I>>(object: I): Index {
     const message = createBaseIndex();
     message.id = object.id ?? 0;
@@ -783,10 +751,6 @@ export const Function = {
     message.path !== undefined && (obj.path = message.path);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Function>, I>>(base?: I): Function {
-    return Function.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Function>, I>>(object: I): Function {
@@ -943,10 +907,6 @@ export const Table = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Table>, I>>(base?: I): Table {
-    return Table.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Table>, I>>(object: I): Table {
     const message = createBaseTable();
     message.id = object.id ?? 0;
@@ -1018,10 +978,6 @@ export const Table_TableVersion = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Table_TableVersion>, I>>(base?: I): Table_TableVersion {
-    return Table_TableVersion.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Table_TableVersion>, I>>(object: I): Table_TableVersion {
     const message = createBaseTable_TableVersion();
     message.version = object.version ?? 0;
@@ -1044,10 +1000,6 @@ export const Table_PropertiesEntry = {
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Table_PropertiesEntry>, I>>(base?: I): Table_PropertiesEntry {
-    return Table_PropertiesEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Table_PropertiesEntry>, I>>(object: I): Table_PropertiesEntry {
@@ -1123,10 +1075,6 @@ export const View = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<View>, I>>(base?: I): View {
-    return View.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<View>, I>>(object: I): View {
     const message = createBaseView();
     message.id = object.id ?? 0;
@@ -1166,10 +1114,6 @@ export const View_PropertiesEntry = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<View_PropertiesEntry>, I>>(base?: I): View_PropertiesEntry {
-    return View_PropertiesEntry.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<View_PropertiesEntry>, I>>(object: I): View_PropertiesEntry {
     const message = createBaseView_PropertiesEntry();
     message.key = object.key ?? "";
@@ -1201,10 +1145,6 @@ export const Schema = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Schema>, I>>(base?: I): Schema {
-    return Schema.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Schema>, I>>(object: I): Schema {
     const message = createBaseSchema();
     message.id = object.id ?? 0;
@@ -1234,10 +1174,6 @@ export const Database = {
     message.name !== undefined && (obj.name = message.name);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Database>, I>>(base?: I): Database {
-    return Database.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Database>, I>>(object: I): Database {

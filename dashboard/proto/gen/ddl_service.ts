@@ -241,10 +241,6 @@ export const CreateDatabaseRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateDatabaseRequest>, I>>(base?: I): CreateDatabaseRequest {
-    return CreateDatabaseRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateDatabaseRequest>, I>>(object: I): CreateDatabaseRequest {
     const message = createBaseCreateDatabaseRequest();
     message.db = (object.db !== undefined && object.db !== null) ? Database.fromPartial(object.db) : undefined;
@@ -273,10 +269,6 @@ export const CreateDatabaseResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateDatabaseResponse>, I>>(base?: I): CreateDatabaseResponse {
-    return CreateDatabaseResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateDatabaseResponse>, I>>(object: I): CreateDatabaseResponse {
     const message = createBaseCreateDatabaseResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -301,10 +293,6 @@ export const DropDatabaseRequest = {
     const obj: any = {};
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropDatabaseRequest>, I>>(base?: I): DropDatabaseRequest {
-    return DropDatabaseRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropDatabaseRequest>, I>>(object: I): DropDatabaseRequest {
@@ -333,10 +321,6 @@ export const DropDatabaseResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropDatabaseResponse>, I>>(base?: I): DropDatabaseResponse {
-    return DropDatabaseResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropDatabaseResponse>, I>>(object: I): DropDatabaseResponse {
     const message = createBaseDropDatabaseResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -360,10 +344,6 @@ export const CreateSchemaRequest = {
     const obj: any = {};
     message.schema !== undefined && (obj.schema = message.schema ? Schema.toJSON(message.schema) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateSchemaRequest>, I>>(base?: I): CreateSchemaRequest {
-    return CreateSchemaRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateSchemaRequest>, I>>(object: I): CreateSchemaRequest {
@@ -396,10 +376,6 @@ export const CreateSchemaResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateSchemaResponse>, I>>(base?: I): CreateSchemaResponse {
-    return CreateSchemaResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateSchemaResponse>, I>>(object: I): CreateSchemaResponse {
     const message = createBaseCreateSchemaResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -424,10 +400,6 @@ export const DropSchemaRequest = {
     const obj: any = {};
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropSchemaRequest>, I>>(base?: I): DropSchemaRequest {
-    return DropSchemaRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropSchemaRequest>, I>>(object: I): DropSchemaRequest {
@@ -456,10 +428,6 @@ export const DropSchemaResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropSchemaResponse>, I>>(base?: I): DropSchemaResponse {
-    return DropSchemaResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropSchemaResponse>, I>>(object: I): DropSchemaResponse {
     const message = createBaseDropSchemaResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -483,10 +451,6 @@ export const CreateSourceRequest = {
     const obj: any = {};
     message.source !== undefined && (obj.source = message.source ? Source.toJSON(message.source) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateSourceRequest>, I>>(base?: I): CreateSourceRequest {
-    return CreateSourceRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateSourceRequest>, I>>(object: I): CreateSourceRequest {
@@ -519,10 +483,6 @@ export const CreateSourceResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateSourceResponse>, I>>(base?: I): CreateSourceResponse {
-    return CreateSourceResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateSourceResponse>, I>>(object: I): CreateSourceResponse {
     const message = createBaseCreateSourceResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -549,10 +509,6 @@ export const DropSourceRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropSourceRequest>, I>>(base?: I): DropSourceRequest {
-    return DropSourceRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropSourceRequest>, I>>(object: I): DropSourceRequest {
     const message = createBaseDropSourceRequest();
     message.sourceId = object.sourceId ?? 0;
@@ -577,10 +533,6 @@ export const DropSourceResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropSourceResponse>, I>>(base?: I): DropSourceResponse {
-    return DropSourceResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropSourceResponse>, I>>(object: I): DropSourceResponse {
@@ -611,10 +563,6 @@ export const CreateSinkRequest = {
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateSinkRequest>, I>>(base?: I): CreateSinkRequest {
-    return CreateSinkRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateSinkRequest>, I>>(object: I): CreateSinkRequest {
@@ -648,10 +596,6 @@ export const CreateSinkResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateSinkResponse>, I>>(base?: I): CreateSinkResponse {
-    return CreateSinkResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateSinkResponse>, I>>(object: I): CreateSinkResponse {
     const message = createBaseCreateSinkResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -678,10 +622,6 @@ export const DropSinkRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropSinkRequest>, I>>(base?: I): DropSinkRequest {
-    return DropSinkRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropSinkRequest>, I>>(object: I): DropSinkRequest {
     const message = createBaseDropSinkRequest();
     message.sinkId = object.sinkId ?? 0;
@@ -706,10 +646,6 @@ export const DropSinkResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropSinkResponse>, I>>(base?: I): DropSinkResponse {
-    return DropSinkResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropSinkResponse>, I>>(object: I): DropSinkResponse {
@@ -741,10 +677,6 @@ export const CreateMaterializedViewRequest = {
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateMaterializedViewRequest>, I>>(base?: I): CreateMaterializedViewRequest {
-    return CreateMaterializedViewRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateMaterializedViewRequest>, I>>(
@@ -782,10 +714,6 @@ export const CreateMaterializedViewResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateMaterializedViewResponse>, I>>(base?: I): CreateMaterializedViewResponse {
-    return CreateMaterializedViewResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateMaterializedViewResponse>, I>>(
     object: I,
   ): CreateMaterializedViewResponse {
@@ -814,10 +742,6 @@ export const DropMaterializedViewRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropMaterializedViewRequest>, I>>(base?: I): DropMaterializedViewRequest {
-    return DropMaterializedViewRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropMaterializedViewRequest>, I>>(object: I): DropMaterializedViewRequest {
     const message = createBaseDropMaterializedViewRequest();
     message.tableId = object.tableId ?? 0;
@@ -844,10 +768,6 @@ export const DropMaterializedViewResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropMaterializedViewResponse>, I>>(base?: I): DropMaterializedViewResponse {
-    return DropMaterializedViewResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropMaterializedViewResponse>, I>>(object: I): DropMaterializedViewResponse {
     const message = createBaseDropMaterializedViewResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -871,10 +791,6 @@ export const CreateViewRequest = {
     const obj: any = {};
     message.view !== undefined && (obj.view = message.view ? View.toJSON(message.view) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateViewRequest>, I>>(base?: I): CreateViewRequest {
-    return CreateViewRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateViewRequest>, I>>(object: I): CreateViewRequest {
@@ -905,10 +821,6 @@ export const CreateViewResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateViewResponse>, I>>(base?: I): CreateViewResponse {
-    return CreateViewResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateViewResponse>, I>>(object: I): CreateViewResponse {
     const message = createBaseCreateViewResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -935,10 +847,6 @@ export const DropViewRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropViewRequest>, I>>(base?: I): DropViewRequest {
-    return DropViewRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropViewRequest>, I>>(object: I): DropViewRequest {
     const message = createBaseDropViewRequest();
     message.viewId = object.viewId ?? 0;
@@ -963,10 +871,6 @@ export const DropViewResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropViewResponse>, I>>(base?: I): DropViewResponse {
-    return DropViewResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropViewResponse>, I>>(object: I): DropViewResponse {
@@ -1000,10 +904,6 @@ export const CreateTableRequest = {
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateTableRequest>, I>>(base?: I): CreateTableRequest {
-    return CreateTableRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateTableRequest>, I>>(object: I): CreateTableRequest {
@@ -1042,10 +942,6 @@ export const CreateTableResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateTableResponse>, I>>(base?: I): CreateTableResponse {
-    return CreateTableResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateTableResponse>, I>>(object: I): CreateTableResponse {
     const message = createBaseCreateTableResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -1070,10 +966,6 @@ export const CreateFunctionRequest = {
     const obj: any = {};
     message.function !== undefined && (obj.function = message.function ? Function.toJSON(message.function) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateFunctionRequest>, I>>(base?: I): CreateFunctionRequest {
-    return CreateFunctionRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateFunctionRequest>, I>>(object: I): CreateFunctionRequest {
@@ -1106,10 +998,6 @@ export const CreateFunctionResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateFunctionResponse>, I>>(base?: I): CreateFunctionResponse {
-    return CreateFunctionResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateFunctionResponse>, I>>(object: I): CreateFunctionResponse {
     const message = createBaseCreateFunctionResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -1136,10 +1024,6 @@ export const DropFunctionRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropFunctionRequest>, I>>(base?: I): DropFunctionRequest {
-    return DropFunctionRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropFunctionRequest>, I>>(object: I): DropFunctionRequest {
     const message = createBaseDropFunctionRequest();
     message.functionId = object.functionId ?? 0;
@@ -1164,10 +1048,6 @@ export const DropFunctionResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropFunctionResponse>, I>>(base?: I): DropFunctionResponse {
-    return DropFunctionResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropFunctionResponse>, I>>(object: I): DropFunctionResponse {
@@ -1199,10 +1079,6 @@ export const DropTableRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropTableRequest>, I>>(base?: I): DropTableRequest {
-    return DropTableRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropTableRequest>, I>>(object: I): DropTableRequest {
     const message = createBaseDropTableRequest();
     if (object.sourceId?.$case === "id" && object.sourceId?.id !== undefined && object.sourceId?.id !== null) {
@@ -1232,10 +1108,6 @@ export const DropTableResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropTableResponse>, I>>(base?: I): DropTableResponse {
-    return DropTableResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropTableResponse>, I>>(object: I): DropTableResponse {
     const message = createBaseDropTableResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -1258,10 +1130,6 @@ export const RisectlListStateTablesRequest = {
   toJSON(_: RisectlListStateTablesRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RisectlListStateTablesRequest>, I>>(base?: I): RisectlListStateTablesRequest {
-    return RisectlListStateTablesRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RisectlListStateTablesRequest>, I>>(_: I): RisectlListStateTablesRequest {
@@ -1287,10 +1155,6 @@ export const RisectlListStateTablesResponse = {
       obj.tables = [];
     }
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RisectlListStateTablesResponse>, I>>(base?: I): RisectlListStateTablesResponse {
-    return RisectlListStateTablesResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RisectlListStateTablesResponse>, I>>(
@@ -1323,10 +1187,6 @@ export const CreateIndexRequest = {
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CreateIndexRequest>, I>>(base?: I): CreateIndexRequest {
-    return CreateIndexRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateIndexRequest>, I>>(object: I): CreateIndexRequest {
@@ -1363,10 +1223,6 @@ export const CreateIndexResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CreateIndexResponse>, I>>(base?: I): CreateIndexResponse {
-    return CreateIndexResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CreateIndexResponse>, I>>(object: I): CreateIndexResponse {
     const message = createBaseCreateIndexResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -1393,10 +1249,6 @@ export const DropIndexRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropIndexRequest>, I>>(base?: I): DropIndexRequest {
-    return DropIndexRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropIndexRequest>, I>>(object: I): DropIndexRequest {
     const message = createBaseDropIndexRequest();
     message.indexId = object.indexId ?? 0;
@@ -1421,10 +1273,6 @@ export const DropIndexResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DropIndexResponse>, I>>(base?: I): DropIndexResponse {
-    return DropIndexResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropIndexResponse>, I>>(object: I): DropIndexResponse {
@@ -1457,10 +1305,6 @@ export const ReplaceTablePlanRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReplaceTablePlanRequest>, I>>(base?: I): ReplaceTablePlanRequest {
-    return ReplaceTablePlanRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanRequest>, I>>(object: I): ReplaceTablePlanRequest {
     const message = createBaseReplaceTablePlanRequest();
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
@@ -1488,10 +1332,6 @@ export const ReplaceTablePlanResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ReplaceTablePlanResponse>, I>>(base?: I): ReplaceTablePlanResponse {
-    return ReplaceTablePlanResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanResponse>, I>>(object: I): ReplaceTablePlanResponse {
@@ -1523,10 +1363,6 @@ export const GetTableRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetTableRequest>, I>>(base?: I): GetTableRequest {
-    return GetTableRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<GetTableRequest>, I>>(object: I): GetTableRequest {
     const message = createBaseGetTableRequest();
     message.databaseName = object.databaseName ?? "";
@@ -1548,10 +1384,6 @@ export const GetTableResponse = {
     const obj: any = {};
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetTableResponse>, I>>(base?: I): GetTableResponse {
-    return GetTableResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetTableResponse>, I>>(object: I): GetTableResponse {

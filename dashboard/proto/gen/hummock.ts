@@ -874,10 +874,6 @@ export const SstableInfo = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<SstableInfo>, I>>(base?: I): SstableInfo {
-    return SstableInfo.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<SstableInfo>, I>>(object: I): SstableInfo {
     const message = createBaseSstableInfo();
     message.id = object.id ?? 0;
@@ -917,10 +913,6 @@ export const OverlappingLevel = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<OverlappingLevel>, I>>(base?: I): OverlappingLevel {
-    return OverlappingLevel.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<OverlappingLevel>, I>>(object: I): OverlappingLevel {
     const message = createBaseOverlappingLevel();
     message.subLevels = object.subLevels?.map((e) => Level.fromPartial(e)) || [];
@@ -958,10 +950,6 @@ export const Level = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Level>, I>>(base?: I): Level {
-    return Level.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Level>, I>>(object: I): Level {
     const message = createBaseLevel();
     message.levelIdx = object.levelIdx ?? 0;
@@ -996,10 +984,6 @@ export const InputLevel = {
       obj.tableInfos = [];
     }
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<InputLevel>, I>>(base?: I): InputLevel {
-    return InputLevel.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<InputLevel>, I>>(object: I): InputLevel {
@@ -1044,10 +1028,6 @@ export const IntraLevelDelta = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<IntraLevelDelta>, I>>(base?: I): IntraLevelDelta {
-    return IntraLevelDelta.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<IntraLevelDelta>, I>>(object: I): IntraLevelDelta {
     const message = createBaseIntraLevelDelta();
     message.levelIdx = object.levelIdx ?? 0;
@@ -1084,10 +1064,6 @@ export const GroupConstruct = {
     }
     message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GroupConstruct>, I>>(base?: I): GroupConstruct {
-    return GroupConstruct.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GroupConstruct>, I>>(object: I): GroupConstruct {
@@ -1129,10 +1105,6 @@ export const GroupMetaChange = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GroupMetaChange>, I>>(base?: I): GroupMetaChange {
-    return GroupMetaChange.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<GroupMetaChange>, I>>(object: I): GroupMetaChange {
     const message = createBaseGroupMetaChange();
     message.tableIdsAdd = object.tableIdsAdd?.map((e) => e) || [];
@@ -1153,10 +1125,6 @@ export const GroupDestroy = {
   toJSON(_: GroupDestroy): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GroupDestroy>, I>>(base?: I): GroupDestroy {
-    return GroupDestroy.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GroupDestroy>, I>>(_: I): GroupDestroy {
@@ -1199,10 +1167,6 @@ export const GroupDelta = {
       ? GroupMetaChange.toJSON(message.deltaType?.groupMetaChange)
       : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GroupDelta>, I>>(base?: I): GroupDelta {
-    return GroupDelta.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GroupDelta>, I>>(object: I): GroupDelta {
@@ -1271,10 +1235,6 @@ export const UncommittedEpoch = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UncommittedEpoch>, I>>(base?: I): UncommittedEpoch {
-    return UncommittedEpoch.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UncommittedEpoch>, I>>(object: I): UncommittedEpoch {
     const message = createBaseUncommittedEpoch();
     message.epoch = object.epoch ?? 0;
@@ -1314,10 +1274,6 @@ export const HummockVersion = {
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<HummockVersion>, I>>(base?: I): HummockVersion {
-    return HummockVersion.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<HummockVersion>, I>>(object: I): HummockVersion {
@@ -1371,10 +1327,6 @@ export const HummockVersion_Levels = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockVersion_Levels>, I>>(base?: I): HummockVersion_Levels {
-    return HummockVersion_Levels.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockVersion_Levels>, I>>(object: I): HummockVersion_Levels {
     const message = createBaseHummockVersion_Levels();
     message.levels = object.levels?.map((e) => Level.fromPartial(e)) || [];
@@ -1404,10 +1356,6 @@ export const HummockVersion_LevelsEntry = {
     message.value !== undefined &&
       (obj.value = message.value ? HummockVersion_Levels.toJSON(message.value) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<HummockVersion_LevelsEntry>, I>>(base?: I): HummockVersion_LevelsEntry {
-    return HummockVersion_LevelsEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<HummockVersion_LevelsEntry>, I>>(object: I): HummockVersion_LevelsEntry {
@@ -1468,10 +1416,6 @@ export const HummockVersionDelta = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockVersionDelta>, I>>(base?: I): HummockVersionDelta {
-    return HummockVersionDelta.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockVersionDelta>, I>>(object: I): HummockVersionDelta {
     const message = createBaseHummockVersionDelta();
     message.id = object.id ?? 0;
@@ -1513,10 +1457,6 @@ export const HummockVersionDelta_GroupDeltas = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockVersionDelta_GroupDeltas>, I>>(base?: I): HummockVersionDelta_GroupDeltas {
-    return HummockVersionDelta_GroupDeltas.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockVersionDelta_GroupDeltas>, I>>(
     object: I,
   ): HummockVersionDelta_GroupDeltas {
@@ -1544,12 +1484,6 @@ export const HummockVersionDelta_GroupDeltasEntry = {
     message.value !== undefined &&
       (obj.value = message.value ? HummockVersionDelta_GroupDeltas.toJSON(message.value) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<HummockVersionDelta_GroupDeltasEntry>, I>>(
-    base?: I,
-  ): HummockVersionDelta_GroupDeltasEntry {
-    return HummockVersionDelta_GroupDeltasEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<HummockVersionDelta_GroupDeltasEntry>, I>>(
@@ -1587,10 +1521,6 @@ export const HummockVersionDeltas = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockVersionDeltas>, I>>(base?: I): HummockVersionDeltas {
-    return HummockVersionDeltas.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockVersionDeltas>, I>>(object: I): HummockVersionDeltas {
     const message = createBaseHummockVersionDeltas();
     message.versionDeltas = object.versionDeltas?.map((e) => HummockVersionDelta.fromPartial(e)) || [];
@@ -1615,10 +1545,6 @@ export const HummockSnapshot = {
     message.committedEpoch !== undefined && (obj.committedEpoch = Math.round(message.committedEpoch));
     message.currentEpoch !== undefined && (obj.currentEpoch = Math.round(message.currentEpoch));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<HummockSnapshot>, I>>(base?: I): HummockSnapshot {
-    return HummockSnapshot.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<HummockSnapshot>, I>>(object: I): HummockSnapshot {
@@ -1653,10 +1579,6 @@ export const VersionUpdatePayload = {
       ? HummockVersion.toJSON(message.payload?.pinnedVersion)
       : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<VersionUpdatePayload>, I>>(base?: I): VersionUpdatePayload {
-    return VersionUpdatePayload.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<VersionUpdatePayload>, I>>(object: I): VersionUpdatePayload {
@@ -1704,10 +1626,6 @@ export const UnpinVersionBeforeRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UnpinVersionBeforeRequest>, I>>(base?: I): UnpinVersionBeforeRequest {
-    return UnpinVersionBeforeRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UnpinVersionBeforeRequest>, I>>(object: I): UnpinVersionBeforeRequest {
     const message = createBaseUnpinVersionBeforeRequest();
     message.contextId = object.contextId ?? 0;
@@ -1731,10 +1649,6 @@ export const UnpinVersionBeforeResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UnpinVersionBeforeResponse>, I>>(base?: I): UnpinVersionBeforeResponse {
-    return UnpinVersionBeforeResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UnpinVersionBeforeResponse>, I>>(object: I): UnpinVersionBeforeResponse {
     const message = createBaseUnpinVersionBeforeResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -1756,10 +1670,6 @@ export const GetCurrentVersionRequest = {
   toJSON(_: GetCurrentVersionRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetCurrentVersionRequest>, I>>(base?: I): GetCurrentVersionRequest {
-    return GetCurrentVersionRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetCurrentVersionRequest>, I>>(_: I): GetCurrentVersionRequest {
@@ -1786,10 +1696,6 @@ export const GetCurrentVersionResponse = {
     message.currentVersion !== undefined &&
       (obj.currentVersion = message.currentVersion ? HummockVersion.toJSON(message.currentVersion) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetCurrentVersionResponse>, I>>(base?: I): GetCurrentVersionResponse {
-    return GetCurrentVersionResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetCurrentVersionResponse>, I>>(object: I): GetCurrentVersionResponse {
@@ -1819,10 +1725,6 @@ export const UnpinVersionRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UnpinVersionRequest>, I>>(base?: I): UnpinVersionRequest {
-    return UnpinVersionRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UnpinVersionRequest>, I>>(object: I): UnpinVersionRequest {
     const message = createBaseUnpinVersionRequest();
     message.contextId = object.contextId ?? 0;
@@ -1843,10 +1745,6 @@ export const UnpinVersionResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<UnpinVersionResponse>, I>>(base?: I): UnpinVersionResponse {
-    return UnpinVersionResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UnpinVersionResponse>, I>>(object: I): UnpinVersionResponse {
@@ -1871,10 +1769,6 @@ export const PinSnapshotRequest = {
     const obj: any = {};
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<PinSnapshotRequest>, I>>(base?: I): PinSnapshotRequest {
-    return PinSnapshotRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<PinSnapshotRequest>, I>>(object: I): PinSnapshotRequest {
@@ -1903,10 +1797,6 @@ export const PinSpecificSnapshotRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<PinSpecificSnapshotRequest>, I>>(base?: I): PinSpecificSnapshotRequest {
-    return PinSpecificSnapshotRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<PinSpecificSnapshotRequest>, I>>(object: I): PinSpecificSnapshotRequest {
     const message = createBasePinSpecificSnapshotRequest();
     message.contextId = object.contextId ?? 0;
@@ -1927,12 +1817,6 @@ export const GetAssignedCompactTaskNumRequest = {
   toJSON(_: GetAssignedCompactTaskNumRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetAssignedCompactTaskNumRequest>, I>>(
-    base?: I,
-  ): GetAssignedCompactTaskNumRequest {
-    return GetAssignedCompactTaskNumRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetAssignedCompactTaskNumRequest>, I>>(
@@ -1956,12 +1840,6 @@ export const GetAssignedCompactTaskNumResponse = {
     const obj: any = {};
     message.numTasks !== undefined && (obj.numTasks = Math.round(message.numTasks));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetAssignedCompactTaskNumResponse>, I>>(
-    base?: I,
-  ): GetAssignedCompactTaskNumResponse {
-    return GetAssignedCompactTaskNumResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetAssignedCompactTaskNumResponse>, I>>(
@@ -1993,10 +1871,6 @@ export const PinSnapshotResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<PinSnapshotResponse>, I>>(base?: I): PinSnapshotResponse {
-    return PinSnapshotResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<PinSnapshotResponse>, I>>(object: I): PinSnapshotResponse {
     const message = createBasePinSnapshotResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -2023,10 +1897,6 @@ export const GetEpochRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetEpochRequest>, I>>(base?: I): GetEpochRequest {
-    return GetEpochRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<GetEpochRequest>, I>>(_: I): GetEpochRequest {
     const message = createBaseGetEpochRequest();
     return message;
@@ -2051,10 +1921,6 @@ export const GetEpochResponse = {
     message.snapshot !== undefined &&
       (obj.snapshot = message.snapshot ? HummockSnapshot.toJSON(message.snapshot) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetEpochResponse>, I>>(base?: I): GetEpochResponse {
-    return GetEpochResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetEpochResponse>, I>>(object: I): GetEpochResponse {
@@ -2084,10 +1950,6 @@ export const UnpinSnapshotRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UnpinSnapshotRequest>, I>>(base?: I): UnpinSnapshotRequest {
-    return UnpinSnapshotRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UnpinSnapshotRequest>, I>>(object: I): UnpinSnapshotRequest {
     const message = createBaseUnpinSnapshotRequest();
     message.contextId = object.contextId ?? 0;
@@ -2108,10 +1970,6 @@ export const UnpinSnapshotResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<UnpinSnapshotResponse>, I>>(base?: I): UnpinSnapshotResponse {
-    return UnpinSnapshotResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UnpinSnapshotResponse>, I>>(object: I): UnpinSnapshotResponse {
@@ -2143,10 +2001,6 @@ export const UnpinSnapshotBeforeRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UnpinSnapshotBeforeRequest>, I>>(base?: I): UnpinSnapshotBeforeRequest {
-    return UnpinSnapshotBeforeRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UnpinSnapshotBeforeRequest>, I>>(object: I): UnpinSnapshotBeforeRequest {
     const message = createBaseUnpinSnapshotBeforeRequest();
     message.contextId = object.contextId ?? 0;
@@ -2170,10 +2024,6 @@ export const UnpinSnapshotBeforeResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<UnpinSnapshotBeforeResponse>, I>>(base?: I): UnpinSnapshotBeforeResponse {
-    return UnpinSnapshotBeforeResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UnpinSnapshotBeforeResponse>, I>>(object: I): UnpinSnapshotBeforeResponse {
@@ -2208,10 +2058,6 @@ export const KeyRange = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<KeyRange>, I>>(base?: I): KeyRange {
-    return KeyRange.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<KeyRange>, I>>(object: I): KeyRange {
     const message = createBaseKeyRange();
     message.left = object.left ?? new Uint8Array();
@@ -2234,10 +2080,6 @@ export const TableOption = {
     const obj: any = {};
     message.retentionSeconds !== undefined && (obj.retentionSeconds = Math.round(message.retentionSeconds));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<TableOption>, I>>(base?: I): TableOption {
-    return TableOption.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TableOption>, I>>(object: I): TableOption {
@@ -2348,10 +2190,6 @@ export const CompactTask = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactTask>, I>>(base?: I): CompactTask {
-    return CompactTask.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactTask>, I>>(object: I): CompactTask {
     const message = createBaseCompactTask();
     message.inputSsts = object.inputSsts?.map((e) => InputLevel.fromPartial(e)) || [];
@@ -2402,10 +2240,6 @@ export const CompactTask_TableOptionsEntry = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactTask_TableOptionsEntry>, I>>(base?: I): CompactTask_TableOptionsEntry {
-    return CompactTask_TableOptionsEntry.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactTask_TableOptionsEntry>, I>>(
     object: I,
   ): CompactTask_TableOptionsEntry {
@@ -2443,10 +2277,6 @@ export const LevelHandler = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<LevelHandler>, I>>(base?: I): LevelHandler {
-    return LevelHandler.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<LevelHandler>, I>>(object: I): LevelHandler {
     const message = createBaseLevelHandler();
     message.level = object.level ?? 0;
@@ -2480,10 +2310,6 @@ export const LevelHandler_RunningCompactTask = {
     message.totalFileSize !== undefined && (obj.totalFileSize = Math.round(message.totalFileSize));
     message.targetLevel !== undefined && (obj.targetLevel = Math.round(message.targetLevel));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<LevelHandler_RunningCompactTask>, I>>(base?: I): LevelHandler_RunningCompactTask {
-    return LevelHandler_RunningCompactTask.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<LevelHandler_RunningCompactTask>, I>>(
@@ -2523,10 +2349,6 @@ export const CompactStatus = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactStatus>, I>>(base?: I): CompactStatus {
-    return CompactStatus.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactStatus>, I>>(object: I): CompactStatus {
     const message = createBaseCompactStatus();
     message.compactionGroupId = object.compactionGroupId ?? 0;
@@ -2553,10 +2375,6 @@ export const CompactionGroup = {
     message.compactionConfig !== undefined &&
       (obj.compactionConfig = message.compactionConfig ? CompactionConfig.toJSON(message.compactionConfig) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<CompactionGroup>, I>>(base?: I): CompactionGroup {
-    return CompactionGroup.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
@@ -2597,10 +2415,6 @@ export const CompactionGroupInfo = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactionGroupInfo>, I>>(base?: I): CompactionGroupInfo {
-    return CompactionGroupInfo.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactionGroupInfo>, I>>(object: I): CompactionGroupInfo {
     const message = createBaseCompactionGroupInfo();
     message.id = object.id ?? 0;
@@ -2633,10 +2447,6 @@ export const CompactTaskAssignment = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactTaskAssignment>, I>>(base?: I): CompactTaskAssignment {
-    return CompactTaskAssignment.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactTaskAssignment>, I>>(object: I): CompactTaskAssignment {
     const message = createBaseCompactTaskAssignment();
     message.compactTask = (object.compactTask !== undefined && object.compactTask !== null)
@@ -2659,10 +2469,6 @@ export const GetCompactionTasksRequest = {
   toJSON(_: GetCompactionTasksRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetCompactionTasksRequest>, I>>(base?: I): GetCompactionTasksRequest {
-    return GetCompactionTasksRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetCompactionTasksRequest>, I>>(_: I): GetCompactionTasksRequest {
@@ -2689,10 +2495,6 @@ export const GetCompactionTasksResponse = {
     message.compactTask !== undefined &&
       (obj.compactTask = message.compactTask ? CompactTask.toJSON(message.compactTask) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetCompactionTasksResponse>, I>>(base?: I): GetCompactionTasksResponse {
-    return GetCompactionTasksResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetCompactionTasksResponse>, I>>(object: I): GetCompactionTasksResponse {
@@ -2739,10 +2541,6 @@ export const ReportCompactionTasksRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReportCompactionTasksRequest>, I>>(base?: I): ReportCompactionTasksRequest {
-    return ReportCompactionTasksRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReportCompactionTasksRequest>, I>>(object: I): ReportCompactionTasksRequest {
     const message = createBaseReportCompactionTasksRequest();
     message.contextId = object.contextId ?? 0;
@@ -2781,12 +2579,6 @@ export const ReportCompactionTasksRequest_TableStatsChangeEntry = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReportCompactionTasksRequest_TableStatsChangeEntry>, I>>(
-    base?: I,
-  ): ReportCompactionTasksRequest_TableStatsChangeEntry {
-    return ReportCompactionTasksRequest_TableStatsChangeEntry.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReportCompactionTasksRequest_TableStatsChangeEntry>, I>>(
     object: I,
   ): ReportCompactionTasksRequest_TableStatsChangeEntry {
@@ -2812,10 +2604,6 @@ export const ReportCompactionTasksResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ReportCompactionTasksResponse>, I>>(base?: I): ReportCompactionTasksResponse {
-    return ReportCompactionTasksResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ReportCompactionTasksResponse>, I>>(
@@ -2848,10 +2636,6 @@ export const HummockPinnedVersion = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockPinnedVersion>, I>>(base?: I): HummockPinnedVersion {
-    return HummockPinnedVersion.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockPinnedVersion>, I>>(object: I): HummockPinnedVersion {
     const message = createBaseHummockPinnedVersion();
     message.contextId = object.contextId ?? 0;
@@ -2880,10 +2664,6 @@ export const HummockPinnedSnapshot = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockPinnedSnapshot>, I>>(base?: I): HummockPinnedSnapshot {
-    return HummockPinnedSnapshot.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockPinnedSnapshot>, I>>(object: I): HummockPinnedSnapshot {
     const message = createBaseHummockPinnedSnapshot();
     message.contextId = object.contextId ?? 0;
@@ -2905,10 +2685,6 @@ export const GetNewSstIdsRequest = {
     const obj: any = {};
     message.number !== undefined && (obj.number = Math.round(message.number));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetNewSstIdsRequest>, I>>(base?: I): GetNewSstIdsRequest {
-    return GetNewSstIdsRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetNewSstIdsRequest>, I>>(object: I): GetNewSstIdsRequest {
@@ -2937,10 +2713,6 @@ export const GetNewSstIdsResponse = {
     message.startId !== undefined && (obj.startId = Math.round(message.startId));
     message.endId !== undefined && (obj.endId = Math.round(message.endId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetNewSstIdsResponse>, I>>(base?: I): GetNewSstIdsResponse {
-    return GetNewSstIdsResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetNewSstIdsResponse>, I>>(object: I): GetNewSstIdsResponse {
@@ -2975,10 +2747,6 @@ export const CompactTaskProgress = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactTaskProgress>, I>>(base?: I): CompactTaskProgress {
-    return CompactTaskProgress.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactTaskProgress>, I>>(object: I): CompactTaskProgress {
     const message = createBaseCompactTaskProgress();
     message.taskId = object.taskId ?? 0;
@@ -3011,12 +2779,6 @@ export const ReportCompactionTaskProgressRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReportCompactionTaskProgressRequest>, I>>(
-    base?: I,
-  ): ReportCompactionTaskProgressRequest {
-    return ReportCompactionTaskProgressRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressRequest>, I>>(
     object: I,
   ): ReportCompactionTaskProgressRequest {
@@ -3040,12 +2802,6 @@ export const ReportCompactionTaskProgressResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ReportCompactionTaskProgressResponse>, I>>(
-    base?: I,
-  ): ReportCompactionTaskProgressResponse {
-    return ReportCompactionTaskProgressResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressResponse>, I>>(
@@ -3077,10 +2833,6 @@ export const SubscribeCompactTasksRequest = {
     message.maxConcurrentTaskNumber !== undefined &&
       (obj.maxConcurrentTaskNumber = Math.round(message.maxConcurrentTaskNumber));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<SubscribeCompactTasksRequest>, I>>(base?: I): SubscribeCompactTasksRequest {
-    return SubscribeCompactTasksRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SubscribeCompactTasksRequest>, I>>(object: I): SubscribeCompactTasksRequest {
@@ -3126,10 +2878,6 @@ export const ValidationTask = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ValidationTask>, I>>(base?: I): ValidationTask {
-    return ValidationTask.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ValidationTask>, I>>(object: I): ValidationTask {
     const message = createBaseValidationTask();
     message.sstInfos = object.sstInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
@@ -3161,12 +2909,6 @@ export const ValidationTask_SstIdToWorkerIdEntry = {
     message.key !== undefined && (obj.key = Math.round(message.key));
     message.value !== undefined && (obj.value = Math.round(message.value));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ValidationTask_SstIdToWorkerIdEntry>, I>>(
-    base?: I,
-  ): ValidationTask_SstIdToWorkerIdEntry {
-    return ValidationTask_SstIdToWorkerIdEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ValidationTask_SstIdToWorkerIdEntry>, I>>(
@@ -3215,10 +2957,6 @@ export const SubscribeCompactTasksResponse = {
       ? CancelCompactTask.toJSON(message.task?.cancelCompactTask)
       : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<SubscribeCompactTasksResponse>, I>>(base?: I): SubscribeCompactTasksResponse {
-    return SubscribeCompactTasksResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SubscribeCompactTasksResponse>, I>>(
@@ -3287,10 +3025,6 @@ export const VacuumTask = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<VacuumTask>, I>>(base?: I): VacuumTask {
-    return VacuumTask.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<VacuumTask>, I>>(object: I): VacuumTask {
     const message = createBaseVacuumTask();
     message.sstableIds = object.sstableIds?.map((e) => e) || [];
@@ -3311,10 +3045,6 @@ export const FullScanTask = {
     const obj: any = {};
     message.sstRetentionTimeSec !== undefined && (obj.sstRetentionTimeSec = Math.round(message.sstRetentionTimeSec));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<FullScanTask>, I>>(base?: I): FullScanTask {
-    return FullScanTask.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<FullScanTask>, I>>(object: I): FullScanTask {
@@ -3343,10 +3073,6 @@ export const CancelCompactTask = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CancelCompactTask>, I>>(base?: I): CancelCompactTask {
-    return CancelCompactTask.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CancelCompactTask>, I>>(object: I): CancelCompactTask {
     const message = createBaseCancelCompactTask();
     message.contextId = object.contextId ?? 0;
@@ -3371,10 +3097,6 @@ export const ReportVacuumTaskRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReportVacuumTaskRequest>, I>>(base?: I): ReportVacuumTaskRequest {
-    return ReportVacuumTaskRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReportVacuumTaskRequest>, I>>(object: I): ReportVacuumTaskRequest {
     const message = createBaseReportVacuumTaskRequest();
     message.vacuumTask = (object.vacuumTask !== undefined && object.vacuumTask !== null)
@@ -3397,10 +3119,6 @@ export const ReportVacuumTaskResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ReportVacuumTaskResponse>, I>>(base?: I): ReportVacuumTaskResponse {
-    return ReportVacuumTaskResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ReportVacuumTaskResponse>, I>>(object: I): ReportVacuumTaskResponse {
@@ -3441,10 +3159,6 @@ export const TriggerManualCompactionRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<TriggerManualCompactionRequest>, I>>(base?: I): TriggerManualCompactionRequest {
-    return TriggerManualCompactionRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<TriggerManualCompactionRequest>, I>>(
     object: I,
   ): TriggerManualCompactionRequest {
@@ -3473,10 +3187,6 @@ export const TriggerManualCompactionResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<TriggerManualCompactionResponse>, I>>(base?: I): TriggerManualCompactionResponse {
-    return TriggerManualCompactionResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TriggerManualCompactionResponse>, I>>(
@@ -3509,10 +3219,6 @@ export const ReportFullScanTaskRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReportFullScanTaskRequest>, I>>(base?: I): ReportFullScanTaskRequest {
-    return ReportFullScanTaskRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReportFullScanTaskRequest>, I>>(object: I): ReportFullScanTaskRequest {
     const message = createBaseReportFullScanTaskRequest();
     message.sstIds = object.sstIds?.map((e) => e) || [];
@@ -3533,10 +3239,6 @@ export const ReportFullScanTaskResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ReportFullScanTaskResponse>, I>>(base?: I): ReportFullScanTaskResponse {
-    return ReportFullScanTaskResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ReportFullScanTaskResponse>, I>>(object: I): ReportFullScanTaskResponse {
@@ -3563,10 +3265,6 @@ export const TriggerFullGCRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<TriggerFullGCRequest>, I>>(base?: I): TriggerFullGCRequest {
-    return TriggerFullGCRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<TriggerFullGCRequest>, I>>(object: I): TriggerFullGCRequest {
     const message = createBaseTriggerFullGCRequest();
     message.sstRetentionTimeSec = object.sstRetentionTimeSec ?? 0;
@@ -3587,10 +3285,6 @@ export const TriggerFullGCResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<TriggerFullGCResponse>, I>>(base?: I): TriggerFullGCResponse {
-    return TriggerFullGCResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TriggerFullGCResponse>, I>>(object: I): TriggerFullGCResponse {
@@ -3623,10 +3317,6 @@ export const ListVersionDeltasRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ListVersionDeltasRequest>, I>>(base?: I): ListVersionDeltasRequest {
-    return ListVersionDeltasRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ListVersionDeltasRequest>, I>>(object: I): ListVersionDeltasRequest {
     const message = createBaseListVersionDeltasRequest();
     message.startId = object.startId ?? 0;
@@ -3652,10 +3342,6 @@ export const ListVersionDeltasResponse = {
     message.versionDeltas !== undefined &&
       (obj.versionDeltas = message.versionDeltas ? HummockVersionDeltas.toJSON(message.versionDeltas) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ListVersionDeltasResponse>, I>>(base?: I): ListVersionDeltasResponse {
-    return ListVersionDeltasResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ListVersionDeltasResponse>, I>>(object: I): ListVersionDeltasResponse {
@@ -3702,10 +3388,6 @@ export const PinnedVersionsSummary = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<PinnedVersionsSummary>, I>>(base?: I): PinnedVersionsSummary {
-    return PinnedVersionsSummary.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<PinnedVersionsSummary>, I>>(object: I): PinnedVersionsSummary {
     const message = createBasePinnedVersionsSummary();
     message.pinnedVersions = object.pinnedVersions?.map((e) => HummockPinnedVersion.fromPartial(e)) || [];
@@ -3739,12 +3421,6 @@ export const PinnedVersionsSummary_WorkersEntry = {
     message.key !== undefined && (obj.key = Math.round(message.key));
     message.value !== undefined && (obj.value = message.value ? WorkerNode.toJSON(message.value) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<PinnedVersionsSummary_WorkersEntry>, I>>(
-    base?: I,
-  ): PinnedVersionsSummary_WorkersEntry {
-    return PinnedVersionsSummary_WorkersEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<PinnedVersionsSummary_WorkersEntry>, I>>(
@@ -3794,10 +3470,6 @@ export const PinnedSnapshotsSummary = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<PinnedSnapshotsSummary>, I>>(base?: I): PinnedSnapshotsSummary {
-    return PinnedSnapshotsSummary.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<PinnedSnapshotsSummary>, I>>(object: I): PinnedSnapshotsSummary {
     const message = createBasePinnedSnapshotsSummary();
     message.pinnedSnapshots = object.pinnedSnapshots?.map((e) => HummockPinnedSnapshot.fromPartial(e)) || [];
@@ -3833,12 +3505,6 @@ export const PinnedSnapshotsSummary_WorkersEntry = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<PinnedSnapshotsSummary_WorkersEntry>, I>>(
-    base?: I,
-  ): PinnedSnapshotsSummary_WorkersEntry {
-    return PinnedSnapshotsSummary_WorkersEntry.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<PinnedSnapshotsSummary_WorkersEntry>, I>>(
     object: I,
   ): PinnedSnapshotsSummary_WorkersEntry {
@@ -3865,12 +3531,6 @@ export const RiseCtlGetPinnedVersionsSummaryRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<RiseCtlGetPinnedVersionsSummaryRequest>, I>>(
-    base?: I,
-  ): RiseCtlGetPinnedVersionsSummaryRequest {
-    return RiseCtlGetPinnedVersionsSummaryRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedVersionsSummaryRequest>, I>>(
     _: I,
   ): RiseCtlGetPinnedVersionsSummaryRequest {
@@ -3893,12 +3553,6 @@ export const RiseCtlGetPinnedVersionsSummaryResponse = {
     message.summary !== undefined &&
       (obj.summary = message.summary ? PinnedVersionsSummary.toJSON(message.summary) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RiseCtlGetPinnedVersionsSummaryResponse>, I>>(
-    base?: I,
-  ): RiseCtlGetPinnedVersionsSummaryResponse {
-    return RiseCtlGetPinnedVersionsSummaryResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedVersionsSummaryResponse>, I>>(
@@ -3926,12 +3580,6 @@ export const RiseCtlGetPinnedSnapshotsSummaryRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<RiseCtlGetPinnedSnapshotsSummaryRequest>, I>>(
-    base?: I,
-  ): RiseCtlGetPinnedSnapshotsSummaryRequest {
-    return RiseCtlGetPinnedSnapshotsSummaryRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedSnapshotsSummaryRequest>, I>>(
     _: I,
   ): RiseCtlGetPinnedSnapshotsSummaryRequest {
@@ -3954,12 +3602,6 @@ export const RiseCtlGetPinnedSnapshotsSummaryResponse = {
     message.summary !== undefined &&
       (obj.summary = message.summary ? PinnedSnapshotsSummary.toJSON(message.summary) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RiseCtlGetPinnedSnapshotsSummaryResponse>, I>>(
-    base?: I,
-  ): RiseCtlGetPinnedSnapshotsSummaryResponse {
-    return RiseCtlGetPinnedSnapshotsSummaryResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RiseCtlGetPinnedSnapshotsSummaryResponse>, I>>(
@@ -4002,10 +3644,6 @@ export const InitMetadataForReplayRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(base?: I): InitMetadataForReplayRequest {
-    return InitMetadataForReplayRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(object: I): InitMetadataForReplayRequest {
     const message = createBaseInitMetadataForReplayRequest();
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
@@ -4028,10 +3666,6 @@ export const InitMetadataForReplayResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<InitMetadataForReplayResponse>, I>>(base?: I): InitMetadataForReplayResponse {
-    return InitMetadataForReplayResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayResponse>, I>>(_: I): InitMetadataForReplayResponse {
     const message = createBaseInitMetadataForReplayResponse();
     return message;
@@ -4052,10 +3686,6 @@ export const ReplayVersionDeltaRequest = {
     message.versionDelta !== undefined &&
       (obj.versionDelta = message.versionDelta ? HummockVersionDelta.toJSON(message.versionDelta) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ReplayVersionDeltaRequest>, I>>(base?: I): ReplayVersionDeltaRequest {
-    return ReplayVersionDeltaRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ReplayVersionDeltaRequest>, I>>(object: I): ReplayVersionDeltaRequest {
@@ -4093,10 +3723,6 @@ export const ReplayVersionDeltaResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ReplayVersionDeltaResponse>, I>>(base?: I): ReplayVersionDeltaResponse {
-    return ReplayVersionDeltaResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ReplayVersionDeltaResponse>, I>>(object: I): ReplayVersionDeltaResponse {
     const message = createBaseReplayVersionDeltaResponse();
     message.version = (object.version !== undefined && object.version !== null)
@@ -4132,12 +3758,6 @@ export const TriggerCompactionDeterministicRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<TriggerCompactionDeterministicRequest>, I>>(
-    base?: I,
-  ): TriggerCompactionDeterministicRequest {
-    return TriggerCompactionDeterministicRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<TriggerCompactionDeterministicRequest>, I>>(
     object: I,
   ): TriggerCompactionDeterministicRequest {
@@ -4162,12 +3782,6 @@ export const TriggerCompactionDeterministicResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<TriggerCompactionDeterministicResponse>, I>>(
-    base?: I,
-  ): TriggerCompactionDeterministicResponse {
-    return TriggerCompactionDeterministicResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<TriggerCompactionDeterministicResponse>, I>>(
     _: I,
   ): TriggerCompactionDeterministicResponse {
@@ -4188,10 +3802,6 @@ export const DisableCommitEpochRequest = {
   toJSON(_: DisableCommitEpochRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DisableCommitEpochRequest>, I>>(base?: I): DisableCommitEpochRequest {
-    return DisableCommitEpochRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DisableCommitEpochRequest>, I>>(_: I): DisableCommitEpochRequest {
@@ -4218,10 +3828,6 @@ export const DisableCommitEpochResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DisableCommitEpochResponse>, I>>(base?: I): DisableCommitEpochResponse {
-    return DisableCommitEpochResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DisableCommitEpochResponse>, I>>(object: I): DisableCommitEpochResponse {
     const message = createBaseDisableCommitEpochResponse();
     message.currentVersion = (object.currentVersion !== undefined && object.currentVersion !== null)
@@ -4243,12 +3849,6 @@ export const RiseCtlListCompactionGroupRequest = {
   toJSON(_: RiseCtlListCompactionGroupRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RiseCtlListCompactionGroupRequest>, I>>(
-    base?: I,
-  ): RiseCtlListCompactionGroupRequest {
-    return RiseCtlListCompactionGroupRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RiseCtlListCompactionGroupRequest>, I>>(
@@ -4282,12 +3882,6 @@ export const RiseCtlListCompactionGroupResponse = {
       obj.compactionGroups = [];
     }
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RiseCtlListCompactionGroupResponse>, I>>(
-    base?: I,
-  ): RiseCtlListCompactionGroupResponse {
-    return RiseCtlListCompactionGroupResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RiseCtlListCompactionGroupResponse>, I>>(
@@ -4333,12 +3927,6 @@ export const RiseCtlUpdateCompactionConfigRequest = {
       obj.configs = [];
     }
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigRequest>, I>>(
-    base?: I,
-  ): RiseCtlUpdateCompactionConfigRequest {
-    return RiseCtlUpdateCompactionConfigRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigRequest>, I>>(
@@ -4401,12 +3989,6 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
     message.mutableConfig?.$case === "maxSubCompaction" &&
       (obj.maxSubCompaction = Math.round(message.mutableConfig?.maxSubCompaction));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigRequest_MutableConfig>, I>>(
-    base?: I,
-  ): RiseCtlUpdateCompactionConfigRequest_MutableConfig {
-    return RiseCtlUpdateCompactionConfigRequest_MutableConfig.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigRequest_MutableConfig>, I>>(
@@ -4509,12 +4091,6 @@ export const RiseCtlUpdateCompactionConfigResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigResponse>, I>>(
-    base?: I,
-  ): RiseCtlUpdateCompactionConfigResponse {
-    return RiseCtlUpdateCompactionConfigResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigResponse>, I>>(
     object: I,
   ): RiseCtlUpdateCompactionConfigResponse {
@@ -4546,12 +4122,6 @@ export const SetCompactorRuntimeConfigRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<SetCompactorRuntimeConfigRequest>, I>>(
-    base?: I,
-  ): SetCompactorRuntimeConfigRequest {
-    return SetCompactorRuntimeConfigRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<SetCompactorRuntimeConfigRequest>, I>>(
     object: I,
   ): SetCompactorRuntimeConfigRequest {
@@ -4578,12 +4148,6 @@ export const SetCompactorRuntimeConfigResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<SetCompactorRuntimeConfigResponse>, I>>(
-    base?: I,
-  ): SetCompactorRuntimeConfigResponse {
-    return SetCompactorRuntimeConfigResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<SetCompactorRuntimeConfigResponse>, I>>(
     _: I,
   ): SetCompactorRuntimeConfigResponse {
@@ -4607,10 +4171,6 @@ export const PinVersionRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<PinVersionRequest>, I>>(base?: I): PinVersionRequest {
-    return PinVersionRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
     const message = createBasePinVersionRequest();
     message.contextId = object.contextId ?? 0;
@@ -4632,10 +4192,6 @@ export const PinVersionResponse = {
     message.pinnedVersion !== undefined &&
       (obj.pinnedVersion = message.pinnedVersion ? HummockVersion.toJSON(message.pinnedVersion) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<PinVersionResponse>, I>>(base?: I): PinVersionResponse {
-    return PinVersionResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
@@ -4717,10 +4273,6 @@ export const CompactionConfig = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactionConfig>, I>>(base?: I): CompactionConfig {
-    return CompactionConfig.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactionConfig>, I>>(object: I): CompactionConfig {
     const message = createBaseCompactionConfig();
     message.maxBytesForLevelBase = object.maxBytesForLevelBase ?? 0;
@@ -4758,10 +4310,6 @@ export const TableStats = {
     message.totalValueSize !== undefined && (obj.totalValueSize = Math.round(message.totalValueSize));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<TableStats>, I>>(base?: I): TableStats {
-    return TableStats.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TableStats>, I>>(object: I): TableStats {
@@ -4802,10 +4350,6 @@ export const HummockVersionStats = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockVersionStats>, I>>(base?: I): HummockVersionStats {
-    return HummockVersionStats.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockVersionStats>, I>>(object: I): HummockVersionStats {
     const message = createBaseHummockVersionStats();
     message.hummockVersionId = object.hummockVersionId ?? 0;
@@ -4841,12 +4385,6 @@ export const HummockVersionStats_TableStatsEntry = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HummockVersionStats_TableStatsEntry>, I>>(
-    base?: I,
-  ): HummockVersionStats_TableStatsEntry {
-    return HummockVersionStats_TableStatsEntry.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HummockVersionStats_TableStatsEntry>, I>>(
     object: I,
   ): HummockVersionStats_TableStatsEntry {
@@ -4862,7 +4400,7 @@ export const HummockVersionStats_TableStatsEntry = {
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var tsProtoGlobalThis: any = (() => {
+var globalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -4879,10 +4417,10 @@ var tsProtoGlobalThis: any = (() => {
 })();
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if (tsProtoGlobalThis.Buffer) {
-    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
+  if (globalThis.Buffer) {
+    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = tsProtoGlobalThis.atob(b64);
+    const bin = globalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -4892,14 +4430,14 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (tsProtoGlobalThis.Buffer) {
-    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
+  if (globalThis.Buffer) {
+    return globalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
       bin.push(String.fromCharCode(byte));
     });
-    return tsProtoGlobalThis.btoa(bin.join(""));
+    return globalThis.btoa(bin.join(""));
   }
 }
 

@@ -31,10 +31,6 @@ export const CompactorRuntimeConfig = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<CompactorRuntimeConfig>, I>>(base?: I): CompactorRuntimeConfig {
-    return CompactorRuntimeConfig.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<CompactorRuntimeConfig>, I>>(object: I): CompactorRuntimeConfig {
     const message = createBaseCompactorRuntimeConfig();
     message.maxConcurrentTaskNumber = object.maxConcurrentTaskNumber ?? 0;
@@ -58,10 +54,6 @@ export const SetRuntimeConfigRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<SetRuntimeConfigRequest>, I>>(base?: I): SetRuntimeConfigRequest {
-    return SetRuntimeConfigRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<SetRuntimeConfigRequest>, I>>(object: I): SetRuntimeConfigRequest {
     const message = createBaseSetRuntimeConfigRequest();
     message.config = (object.config !== undefined && object.config !== null)
@@ -83,10 +75,6 @@ export const SetRuntimeConfigResponse = {
   toJSON(_: SetRuntimeConfigResponse): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<SetRuntimeConfigResponse>, I>>(base?: I): SetRuntimeConfigResponse {
-    return SetRuntimeConfigResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SetRuntimeConfigResponse>, I>>(_: I): SetRuntimeConfigResponse {

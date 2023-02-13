@@ -131,10 +131,6 @@ export const HangingChannel = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<HangingChannel>, I>>(base?: I): HangingChannel {
-    return HangingChannel.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<HangingChannel>, I>>(object: I): HangingChannel {
     const message = createBaseHangingChannel();
     message.upstream = (object.upstream !== undefined && object.upstream !== null)
@@ -178,10 +174,6 @@ export const UpdateActorsRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<UpdateActorsRequest>, I>>(base?: I): UpdateActorsRequest {
-    return UpdateActorsRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<UpdateActorsRequest>, I>>(object: I): UpdateActorsRequest {
     const message = createBaseUpdateActorsRequest();
     message.requestId = object.requestId ?? "";
@@ -204,10 +196,6 @@ export const UpdateActorsResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<UpdateActorsResponse>, I>>(base?: I): UpdateActorsResponse {
-    return UpdateActorsResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UpdateActorsResponse>, I>>(object: I): UpdateActorsResponse {
@@ -236,10 +224,6 @@ export const BroadcastActorInfoTableRequest = {
       obj.info = [];
     }
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<BroadcastActorInfoTableRequest>, I>>(base?: I): BroadcastActorInfoTableRequest {
-    return BroadcastActorInfoTableRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<BroadcastActorInfoTableRequest>, I>>(
@@ -274,10 +258,6 @@ export const BuildActorsRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BuildActorsRequest>, I>>(base?: I): BuildActorsRequest {
-    return BuildActorsRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<BuildActorsRequest>, I>>(object: I): BuildActorsRequest {
     const message = createBaseBuildActorsRequest();
     message.requestId = object.requestId ?? "";
@@ -303,10 +283,6 @@ export const BuildActorsResponse = {
     message.requestId !== undefined && (obj.requestId = message.requestId);
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<BuildActorsResponse>, I>>(base?: I): BuildActorsResponse {
-    return BuildActorsResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<BuildActorsResponse>, I>>(object: I): BuildActorsResponse {
@@ -342,10 +318,6 @@ export const DropActorsRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropActorsRequest>, I>>(base?: I): DropActorsRequest {
-    return DropActorsRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropActorsRequest>, I>>(object: I): DropActorsRequest {
     const message = createBaseDropActorsRequest();
     message.requestId = object.requestId ?? "";
@@ -373,10 +345,6 @@ export const DropActorsResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DropActorsResponse>, I>>(base?: I): DropActorsResponse {
-    return DropActorsResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DropActorsResponse>, I>>(object: I): DropActorsResponse {
     const message = createBaseDropActorsResponse();
     message.requestId = object.requestId ?? "";
@@ -400,10 +368,6 @@ export const ForceStopActorsRequest = {
     const obj: any = {};
     message.requestId !== undefined && (obj.requestId = message.requestId);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ForceStopActorsRequest>, I>>(base?: I): ForceStopActorsRequest {
-    return ForceStopActorsRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ForceStopActorsRequest>, I>>(object: I): ForceStopActorsRequest {
@@ -430,10 +394,6 @@ export const ForceStopActorsResponse = {
     message.requestId !== undefined && (obj.requestId = message.requestId);
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ForceStopActorsResponse>, I>>(base?: I): ForceStopActorsResponse {
-    return ForceStopActorsResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ForceStopActorsResponse>, I>>(object: I): ForceStopActorsResponse {
@@ -479,10 +439,6 @@ export const InjectBarrierRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<InjectBarrierRequest>, I>>(base?: I): InjectBarrierRequest {
-    return InjectBarrierRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<InjectBarrierRequest>, I>>(object: I): InjectBarrierRequest {
     const message = createBaseInjectBarrierRequest();
     message.requestId = object.requestId ?? "";
@@ -514,10 +470,6 @@ export const InjectBarrierResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<InjectBarrierResponse>, I>>(base?: I): InjectBarrierResponse {
-    return InjectBarrierResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<InjectBarrierResponse>, I>>(object: I): InjectBarrierResponse {
     const message = createBaseInjectBarrierResponse();
     message.requestId = object.requestId ?? "";
@@ -545,10 +497,6 @@ export const BarrierCompleteRequest = {
     message.requestId !== undefined && (obj.requestId = message.requestId);
     message.prevEpoch !== undefined && (obj.prevEpoch = Math.round(message.prevEpoch));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<BarrierCompleteRequest>, I>>(base?: I): BarrierCompleteRequest {
-    return BarrierCompleteRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<BarrierCompleteRequest>, I>>(object: I): BarrierCompleteRequest {
@@ -600,10 +548,6 @@ export const BarrierCompleteResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BarrierCompleteResponse>, I>>(base?: I): BarrierCompleteResponse {
-    return BarrierCompleteResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<BarrierCompleteResponse>, I>>(object: I): BarrierCompleteResponse {
     const message = createBaseBarrierCompleteResponse();
     message.requestId = object.requestId ?? "";
@@ -638,12 +582,6 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
     message.done !== undefined && (obj.done = message.done);
     message.consumedEpoch !== undefined && (obj.consumedEpoch = Math.round(message.consumedEpoch));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<BarrierCompleteResponse_CreateMviewProgress>, I>>(
-    base?: I,
-  ): BarrierCompleteResponse_CreateMviewProgress {
-    return BarrierCompleteResponse_CreateMviewProgress.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<BarrierCompleteResponse_CreateMviewProgress>, I>>(
@@ -688,12 +626,6 @@ export const BarrierCompleteResponse_GroupedSstableInfo = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BarrierCompleteResponse_GroupedSstableInfo>, I>>(
-    base?: I,
-  ): BarrierCompleteResponse_GroupedSstableInfo {
-    return BarrierCompleteResponse_GroupedSstableInfo.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<BarrierCompleteResponse_GroupedSstableInfo>, I>>(
     object: I,
   ): BarrierCompleteResponse_GroupedSstableInfo {
@@ -732,12 +664,6 @@ export const BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry>, I>>(
-    base?: I,
-  ): BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry {
-    return BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry>, I>>(
     object: I,
   ): BarrierCompleteResponse_GroupedSstableInfo_TableStatsMapEntry {
@@ -763,10 +689,6 @@ export const BroadcastActorInfoTableResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<BroadcastActorInfoTableResponse>, I>>(base?: I): BroadcastActorInfoTableResponse {
-    return BroadcastActorInfoTableResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<BroadcastActorInfoTableResponse>, I>>(
@@ -795,10 +717,6 @@ export const WaitEpochCommitRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<WaitEpochCommitRequest>, I>>(base?: I): WaitEpochCommitRequest {
-    return WaitEpochCommitRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<WaitEpochCommitRequest>, I>>(object: I): WaitEpochCommitRequest {
     const message = createBaseWaitEpochCommitRequest();
     message.epoch = object.epoch ?? 0;
@@ -819,10 +737,6 @@ export const WaitEpochCommitResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<WaitEpochCommitResponse>, I>>(base?: I): WaitEpochCommitResponse {
-    return WaitEpochCommitResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<WaitEpochCommitResponse>, I>>(object: I): WaitEpochCommitResponse {

@@ -238,10 +238,6 @@ export const Status = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<Status>, I>>(base?: I): Status {
-    return Status.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<Status>, I>>(object: I): Status {
     const message = createBaseStatus();
     message.code = object.code ?? Status_Code.UNSPECIFIED;
@@ -264,10 +260,6 @@ export const HostAddress = {
     message.host !== undefined && (obj.host = message.host);
     message.port !== undefined && (obj.port = Math.round(message.port));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<HostAddress>, I>>(base?: I): HostAddress {
-    return HostAddress.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<HostAddress>, I>>(object: I): HostAddress {
@@ -297,10 +289,6 @@ export const ActorInfo = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ActorInfo>, I>>(base?: I): ActorInfo {
-    return ActorInfo.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ActorInfo>, I>>(object: I): ActorInfo {
     const message = createBaseActorInfo();
     message.actorId = object.actorId ?? 0;
@@ -328,10 +316,6 @@ export const ParallelUnit = {
     message.id !== undefined && (obj.id = Math.round(message.id));
     message.workerNodeId !== undefined && (obj.workerNodeId = Math.round(message.workerNodeId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<ParallelUnit>, I>>(base?: I): ParallelUnit {
-    return ParallelUnit.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ParallelUnit>, I>>(object: I): ParallelUnit {
@@ -379,10 +363,6 @@ export const WorkerNode = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<WorkerNode>, I>>(base?: I): WorkerNode {
-    return WorkerNode.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<WorkerNode>, I>>(object: I): WorkerNode {
     const message = createBaseWorkerNode();
     message.id = object.id ?? 0;
@@ -416,10 +396,6 @@ export const Buffer = {
     message.body !== undefined &&
       (obj.body = base64FromBytes(message.body !== undefined ? message.body : new Uint8Array()));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<Buffer>, I>>(base?: I): Buffer {
-    return Buffer.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Buffer>, I>>(object: I): Buffer {
@@ -457,10 +433,6 @@ export const ParallelUnitMapping = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<ParallelUnitMapping>, I>>(base?: I): ParallelUnitMapping {
-    return ParallelUnitMapping.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<ParallelUnitMapping>, I>>(object: I): ParallelUnitMapping {
     const message = createBaseParallelUnitMapping();
     message.originalIndices = object.originalIndices?.map((e) => e) || [];
@@ -494,10 +466,6 @@ export const BatchQueryEpoch = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BatchQueryEpoch>, I>>(base?: I): BatchQueryEpoch {
-    return BatchQueryEpoch.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<BatchQueryEpoch>, I>>(object: I): BatchQueryEpoch {
     const message = createBaseBatchQueryEpoch();
     if (
@@ -518,7 +486,7 @@ export const BatchQueryEpoch = {
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var tsProtoGlobalThis: any = (() => {
+var globalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -535,10 +503,10 @@ var tsProtoGlobalThis: any = (() => {
 })();
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if (tsProtoGlobalThis.Buffer) {
-    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
+  if (globalThis.Buffer) {
+    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = tsProtoGlobalThis.atob(b64);
+    const bin = globalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -548,14 +516,14 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (tsProtoGlobalThis.Buffer) {
-    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
+  if (globalThis.Buffer) {
+    return globalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
       bin.push(String.fromCharCode(byte));
     });
-    return tsProtoGlobalThis.btoa(bin.join(""));
+    return globalThis.btoa(bin.join(""));
   }
 }
 

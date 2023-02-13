@@ -116,10 +116,6 @@ export const MetaBackupManifestId = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<MetaBackupManifestId>, I>>(base?: I): MetaBackupManifestId {
-    return MetaBackupManifestId.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<MetaBackupManifestId>, I>>(object: I): MetaBackupManifestId {
     const message = createBaseMetaBackupManifestId();
     message.id = object.id ?? 0;
@@ -139,10 +135,6 @@ export const BackupMetaRequest = {
   toJSON(_: BackupMetaRequest): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<BackupMetaRequest>, I>>(base?: I): BackupMetaRequest {
-    return BackupMetaRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<BackupMetaRequest>, I>>(_: I): BackupMetaRequest {
@@ -166,10 +158,6 @@ export const BackupMetaResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<BackupMetaResponse>, I>>(base?: I): BackupMetaResponse {
-    return BackupMetaResponse.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<BackupMetaResponse>, I>>(object: I): BackupMetaResponse {
     const message = createBaseBackupMetaResponse();
     message.jobId = object.jobId ?? 0;
@@ -190,10 +178,6 @@ export const GetBackupJobStatusRequest = {
     const obj: any = {};
     message.jobId !== undefined && (obj.jobId = Math.round(message.jobId));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetBackupJobStatusRequest>, I>>(base?: I): GetBackupJobStatusRequest {
-    return GetBackupJobStatusRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetBackupJobStatusRequest>, I>>(object: I): GetBackupJobStatusRequest {
@@ -220,10 +204,6 @@ export const GetBackupJobStatusResponse = {
     message.jobId !== undefined && (obj.jobId = Math.round(message.jobId));
     message.jobStatus !== undefined && (obj.jobStatus = backupJobStatusToJSON(message.jobStatus));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetBackupJobStatusResponse>, I>>(base?: I): GetBackupJobStatusResponse {
-    return GetBackupJobStatusResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetBackupJobStatusResponse>, I>>(object: I): GetBackupJobStatusResponse {
@@ -253,10 +233,6 @@ export const DeleteMetaSnapshotRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DeleteMetaSnapshotRequest>, I>>(base?: I): DeleteMetaSnapshotRequest {
-    return DeleteMetaSnapshotRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<DeleteMetaSnapshotRequest>, I>>(object: I): DeleteMetaSnapshotRequest {
     const message = createBaseDeleteMetaSnapshotRequest();
     message.snapshotIds = object.snapshotIds?.map((e) => e) || [];
@@ -276,10 +252,6 @@ export const DeleteMetaSnapshotResponse = {
   toJSON(_: DeleteMetaSnapshotResponse): unknown {
     const obj: any = {};
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<DeleteMetaSnapshotResponse>, I>>(base?: I): DeleteMetaSnapshotResponse {
-    return DeleteMetaSnapshotResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DeleteMetaSnapshotResponse>, I>>(_: I): DeleteMetaSnapshotResponse {
@@ -302,10 +274,6 @@ export const GetMetaSnapshotManifestRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetMetaSnapshotManifestRequest>, I>>(base?: I): GetMetaSnapshotManifestRequest {
-    return GetMetaSnapshotManifestRequest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<GetMetaSnapshotManifestRequest>, I>>(_: I): GetMetaSnapshotManifestRequest {
     const message = createBaseGetMetaSnapshotManifestRequest();
     return message;
@@ -326,10 +294,6 @@ export const GetMetaSnapshotManifestResponse = {
     message.manifest !== undefined &&
       (obj.manifest = message.manifest ? MetaSnapshotManifest.toJSON(message.manifest) : undefined);
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<GetMetaSnapshotManifestResponse>, I>>(base?: I): GetMetaSnapshotManifestResponse {
-    return GetMetaSnapshotManifestResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetMetaSnapshotManifestResponse>, I>>(
@@ -368,10 +332,6 @@ export const MetaSnapshotManifest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<MetaSnapshotManifest>, I>>(base?: I): MetaSnapshotManifest {
-    return MetaSnapshotManifest.fromPartial(base ?? {});
-  },
-
   fromPartial<I extends Exact<DeepPartial<MetaSnapshotManifest>, I>>(object: I): MetaSnapshotManifest {
     const message = createBaseMetaSnapshotManifest();
     message.manifestId = object.manifestId ?? 0;
@@ -401,10 +361,6 @@ export const MetaSnapshotMetadata = {
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
     return obj;
-  },
-
-  create<I extends Exact<DeepPartial<MetaSnapshotMetadata>, I>>(base?: I): MetaSnapshotMetadata {
-    return MetaSnapshotMetadata.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<MetaSnapshotMetadata>, I>>(object: I): MetaSnapshotMetadata {
