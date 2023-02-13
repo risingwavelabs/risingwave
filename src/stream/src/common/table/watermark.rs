@@ -50,6 +50,11 @@ impl<const PERIOD: usize> WatermarkBufferStrategy for WatermarkBufferByEpoch<PER
     }
 
     fn apply(&mut self) -> bool {
-        std::mem::take(&mut self.buffered_epoch) >= PERIOD
+        if self.buffered_epoch >= PERIOD {
+            self.buffered_epoch = 0;
+            return true;
+        } else {
+            return false;
+        }
     }
 }
