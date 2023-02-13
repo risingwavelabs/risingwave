@@ -59,12 +59,12 @@ max_heartbeat_interval_secs = 600",
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     let mut services = match profile {
         "playground" => vec![
-            RisingWaveService::Meta(osstrs([])),
+            RisingWaveService::Meta(osstrs(["--dashboard-host", "0.0.0.0:5691"])),
             RisingWaveService::Compute(osstrs([])),
             RisingWaveService::Frontend(osstrs([])),
         ],
         "playground-3cn" => vec![
-            RisingWaveService::Meta(osstrs([])),
+            RisingWaveService::Meta(osstrs(["--dashboard-host", "0.0.0.0:5691"])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",

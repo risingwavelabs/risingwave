@@ -325,11 +325,13 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .unwrap(),
     );
 
+    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
+        catalog_manager.clone(),
     )
     .await
     .unwrap();
@@ -355,8 +357,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
-
-    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
@@ -403,7 +403,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     hummock_manager
-        .purge_stale(
+        .purge(
             &fragment_manager
                 .list_table_fragments()
                 .await

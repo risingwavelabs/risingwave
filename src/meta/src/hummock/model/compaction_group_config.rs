@@ -13,12 +13,9 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 pub use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -27,20 +24,14 @@ use crate::model::{MetadataModel, MetadataModelResult};
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
     pub(crate) group_id: CompactionGroupId,
-    pub(crate) parent_group_id: CompactionGroupId,
-    pub(crate) member_table_ids: HashSet<StateTableId>,
     pub(crate) compaction_config: Arc<CompactionConfig>,
-    pub(crate) table_id_to_options: HashMap<StateTableId, TableOption>,
 }
 
 impl CompactionGroup {
     pub fn new(group_id: CompactionGroupId, compaction_config: CompactionConfig) -> Self {
         Self {
             group_id,
-            member_table_ids: Default::default(),
             compaction_config: Arc::new(compaction_config),
-            table_id_to_options: HashMap::default(),
-            parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
         }
     }
 
@@ -48,16 +39,8 @@ impl CompactionGroup {
         self.group_id
     }
 
-    pub fn member_table_ids(&self) -> &HashSet<StateTableId> {
-        &self.member_table_ids
-    }
-
     pub fn compaction_config(&self) -> Arc<CompactionConfig> {
         self.compaction_config.clone()
-    }
-
-    pub fn table_id_to_options(&self) -> &HashMap<u32, TableOption> {
-        &self.table_id_to_options
     }
 }
 
@@ -65,8 +48,6 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
     fn from(compaction_group: &risingwave_pb::hummock::CompactionGroup) -> Self {
         Self {
             group_id: compaction_group.id,
-            parent_group_id: compaction_group.parent_id,
-            member_table_ids: compaction_group.member_table_ids.iter().cloned().collect(),
             compaction_config: Arc::new(
                 compaction_group
                     .compaction_config
@@ -74,11 +55,6 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
                     .cloned()
                     .unwrap(),
             ),
-            table_id_to_options: compaction_group
-                .table_id_to_options
-                .iter()
-                .map(|id_to_table_option| (*id_to_table_option.0, id_to_table_option.1.into()))
-                .collect::<HashMap<_, _>>(),
         }
     }
 }
@@ -87,30 +63,19 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
     fn from(compaction_group: &CompactionGroup) -> Self {
         Self {
             id: compaction_group.group_id,
-            parent_id: compaction_group.parent_group_id,
-            member_table_ids: compaction_group
-                .member_table_ids
-                .iter()
-                .cloned()
-                .collect_vec(),
             compaction_config: Some(compaction_group.compaction_config.as_ref().clone()),
-            table_id_to_options: compaction_group
-                .table_id_to_options
-                .iter()
-                .map(|id_to_table_option| (*id_to_table_option.0, id_to_table_option.1.into()))
-                .collect::<HashMap<_, _>>(),
         }
     }
 }
 
-const HUMMOCK_COMPACTION_GROUP_CF_NAME: &str = "cf/hummock_compaction_group";
+const HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME: &str = "cf/hummock_compaction_group_config";
 
 impl MetadataModel for CompactionGroup {
     type KeyType = CompactionGroupId;
     type ProstType = risingwave_pb::hummock::CompactionGroup;
 
     fn cf_name() -> String {
-        String::from(HUMMOCK_COMPACTION_GROUP_CF_NAME)
+        String::from(HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME)
     }
 
     fn to_protobuf(&self) -> Self::ProstType {

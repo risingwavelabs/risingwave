@@ -249,15 +249,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = Arc::new(
-        prepare_compactor_and_filter(
-            &storage,
-            &hummock_meta_client,
-            hummock_manager_ref.clone(),
-            existing_table_id,
-        )
-        .await,
-    );
+    let compact_ctx = Arc::new(prepare_compactor_and_filter(
+        &storage,
+        &hummock_meta_client,
+        existing_table_id,
+    ));
 
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);

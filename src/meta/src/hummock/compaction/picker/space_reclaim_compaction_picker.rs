@@ -118,7 +118,7 @@ mod test {
     };
     use crate::hummock::compaction::level_selector::SpaceReclaimCompactionSelector;
     use crate::hummock::compaction::{LevelSelector, LocalSelectorStatistic};
-    use crate::hummock::compaction_group::CompactionGroup;
+    use crate::hummock::model::CompactionGroup;
 
     #[test]
     fn test_space_reclaim_compaction_selector() {
@@ -127,7 +127,7 @@ mod test {
             .max_level(4)
             .max_space_reclaim_bytes(max_space_reclaim_bytes)
             .build();
-        let mut group_config = CompactionGroup::new(1, config);
+        let group_config = CompactionGroup::new(1, config);
 
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
@@ -160,9 +160,10 @@ mod test {
             },
         ];
         assert_eq!(levels.len(), 4);
-        let levels = Levels {
+        let mut levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
@@ -257,7 +258,7 @@ mod test {
                 }
             }
 
-            group_config.member_table_ids = HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+            levels.member_table_ids = vec![2, 3, 4, 5, 6, 7, 8, 9, 10];
             // pick space reclaim
             let task = selector.pick_compaction(
                 1,
@@ -276,7 +277,7 @@ mod test {
                 }
             }
 
-            group_config.member_table_ids = HashSet::from_iter([2, 3, 4, 5, 6, 7, 8, 9]);
+            levels.member_table_ids = vec![2, 3, 4, 5, 6, 7, 8, 9];
             // pick space reclaim
             let task = selector
                 .pick_compaction(
