@@ -15,7 +15,7 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::Field as ProstField;
+use risingwave_pb::plan_common::{ColumnDesc as ProstColumnDesc, Field as ProstField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
@@ -70,6 +70,17 @@ impl From<ColumnDesc> for Field {
                 .map(Into::into)
                 .collect(),
             type_name: column_desc.type_name,
+        }
+    }
+}
+
+impl From<&ProstColumnDesc> for Field {
+    fn from(pb_column_desc: &ProstColumnDesc) -> Self {
+        Self {
+            data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
+            name: pb_column_desc.name.clone(),
+            sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
+            type_name: pb_column_desc.type_name.clone(),
         }
     }
 }

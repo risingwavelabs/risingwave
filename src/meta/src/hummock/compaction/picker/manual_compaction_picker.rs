@@ -333,6 +333,7 @@ pub mod tests {
     use crate::hummock::compaction::level_selector::{LevelSelector, ManualCompactionSelector};
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::LocalSelectorStatistic;
+    use crate::hummock::compaction_group::CompactionGroup;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     fn clean_task_state(level_handler: &mut LevelHandler) {
@@ -1139,7 +1140,8 @@ pub mod tests {
 
     #[test]
     fn test_manual_compaction_selector_l0() {
-        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let config = CompactionConfigBuilder::new().max_level(4).build();
+        let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![
             generate_table(0, 1, 0, 500, 1),
             generate_table(1, 1, 0, 500, 1),
@@ -1181,13 +1183,15 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 0,
             };
-            let mut selector = ManualCompactionSelector::new(
-                config.clone(),
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let mut selector = ManualCompactionSelector::new(option);
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
@@ -1214,13 +1218,15 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 0,
             };
-            let mut selector = ManualCompactionSelector::new(
-                config,
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let mut selector = ManualCompactionSelector::new(option);
             let task = selector
-                .pick_compaction(2, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    2,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 3);
@@ -1234,7 +1240,8 @@ pub mod tests {
     /// tests `DynamicLevelSelector::manual_pick_compaction`
     #[test]
     fn test_manual_compaction_selector() {
-        let config = Arc::new(CompactionConfigBuilder::new().max_level(4).build());
+        let config = CompactionConfigBuilder::new().max_level(4).build();
+        let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
         let levels = vec![
@@ -1282,13 +1289,15 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 3,
             };
-            let mut selector = ManualCompactionSelector::new(
-                config.clone(),
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let mut selector = ManualCompactionSelector::new(option);
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
@@ -1317,13 +1326,15 @@ pub mod tests {
                 internal_table_id: HashSet::default(),
                 level: 4,
             };
-            let mut selector = ManualCompactionSelector::new(
-                config,
-                Arc::new(RangeOverlapStrategy::default()),
-                option,
-            );
+            let mut selector = ManualCompactionSelector::new(option);
             let task = selector
-                .pick_compaction(1, &levels, &mut levels_handler, &mut local_stats)
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
             assert_eq!(task.input.input_levels.len(), 2);
