@@ -1787,8 +1787,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
+    use risingwave_expr::expr::{new_binary_expr, BoxedExpression, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::{
