@@ -1469,7 +1469,7 @@ def section_streaming_errors(outer_panels):
                     [
                         panels.target(
                             f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
-                            "error_type: {{error_type}}, error_msg: {{error_msg}}, fragment_id: {{fragment_id}}, executor_name: {{executor_name}}",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
