@@ -43,8 +43,6 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
         .unwrap();
     populate_tables(client, &mut rng, base_tables.clone(), row_count).await;
     tracing::info!("Created base_tables");
-    // FIXME(noel): This is a hack, seems like flush is not working as expected.
-    sleep(Duration::from_secs(20)).await;
 
     test_sqlsmith(
         client,
