@@ -37,8 +37,8 @@ pub use crate::hummock::compaction::level_selector::{
     SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
-use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::level_handler::LevelHandler;
+use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
 pub struct CompactStatus {

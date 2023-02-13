@@ -603,7 +603,7 @@ impl MetaClient {
     pub async fn init_metadata_for_replay(
         &self,
         tables: Vec<ProstTable>,
-        compaction_groups: Vec<CompactionGroup>,
+        compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
             tables,
@@ -690,7 +690,7 @@ impl MetaClient {
         Ok(resp.num_tasks as usize)
     }
 
-    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroupInfo>> {
         let req = RiseCtlListCompactionGroupRequest {};
         let resp = self.inner.rise_ctl_list_compaction_group(req).await?;
         Ok(resp.compaction_groups)
@@ -869,12 +869,6 @@ impl HummockMetaClient for MetaClient {
         let req = ReportFullScanTaskRequest { sst_ids };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
-    }
-
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
-        let req = GetCompactionGroupsRequest {};
-        let resp = self.inner.get_compaction_groups(req).await?;
-        Ok(resp.compaction_groups)
     }
 
     async fn trigger_manual_compaction(
@@ -1390,7 +1384,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
-            ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }

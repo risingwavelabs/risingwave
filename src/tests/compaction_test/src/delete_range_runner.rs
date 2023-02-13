@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
@@ -24,9 +24,11 @@ use futures::StreamExt;
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{load_config, RwConfig, NO_OVERRIDE};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
 };
@@ -37,7 +39,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::hummock::{CompactionConfig, CompactionGroup, TableOption};
+use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::backup_reader::BackupReader;
@@ -116,7 +118,10 @@ async fn compaction_test(
         distribution_key: vec![],
         stream_key: vec![],
         owner: 0,
-        properties: Default::default(),
+        properties: HashMap::<String, String>::from([(
+            PROPERTIES_RETENTION_SECOND_KEY.to_string(),
+            0.to_string(),
+        )]),
         fragment_id: 0,
         vnode_col_index: None,
         value_indices: vec![],
@@ -133,32 +138,18 @@ async fn compaction_test(
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
     delete_range_table.name = "delete-range-table".to_string();
-    let mut group1 = CompactionGroup {
-        id: 3,
+    let group1 = CompactionGroupInfo {
+        id: StaticCompactionGroupId::StateDefault as _,
         parent_id: 0,
         member_table_ids: vec![1],
         compaction_config: Some(compaction_config.clone()),
-        table_id_to_options: Default::default(),
     };
-    group1.table_id_to_options.insert(
-        1,
-        TableOption {
-            retention_seconds: 0,
-        },
-    );
-    let mut group2 = CompactionGroup {
-        id: 4,
+    let group2 = CompactionGroupInfo {
+        id: StaticCompactionGroupId::MaterializedView as _,
         parent_id: 0,
         member_table_ids: vec![2],
         compaction_config: Some(compaction_config.clone()),
-        table_id_to_options: Default::default(),
     };
-    group2.table_id_to_options.insert(
-        2,
-        TableOption {
-            retention_seconds: 0,
-        },
-    );
     hummock_manager_ref
         .init_metadata_for_version_replay(
             vec![delete_key_table, delete_range_table],
