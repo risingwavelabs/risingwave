@@ -33,7 +33,7 @@ impl ConnectorNodeService {
     fn connector_path(&self) -> Result<PathBuf> {
         let prefix_bin = env::var("PREFIX_BIN")?;
         Ok(Path::new(&prefix_bin)
-            .join("../../../../ci/connector-node")
+            .join("connector-node")
             .join("start-service.sh"))
     }
 }
