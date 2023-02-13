@@ -147,7 +147,10 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
         (AggKind::Sum, _) => return None,
 
         // StdDev, stddev_pop and stddev_samp
-        (AggKind::StddevPop | AggKind::StddevSamp, [input]) => match input {
+        (
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
+            [input],
+        ) => match input {
             DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
                 DataType::Decimal
             }
@@ -155,7 +158,9 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             _ => return None,
         },
 
-        (AggKind::StddevPop | AggKind::StddevSamp, _) => return None,
+        (AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp, _) => {
+            return None
+        }
 
         (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
         (AggKind::Sum0, _) => return None,

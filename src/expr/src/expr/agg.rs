@@ -34,6 +34,8 @@ pub enum AggKind {
     ApproxCountDistinct,
     ArrayAgg,
     FirstValue,
+    VarPop,
+    VarSamp,
     StddevPop,
     StddevSamp,
 }
@@ -55,6 +57,8 @@ impl TryFrom<Type> for AggKind {
             Type::FirstValue => Ok(AggKind::FirstValue),
             Type::StddevPop => Ok(AggKind::StddevPop),
             Type::StddevSamp => Ok(AggKind::StddevSamp),
+            Type::VarPop => Ok(AggKind::VarPop),
+            Type::VarSamp => Ok(AggKind::VarSamp),
             Type::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -75,6 +79,8 @@ impl AggKind {
             Self::FirstValue => Type::FirstValue,
             Self::StddevPop => Type::StddevPop,
             Self::StddevSamp => Type::StddevSamp,
+            Self::VarPop => Type::VarPop,
+            Self::VarSamp => Type::VarSamp,
         }
     }
 }

@@ -280,7 +280,10 @@ impl DistinctAggRule {
                     AggKind::ApproxCountDistinct => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }
-                    AggKind::StddevPop | AggKind::StddevSamp => todo!("stddev placeholder"),
+                    AggKind::StddevPop
+                    | AggKind::StddevSamp
+                    | AggKind::VarPop
+                    | AggKind::VarSamp => todo!("stddev placeholder"),
                 }
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
