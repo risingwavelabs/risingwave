@@ -235,6 +235,11 @@ pub(crate) async fn resolve_source_schema(
             csv_has_header: csv_info.has_header,
             ..Default::default()
         },
+
+        SourceSchema::Native => StreamSourceInfo {
+            row_format: RowFormatType::Native as i32,
+            ..Default::default()
+        },
     };
 
     Ok(source_info)
