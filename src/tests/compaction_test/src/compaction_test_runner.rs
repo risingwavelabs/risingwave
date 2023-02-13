@@ -244,7 +244,6 @@ async fn init_metadata_for_replay(
     meta_client.activate(advertise_addr).await.unwrap();
 
     let tables = meta_client.risectl_list_state_tables().await?;
-    // let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
     let new_meta_client =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;

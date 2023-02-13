@@ -18,7 +18,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
-use risingwave_pb::hummock::{CompactionGroupConfig, HummockVersion, HummockVersionStats};
+use risingwave_pb::hummock::{CompactionGroup, HummockVersion, HummockVersionStats};
 use risingwave_pb::meta::TableFragments;
 use risingwave_pb::user::UserInfo;
 
@@ -61,7 +61,7 @@ pub struct ClusterMetadata {
     /// Hummock metadata
     pub hummock_version: HummockVersion,
     pub version_stats: HummockVersionStats,
-    pub compaction_groups: Vec<CompactionGroupConfig>,
+    pub compaction_groups: Vec<CompactionGroup>,
 
     /// Catalog metadata
     pub database: Vec<Database>,
@@ -105,8 +105,7 @@ impl ClusterMetadata {
             .collect();
         let hummock_version = Self::decode_prost_message(&mut buf)?;
         let version_stats = Self::decode_prost_message(&mut buf)?;
-        let compaction_groups: Vec<CompactionGroupConfig> =
-            Self::decode_prost_message_list(&mut buf)?;
+        let compaction_groups: Vec<CompactionGroup> = Self::decode_prost_message_list(&mut buf)?;
         let table_fragments: Vec<TableFragments> = Self::decode_prost_message_list(&mut buf)?;
         let user_info: Vec<UserInfo> = Self::decode_prost_message_list(&mut buf)?;
         let database: Vec<Database> = Self::decode_prost_message_list(&mut buf)?;
@@ -173,7 +172,7 @@ impl ClusterMetadata {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::hummock::{CompactionGroupConfig, TableStats};
+    use risingwave_pb::hummock::{CompactionGroup, TableStats};
 
     use crate::meta_snapshot::{ClusterMetadata, MetaSnapshot};
 
@@ -201,7 +200,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        raw.compaction_groups.push(CompactionGroupConfig {
+        raw.compaction_groups.push(CompactionGroup {
             id: 3000,
             ..Default::default()
         });

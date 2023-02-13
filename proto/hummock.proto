@@ -59,14 +59,11 @@ message GroupConstruct {
   uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
   uint64 group_id = 4;
-  // TODO #7817 try to remove `table_id_to_options`
-  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message GroupMetaChange {
   repeated uint32 table_ids_add = 1;
   repeated uint32 table_ids_remove = 2;
-  map<uint32, TableOption> table_id_to_options_add = 3;
 }
 
 message GroupDestroy {}
@@ -92,8 +89,6 @@ message HummockVersion {
     uint64 group_id = 3;
     uint64 parent_group_id = 4;
     repeated uint32 member_table_ids = 5;
-    // TODO #7817 try to remove `table_id_to_options`
-    map<uint32, TableOption> table_id_to_options = 6;
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -290,19 +285,18 @@ message CompactStatus {
 }
 
 // Config info of compaction group.
-message CompactionGroupConfig {
+message CompactionGroup {
   uint64 id = 1;
   CompactionConfig compaction_config = 4;
 }
 
 // Complete info of compaction group.
 // The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
-message CompactionGroup {
+message CompactionGroupInfo {
   uint64 id = 1;
   uint64 parent_id = 2;
   repeated uint32 member_table_ids = 3;
   CompactionConfig compaction_config = 4;
-  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message CompactTaskAssignment {
@@ -474,7 +468,7 @@ message RiseCtlGetPinnedSnapshotsSummaryResponse {
 
 message InitMetadataForReplayRequest {
   repeated catalog.Table tables = 1;
-  repeated CompactionGroup compaction_groups = 2;
+  repeated CompactionGroupInfo compaction_groups = 2;
 }
 
 message InitMetadataForReplayResponse {}
@@ -505,7 +499,7 @@ message RiseCtlListCompactionGroupRequest {}
 
 message RiseCtlListCompactionGroupResponse {
   common.Status status = 1;
-  repeated CompactionGroup compaction_groups = 2;
+  repeated CompactionGroupInfo compaction_groups = 2;
 }
 
 message RiseCtlUpdateCompactionConfigRequest {

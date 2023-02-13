@@ -17,7 +17,6 @@ use std::ops::DerefMut;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_sst_ids,
     get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
@@ -28,8 +27,8 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompactionGroup, GroupConstruct, GroupDelta, GroupDestroy, GroupMetaChange,
-    TableOption as ProstTableOption,
+    CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
+    GroupMetaChange,
 };
 use tokio::sync::{OnceCell, RwLock};
 
@@ -96,7 +95,6 @@ impl<S: MetaStore> HummockManager<S> {
             .get("independent_compaction_group")
             .map(|s| s == "1")
             == Some(true);
-        let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
         // materialized_view
         pairs.push((
@@ -106,7 +104,6 @@ impl<S: MetaStore> HummockManager<S> {
             } else {
                 CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
             },
-            table_option,
         ));
         // internal states
         for table_id in table_fragments.internal_table_ids() {
@@ -118,7 +115,6 @@ impl<S: MetaStore> HummockManager<S> {
                 } else {
                     CompactionGroupId::from(StaticCompactionGroupId::StateDefault)
                 },
-                table_option,
             ));
         }
         self.register_table_ids(&pairs).await?;
@@ -165,7 +161,7 @@ impl<S: MetaStore> HummockManager<S> {
     #[named]
     pub async fn register_table_ids(
         &self,
-        pairs: &[(StateTableId, CompactionGroupId, TableOption)],
+        pairs: &[(StateTableId, CompactionGroupId)],
     ) -> Result<()> {
         if pairs.is_empty() {
             return Ok(());
@@ -174,7 +170,7 @@ impl<S: MetaStore> HummockManager<S> {
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
 
-        for (table_id, _, _) in pairs.iter() {
+        for (table_id, _) in pairs.iter() {
             if let Some(old_group) =
                 try_get_compaction_group_id_by_table_id(current_version, *table_id)
             {
@@ -192,7 +188,7 @@ impl<S: MetaStore> HummockManager<S> {
             build_version_delta_after_version(current_version),
         );
 
-        for (table_id, raw_group_id, table_option) in pairs.iter() {
+        for (table_id, raw_group_id) in pairs.iter() {
             let mut group_id = *raw_group_id;
             if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
                 let mut is_group_init = false;
@@ -238,10 +234,6 @@ impl<S: MetaStore> HummockManager<S> {
             group_deltas.push(GroupDelta {
                 delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
                     table_ids_add: vec![*table_id],
-                    table_id_to_options_add: HashMap::from([(
-                        *table_id,
-                        ProstTableOption::from(table_option),
-                    )]),
                     ..Default::default()
                 })),
             });
@@ -390,7 +382,7 @@ impl<S: MetaStore> HummockManager<S> {
     /// Gets complete compaction group info.
     /// It is the aggregate of `HummockVersion` and `CompactionGroupConfig`
     #[named]
-    pub async fn list_compaction_group(&self) -> Vec<CompactionGroup> {
+    pub async fn list_compaction_group(&self) -> Vec<CompactionGroupInfo> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -401,12 +393,11 @@ impl<S: MetaStore> HummockManager<S> {
                 .read()
                 .await
                 .get_compaction_config(levels.group_id);
-            let group = CompactionGroup {
+            let group = CompactionGroupInfo {
                 id: levels.group_id,
                 parent_id: levels.parent_group_id,
                 member_table_ids: levels.member_table_ids.clone(),
                 compaction_config: Some(config),
-                table_id_to_options: levels.table_id_to_options.clone(),
             };
             compaction_groups.push(group);
         }

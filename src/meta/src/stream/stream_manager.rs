@@ -548,6 +548,7 @@ mod tests {
                 cluster_manager.clone(),
                 meta_metrics.clone(),
                 compactor_manager.clone(),
+                catalog_manager.clone(),
             )
             .await?;
 

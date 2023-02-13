@@ -43,8 +43,8 @@ impl CompactionGroupConfig {
     }
 }
 
-impl From<&risingwave_pb::hummock::CompactionGroupConfig> for CompactionGroupConfig {
-    fn from(compaction_group: &risingwave_pb::hummock::CompactionGroupConfig) -> Self {
+impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroupConfig {
+    fn from(compaction_group: &risingwave_pb::hummock::CompactionGroup) -> Self {
         Self {
             group_id: compaction_group.id,
             compaction_config: compaction_group
@@ -56,7 +56,7 @@ impl From<&risingwave_pb::hummock::CompactionGroupConfig> for CompactionGroupCon
     }
 }
 
-impl From<&CompactionGroupConfig> for risingwave_pb::hummock::CompactionGroupConfig {
+impl From<&CompactionGroupConfig> for risingwave_pb::hummock::CompactionGroup {
     fn from(compaction_group: &CompactionGroupConfig) -> Self {
         Self {
             id: compaction_group.group_id,
@@ -69,7 +69,7 @@ const HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME: &str = "cf/hummock_compaction_gro
 
 impl MetadataModel for CompactionGroupConfig {
     type KeyType = CompactionGroupId;
-    type ProstType = risingwave_pb::hummock::CompactionGroupConfig;
+    type ProstType = risingwave_pb::hummock::CompactionGroup;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME)

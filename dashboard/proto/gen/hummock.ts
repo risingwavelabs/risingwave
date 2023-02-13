@@ -92,24 +92,11 @@ export interface GroupConstruct {
   parentGroupId: number;
   tableIds: number[];
   groupId: number;
-  /** TODO #7817 try to remove `table_id_to_options` */
-  tableIdToOptions: { [key: number]: TableOption };
-}
-
-export interface GroupConstruct_TableIdToOptionsEntry {
-  key: number;
-  value: TableOption | undefined;
 }
 
 export interface GroupMetaChange {
   tableIdsAdd: number[];
   tableIdsRemove: number[];
-  tableIdToOptionsAdd: { [key: number]: TableOption };
-}
-
-export interface GroupMetaChange_TableIdToOptionsAddEntry {
-  key: number;
-  value: TableOption | undefined;
 }
 
 export interface GroupDestroy {
@@ -146,13 +133,6 @@ export interface HummockVersion_Levels {
   groupId: number;
   parentGroupId: number;
   memberTableIds: number[];
-  /** TODO #7817 try to remove `table_id_to_options` */
-  tableIdToOptions: { [key: number]: TableOption };
-}
-
-export interface HummockVersion_Levels_TableIdToOptionsEntry {
-  key: number;
-  value: TableOption | undefined;
 }
 
 export interface HummockVersion_LevelsEntry {
@@ -497,7 +477,7 @@ export interface CompactStatus {
 }
 
 /** Config info of compaction group. */
-export interface CompactionGroupConfig {
+export interface CompactionGroup {
   id: number;
   compactionConfig: CompactionConfig | undefined;
 }
@@ -506,17 +486,11 @@ export interface CompactionGroupConfig {
  * Complete info of compaction group.
  * The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
  */
-export interface CompactionGroup {
+export interface CompactionGroupInfo {
   id: number;
   parentId: number;
   memberTableIds: number[];
   compactionConfig: CompactionConfig | undefined;
-  tableIdToOptions: { [key: number]: TableOption };
-}
-
-export interface CompactionGroup_TableIdToOptionsEntry {
-  key: number;
-  value: TableOption | undefined;
 }
 
 export interface CompactTaskAssignment {
@@ -714,7 +688,7 @@ export interface RiseCtlGetPinnedSnapshotsSummaryResponse {
 
 export interface InitMetadataForReplayRequest {
   tables: Table[];
-  compactionGroups: CompactionGroup[];
+  compactionGroups: CompactionGroupInfo[];
 }
 
 export interface InitMetadataForReplayResponse {
@@ -749,7 +723,7 @@ export interface RiseCtlListCompactionGroupRequest {
 
 export interface RiseCtlListCompactionGroupResponse {
   status: Status | undefined;
-  compactionGroups: CompactionGroup[];
+  compactionGroups: CompactionGroupInfo[];
 }
 
 export interface RiseCtlUpdateCompactionConfigRequest {
@@ -1065,7 +1039,7 @@ export const IntraLevelDelta = {
 };
 
 function createBaseGroupConstruct(): GroupConstruct {
-  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0, tableIdToOptions: {} };
+  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0 };
 }
 
 export const GroupConstruct = {
@@ -1075,12 +1049,6 @@ export const GroupConstruct = {
       parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
       groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
-      tableIdToOptions: isObject(object.tableIdToOptions)
-        ? Object.entries(object.tableIdToOptions).reduce<{ [key: number]: TableOption }>((acc, [key, value]) => {
-          acc[Number(key)] = TableOption.fromJSON(value);
-          return acc;
-        }, {})
-        : {},
     };
   },
 
@@ -1095,12 +1063,6 @@ export const GroupConstruct = {
       obj.tableIds = [];
     }
     message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
-    obj.tableIdToOptions = {};
-    if (message.tableIdToOptions) {
-      Object.entries(message.tableIdToOptions).forEach(([k, v]) => {
-        obj.tableIdToOptions[k] = TableOption.toJSON(v);
-      });
-    }
     return obj;
   },
 
@@ -1112,52 +1074,12 @@ export const GroupConstruct = {
     message.parentGroupId = object.parentGroupId ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
     message.groupId = object.groupId ?? 0;
-    message.tableIdToOptions = Object.entries(object.tableIdToOptions ?? {}).reduce<{ [key: number]: TableOption }>(
-      (acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[Number(key)] = TableOption.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    return message;
-  },
-};
-
-function createBaseGroupConstruct_TableIdToOptionsEntry(): GroupConstruct_TableIdToOptionsEntry {
-  return { key: 0, value: undefined };
-}
-
-export const GroupConstruct_TableIdToOptionsEntry = {
-  fromJSON(object: any): GroupConstruct_TableIdToOptionsEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? TableOption.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: GroupConstruct_TableIdToOptionsEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? TableOption.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GroupConstruct_TableIdToOptionsEntry>, I>>(
-    object: I,
-  ): GroupConstruct_TableIdToOptionsEntry {
-    const message = createBaseGroupConstruct_TableIdToOptionsEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? TableOption.fromPartial(object.value)
-      : undefined;
     return message;
   },
 };
 
 function createBaseGroupMetaChange(): GroupMetaChange {
-  return { tableIdsAdd: [], tableIdsRemove: [], tableIdToOptionsAdd: {} };
+  return { tableIdsAdd: [], tableIdsRemove: [] };
 }
 
 export const GroupMetaChange = {
@@ -1165,12 +1087,6 @@ export const GroupMetaChange = {
     return {
       tableIdsAdd: Array.isArray(object?.tableIdsAdd) ? object.tableIdsAdd.map((e: any) => Number(e)) : [],
       tableIdsRemove: Array.isArray(object?.tableIdsRemove) ? object.tableIdsRemove.map((e: any) => Number(e)) : [],
-      tableIdToOptionsAdd: isObject(object.tableIdToOptionsAdd)
-        ? Object.entries(object.tableIdToOptionsAdd).reduce<{ [key: number]: TableOption }>((acc, [key, value]) => {
-          acc[Number(key)] = TableOption.fromJSON(value);
-          return acc;
-        }, {})
-        : {},
     };
   },
 
@@ -1186,12 +1102,6 @@ export const GroupMetaChange = {
     } else {
       obj.tableIdsRemove = [];
     }
-    obj.tableIdToOptionsAdd = {};
-    if (message.tableIdToOptionsAdd) {
-      Object.entries(message.tableIdToOptionsAdd).forEach(([k, v]) => {
-        obj.tableIdToOptionsAdd[k] = TableOption.toJSON(v);
-      });
-    }
     return obj;
   },
 
@@ -1199,45 +1109,6 @@ export const GroupMetaChange = {
     const message = createBaseGroupMetaChange();
     message.tableIdsAdd = object.tableIdsAdd?.map((e) => e) || [];
     message.tableIdsRemove = object.tableIdsRemove?.map((e) => e) || [];
-    message.tableIdToOptionsAdd = Object.entries(object.tableIdToOptionsAdd ?? {}).reduce<
-      { [key: number]: TableOption }
-    >((acc, [key, value]) => {
-      if (value !== undefined) {
-        acc[Number(key)] = TableOption.fromPartial(value);
-      }
-      return acc;
-    }, {});
-    return message;
-  },
-};
-
-function createBaseGroupMetaChange_TableIdToOptionsAddEntry(): GroupMetaChange_TableIdToOptionsAddEntry {
-  return { key: 0, value: undefined };
-}
-
-export const GroupMetaChange_TableIdToOptionsAddEntry = {
-  fromJSON(object: any): GroupMetaChange_TableIdToOptionsAddEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? TableOption.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: GroupMetaChange_TableIdToOptionsAddEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? TableOption.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GroupMetaChange_TableIdToOptionsAddEntry>, I>>(
-    object: I,
-  ): GroupMetaChange_TableIdToOptionsAddEntry {
-    const message = createBaseGroupMetaChange_TableIdToOptionsAddEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? TableOption.fromPartial(object.value)
-      : undefined;
     return message;
   },
 };
@@ -1424,7 +1295,7 @@ export const HummockVersion = {
 };
 
 function createBaseHummockVersion_Levels(): HummockVersion_Levels {
-  return { levels: [], l0: undefined, groupId: 0, parentGroupId: 0, memberTableIds: [], tableIdToOptions: {} };
+  return { levels: [], l0: undefined, groupId: 0, parentGroupId: 0, memberTableIds: [] };
 }
 
 export const HummockVersion_Levels = {
@@ -1435,12 +1306,6 @@ export const HummockVersion_Levels = {
       groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
       parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
       memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
-      tableIdToOptions: isObject(object.tableIdToOptions)
-        ? Object.entries(object.tableIdToOptions).reduce<{ [key: number]: TableOption }>((acc, [key, value]) => {
-          acc[Number(key)] = TableOption.fromJSON(value);
-          return acc;
-        }, {})
-        : {},
     };
   },
 
@@ -1459,12 +1324,6 @@ export const HummockVersion_Levels = {
     } else {
       obj.memberTableIds = [];
     }
-    obj.tableIdToOptions = {};
-    if (message.tableIdToOptions) {
-      Object.entries(message.tableIdToOptions).forEach(([k, v]) => {
-        obj.tableIdToOptions[k] = TableOption.toJSON(v);
-      });
-    }
     return obj;
   },
 
@@ -1475,46 +1334,6 @@ export const HummockVersion_Levels = {
     message.groupId = object.groupId ?? 0;
     message.parentGroupId = object.parentGroupId ?? 0;
     message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
-    message.tableIdToOptions = Object.entries(object.tableIdToOptions ?? {}).reduce<{ [key: number]: TableOption }>(
-      (acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[Number(key)] = TableOption.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    return message;
-  },
-};
-
-function createBaseHummockVersion_Levels_TableIdToOptionsEntry(): HummockVersion_Levels_TableIdToOptionsEntry {
-  return { key: 0, value: undefined };
-}
-
-export const HummockVersion_Levels_TableIdToOptionsEntry = {
-  fromJSON(object: any): HummockVersion_Levels_TableIdToOptionsEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? TableOption.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: HummockVersion_Levels_TableIdToOptionsEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? TableOption.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<HummockVersion_Levels_TableIdToOptionsEntry>, I>>(
-    object: I,
-  ): HummockVersion_Levels_TableIdToOptionsEntry {
-    const message = createBaseHummockVersion_Levels_TableIdToOptionsEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? TableOption.fromPartial(object.value)
-      : undefined;
     return message;
   },
 };
@@ -2538,19 +2357,19 @@ export const CompactStatus = {
   },
 };
 
-function createBaseCompactionGroupConfig(): CompactionGroupConfig {
+function createBaseCompactionGroup(): CompactionGroup {
   return { id: 0, compactionConfig: undefined };
 }
 
-export const CompactionGroupConfig = {
-  fromJSON(object: any): CompactionGroupConfig {
+export const CompactionGroup = {
+  fromJSON(object: any): CompactionGroup {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
       compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
     };
   },
 
-  toJSON(message: CompactionGroupConfig): unknown {
+  toJSON(message: CompactionGroup): unknown {
     const obj: any = {};
     message.id !== undefined && (obj.id = Math.round(message.id));
     message.compactionConfig !== undefined &&
@@ -2558,8 +2377,8 @@ export const CompactionGroupConfig = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CompactionGroupConfig>, I>>(object: I): CompactionGroupConfig {
-    const message = createBaseCompactionGroupConfig();
+  fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
+    const message = createBaseCompactionGroup();
     message.id = object.id ?? 0;
     message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
       ? CompactionConfig.fromPartial(object.compactionConfig)
@@ -2568,27 +2387,21 @@ export const CompactionGroupConfig = {
   },
 };
 
-function createBaseCompactionGroup(): CompactionGroup {
-  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined, tableIdToOptions: {} };
+function createBaseCompactionGroupInfo(): CompactionGroupInfo {
+  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined };
 }
 
-export const CompactionGroup = {
-  fromJSON(object: any): CompactionGroup {
+export const CompactionGroupInfo = {
+  fromJSON(object: any): CompactionGroupInfo {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
       parentId: isSet(object.parentId) ? Number(object.parentId) : 0,
       memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
       compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
-      tableIdToOptions: isObject(object.tableIdToOptions)
-        ? Object.entries(object.tableIdToOptions).reduce<{ [key: number]: TableOption }>((acc, [key, value]) => {
-          acc[Number(key)] = TableOption.fromJSON(value);
-          return acc;
-        }, {})
-        : {},
     };
   },
 
-  toJSON(message: CompactionGroup): unknown {
+  toJSON(message: CompactionGroupInfo): unknown {
     const obj: any = {};
     message.id !== undefined && (obj.id = Math.round(message.id));
     message.parentId !== undefined && (obj.parentId = Math.round(message.parentId));
@@ -2599,62 +2412,16 @@ export const CompactionGroup = {
     }
     message.compactionConfig !== undefined &&
       (obj.compactionConfig = message.compactionConfig ? CompactionConfig.toJSON(message.compactionConfig) : undefined);
-    obj.tableIdToOptions = {};
-    if (message.tableIdToOptions) {
-      Object.entries(message.tableIdToOptions).forEach(([k, v]) => {
-        obj.tableIdToOptions[k] = TableOption.toJSON(v);
-      });
-    }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
-    const message = createBaseCompactionGroup();
+  fromPartial<I extends Exact<DeepPartial<CompactionGroupInfo>, I>>(object: I): CompactionGroupInfo {
+    const message = createBaseCompactionGroupInfo();
     message.id = object.id ?? 0;
     message.parentId = object.parentId ?? 0;
     message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
     message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
       ? CompactionConfig.fromPartial(object.compactionConfig)
-      : undefined;
-    message.tableIdToOptions = Object.entries(object.tableIdToOptions ?? {}).reduce<{ [key: number]: TableOption }>(
-      (acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[Number(key)] = TableOption.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    return message;
-  },
-};
-
-function createBaseCompactionGroup_TableIdToOptionsEntry(): CompactionGroup_TableIdToOptionsEntry {
-  return { key: 0, value: undefined };
-}
-
-export const CompactionGroup_TableIdToOptionsEntry = {
-  fromJSON(object: any): CompactionGroup_TableIdToOptionsEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? TableOption.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: CompactionGroup_TableIdToOptionsEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? TableOption.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<CompactionGroup_TableIdToOptionsEntry>, I>>(
-    object: I,
-  ): CompactionGroup_TableIdToOptionsEntry {
-    const message = createBaseCompactionGroup_TableIdToOptionsEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? TableOption.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -3857,7 +3624,7 @@ export const InitMetadataForReplayRequest = {
     return {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        ? object.compactionGroups.map((e: any) => CompactionGroupInfo.fromJSON(e))
         : [],
     };
   },
@@ -3870,7 +3637,7 @@ export const InitMetadataForReplayRequest = {
       obj.tables = [];
     }
     if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroupInfo.toJSON(e) : undefined);
     } else {
       obj.compactionGroups = [];
     }
@@ -3880,7 +3647,7 @@ export const InitMetadataForReplayRequest = {
   fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(object: I): InitMetadataForReplayRequest {
     const message = createBaseInitMetadataForReplayRequest();
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroupInfo.fromPartial(e)) || [];
     return message;
   },
 };
@@ -4101,7 +3868,7 @@ export const RiseCtlListCompactionGroupResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        ? object.compactionGroups.map((e: any) => CompactionGroupInfo.fromJSON(e))
         : [],
     };
   },
@@ -4110,7 +3877,7 @@ export const RiseCtlListCompactionGroupResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroupInfo.toJSON(e) : undefined);
     } else {
       obj.compactionGroups = [];
     }
@@ -4124,7 +3891,7 @@ export const RiseCtlListCompactionGroupResponse = {
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroupInfo.fromPartial(e)) || [];
     return message;
   },
 };

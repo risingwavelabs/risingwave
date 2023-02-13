@@ -62,7 +62,10 @@ use crate::hummock::metrics_utils::{
     trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
-use crate::manager::{ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID};
+use crate::manager::{
+    CatalogManager, CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification,
+    MetaSrvEnv, META_NODE_ID,
+};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
 };
@@ -92,7 +95,7 @@ type Snapshot = ArcSwap<HummockSnapshot>;
 pub struct HummockManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
-
+    catalog_manager: CatalogManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
     // Note that all hummock state store user should register to `CompactionGroupManager`. It
     // includes all state tables of streaming jobs except sink.
@@ -164,7 +167,7 @@ use risingwave_hummock_sdk::table_stats::{
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::CompactionGroup as ProstCompactionGroup;
+use risingwave_pb::hummock::CompactionGroupInfo as ProstCompactionGroup;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -267,14 +270,16 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
+        catalog_manager: CatalogManagerRef<S>,
     ) -> Result<HummockManagerRef<S>> {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
-        Self::with_compaction_group_manager(
+        Self::new_impl(
             env,
             cluster_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
+            catalog_manager,
         )
         .await
     }
@@ -286,25 +291,31 @@ where
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
-    ) -> Result<HummockManagerRef<S>> {
+    ) -> HummockManagerRef<S> {
         let compaction_group_manager =
-            Self::build_compaction_group_manager_with_config(&env, config).await?;
-        Self::with_compaction_group_manager(
+            Self::build_compaction_group_manager_with_config(&env, config)
+                .await
+                .unwrap();
+        let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
+        Self::new_impl(
             env,
             cluster_manager,
             metrics,
             compactor_manager,
             compaction_group_manager,
+            catalog_manager,
         )
         .await
+        .unwrap()
     }
 
-    async fn with_compaction_group_manager(
+    async fn new_impl(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
+        catalog_manager: CatalogManagerRef<S>,
     ) -> Result<HummockManagerRef<S>> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
@@ -319,6 +330,7 @@ where
             ),
             metrics,
             cluster_manager,
+            catalog_manager,
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
             compaction_resume_notifier: parking_lot::RwLock::new(None),
@@ -907,13 +919,12 @@ where
                 }
             }
 
-            // build table_options
-            compact_task.table_options = current_version
-                .get_compaction_group_levels(compaction_group_id)
-                .table_id_to_options
+            compact_task.table_options = self
+                .catalog_manager
+                .get_table_options(&compact_task.existing_table_ids)
+                .await
                 .iter()
-                .filter(|id_to_option| compact_task.existing_table_ids.contains(id_to_option.0))
-                .map(|id_to_option| (*id_to_option.0, id_to_option.1.clone()))
+                .map(|(k, v)| (*k, v.into()))
                 .collect();
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask = group_config.compaction_filter_mask;
@@ -1810,9 +1821,7 @@ where
         for group in &compaction_groups {
             let mut pairs = vec![];
             for table_id in group.member_table_ids.clone() {
-                if let Some(option) = group.table_id_to_options.get(&table_id) {
-                    pairs.push((table_id as StateTableId, group.id, option.into()));
-                }
+                pairs.push((table_id as StateTableId, group.id));
             }
             let group_config = group.compaction_config.clone().unwrap();
             self.compaction_group_manager

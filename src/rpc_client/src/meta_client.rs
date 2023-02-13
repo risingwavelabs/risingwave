@@ -599,7 +599,7 @@ impl MetaClient {
     pub async fn init_metadata_for_replay(
         &self,
         tables: Vec<ProstTable>,
-        compaction_groups: Vec<CompactionGroup>,
+        compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
             tables,
@@ -686,7 +686,7 @@ impl MetaClient {
         Ok(resp.num_tasks as usize)
     }
 
-    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroupInfo>> {
         let req = RiseCtlListCompactionGroupRequest {};
         let resp = self.inner.rise_ctl_list_compaction_group(req).await?;
         Ok(resp.compaction_groups)

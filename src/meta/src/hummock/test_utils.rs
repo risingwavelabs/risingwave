@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
@@ -204,7 +203,7 @@ pub async fn register_table_ids_to_compaction_group<S>(
         .register_table_ids(
             &table_ids
                 .iter()
-                .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
+                .map(|table_id| (*table_id, compaction_group_id))
                 .collect_vec(),
         )
         .await
@@ -309,8 +308,7 @@ pub async fn setup_compute_env_with_config(
         compactor_manager,
         config,
     )
-    .await
-    .unwrap();
+    .await;
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,
