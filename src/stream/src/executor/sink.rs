@@ -89,7 +89,7 @@ impl SinkExecutor {
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(w) => Message::Watermark(w),
+                Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     if !in_transaction {
                         sink.begin_epoch(epoch).await?;
