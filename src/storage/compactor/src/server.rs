@@ -92,7 +92,7 @@ pub async fn compactor_serve(
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
     let object_store = Arc::new(
         parse_remote_object_store(
-            &state_store_url
+            state_store_url
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
