@@ -76,7 +76,7 @@ impl<S: StateStore> Deduplicater<S> {
         let mut vis_masks_inv = (0..visibilities.len())
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
-        for (datum_idx, (op, datum)) in ops.iter().zip(column.iter()).enumerate() {
+        for (datum_idx, (op, datum)) in ops.iter().zip_eq(column.iter()).enumerate() {
             // get counts of the distinct key of all agg calls that distinct on this column
             let counts = if let Some(counts) = cache.get_mut(&datum) {
                 counts
@@ -138,7 +138,7 @@ impl<S: StateStore> Deduplicater<S> {
             }
         });
 
-        for (vis, vis_mask_inv) in visibilities.iter_mut().zip(vis_masks_inv.into_iter()) {
+        for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
             let mask = !vis_mask_inv.finish();
             if !mask.all() {
                 // update visibility if needed
@@ -279,7 +279,6 @@ mod tests {
             .enumerate()
             .filter(|(_, call)| call.distinct) // only distinct agg calls need dedup table
             .into_group_map_by(|(_, call)| call.args.val_indices()[0])
-            .into_iter()
         {
             let mut columns = vec![];
             let mut order_types = vec![];

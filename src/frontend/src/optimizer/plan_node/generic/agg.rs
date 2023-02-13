@@ -397,7 +397,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 }
 
                 // Agg calls with same distinct column share the same dedup table, but they may have
-                // different filter conditions, so the count of occurence of one distinct key may
+                // different filter conditions, so the count of occurrence of one distinct key may
                 // differ among different calls. We add one column for each call in the dedup table.
                 for (call_index, _) in indices_and_calls {
                     table_builder.add_column(&Field {
