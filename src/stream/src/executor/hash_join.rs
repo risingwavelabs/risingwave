@@ -875,7 +875,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     side_match.start_pos,
                 );
 
-                cond.eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
+                cond.eval_row_infallible(&new_row, |err| ctx.on_compute_error(cond, err, identity))
                     .map(|s| *s.as_bool())
                     .unwrap_or(false)
             } else {

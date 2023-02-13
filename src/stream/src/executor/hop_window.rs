@@ -201,7 +201,7 @@ impl HopWindowExecutor {
                 let chunk = chunk.compact();
                 let (data_chunk, ops) = chunk.into_parts();
                 let hop_start = hop_start
-                    .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, &info.identity));
+                    .eval_infallible(&data_chunk, |err| ctx.on_compute_error(&hop_start, err, &info.identity));
                 let len = hop_start.len();
                 let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
                 let (origin_cols, vis) = data_chunk.into_parts();

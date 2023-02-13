@@ -24,6 +24,7 @@ use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
+use risingwave_expr::expr::Expression;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
@@ -78,14 +79,14 @@ impl ActorContext {
         })
     }
 
-    pub fn on_compute_error(&self, err: ExprError, identity: &str) {
+    pub fn on_compute_error(&self, expr: &Box<dyn Expression>, err: ExprError, identity: &str) {
         tracing::error!("Compute error: {}, executor: {identity}", err);
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         self.streaming_metrics
             .user_error_count
             .with_label_values(&[
                 "ExprError",
-                &err.to_string(),
+                &format!("In {expr}: {}", err.to_string()),
                 executor_name,
                 &self.fragment_id.to_string(),
             ])

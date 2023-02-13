@@ -110,7 +110,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
             .iter()
             .map(|expr| {
                 Column::new(expr.eval_infallible(&data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.info.identity)
+                    self.ctx.on_compute_error(expr, err, &self.info.identity)
                 }))
             })
             .collect();
