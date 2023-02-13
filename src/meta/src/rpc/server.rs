@@ -49,6 +49,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    SystemParamManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::MetaMetrics;
@@ -304,6 +305,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
+    let init_system_param = opts.init_system_params();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -438,6 +440,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
+    let system_param_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_param).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -460,7 +464,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         stream_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
+    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone(), system_param_manager);
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),
