@@ -41,7 +41,7 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
 /// Generate `INSERT`
 pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> String {
     let mut gen = SqlGenerator::new(rng, tables);
-    format!("{}", gen.gen_insert_stmt());
+    format!("{}", gen.gen_insert_stmt(count))
 }
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
