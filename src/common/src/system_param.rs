@@ -74,7 +74,7 @@ macro_rules! impl_system_params_from_kv {
         ///   versions of this field.
         /// - Deprecated: Guaranteed to be `None`.
         /// - Unrecognized: Not allowed.
-        pub fn system_params_from_kv(kvs: Vec<(Vec<u8>, Vec<u8>)>) -> Result<SystemParams> {
+        pub fn system_params_from_kv(kvs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<SystemParams> {
             let mut ret = SystemParams::default();
             let mut expected_keys: HashSet<_> = [
                 $($key,)*
@@ -83,9 +83,9 @@ macro_rules! impl_system_params_from_kv {
             .cloned()
             .collect();
             for (k, v) in kvs {
-                let k = String::from_utf8(k).unwrap();
-                let v = String::from_utf8(v).unwrap();
-                match k.as_str() {
+                let k = std::str::from_utf8(k.as_ref()).unwrap();
+                let v = std::str::from_utf8(v.as_ref()).unwrap();
+                match k {
                     $(
                         $key => ret.$field = Some(v.parse().unwrap()),
                     )*
@@ -97,7 +97,7 @@ macro_rules! impl_system_params_from_kv {
                         .into());
                     }
                 }
-                expected_keys.remove(k.as_str());
+                expected_keys.remove(k);
             }
             if !expected_keys.is_empty() {
                 return Err(ErrorCode::SystemParamsError(format!(
@@ -114,3 +114,41 @@ macro_rules! impl_system_params_from_kv {
 for_all_undeprecated_params!(impl_system_params_from_kv);
 
 for_all_undeprecated_params!(impl_system_params_to_kv);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_from_kv() {
+        // Include all fields (deprecated also).
+        let kvs = vec![
+            (BARRIER_INTERVAL_MS_KEY, "1"),
+            (CHECKPOINT_FREQUENCY_KEY, "1"),
+            (SSTABLE_SIZE_MB_KEY, "1"),
+            (BLOCK_SIZE_KB_KEY, "1"),
+            (BLOOM_FALSE_POSITIVE_KEY, "1"),
+            (STATE_STORE_KEY, "a"),
+            (DATA_DIRECTORY_KEY, "a"),
+            (BACKUP_STORAGE_URL_KEY, "a"),
+            (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
+        ];
+
+        // To kv - missing field.
+        let p = SystemParams::default();
+        assert!(system_params_to_kv(&p).is_err());
+
+        // From kv - missing field.
+        assert!(system_params_from_kv(vec![(BARRIER_INTERVAL_MS_KEY, "1")]).is_err());
+
+        // From kv - unrecognized field.
+        assert!(system_params_from_kv(vec![("?", "?")]).is_err());
+
+        // Deser & ser.
+        let p = system_params_from_kv(kvs).unwrap();
+        assert_eq!(
+            p,
+            system_params_from_kv(system_params_to_kv(&p).unwrap()).unwrap()
+        );
+    }
+}
