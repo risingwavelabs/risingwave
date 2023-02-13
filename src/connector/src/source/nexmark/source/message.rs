@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -19,12 +18,10 @@ use nexmark::event::Event;
 
 use crate::source::nexmark::source::combined_event::CombinedEvent;
 use crate::source::{SourceMessage, SourceMeta, SplitId};
-
 #[derive(Clone, Debug)]
 pub struct NexmarkMeta {
     pub timestamp: Option<i64>,
 }
-
 #[derive(Clone, Debug)]
 pub struct NexmarkMessage {
     pub split_id: SplitId,
