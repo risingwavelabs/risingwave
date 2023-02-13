@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
+use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
@@ -681,9 +682,12 @@ impl<S: MetaStore> CompactionGroupManagerInner<S> {
     ) -> Result<()> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for compaction_group_id in compaction_group_ids {
-            if let Some(mut group) = compaction_groups.get_mut(*compaction_group_id) {
-                let config = &mut group.compaction_config;
-                update_compaction_config(config, config_to_update);
+            if let Some(group) = compaction_groups.get(compaction_group_id) {
+                let mut config = group.compaction_config.as_ref().clone();
+                update_compaction_config(&mut config, config_to_update);
+                let mut new_group = group.clone();
+                new_group.compaction_config = Arc::new(config);
+                compaction_groups.insert(*compaction_group_id, new_group);
             }
         }
         let mut trx = Transaction::default();
