@@ -350,6 +350,9 @@ impl ByteStreamSourceParserImpl {
                 DebeziumJsonParser::new(rw_columns).map(Self::DebeziumJson)
             }
             SpecificParserConfig::Maxwell => MaxwellParser::new(rw_columns).map(Self::Maxwell),
+            SpecificParserConfig::Native => {
+                unreachable!("Native parser should not be created")
+            }
         }
     }
 }
@@ -370,14 +373,28 @@ pub enum SpecificParserConfig {
     Csv(CsvParserConfig),
     Avro(AvroParserConfig),
     Protobuf(ProtobufParserConfig),
-    #[default]
     Json,
     DebeziumJson,
     Maxwell,
     CanalJson,
+    #[default]
+    Native,
 }
 
 impl SpecificParserConfig {
+    pub fn get_source_format(&self) -> SourceFormat {
+        match self {
+            SpecificParserConfig::Avro(_) => SourceFormat::Avro,
+            SpecificParserConfig::Csv(_) => SourceFormat::Csv,
+            SpecificParserConfig::Protobuf(_) => SourceFormat::Protobuf,
+            SpecificParserConfig::Json => SourceFormat::Json,
+            SpecificParserConfig::DebeziumJson => SourceFormat::DebeziumJson,
+            SpecificParserConfig::Maxwell => SourceFormat::Maxwell,
+            SpecificParserConfig::CanalJson => SourceFormat::CanalJson,
+            SpecificParserConfig::Native => SourceFormat::Native,
+        }
+    }
+
     pub async fn new(
         format: SourceFormat,
         info: &StreamSourceInfo,
@@ -405,6 +422,7 @@ impl SpecificParserConfig {
             SourceFormat::DebeziumJson => SpecificParserConfig::DebeziumJson,
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
+            SourceFormat::Native => SpecificParserConfig::Native,
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "invalid source format".to_string(),
