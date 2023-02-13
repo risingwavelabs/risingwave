@@ -35,10 +35,10 @@ use tokio::sync::{OnceCell, RwLock};
 
 use super::write_lock;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::CompactionGroupConfig;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::model::CompactionGroupConfig;
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction,

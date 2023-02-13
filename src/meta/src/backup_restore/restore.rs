@@ -21,7 +21,7 @@ use risingwave_common::config::MetaBackend;
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
 use crate::dispatch_meta_store;
-use crate::hummock::compaction_group::CompactionGroupConfig;
+use crate::hummock::model::CompactionGroupConfig;
 use crate::model::{MetadataModel, TableFragments};
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 

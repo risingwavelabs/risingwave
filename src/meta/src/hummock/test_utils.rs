@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
@@ -33,7 +34,6 @@ use risingwave_pb::hummock::{
 
 use super::CompactionPickParma;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::TableOption;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
 use crate::rpc::metrics::MetaMetrics;

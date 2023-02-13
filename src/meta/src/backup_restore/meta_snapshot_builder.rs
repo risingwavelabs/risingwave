@@ -69,7 +69,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             .next()
             .ok_or_else(|| anyhow!("hummock version stats not found in meta store"))?;
         let compaction_groups =
-            crate::hummock::compaction_group::CompactionGroupConfig::list_at_snapshot::<S>(
+            crate::hummock::model::CompactionGroupConfig::list_at_snapshot::<S>(
                 &meta_store_snapshot,
             )
             .await?
