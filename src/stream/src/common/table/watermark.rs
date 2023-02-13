@@ -52,9 +52,9 @@ impl<const PERIOD: usize> WatermarkBufferStrategy for WatermarkBufferByEpoch<PER
     fn apply(&mut self) -> bool {
         if self.buffered_epochs_cnt >= PERIOD {
             self.buffered_epochs_cnt = 0;
-            return true;
+            true
         } else {
-            return false;
+            false
         }
     }
 }
