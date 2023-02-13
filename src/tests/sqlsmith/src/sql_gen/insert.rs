@@ -10,7 +10,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_insert_stmt(&mut self, row_count: usize) -> Statement {
         let table = self.tables.choose(&mut self.rng).unwrap();
         let table_name = ObjectName(vec![table.clone().name.as_str().into()]);
-        let data_types = table.columns.iter().cloned().map(|c| c.data_type).collect_vec();
+        let data_types = table
+            .columns
+            .iter()
+            .cloned()
+            .map(|c| c.data_type)
+            .collect_vec();
         let values = self.gen_values(&data_types, row_count);
         let source = Query {
             with: None,
