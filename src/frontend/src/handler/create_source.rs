@@ -240,6 +240,34 @@ pub(crate) async fn resolve_source_schema(
             row_format: RowFormatType::Native as i32,
             ..Default::default()
         },
+
+        SourceSchema::DebeziumAvro(avro_schema) => {
+            // TODO: support schemaless create source
+            // let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
+            //     // The first column is `_rw_kafka_timestamp`.
+            //     (2, 1)
+            // } else {
+            //     (1, 0)
+            // };
+            // if columns.len() != expected_column_len
+            //     || pk_column_ids != vec![ROW_ID_COLUMN_ID]
+            //     || row_id_index != Some(expected_row_id_index)
+            // {
+            //     return Err(RwError::from(ProtocolError(
+            //         "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
+            //     )));
+            // }
+
+            // columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumAvro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                use_schema_registry: avro_schema.use_schema_registry,
+                proto_message_name: "".to_owned(),
+                ..Default::default()
+            }
+        }
     };
 
     Ok(source_info)
