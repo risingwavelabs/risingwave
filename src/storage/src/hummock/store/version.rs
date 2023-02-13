@@ -758,12 +758,10 @@ impl HummockVersionReader {
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<bool> {
         let table_id = read_options.table_id;
-        let table_id_string = table_id.to_string();
-        let table_id_label = table_id_string.as_str();
         let mut table_counts = 0;
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
         let mut stats_guard =
-            MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), read_options.table_id);
+            MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
 
         // 1. check staging data
         for imm in &imms {
