@@ -14,7 +14,7 @@
     with (
       connector = 'nexmark',
       nexmark.table.type = 'Auction'
-    ) row format JSON;
+    );
 
     create source bid (
       auction INTEGER,
@@ -27,7 +27,7 @@
     with (
       connector = 'nexmark',
       nexmark.table.type = 'Bid'
-    ) row format JSON;
+    );
 
     create source person (
       id INTEGER,
@@ -40,10 +40,10 @@
     with (
       connector = 'nexmark',
       nexmark.table.type = 'Person'
-    ) row format JSON;
+    );
 - id: nexmark_q0
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT auction, bidder, price, date_time FROM bid;
   batch_plan: |
@@ -72,7 +72,7 @@
      Table 4294967294 { columns: [auction, bidder, price, date_time, _row_id], primary key: [$4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [4] }
 - id: nexmark_q1
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       auction,
@@ -106,7 +106,7 @@
      Table 4294967294 { columns: [auction, bidder, price, date_time, _row_id], primary key: [$4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [4] }
 - id: nexmark_q2
   before:
-  - create_sources
+    - create_sources
   sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -137,7 +137,7 @@
      Table 4294967294 { columns: [auction, price, _row_id], primary key: [$2 ASC], value indices: [0, 1, 2], distribution key: [2] }
 - id: nexmark_q3
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         P.name, P.city, P.state, A.id
@@ -201,7 +201,7 @@
      Table 4294967294 { columns: [name, city, state, id, _row_id, seller, _row_id#1, id#1], primary key: [$4 ASC, $6 ASC, $5 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [5] }
 - id: nexmark_q4
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         Q.category,
@@ -289,7 +289,7 @@
      Table 4294967294 { columns: [category, avg], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: nexmark_q5
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT AuctionBids.auction, AuctionBids.num FROM (
       SELECT
@@ -420,7 +420,7 @@
      Table 4294967294 { columns: [auction, num, window_start, window_start#1], primary key: [$2 ASC, $0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [2] }
 - id: nexmark_q6
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         Q.seller,
@@ -438,7 +438,7 @@
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/4978
 - id: nexmark_q7
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       B.auction,
@@ -533,7 +533,7 @@
      Table 4294967294 { columns: [auction, price, bidder, date_time, _row_id, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval), max(price)], primary key: [$4 ASC, $5 ASC, $1 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
 - id: nexmark_q8
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       P.id,
@@ -636,7 +636,7 @@
      Table 4294967294 { columns: [id, name, starttime, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval), seller, TumbleStart(date_time, '00:00:10':Interval), (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval)#1], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0, 2, 3] }
 - id: nexmark_q9
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       id, item_name, description, initial_bid, reserve, date_time, expires, seller, category,
@@ -718,7 +718,7 @@
      Table 4294967294 { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, _row_id, _row_id#1], primary key: [$13 ASC, $14 ASC, $0 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0] }
 - id: nexmark_q10
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT auction, bidder, price, date_time, TO_CHAR(date_time, 'YYYY-MM-DD') as date, TO_CHAR(date_time, 'HH:MI') as time FROM bid;
   batch_plan: |
@@ -747,7 +747,7 @@
      Table 4294967294 { columns: [auction, bidder, price, date_time, date, time, _row_id], primary key: [$6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [6] }
 - id: nexmark_q11
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       B.bidder,
@@ -761,7 +761,7 @@
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q12
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         B.bidder,
@@ -775,7 +775,7 @@
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q13
   before:
-  - create_sources
+    - create_sources
   sql: |
     /* SELECT
         B.auction,
@@ -787,10 +787,10 @@
     JOIN side_input FOR SYSTEM_TIME AS OF B.p_time AS S
     ON mod(B.auction, 10000) = S.key; */
     select 1;
-  stream_error: 'Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation'
+  stream_error: "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
 - id: nexmark_q14
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       auction,
@@ -843,7 +843,7 @@
      Table 4294967294 { columns: [auction, bidder, price, bidtimetype, date_time, extra, _row_id], primary key: [$6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [6] }
 - id: nexmark_q15
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         TO_CHAR(date_time, 'yyyy-MM-dd') as day,
@@ -911,7 +911,7 @@
      Table 4294967294 { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0] }
 - id: nexmark_q16
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
       channel,
@@ -982,7 +982,7 @@
      Table 4294967294 { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0, 1] }
 - id: nexmark_q17
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         auction,
@@ -1032,7 +1032,7 @@
      Table 4294967294 { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
 - id: nexmark_q18
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT auction, bidder, price, channel, url, date_time, extra
     FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
@@ -1080,7 +1080,7 @@
      Table 4294967294 { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
 - id: nexmark_q19
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT * FROM
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
@@ -1099,7 +1099,7 @@
         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
 - id: nexmark_q20
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         auction, bidder, price, channel, url, B.date_time as date_timeB,
@@ -1160,7 +1160,7 @@
      Table 4294967294 { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, _row_id, _row_id#1, id], primary key: [$14 ASC, $15 ASC, $0 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [0] }
 - id: nexmark_q21
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         auction, bidder, price, channel,
@@ -1179,7 +1179,7 @@
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q22
   before:
-  - create_sources
+    - create_sources
   sql: |
     SELECT
         auction, bidder, price, channel,
@@ -1212,7 +1212,7 @@
      Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, _row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
 - id: nexmark_q101
   before:
-  - create_sources
+    - create_sources
   sql: |
     -- A self-made query that covers outer join.
     --
@@ -1284,7 +1284,7 @@
      Table 4294967294 { columns: [auction_id, auction_item_name, current_highest_bid, _row_id, auction], primary key: [$3 ASC, $4 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [0] }
 - id: nexmark_q102
   before:
-  - create_sources
+    - create_sources
   sql: |
     -- A self-made query that covers dynamic filter.
     --
@@ -1409,7 +1409,7 @@
      Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
 - id: nexmark_q103
   before:
-  - create_sources
+    - create_sources
   sql: |
     -- A self-made query that covers semi join.
     --
@@ -1483,7 +1483,7 @@
      Table 4294967294 { columns: [auction_id, auction_item_name, _row_id], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
 - id: nexmark_q104
   before:
-  - create_sources
+    - create_sources
   sql: |
     -- A self-made query that covers anti join.
     --
@@ -1557,7 +1557,7 @@
      Table 4294967294 { columns: [auction_id, auction_item_name, _row_id], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
 - id: nexmark_q105
   before:
-  - create_sources
+    - create_sources
   sql: |
     -- A self-made query that covers singleton top-n (and local-phase group top-n).
     --
