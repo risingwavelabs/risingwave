@@ -654,7 +654,7 @@ impl LogicalAggBuilder {
                 .into();
 
                 // we start with variance
-                let variance_expr = ExprImpl::from(
+                let mut target_expr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Divide,
                         vec![
@@ -706,26 +706,28 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
-                let stddev_expr = ExprImpl::from(
-                    FunctionCall::new(
-                        ExprType::Pow,
-                        vec![
-                            variance_expr.clone(),
-                            // TODO: Because pow only supports [float64, float64], so the case that
-                            // `variance_expr` is Decimal is not considered here, please modify me
-                            // after pow supports Decimal in the future
-                            ExprImpl::from(Literal::new(
-                                Datum::from(ScalarImpl::Float64(OrderedF64::from(0.5))),
-                                DataType::Float64,
-                            )),
-                        ],
-                    )
-                    .unwrap(),
-                );
+                if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
+                    target_expr = ExprImpl::from(
+                        FunctionCall::new(
+                            ExprType::Pow,
+                            vec![
+                                target_expr.clone(),
+                                // TODO: Because pow only supports [float64, float64], so the case
+                                // that `variance_expr` is Decimal
+                                // is not considered here, please modify me
+                                // after pow supports Decimal in the future
+                                ExprImpl::from(Literal::new(
+                                    Datum::from(ScalarImpl::Float64(OrderedF64::from(0.5))),
+                                    DataType::Float64,
+                                )),
+                            ],
+                        )
+                        .unwrap(),
+                    );
+                }
 
                 match agg_kind {
-                    AggKind::VarPop => Ok(variance_expr),
-                    AggKind::StddevPop => Ok(stddev_expr),
+                    AggKind::VarPop | AggKind::StddevPop => Ok(target_expr),
                     AggKind::StddevSamp | AggKind::VarSamp => {
                         let case_expr = ExprImpl::from(
                             FunctionCall::new(
@@ -745,11 +747,7 @@ impl LogicalAggBuilder {
                                         .unwrap(),
                                     ),
                                     ExprImpl::from(Literal::new(None, DataType::Float64)),
-                                    match agg_kind {
-                                        AggKind::VarSamp => variance_expr,
-                                        AggKind::StddevSamp => stddev_expr,
-                                        _ => unreachable!(),
-                                    },
+                                    target_expr,
                                 ],
                             )
                             .unwrap(),
