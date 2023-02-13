@@ -40,8 +40,6 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-          environment:
-            - BUILDKITE_ARTIFACT_UPLOAD_DESTINATION
     timeout_in_minutes: 15
     retry: *auto-retry
 
