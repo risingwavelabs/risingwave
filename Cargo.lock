@@ -743,7 +743,9 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-rustls",
  "hyper-tls",
+ "lazy_static",
  "pin-project-lite",
  "tokio",
  "tower",
@@ -2966,7 +2968,9 @@ checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
  "hyper",
+ "log",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
 ]
@@ -3541,6 +3545,22 @@ dependencies = [
  "toml 0.7.2",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "madsim-aws-sdk-s3"
+version = "0.21.0"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=2a46fe8#2a46fe80d3979c818bc5a98dae9b82370cab1208"
+dependencies = [
+ "aws-sdk-s3",
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "http",
+ "madsim",
+ "spin 0.9.5",
+ "tracing",
 ]
 
 [[package]]
@@ -6128,7 +6148,6 @@ dependencies = [
  "async-trait",
  "async_stack_trace",
  "aws-config",
- "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-types",
  "bytes",
@@ -6137,6 +6156,7 @@ dependencies = [
  "futures",
  "hyper",
  "itertools",
+ "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
  "prometheus",
@@ -6249,6 +6269,7 @@ dependencies = [
  "glob",
  "itertools",
  "madsim",
+ "madsim-aws-sdk-s3",
  "madsim-etcd-client",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -8504,9 +8525,8 @@ dependencies = [
  "arrayvec",
  "auto_enums",
  "auto_enums_derive",
- "aws-smithy-async",
+ "aws-sdk-s3",
  "aws-smithy-client",
- "aws-smithy-http",
  "aws-types",
  "base64 0.21.0",
  "bytes",
@@ -8578,6 +8598,7 @@ dependencies = [
  "time 0.3.17",
  "time-macros",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tokio-util",
  "tonic",
