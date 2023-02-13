@@ -754,9 +754,9 @@ impl<S: StateStore> StateTable<S> {
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
-        self.cur_watermark.as_ref().inspect(|_| {
+        if self.cur_watermark.is_some() {
             self.watermark_buffer_strategy.tick();
-        });
+        }
         self.update_epoch(new_epoch);
     }
 
