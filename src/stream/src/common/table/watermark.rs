@@ -41,17 +41,17 @@ impl WatermarkBufferStrategy for WatermarkNoBuffer {
 #[derive(Default, Debug)]
 pub struct WatermarkBufferByEpoch<const PERIOD: usize> {
     /// number of epochs since the last time we did state cleaning by watermark.
-    buffered_epoch: usize,
+    buffered_epochs_cnt: usize,
 }
 
 impl<const PERIOD: usize> WatermarkBufferStrategy for WatermarkBufferByEpoch<PERIOD> {
     fn tick(&mut self) {
-        self.buffered_epoch += 1;
+        self.buffered_epochs_cnt += 1;
     }
 
     fn apply(&mut self) -> bool {
-        if self.buffered_epoch >= PERIOD {
-            self.buffered_epoch = 0;
+        if self.buffered_epochs_cnt >= PERIOD {
+            self.buffered_epochs_cnt = 0;
             return true;
         } else {
             return false;
