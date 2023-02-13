@@ -388,13 +388,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 let mut table_builder =
                     TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
-                let included_upstream_cols = self
+                let key_cols = self
                     .group_key
                     .iter()
                     .copied()
                     .chain(std::iter::once(distinct_col))
                     .collect_vec();
-                for &idx in &included_upstream_cols {
+                for &idx in &key_cols {
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
                     table_builder.add_order_column(table_col_idx, OrderType::Ascending);
                 }
@@ -410,11 +410,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         type_name: String::default(),
                     });
                 }
+                table_builder
+                    .set_value_indices((key_cols.len()..table_builder.columns().len()).collect());
 
-                let mapping = ColIndexMapping::with_included_columns(
-                    &included_upstream_cols,
-                    in_fields.len(),
-                );
+                let mapping = ColIndexMapping::with_included_columns(&key_cols, in_fields.len());
                 if let Some(idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
                     table_builder.set_vnode_col_idx(idx);
                 }
