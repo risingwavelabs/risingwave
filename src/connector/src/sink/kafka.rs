@@ -110,7 +110,7 @@ enum KafkaSinkState {
     Running(u64),
 }
 
-pub struct KafkaSink {
+pub struct KafkaSink<const APPEND_ONLY: bool> {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
@@ -118,7 +118,7 @@ pub struct KafkaSink {
     in_transaction_epoch: Option<u64>,
 }
 
-impl KafkaSink {
+impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
@@ -253,36 +253,10 @@ impl KafkaSink {
         }
         Ok(())
     }
-}
 
-#[async_trait::async_trait]
-impl Sink for KafkaSink {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
-        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
-        // }
-
-        match self.config.format.as_str() {
-            "append_only" => self.append_only(chunk, &self.schema).await,
-            "debezium" => {
-                self.debezium_update(
-                    chunk,
-                    &self.schema,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64,
-                )
-                .await
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    //  Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
+    // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+    async fn begin_epoch_common(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
         self.do_with_retry(|conductor| conductor.start_transaction())
             .await?;
@@ -290,7 +264,7 @@ impl Sink for KafkaSink {
         Ok(())
     }
 
-    async fn commit(&mut self) -> Result<()> {
+    async fn commit_common(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.flush()) // flush before commit
             .await?;
 
@@ -309,7 +283,7 @@ impl Sink for KafkaSink {
         Ok(())
     }
 
-    async fn abort(&mut self) -> Result<()> {
+    async fn abort_common(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await?;
         tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
@@ -318,7 +292,54 @@ impl Sink for KafkaSink {
     }
 }
 
-impl Debug for KafkaSink {
+#[async_trait::async_trait]
+impl Sink for KafkaSink<true> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.append_only(chunk, &self.schema).await
+    }
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.begin_epoch_common(epoch).await
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        self.commit_common().await
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.abort_common().await
+    }
+}
+
+#[async_trait::async_trait]
+impl Sink for KafkaSink<false> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        // TODO: Distinguish "upsert" from "debezium" later.
+        self.debezium_update(
+            chunk,
+            &self.schema,
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
+        )
+        .await
+    }
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.begin_epoch_common(epoch).await
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        self.commit_common().await
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        self.abort_common().await
+    }
+}
+
+impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
     fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         unimplemented!();
     }
@@ -579,11 +600,13 @@ mod test {
             },
         ]);
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
+        let mut sink = KafkaSink::<true>::new(kafka_config.clone(), schema)
+            .await
+            .unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;
-            sink.begin_epoch(i).await?;
+            sink.begin_epoch_common(i).await?;
             for i in 0..100 {
                 match sink
                     .send(
