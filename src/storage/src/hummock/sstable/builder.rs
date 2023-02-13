@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -117,6 +118,9 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
+
+    min_epoch: u64,
+    max_epoch: u64,
 }
 
 impl<W: SstableWriter> SstableBuilder<W> {
@@ -160,6 +164,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
             total_key_count: 0,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
+            min_epoch: u64::MAX,
+            max_epoch: u64::MIN,
         }
     }
 
@@ -240,6 +246,9 @@ impl<W: SstableWriter> SstableBuilder<W> {
 
         self.raw_key.clear();
         self.raw_value.clear();
+
+        self.min_epoch = cmp::min(self.min_epoch, full_key.epoch);
+        self.max_epoch = cmp::max(self.max_epoch, full_key.epoch);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
@@ -334,12 +343,17 @@ impl<W: SstableWriter> SstableBuilder<W> {
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
             divide_version: 0,
+            min_epoch: self.min_epoch,
+            max_epoch: self.max_epoch,
         };
-        tracing::trace!(
-            "meta_size {} bloom_filter_size {}  add_key_counts {} ",
+        tracing::info!(
+            "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {}",
             meta.encoded_size(),
             meta.bloom_filter.len(),
             self.total_key_count,
+            self.stale_key_count,
+            self.min_epoch,
+            self.max_epoch,
         );
         let bloom_filter_size = meta.bloom_filter.len();
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {

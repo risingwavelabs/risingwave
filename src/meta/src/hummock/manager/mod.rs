@@ -777,12 +777,24 @@ where
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
+        let table_id_to_option = self
+            .catalog_manager
+            .get_table_options(
+                &current_version
+                    .get_compaction_group_levels(compaction_group_id)
+                    .member_table_ids,
+            )
+            .await
+            .iter()
+            .map(|(k, v)| (*k, *v))
+            .collect();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             &group_config,
             &mut stats,
             selector,
+            table_id_to_option,
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {

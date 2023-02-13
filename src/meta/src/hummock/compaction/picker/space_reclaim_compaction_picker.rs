@@ -106,6 +106,8 @@ impl SpaceReclaimCompactionPicker {
 #[cfg(test)]
 mod test {
 
+    use std::collections::HashMap;
+
     use itertools::Itertools;
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
@@ -114,7 +116,7 @@ mod test {
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
-        generate_table_with_table_ids,
+        generate_table_with_ids_and_epochs,
     };
     use crate::hummock::compaction::level_selector::SpaceReclaimCompactionSelector;
     use crate::hummock::compaction::{LevelSelector, LocalSelectorStatistic};
@@ -137,23 +139,23 @@ mod test {
             generate_level(
                 3,
                 vec![
-                    generate_table_with_table_ids(0, 1, 150, 151, 1, vec![0]),
-                    generate_table_with_table_ids(1, 1, 250, 251, 1, vec![1]),
+                    generate_table_with_ids_and_epochs(0, 1, 150, 151, 1, vec![0], 0, 0),
+                    generate_table_with_ids_and_epochs(1, 1, 250, 251, 1, vec![1], 0, 0),
                 ],
             ),
             Level {
                 level_idx: 4,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
-                    generate_table_with_table_ids(2, 1, 0, 100, 1, vec![2]),
-                    generate_table_with_table_ids(3, 1, 101, 200, 1, vec![3]),
-                    generate_table_with_table_ids(4, 1, 222, 300, 1, vec![4]),
-                    generate_table_with_table_ids(5, 1, 333, 400, 1, vec![5]),
-                    generate_table_with_table_ids(6, 1, 444, 500, 1, vec![6]),
-                    generate_table_with_table_ids(7, 1, 555, 600, 1, vec![7]),
-                    generate_table_with_table_ids(8, 1, 666, 700, 1, vec![8]),
-                    generate_table_with_table_ids(9, 1, 777, 800, 1, vec![9]),
-                    generate_table_with_table_ids(10, 1, 888, 900, 1, vec![10]),
+                    generate_table_with_ids_and_epochs(2, 1, 0, 100, 1, vec![2], 0, 0),
+                    generate_table_with_ids_and_epochs(3, 1, 101, 200, 1, vec![3], 0, 0),
+                    generate_table_with_ids_and_epochs(4, 1, 222, 300, 1, vec![4], 0, 0),
+                    generate_table_with_ids_and_epochs(5, 1, 333, 400, 1, vec![5], 0, 0),
+                    generate_table_with_ids_and_epochs(6, 1, 444, 500, 1, vec![6], 0, 0),
+                    generate_table_with_ids_and_epochs(7, 1, 555, 600, 1, vec![7], 0, 0),
+                    generate_table_with_ids_and_epochs(8, 1, 666, 700, 1, vec![8], 0, 0),
+                    generate_table_with_ids_and_epochs(9, 1, 777, 800, 1, vec![9], 0, 0),
+                    generate_table_with_ids_and_epochs(10, 1, 888, 900, 1, vec![10], 0, 0),
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
@@ -178,6 +180,7 @@ mod test {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -223,6 +226,7 @@ mod test {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -266,6 +270,7 @@ mod test {
                 &levels,
                 &mut levels_handler,
                 &mut local_stats,
+                HashMap::default(),
             );
             assert!(task.is_none());
         }
@@ -286,6 +291,7 @@ mod test {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);

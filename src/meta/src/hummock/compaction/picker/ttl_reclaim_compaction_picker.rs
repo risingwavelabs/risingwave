@@ -12,11 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+
+use risingwave_common::catalog::TableOption;
+use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::InputLevel;
+use risingwave_pb::hummock::{InputLevel, SstableInfo};
 
 use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
+
+const MIN_TTL_EXPIRE_INTERVAL_MS: u64 = 60 * 60 * 1000; // 1h
 
 #[derive(Default)]
 pub struct TtlPickerState {
@@ -25,14 +33,50 @@ pub struct TtlPickerState {
 
 pub struct TtlReclaimCompactionPicker {
     max_ttl_reclaim_bytes: u64,
-    // todo: filter table option
+    table_id_to_ttl: HashMap<u32, u32>,
 }
 
 impl TtlReclaimCompactionPicker {
-    pub fn new(max_ttl_reclaim_bytes: u64) -> Self {
+    pub fn new(
+        max_ttl_reclaim_bytes: u64,
+        table_id_to_options: HashMap<StateTableId, TableOption>,
+    ) -> Self {
+        let table_id_to_ttl: HashMap<u32, u32> = table_id_to_options
+            .iter()
+            .filter(|id_to_option| {
+                let table_option = id_to_option.1;
+                table_option.retention_seconds.is_some()
+            })
+            .map(|id_to_option| (*id_to_option.0, id_to_option.1.retention_seconds.unwrap()))
+            .collect();
+
         Self {
             max_ttl_reclaim_bytes,
+            table_id_to_ttl,
         }
+    }
+
+    fn filter(&self, sst: &SstableInfo, current_epoch_time: u64) -> bool {
+        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
+        let expire_epoch =
+            Epoch::from_physical_time(current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS);
+
+        for table_id in table_id_in_sst {
+            match self.table_id_to_ttl.get(&table_id) {
+                Some(ttl_second_u32) => {
+                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
+                    // default to zero.
+                    let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                    let min_epoch = expire_epoch.subtract_ms(ttl_mill);
+                    if Epoch(sst.min_epoch) <= min_epoch {
+                        return false;
+                    }
+                }
+                None => continue,
+            }
+        }
+
+        true
     }
 }
 
@@ -54,10 +98,12 @@ impl TtlReclaimCompactionPicker {
 
         let start_indedx = state.last_select_index;
         let mut select_file_size = 0;
+        let current_epoch_time = Epoch::now().0;
 
         for sst in &reclaimed_level.table_infos[start_indedx..] {
             state.last_select_index += 1;
-            if level_handler.is_pending_compact(&sst.id) {
+
+            if level_handler.is_pending_compact(&sst.id) || self.filter(sst, current_epoch_time) {
                 continue;
             }
 
@@ -102,7 +148,7 @@ mod test {
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
-        generate_table,
+        generate_table_with_ids_and_epochs,
     };
     use crate::hummock::compaction::level_selector::{LevelSelector, TtlCompactionSelector};
     use crate::hummock::compaction::LocalSelectorStatistic;
@@ -117,29 +163,107 @@ mod test {
         let group_config = CompactionGroup::new(1, config);
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
+
+        let current_epoch_time = Epoch::now().0;
+        let expired_epoch = Epoch::from_physical_time(
+            current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS - (1000 * 1000),
+        )
+        .0;
         let levels = vec![
             generate_level(1, vec![]),
             generate_level(2, vec![]),
             generate_level(
                 3,
                 vec![
-                    generate_table(0, 1, 150, 151, 1),
-                    generate_table(1, 1, 250, 251, 1),
+                    generate_table_with_ids_and_epochs(0, 1, 150, 151, 1, vec![0], 0, 0),
+                    generate_table_with_ids_and_epochs(1, 1, 250, 251, 1, vec![1], 0, 0),
                 ],
             ),
             Level {
                 level_idx: 4,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
-                    generate_table(2, 1, 0, 100, 1),
-                    generate_table(3, 1, 101, 200, 1),
-                    generate_table(4, 1, 222, 300, 1),
-                    generate_table(5, 1, 333, 400, 1),
-                    generate_table(6, 1, 444, 500, 1),
-                    generate_table(7, 1, 555, 600, 1),
-                    generate_table(8, 1, 666, 700, 1),
-                    generate_table(9, 1, 777, 800, 1),
-                    generate_table(10, 1, 888, 900, 1),
+                    generate_table_with_ids_and_epochs(2, 1, 0, 100, 1, vec![2], expired_epoch, 0),
+                    generate_table_with_ids_and_epochs(
+                        3,
+                        1,
+                        101,
+                        200,
+                        1,
+                        vec![3],
+                        expired_epoch,
+                        0,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        4,
+                        1,
+                        222,
+                        300,
+                        1,
+                        vec![4],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        5,
+                        1,
+                        333,
+                        400,
+                        1,
+                        vec![5],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        6,
+                        1,
+                        444,
+                        500,
+                        1,
+                        vec![6],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        7,
+                        1,
+                        555,
+                        600,
+                        1,
+                        vec![7],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        8,
+                        1,
+                        666,
+                        700,
+                        1,
+                        vec![8],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        9,
+                        1,
+                        777,
+                        800,
+                        1,
+                        vec![9],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        10,
+                        1,
+                        888,
+                        900,
+                        1,
+                        vec![10],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
@@ -155,7 +279,17 @@ mod test {
         let mut local_stats = LocalSelectorStatistic::default();
         let mut selector = TtlCompactionSelector::default();
         {
-            // pick space reclaim
+            let table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+                .map(|table_id| {
+                    (
+                        table_id as u32,
+                        TableOption {
+                            retention_seconds: Some(5_u32),
+                        },
+                    )
+                })
+                .collect();
+            // pick ttl reclaim
             let task = selector
                 .pick_compaction(
                     1,
@@ -163,6 +297,7 @@ mod test {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    table_id_to_options,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -192,7 +327,18 @@ mod test {
                 }
             }
 
-            // pick space reclaim
+            let table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+                .map(|table_id| {
+                    (
+                        table_id as u32,
+                        TableOption {
+                            retention_seconds: Some(5_u32),
+                        },
+                    )
+                })
+                .collect();
+
+            // pick ttl reclaim
             let task = selector
                 .pick_compaction(
                     1,
@@ -200,6 +346,7 @@ mod test {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    table_id_to_options,
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -226,6 +373,88 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::Ttl
             ));
+        }
+
+        {
+            for level_handler in &mut levels_handler {
+                for pending_task_id in &level_handler.pending_tasks_ids() {
+                    level_handler.remove_task(*pending_task_id);
+                }
+            }
+
+            // rebuild selector
+            selector = TtlCompactionSelector::default();
+            let mut table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+                .map(|table_id| {
+                    (
+                        table_id as u32,
+                        TableOption {
+                            retention_seconds: Some(7200),
+                        },
+                    )
+                })
+                .collect();
+
+            table_id_to_options.insert(
+                5,
+                TableOption {
+                    retention_seconds: Some(5),
+                },
+            );
+
+            // // pick ttl reclaim
+            let task = selector
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    table_id_to_options,
+                )
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+
+            // test table_option_filter
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
+            let select_sst = &task.input.input_levels[0].table_infos.first().unwrap();
+            assert_eq!(select_sst.id, 5);
+
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
+            assert!(matches!(
+                task.compaction_task_type,
+                compact_task::TaskType::Ttl
+            ));
+        }
+
+        {
+            // test empty table_option filter
+
+            for level_handler in &mut levels_handler {
+                for pending_task_id in &level_handler.pending_tasks_ids() {
+                    level_handler.remove_task(*pending_task_id);
+                }
+            }
+
+            // rebuild selector
+            selector = TtlCompactionSelector::default();
+
+            // // pick ttl reclaim
+            let task = selector.pick_compaction(
+                1,
+                &group_config,
+                &levels,
+                &mut levels_handler,
+                &mut local_stats,
+                HashMap::default(),
+            );
+
+            // empty table_options does not select any files
+            assert!(task.is_none());
         }
     }
 }
