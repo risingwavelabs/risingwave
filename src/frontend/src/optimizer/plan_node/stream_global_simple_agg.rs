@@ -93,7 +93,7 @@ impl StreamNode for StreamGlobalSimpleAgg {
         use risingwave_pb::stream_plan::*;
         let result_table = self.logical.infer_result_table(None);
         let agg_states = self.logical.infer_stream_agg_state(None);
-        let distinct_dedup_tables = self.logical.infer_distinct_dedup_table(None);
+        let distinct_dedup_tables = self.logical.infer_distinct_dedup_tables(None);
 
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self

@@ -141,7 +141,7 @@ impl<S: StateStore> Deduplicater<S> {
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip(vis_masks_inv.into_iter()) {
             let mask = !vis_mask_inv.finish();
             if !mask.all() {
-                // update visibility is needed
+                // update visibility if needed
                 **vis = vis.as_ref() & VisRef::from(&mask);
             }
         }

@@ -71,12 +71,12 @@ impl LogicalAgg {
     }
 
     /// Infer dedup tables for distinct agg calls.
-    pub fn infer_distinct_dedup_table(
+    pub fn infer_distinct_dedup_tables(
         &self,
         vnode_col_idx: Option<usize>,
     ) -> HashMap<usize, TableCatalog> {
         self.core
-            .infer_distinct_dedup_table(&self.base, vnode_col_idx)
+            .infer_distinct_dedup_tables(&self.base, vnode_col_idx)
     }
 
     /// Generate plan for stateless 2-phase streaming agg.

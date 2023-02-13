@@ -538,7 +538,7 @@ pub fn to_stream_prost_body(
             let me = &me.core;
             let result_table = me.infer_result_table(base, None);
             let agg_states = me.infer_stream_agg_state(base, None);
-            let distinct_dedup_tables = me.infer_distinct_dedup_table(base, None);
+            let distinct_dedup_tables = me.infer_distinct_dedup_tables(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
                 agg_calls: me
@@ -587,7 +587,7 @@ pub fn to_stream_prost_body(
         Node::HashAgg(me) => {
             let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
             let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
-            let distinct_dedup_tables = me.core.infer_distinct_dedup_table(base, me.vnode_col_idx);
+            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
 
             ProstNode::HashAgg(HashAggNode {
                 group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),

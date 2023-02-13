@@ -361,13 +361,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         internal_table_catalog_builder.build(tb_dist)
     }
 
-    /// Infer the dedup table for distinct agg calls, partitioned by distinct columns.
+    /// Infer dedup tables for distinct agg calls, partitioned by distinct columns.
     /// Since distinct agg calls only dedup on the first input column, the key of the result map is
     /// `usize`, i.e. the distinct column index.
     ///
     /// Dedup table schema:
     /// group key | distinct key | count for AGG1(distinct x) | count for AGG2(distinct x) | ...
-    pub fn infer_distinct_dedup_table(
+    pub fn infer_distinct_dedup_tables(
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
@@ -397,12 +397,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 }
 
                 // Agg calls with same distinct column share the same dedup table, but they may have
-                // different filter conditions hence different distinct row count. We add one column
-                // for each call in the dedup table.
+                // different filter conditions, so the count of occurence of one distinct key may
+                // differ among different calls. We add one column for each call in the dedup table.
                 for (call_index, _) in indices_and_calls {
                     table_builder.add_column(&Field {
                         data_type: DataType::Int64,
-                        name: format!("row_count_for_call_{}", call_index),
+                        name: format!("count_for_agg_call_{}", call_index),
                         sub_fields: vec![],
                         type_name: String::default(),
                     });
