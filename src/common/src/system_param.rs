@@ -14,51 +14,82 @@
 
 use std::collections::HashSet;
 
+use paste::paste;
 use risingwave_pb::meta::SystemParams;
 
 use crate::error::{ErrorCode, RwError};
 
-pub const BARRIER_INTERVAL_MS_KEY: &str = "barrier_interval_ms";
-pub const CHECKPOINT_FREQUENCY_KEY: &str = "checkpoint_interval";
-pub const SSTABLE_SIZE_MB_KEY: &str = "sstable_size_mb";
-pub const BLOCK_SIZE_KB_KEY: &str = "block_size_kb";
-pub const BLOOM_FALSE_POSITIVE_KEY: &str = "bloom_false_positive";
-pub const STATE_STORE_KEY: &str = "state_store";
-pub const DATA_DIRECTORY_KEY: &str = "data_directory";
-pub const BACKUP_STORAGE_URL_KEY: &str = "backup_storage_url";
-pub const BACKUP_STORAGE_DIRECTORY_KEY: &str = "backup_storage_directory";
-
 type Result<T> = core::result::Result<T, RwError>;
 
-macro_rules! for_all_undeprecated_params {
+// Includes deprecated params. Used to define key constans.
+macro_rules! for_all_params {
     ($macro:ident) => {
         $macro! {
-            { barrier_interval_ms, BARRIER_INTERVAL_MS_KEY },
-            { checkpoint_frequency, CHECKPOINT_FREQUENCY_KEY },
-            { sstable_size_mb, SSTABLE_SIZE_MB_KEY },
-            { block_size_kb, BLOCK_SIZE_KB_KEY },
-            { bloom_false_positive, BLOOM_FALSE_POSITIVE_KEY },
-            { state_store, STATE_STORE_KEY },
-            { data_directory, DATA_DIRECTORY_KEY },
-            { backup_storage_url, BACKUP_STORAGE_URL_KEY },
-            { backup_storage_directory, BACKUP_STORAGE_DIRECTORY_KEY },
+            { barrier_interval_ms },
+            { checkpoint_frequency },
+            { sstable_size_mb },
+            { block_size_kb },
+            { bloom_false_positive },
+            { state_store },
+            { data_directory },
+            { backup_storage_url },
+            { backup_storage_directory },
         }
     };
 }
 
+// Only includes undeprecated params.
+// Macro input is { field identifier, mutability }
+macro_rules! for_all_undeprecated_params {
+    ($macro:ident) => {
+        $macro! {
+            { barrier_interval_ms, true },
+            { checkpoint_frequency, true },
+            { sstable_size_mb, false },
+            { block_size_kb, false },
+            { bloom_false_positive, false },
+            { state_store, false },
+            { data_directory, false },
+            { backup_storage_url, false },
+            { backup_storage_directory, false },
+        }
+    };
+}
+
+/// Convert field name to string.
+macro_rules! key_of {
+    ($field:ident) => {
+        stringify!($field)
+    };
+}
+
+/// Define key constants for fields in `SystemParams` for use of other modules.
+macro_rules! def_key {
+    ($({ $field:ident },)*) => {
+        paste! {
+            $(
+                pub const [<$field:upper _KEY>]: &str = key_of!($field);
+            )*
+        }
+
+    };
+}
+
+for_all_params!(def_key);
+
 macro_rules! impl_system_params_to_kv {
-    ($({ $field:ident, $key:path },)*) => {
+    ($({ $field:ident, $_:expr },)*) => {
         /// All undeprecated fields are guaranteed to be contained in the returned map.
         /// Return error if there are missing fields.
         pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
             let mut ret = Vec::with_capacity(9);
             $(ret.push((
-                $key.to_string(),
+                key_of!($field).to_string(),
                 params
                     .$field.as_ref()
                     .ok_or::<RwError>(ErrorCode::SystemParamsError(format!(
                         "missing system param {:?}",
-                        $key
+                        key_of!($field)
                     )).into())?
                     .to_string(),
             ));)*
@@ -68,7 +99,7 @@ macro_rules! impl_system_params_to_kv {
 }
 
 macro_rules! impl_system_params_from_kv {
-    ($({ $field:ident, $key:path },)*) => {
+    ($({ $field:ident, $_:expr },)*) => {
         /// For each field in `SystemParams`, one of these rules apply:
         /// - Up-to-date: Guaranteed to be `Some`. If it is not present, may try to derive it from previous
         ///   versions of this field.
@@ -77,7 +108,7 @@ macro_rules! impl_system_params_from_kv {
         pub fn system_params_from_kv(kvs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<SystemParams> {
             let mut ret = SystemParams::default();
             let mut expected_keys: HashSet<_> = [
-                $($key,)*
+                $(key_of!($field),)*
             ]
             .iter()
             .cloned()
@@ -87,7 +118,7 @@ macro_rules! impl_system_params_from_kv {
                 let v = std::str::from_utf8(v.as_ref()).unwrap();
                 match k {
                     $(
-                        $key => ret.$field = Some(v.parse().unwrap()),
+                        key_of!($field) => ret.$field = Some(v.parse().unwrap()),
                     )*
                     _ => {
                         return Err(ErrorCode::SystemParamsError(format!(
