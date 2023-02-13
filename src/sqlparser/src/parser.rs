@@ -24,6 +24,7 @@ use core::fmt;
 
 use tracing::{debug, instrument};
 
+use crate::ast::ddl::SourceWatermark;
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -114,6 +115,8 @@ impl fmt::Display for ParserError {
 #[cfg(feature = "std")]
 impl std::error::Error for ParserError {}
 
+type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
+
 pub struct Parser {
     tokens: Vec<Token>,
     /// The index of the first unprocessed token in `self.tokens`
@@ -121,12 +124,18 @@ pub struct Parser {
     /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
     /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
     angle_brackets_num: i32,
+    /// It's important that already in named Array or not. so use this field check in or not.
+    /// Consider 0 is you're not in named Array. if more than 0 is you're in named Array
+    array_depth: usize,
+    /// We cannot know current array should be keep named or not, so by using this field store
+    /// every depth of array that should be keep named or not.
+    array_named_stack: Vec<bool>,
 }
 
 impl Parser {
-    const BETWEEN_PREC: u8 = 20;
+    const BETWEEN_PREC: u8 = 21;
     const PLUS_MINUS_PREC: u8 = 30;
-    const TIME_ZONE_PREC: u8 = 20;
+    const TIME_ZONE_PREC: u8 = 21;
     const UNARY_NOT_PREC: u8 = 15;
 
     /// Parse the specified tokens
@@ -135,6 +144,8 @@ impl Parser {
             tokens,
             index: 0,
             angle_brackets_num: 0,
+            array_depth: 0,
+            array_named_stack: Vec::new(),
         }
     }
 
@@ -234,6 +245,25 @@ impl Parser {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
+    }
+
+    /// Check is enter array expression.
+    pub fn peek_array_depth(&self) -> usize {
+        self.array_depth
+    }
+
+    /// When enter specify ARRAY prefix expression.
+    pub fn increase_array_depth(&mut self, num: usize) {
+        self.array_depth += num;
+    }
+
+    /// When exit specify ARRAY prefix expression.
+    pub fn decrease_array_depth(&mut self, num: usize) {
+        self.array_depth -= num;
+    }
+
+    pub fn is_in_array(&self) -> bool {
+        self.peek_array_depth() > 0
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -440,9 +470,10 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY => Ok(Expr::Array(
-                    self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
-                )),
+                Keyword::ARRAY => {
+                    self.expect_token(&Token::LBracket)?;
+                    self.parse_array_expr(true)
+                }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
                 }
@@ -471,6 +502,9 @@ impl Parser {
                     _ => Ok(Expr::Identifier(w.to_ident())),
                 },
             }, // End of Token::Word
+
+            Token::LBracket if self.is_in_array() => self.parse_array_expr(false),
+
             tok @ Token::Minus | tok @ Token::Plus => {
                 let op = if tok == Token::Plus {
                     UnaryOperator::Plus
@@ -896,6 +930,49 @@ impl Parser {
                 _ => self.expected("trim_where field", Token::Word(w))?,
             },
             unexpected => self.expected("trim_where field", unexpected),
+        }
+    }
+
+    /// Parses an array expression `[ex1, ex2, ..]`
+    /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
+    pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
+        self.increase_array_depth(1);
+        if self.array_named_stack.len() < self.peek_array_depth() {
+            self.array_named_stack.push(named);
+        } else if let Err(parse_err) = self.check_same_named_array(named) {
+            Err(parse_err)?
+        }
+
+        if self.peek_token() == Token::RBracket {
+            let _ = self.next_token(); // consume ]
+            self.decrease_array_depth(1);
+            Ok(Expr::Array(Array {
+                elem: vec![],
+                named,
+            }))
+        } else {
+            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+            self.expect_token(&Token::RBracket)?;
+            if self.array_named_stack.len() > self.peek_array_depth() {
+                self.array_named_stack.pop();
+            }
+            self.decrease_array_depth(1);
+            Ok(Expr::Array(Array { elem: exprs, named }))
+        }
+    }
+
+    fn check_same_named_array(&mut self, current_named: bool) -> Result<(), ParserError> {
+        let previous_named = self.array_named_stack.last().unwrap();
+        if current_named != *previous_named {
+            // for '['
+            self.prev_token();
+            if current_named {
+                // for keyword 'array'
+                self.prev_token();
+            }
+            parser_err!(format!("syntax error at or near '{}'", self.peek_token()))?
+        } else {
+            Ok(())
         }
     }
 
@@ -1580,6 +1657,11 @@ impl Parser {
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
+        let emit_mode = if materialized {
+            self.parse_emit_mode()?
+        } else {
+            None
+        };
         let with_options = self.parse_options(Keyword::WITH)?;
         self.expect_keyword(Keyword::AS)?;
         let query = Box::new(self.parse_query()?);
@@ -1591,6 +1673,7 @@ impl Parser {
             materialized,
             or_replace,
             with_options,
+            emit_mode,
         })
     }
 
@@ -1830,19 +1913,36 @@ impl Parser {
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
-        let source_schema = if let Some(opt) = option {
-            // Table is created with an external connector.
-            if opt.value.to_string().contains("-cdc") {
-                // cdc connectors
+        let connector = option.map(|opt| opt.value.to_string());
+        // row format for cdc source must be debezium json
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        let source_schema = if let Some(connector) = connector {
+            if connector.contains("-cdc") {
                 if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+                }
+                Some(SourceSchema::DebeziumJson)
+            } else if connector.contains("nexmark") {
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
+                }
+                Some(SourceSchema::Native)
+            } else if connector.contains("datagen") {
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
+                    Some(SourceSchema::parse_to(self)?)
                 } else {
-                    Some(SourceSchema::DebeziumJson)
+                    Some(SourceSchema::Native)
                 }
             } else {
-                // non-cdc connectors
+                // other connectors
                 self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
                 Some(SourceSchema::parse_to(self)?)
             }
@@ -1872,15 +1972,36 @@ impl Parser {
     }
 
     pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+        let (column_refs, table_constraints, _) = self.parse_columns_inner(true)?;
+        Ok((column_refs, table_constraints))
+    }
+
+    pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
+        self.parse_columns_inner(true)
+    }
+
+    fn parse_columns_inner(
+        &mut self,
+        with_watermark: bool,
+    ) -> Result<ColumnsDefTuple, ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
+        let mut watermarks = vec![];
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {
-            return Ok((columns, constraints));
+            return Ok((columns, constraints, watermarks));
         }
 
         loop {
             if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
+            } else if with_watermark && let Some(watermark) = self.parse_optional_watermark()? {
+                watermarks.push(watermark);
+                if watermarks.len() > 1 {
+                    // TODO(yuhao): allow multiple watermark on source.
+                    return Err(ParserError::ParserError(
+                        "Only 1 watermark is allowed to be defined on source.".to_string(),
+                    ));
+                }
             } else if let Token::Word(_) = self.peek_token() {
                 columns.push(self.parse_column_def()?);
             } else {
@@ -1895,7 +2016,7 @@ impl Parser {
             }
         }
 
-        Ok((columns, constraints))
+        Ok((columns, constraints, watermarks))
     }
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
@@ -2001,6 +2122,18 @@ impl Parser {
         }
     }
 
+    pub fn parse_optional_watermark(&mut self) -> Result<Option<SourceWatermark>, ParserError> {
+        if self.parse_keyword(Keyword::WATERMARK) {
+            self.expect_keyword(Keyword::FOR)?;
+            let column = self.parse_identifier_non_reserved()?;
+            self.expect_keyword(Keyword::AS)?;
+            let expr = self.parse_expr()?;
+            Ok(Some(SourceWatermark { column, expr }))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_optional_table_constraint(
         &mut self,
     ) -> Result<Option<TableConstraint>, ParserError> {
@@ -2092,6 +2225,25 @@ impl Parser {
         self.expect_token(&Token::Eq)?;
         let value = self.parse_value()?;
         Ok(SqlOption { name, value })
+    }
+
+    pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
+        if self.parse_keyword(Keyword::EMIT) {
+            match self.parse_one_of_keywords(&[Keyword::IMMEDIATELY, Keyword::ON]) {
+                Some(Keyword::IMMEDIATELY) => Ok(Some(EmitMode::Immediately)),
+                Some(Keyword::ON) => {
+                    self.expect_keywords(&[Keyword::WINDOW, Keyword::CLOSE])?;
+                    Ok(Some(EmitMode::OnWindowClose))
+                }
+                Some(_) => unreachable!(),
+                None => self.expected(
+                    "IMMEDIATELY or ON WINDOW CLOSE after EMIT",
+                    self.peek_token(),
+                ),
+            }
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {

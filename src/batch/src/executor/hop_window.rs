@@ -23,8 +23,7 @@ use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{new_binary_expr, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::expr_node;
@@ -239,8 +238,15 @@ impl HopWindowExecutor {
             let len = hop_start.len();
             let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
             let (origin_cols, visibility) = data_chunk.into_parts();
-            // SAFETY: Already compacted.
-            assert!(matches!(visibility, Vis::Compact(_)));
+            let len = match visibility {
+                Vis::Compact(len) => len,
+                Vis::Bitmap(_) => {
+                    return Err(BatchError::Internal(anyhow!(
+                        "Input array should already been compacted!"
+                    ))
+                    .into());
+                }
+            };
             for i in 0..units {
                 let window_start_col = if contains_window_start {
                     Some(window_start_exprs[i].eval(&hop_start_chunk)?)
@@ -266,18 +272,7 @@ impl HopWindowExecutor {
                         }
                     })
                     .collect_vec();
-                let len = {
-                    if let Some(col) = &window_start_col {
-                        col.len()
-                    } else if let Some(col) = &window_end_col {
-                        col.len()
-                    } else {
-                        // SAFETY: Either window_start or window_end is in output indices.
-                        unreachable!();
-                    }
-                };
-                let new_chunk = DataChunk::new(new_cols, len);
-                yield new_chunk;
+                yield DataChunk::new(new_cols, len);
             }
         }
     }

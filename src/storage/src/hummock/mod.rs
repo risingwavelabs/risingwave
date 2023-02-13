@@ -21,7 +21,6 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
@@ -37,6 +36,7 @@ mod block_cache;
 pub use block_cache::*;
 
 use crate::hummock::store::state_store::LocalHummockStorage;
+use crate::opts::StorageOpts;
 
 #[cfg(target_os = "linux")]
 pub mod file_cache;
@@ -148,7 +148,7 @@ impl HummockStorage {
     /// Creates a [`HummockStorage`].
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        options: Arc<StorageConfig>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -318,7 +318,7 @@ impl HummockStorage {
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
-        options: Arc<StorageConfig>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
@@ -336,8 +336,8 @@ impl HummockStorage {
         .await
     }
 
-    pub fn storage_config(&self) -> &Arc<StorageConfig> {
-        &self.context.storage_config
+    pub fn storage_opts(&self) -> &Arc<StorageOpts> {
+        &self.context.storage_opts
     }
 
     pub fn version_reader(&self) -> &HummockVersionReader {
@@ -417,10 +417,11 @@ pub fn hit_sstable_bloom_filter(
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
+
     let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash);
 
     if surely_not_have {
-        local_stats.bloom_filter_true_negative_count += 1;
+        local_stats.bloom_filter_true_negative_counts += 1;
     }
     !surely_not_have
 }
@@ -435,10 +436,9 @@ pub async fn get_from_order_sorted_uncommitted_data(
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
-    let dist_key_hash = read_options
-        .prefix_hint
-        .as_ref()
-        .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+    let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
+        Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
+    });
 
     let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 
@@ -498,7 +498,7 @@ pub fn get_from_batch(
 
 #[derive(Clone)]
 pub struct HummockStorageV1 {
-    options: Arc<StorageConfig>,
+    options: Arc<StorageOpts>,
 
     local_version_manager: LocalVersionManagerRef,
 
@@ -523,7 +523,7 @@ pub struct HummockStorageV1 {
 impl HummockStorageV1 {
     /// Creates a [`HummockStorageV1`].
     pub async fn new(
-        options: Arc<StorageConfig>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
@@ -575,7 +575,7 @@ impl HummockStorageV1 {
             CompactorRuntimeConfig::default(),
         ));
 
-        let buffer_tracker = BufferTracker::from_storage_config(&options);
+        let buffer_tracker = BufferTracker::from_storage_opts(&options);
 
         let local_version_manager =
             LocalVersionManager::new(pinned_version.clone(), compactor_context, buffer_tracker);
@@ -625,7 +625,7 @@ impl HummockStorageV1 {
         Ok(instance)
     }
 
-    pub fn options(&self) -> &Arc<StorageConfig> {
+    pub fn options(&self) -> &Arc<StorageOpts> {
         &self.options
     }
 

@@ -23,6 +23,7 @@ env_scripts = [
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
+is_hdfs_backend = get_env ENABLE_HDFS
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -38,8 +39,16 @@ if ${is_all_in_one_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
 end
+
+if ${is_hdfs_backend}
+  set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
+else
+  set_env BUILD_HDFS_BACKEND_CMD ""
+end
+
 ''',
 ]
+
 
 [config]
 default_to_workspace = false
@@ -314,7 +323,7 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
+cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
@@ -504,12 +513,17 @@ set -e
 cargo install cargo-quickinstall --locked
 cargo quickinstall cargo-binstall
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
+
+# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
+echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
+cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
+echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
@@ -532,7 +546,7 @@ echo "check: $(tput setaf 4)cmake$(tput sgr0)"
 cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
 echo
 
-echo "check: $(tput setaf 4)protoc$(tput sgr0)"
+echo "check: $(tput setaf 4)protoc >= 3.12.0$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
 """
@@ -741,6 +755,24 @@ cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 """
 
+[tasks.check-clippy-fix]
+category = "RiseDev - Check"
+description = "Run cargo clippy check and fixes all files (including dirty and staged)"
+script = """
+#!/usr/bin/env bash
+
+echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks and attempting to fix"
+if [ $# -gt 0 ]; then
+  ARGS=("$@")
+
+  echo "Applying clippy --fix for $@ (including dirty and staged files)"
+  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+else
+  echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
+  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+fi
+"""
+
 [tasks.check-typos]
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
@@ -753,6 +785,21 @@ fi
 if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
 fi
+"""
+
+[tasks.check-udeps]
+category = "RiseDev - Check"
+description = "Check unused dependencies"
+env = { RUSTFLAGS = "--cfg tokio_unstable" }
+script = """
+#!/usr/bin/env bash
+
+# TODO: after cargo-machete supports excluding packages, we may use it instead of cargo udeps.
+# It's much faster so we can add it to CI and [tasks.check].
+
+echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
+
+cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
 
@@ -775,6 +822,27 @@ description = "Perform pre-CI checks and automatically fix cargo sort, cargo hak
 
 [tasks.c]
 alias = "check"
+
+[tasks.check-fix]
+category = "RiseDev - Check"
+dependencies = [
+  "warn-on-missing-tools",
+  "check-hakari",
+  "check-dep-sort",
+  "check-fmt",
+  "check-clippy-fix",
+  "check-typos",
+]
+script = """
+#!/usr/bin/env bash
+
+echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
+"""
+description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"
+
+[tasks.cf]
+alias = "check-fix"
+
 
 [tasks.install]
 category = "RiseDev - Prepare"
@@ -835,7 +903,7 @@ description = "Run all streaming e2e tests"
 [tasks.slt-batch]
 category = "RiseDev - SQLLogicTest"
 extend = "slt"
-args = ["${@}", "./e2e_test/batch/**/*.slt"]
+args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]

@@ -21,8 +21,10 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode};
-use crate::expr::Expr;
+use super::{
+    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
+};
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -281,5 +283,23 @@ impl StreamNode for StreamHashJoin {
                 .collect(),
             is_append_only: self.is_append_only,
         })
+    }
+}
+
+impl ExprRewritable for StreamHashJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+            self.eq_join_predicate.rewrite_exprs(r),
+        )
+        .into()
     }
 }

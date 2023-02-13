@@ -13,8 +13,12 @@
 // limitations under the License.
 
 use std::ops::Index;
+use std::slice::Iter;
 
+use anyhow::anyhow;
 use bytes::Bytes;
+
+use crate::error::{PsqlError, PsqlResult};
 
 /// A row of data returned from the database by a query.
 #[derive(Debug, Clone)]
@@ -48,5 +52,89 @@ impl Index<usize> for Row {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Binary,
+    Text,
+}
+
+impl Format {
+    pub fn from_i16(format_code: i16) -> PsqlResult<Self> {
+        match format_code {
+            0 => Ok(Format::Text),
+            1 => Ok(Format::Binary),
+            _ => Err(PsqlError::Internal(anyhow!(
+                "Unknown format code: {}",
+                format_code
+            ))),
+        }
+    }
+}
+
+/// FormatIterator used to generate formats of actual length given the provided format.
+/// According Postgres Document: <https://www.postgresql.org/docs/current/protocol-message-formats.html#:~:text=The%20number%20of,number%20of%20parameters>
+/// - If the length of provided format is 0, all format will be default format(TEXT).
+/// - If the length of provided format is 1, all format will be the same as this only format.
+/// - If the length of provided format > 1, provided format should be the actual format.
+#[derive(Debug, Clone)]
+pub struct FormatIterator<'a, 'b>
+where
+    'a: 'b,
+{
+    _formats: &'a [Format],
+    format_iter: Iter<'b, Format>,
+    actual_len: usize,
+    default_format: Format,
+}
+
+impl<'a, 'b> FormatIterator<'a, 'b> {
+    pub fn new(provided_formats: &'a [Format], actual_len: usize) -> Result<Self, String> {
+        if !provided_formats.is_empty()
+            && provided_formats.len() != 1
+            && provided_formats.len() != actual_len
+        {
+            return Err(format!(
+                "format codes length {} is not 0, 1 or equal to actual length {}",
+                provided_formats.len(),
+                actual_len
+            ));
+        }
+
+        let default_format = provided_formats.get(0).copied().unwrap_or(Format::Text);
+
+        Ok(Self {
+            _formats: provided_formats,
+            default_format,
+            format_iter: provided_formats.iter(),
+            actual_len,
+        })
+    }
+}
+
+impl Iterator for FormatIterator<'_, '_> {
+    type Item = Format;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.actual_len == 0 {
+            return None;
+        }
+
+        self.actual_len -= 1;
+
+        Some(
+            self.format_iter
+                .next()
+                .copied()
+                .unwrap_or(self.default_format),
+        )
+    }
+}
+
+impl ExactSizeIterator for FormatIterator<'_, '_> {
+    fn len(&self) -> usize {
+        self.actual_len
     }
 }

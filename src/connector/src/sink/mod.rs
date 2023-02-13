@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod catalog;
 pub mod console;
 pub mod kafka;
 pub mod redis;
@@ -19,6 +20,7 @@ pub mod remote;
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
@@ -54,7 +56,7 @@ pub trait Sink {
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum SinkConfig {
     Redis(RedisConfig),
-    Kafka(KafkaConfig),
+    Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
     Console(ConsoleConfig),
     BlackHole,
@@ -76,9 +78,11 @@ impl SinkConfig {
         const SINK_TYPE_KEY: &str = "connector";
         let sink_type = properties
             .get(SINK_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(format!("missing config: {}", SINK_TYPE_KEY)))?;
+            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", SINK_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
-            KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
+            KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
+                properties,
+            )?))),
             CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
                 properties,
             )?)),
@@ -101,8 +105,10 @@ impl SinkConfig {
 #[derive(Debug)]
 pub enum SinkImpl {
     Redis(Box<RedisSink>),
-    Kafka(Box<KafkaSink>),
-    Remote(Box<RemoteSink>),
+    Kafka(Box<KafkaSink<true>>),
+    UpsertKafka(Box<KafkaSink<false>>),
+    Remote(Box<RemoteSink<true>>),
+    UpsertRemote(Box<RemoteSink<false>>),
     Console(Box<ConsoleSink>),
     Blackhole,
 }
@@ -116,7 +122,9 @@ impl SinkImpl {
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
+            SinkConfig::Kafka(cfg) => {
+                SinkImpl::Kafka(Box::new(KafkaSink::new(*cfg, schema).await?))
+            }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
                 RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
@@ -126,47 +134,48 @@ impl SinkImpl {
     }
 }
 
-#[async_trait]
-impl Sink for SinkImpl {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Remote(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Console(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+macro_rules! impl_sink {
+    ($($variant_name:ident),*) => {
+        #[async_trait]
+        impl Sink for SinkImpl {
+            async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.write_batch(chunk).await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Remote(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Console(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+            async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.begin_epoch(epoch).await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn commit(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.commit().await,
-            SinkImpl::Kafka(sink) => sink.commit().await,
-            SinkImpl::Remote(sink) => sink.commit().await,
-            SinkImpl::Console(sink) => sink.commit().await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+            async fn commit(&mut self) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.commit().await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn abort(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.abort().await,
-            SinkImpl::Kafka(sink) => sink.abort().await,
-            SinkImpl::Remote(sink) => sink.abort().await,
-            SinkImpl::Console(sink) => sink.abort().await,
-            SinkImpl::Blackhole => Ok(()),
+            async fn abort(&mut self) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.abort().await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
         }
     }
+}
+
+impl_sink! {
+    Redis,
+    Kafka,
+    UpsertKafka,
+    Remote,
+    UpsertRemote,
+    Console
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;
@@ -180,7 +189,7 @@ pub enum SinkError {
     #[error("Json parse error: {0}")]
     JsonParse(String),
     #[error("config error: {0}")]
-    Config(String),
+    Config(#[from] anyhow::Error),
 }
 
 impl From<RpcError> for SinkError {

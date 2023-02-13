@@ -33,7 +33,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "health",
         "hummock",
         "java_binding",
-        "leader",
         "meta",
         "monitor_service",
         "plan_common",
@@ -54,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
         .compile_well_known_types(true)
+        .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

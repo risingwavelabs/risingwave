@@ -396,6 +396,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
 
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactorManager;
 
@@ -410,7 +411,10 @@ mod tests {
             let _receiver = compactor_manager.add_compactor(context_id, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
-                .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+                .get_compact_task(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    &mut default_level_selector(),
+                )
                 .await
                 .unwrap()
                 .unwrap();

@@ -1,5 +1,6 @@
 disallowed-methods = [
-    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
+    { path = "std::iter::Iterator::zip", reason = "Please use `zip_eq_fast` if it's available. Otherwise use `zip_eq_debug`" },
+    { path = "itertools::Itertools::zip_eq", reason = "Please use `zip_eq_fast` if it's available. Otherwise use `zip_eq_debug`" },
     { path = "futures::stream::select_all", reason = "Please use `risingwave_common::util::select_all` instead." },
 ]
 doc-valid-idents = [

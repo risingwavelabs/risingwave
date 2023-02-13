@@ -23,13 +23,14 @@ use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
     generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
     PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType};
+use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -161,11 +162,7 @@ impl ColPrunable for LogicalSource {
     }
 }
 
-impl ExprRewritable for LogicalSource {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalSource {}
 
 /// A util function to extract kafka offset timestamp range.
 ///
@@ -360,7 +357,10 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef = StreamSource::new(self.clone()).into();
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id{
+        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty(){
+            plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+        }
+        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
             plan = StreamRowIdGen::new(plan, row_id_index).into();
         }
         Ok(plan)

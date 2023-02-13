@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_pb::meta::MetaLeaderInfo;
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use crate::manager::{
@@ -48,8 +48,6 @@ where
 
     /// idle status manager.
     idle_manager: IdleManagerRef,
-
-    info: MetaLeaderInfo,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -97,6 +95,24 @@ pub struct MetaOpts {
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
+
+    /// Target size of the Sstable.
+    pub sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    pub block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    pub bloom_false_positive: f64,
+
+    /// State store url.
+    pub state_store: Option<String>,
+
+    /// Remote directory for storing data and metadata objects.
+    pub data_directory: String,
+
+    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -119,6 +135,28 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
+            sstable_size_mb: 256,
+            block_size_kb: 64,
+            bloom_false_positive: 0.001,
+            state_store: None,
+            data_directory: "hummock_001".to_string(),
+            periodic_space_reclaim_compaction_interval_sec: 60,
+        }
+    }
+
+    pub fn init_system_params(&self) -> SystemParams {
+        // For fields not provided from CLI, use default values.
+        // For deprecated fields, use `None`.
+        SystemParams {
+            barrier_interval_ms: Some(self.barrier_interval.as_millis() as u32),
+            checkpoint_frequency: Some(self.checkpoint_frequency as u64),
+            sstable_size_mb: Some(self.sstable_size_mb),
+            bloom_false_positive: Some(self.bloom_false_positive),
+            block_size_kb: Some(self.block_size_kb),
+            state_store: Some(self.state_store.clone().unwrap_or_default()),
+            data_directory: Some(self.data_directory.clone()),
+            backup_storage_url: Some(self.backup_storage_url.clone()),
+            backup_storage_directory: Some(self.backup_storage_directory.clone()),
         }
     }
 }
@@ -127,7 +165,7 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -140,7 +178,6 @@ where
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info,
             opts: opts.into(),
         }
     }
@@ -184,10 +221,6 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
-
-    pub fn get_leader_info(&self) -> MetaLeaderInfo {
-        self.info.clone()
-    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -199,7 +232,6 @@ impl MetaSrvEnv<MemStore> {
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let leader_info = MetaLeaderInfo::default();
         let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
@@ -212,7 +244,6 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info: leader_info,
             opts,
         }
     }

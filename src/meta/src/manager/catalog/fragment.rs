@@ -22,10 +22,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::{ActorStatus, State};
+use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -80,21 +80,6 @@ pub struct ActorInfos {
 
     /// all reachable barrier inject actors
     pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
-}
-
-pub struct FragmentVNodeInfo {
-    pub fragment_id: FragmentId,
-
-    /// actor id => parallel unit
-    pub actor_parallel_unit_maps: BTreeMap<ActorId, ParallelUnit>,
-
-    /// fragment vnode mapping info
-    pub vnode_mapping: ParallelUnitMapping,
-}
-
-#[derive(Default)]
-pub struct BuildGraphInfo {
-    pub table_mview_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -452,14 +437,6 @@ where
         }
 
         actor_maps
-    }
-
-    pub async fn all_chain_actor_ids(&self) -> HashSet<ActorId> {
-        let map = &self.core.read().await.table_fragments;
-
-        map.values()
-            .flat_map(|table_fragment| table_fragment.chain_actor_ids())
-            .collect::<HashSet<_>>()
     }
 
     pub async fn update_actor_splits_by_split_assignment(
@@ -832,6 +809,7 @@ where
             .collect::<MetaResult<Vec<_>>>()
     }
 
+    #[cfg(test)]
     pub async fn get_table_mview_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
         Ok(map
@@ -840,88 +818,23 @@ where
             .mview_actor_ids())
     }
 
-    // we will read three things at once, avoiding locking too much.
-    pub async fn get_build_graph_info(
+    /// Get the upstream `Materialize` fragments of the specified tables.
+    pub async fn get_upstream_mview_fragments(
         &self,
         table_ids: &HashSet<TableId>,
-    ) -> MetaResult<BuildGraphInfo> {
+    ) -> MetaResult<HashMap<TableId, Fragment>> {
         let map = &self.core.read().await.table_fragments;
-        let mut info: BuildGraphInfo = Default::default();
+        let mut fragments = HashMap::new();
 
-        for table_id in table_ids {
-            info.table_mview_actor_ids.insert(
-                *table_id,
-                map.get(table_id)
-                    .context(format!("table_fragment not exist: id={}", table_id))?
-                    .mview_actor_ids(),
-            );
-        }
-        Ok(info)
-    }
-
-    pub async fn get_mview_vnode_bitmap_info(
-        &self,
-        table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
-        let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, Vec<(ActorId, Option<Buffer>)>> = HashMap::new();
-
-        for table_id in table_ids {
-            info.insert(
-                *table_id,
-                map.get(table_id)
-                    .context(format!("table_fragment not exist: id={}", table_id))?
-                    .mview_vnode_bitmap_info(),
-            );
+        for &table_id in table_ids {
+            let table_fragments = map
+                .get(&table_id)
+                .context(format!("table_fragment not exist: id={}", table_id))?;
+            if let Some(fragment) = table_fragments.mview_fragment() {
+                fragments.insert(table_id, fragment);
+            }
         }
 
-        Ok(info)
-    }
-
-    pub async fn get_mview_fragment_vnode_info(
-        &self,
-        table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, FragmentVNodeInfo>> {
-        let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, FragmentVNodeInfo> = HashMap::new();
-
-        for table_id in table_ids {
-            let table_fragment = map
-                .get(table_id)
-                .ok_or_else(|| anyhow!("table_fragment not exist: id={table_id}"))?;
-            let (fragment_id, vnode_mapping) = table_fragment
-                .mview_vnode_mapping()
-                .ok_or_else(|| anyhow!("mview_vnode_mapping not exist: id={table_id}"))?;
-
-            info.insert(
-                *table_id,
-                FragmentVNodeInfo {
-                    fragment_id,
-                    actor_parallel_unit_maps: table_fragment.mview_actor_parallel_units(),
-                    vnode_mapping,
-                },
-            );
-        }
-
-        Ok(info)
-    }
-
-    pub async fn get_tables_worker_actors(
-        &self,
-        table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>> {
-        let map = &self.core.read().await.table_fragments;
-        let mut info: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>> = HashMap::new();
-
-        for table_id in table_ids {
-            info.insert(
-                *table_id,
-                map.get(table_id)
-                    .context(format!("table_fragment not exist: id={}", table_id))?
-                    .worker_actor_ids(),
-            );
-        }
-
-        Ok(info)
+        Ok(fragments)
     }
 }

@@ -28,7 +28,7 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
@@ -40,6 +40,7 @@ use crate::pg_message::{
 };
 use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
+use crate::types::Format;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -166,9 +167,14 @@ where
                         }
                     }
 
-                    PsqlError::StartupError(_)
-                    | PsqlError::PasswordError(_)
-                    | PsqlError::SslError(_) => {
+                    PsqlError::SslError(e) => {
+                        // For ssl error, because the stream has already been consumed, so there is
+                        // no way to write more message.
+                        error!("SSL connection setup error: {}", e);
+                        return true;
+                    }
+
+                    PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
                         // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
@@ -330,7 +336,7 @@ where
 
             // execute query
             let mut res = session
-                .run_one_query(stmt, false)
+                .run_one_query(stmt, Format::Text)
                 .await
                 .map_err(|err| PsqlError::QueryError(err))?;
 
@@ -454,13 +460,24 @@ where
                 .ok_or_else(PsqlError::no_statement)?
         };
 
+        let result_formats = msg
+            .result_format_codes
+            .iter()
+            .map(|&format_code| Format::from_i16(format_code))
+            .try_collect()?;
+        let param_formats = msg
+            .param_format_codes
+            .iter()
+            .map(|&format_code| Format::from_i16(format_code))
+            .try_collect()?;
+
         // 2. Instance the statement to get the portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = statement.instance(
             portal_name.clone(),
             &msg.params,
-            msg.result_format_code,
-            msg.param_format_code,
+            result_formats,
+            param_formats,
         )?;
 
         // 3. Insert the Portal.
