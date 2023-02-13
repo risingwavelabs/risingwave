@@ -88,6 +88,30 @@ query IT
 select * from s1 where _rw_kafka_timestamp > '2045-01-01 0:00:00+00:00'
 ----
 
+query B
+select _rw_kafka_timestamp > '1977-01-01 00:00:00+00:00' from s1
+----
+t
+t
+t
+t
+
+query B
+select _rw_kafka_timestamp < now() from s1 
+----
+t
+t
+t
+t
+
+query B
+select _rw_kafka_timestamp < now() - interval '1 day' from s1
+----
+f
+f
+f
+f
+
 query IT rowsort
 select * from s1 limit 2
 ----

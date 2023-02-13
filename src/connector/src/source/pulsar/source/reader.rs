@@ -31,7 +31,8 @@ use crate::source::monitor::SourceMetrics;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData, MAX_CHUNK_SIZE,
+    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReaderV2, MAX_CHUNK_SIZE,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -89,7 +90,10 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
     Ok(message_id)
 }
 
-impl PulsarSplitReader {
+#[async_trait]
+impl SplitReaderV2 for PulsarSplitReader {
+    type Properties = PulsarProperties;
+
     async fn new(
         props: PulsarProperties,
         splits: Vec<SplitImpl>,
@@ -156,6 +160,10 @@ impl PulsarSplitReader {
             metrics,
             source_info,
         })
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 

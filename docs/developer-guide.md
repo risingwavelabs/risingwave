@@ -22,6 +22,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Configure system variables](#configure-system-variables)
   * [Start the playground with RiseDev](#start-the-playground-with-risedev)
   * [Start the playground with cargo](#start-the-playground-with-cargo)
+- [Debug playground using vscode](#debug-playground-using-vscode)
 - [Develop the dashboard](#develop-the-dashboard)
   * [Dashboard v1](#dashboard-v1)
   * [Dashboard v2](#dashboard-v2)
@@ -196,6 +197,10 @@ Then, connect to the playground instance via:
 ```shell
 psql -h localhost -p 4566 -d dev -U root
 ```
+
+## Debug playground using vscode 
+
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
 
 ## Develop the dashboard
 
@@ -450,15 +455,14 @@ license-eye -c .licenserc.yaml header fix
 
 ## Add new dependencies
 
-To avoid rebuild some common dependencies across different crates in workspace, use
+`./risedev check-hakari`: To avoid rebuild some common dependencies across different crates in workspace, use
 [cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
 are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
 after deps get updated.
 
-Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
-workspace.
+`./risedev check-udeps`: Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in workspace.
 
-And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+`./risedev check-dep-sort`: Use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
 ## Submit PRs
 

@@ -27,8 +27,6 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
-// TODO: Change user manager as a part of the catalog manager, to ensure that operations on Catalog
-// and User are transactional.
 pub struct UserServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
