@@ -18,6 +18,7 @@ use risingwave_pb::meta::SystemParams;
 
 use crate::model::{MetadataModelError, MetadataModelResult};
 use crate::storage::{MetaStore, Transaction};
+
 const SYSTEM_PARAMS_CF_NAME: &str = "cf/system_params";
 
 // A dummy trait to implement custom methods on `SystemParams`.
