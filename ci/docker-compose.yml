@@ -50,7 +50,7 @@ services:
     volumes:
       - ..:/risingwave
     environment:
-      - BUILDKITE_ARTIFACT_UPLOAD_DESTINATION
+      # - BUILDKITE_ARTIFACT_UPLOAD_DESTINATION
       - BUILDKITE_PIPELINE_ID
       - BUILDKITE_BUILD_ID
       - BUILDKITE_JOB_ID
