@@ -204,13 +204,15 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             });
 
         // Apply chunk to each of the state (per agg_call)
-        agg_group.apply_chunk(
-            storages,
-            &ops,
-            &columns,
-            visibilities,
-            distinct_dedup_tables,
-        )?;
+        agg_group
+            .apply_chunk(
+                storages,
+                &ops,
+                &columns,
+                visibilities,
+                distinct_dedup_tables,
+            )
+            .await?;
 
         Ok(())
     }
@@ -305,6 +307,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             state_table.init_epoch(barrier.epoch);
         });
         result_table.init_epoch(barrier.epoch);
+        distinct_dedup_tables.values_mut().for_each(|state_table| {
+            state_table.init_epoch(barrier.epoch);
+        });
 
         yield Message::Barrier(barrier);
 

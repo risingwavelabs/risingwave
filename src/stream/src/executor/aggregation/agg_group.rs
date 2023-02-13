@@ -122,7 +122,7 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Apply input chunk to all managed agg states.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
@@ -130,9 +130,16 @@ impl<S: StateStore> AggGroup<S> {
         visibilities: Vec<Option<Bitmap>>,
         distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
-        let visibilities =
-            self.distinct_dedup
-                .dedup_chunk(ops, columns, visibilities, distinct_dedup_tables);
+        let visibilities = self
+            .distinct_dedup
+            .dedup_chunk(
+                ops,
+                columns,
+                visibilities,
+                distinct_dedup_tables,
+                self.group_key.as_ref(),
+            )
+            .await?;
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in
             self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
