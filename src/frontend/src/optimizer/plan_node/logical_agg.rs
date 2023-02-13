@@ -22,8 +22,8 @@ use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, DistinctDedupTable, GenericPlanNode, GenericPlanRef, PlanAggCall,
-    PlanAggOrderByField, ProjectBuilder,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
+    ProjectBuilder,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -74,7 +74,7 @@ impl LogicalAgg {
     pub fn infer_distinct_dedup_table(
         &self,
         vnode_col_idx: Option<usize>,
-    ) -> HashMap<usize, DistinctDedupTable> {
+    ) -> HashMap<usize, TableCatalog> {
         self.core
             .infer_distinct_dedup_table(&self.base, vnode_col_idx)
     }

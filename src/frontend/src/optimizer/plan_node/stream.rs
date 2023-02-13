@@ -563,10 +563,7 @@ pub fn to_stream_prost_body(
                 ),
                 dedup_tables: dedup_tables
                     .into_iter()
-                    .map(|(key_idx, dedup_table)| {
-                        // TODO(rctmp): DistinctDedupTable to prost
-                        (key_idx as u32, dedup_table.table.to_internal_table_prost())
-                    })
+                    .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
             })
         }
@@ -612,10 +609,7 @@ pub fn to_stream_prost_body(
                 ),
                 dedup_tables: dedup_tables
                     .into_iter()
-                    .map(|(key_idx, dedup_table)| {
-                        // TODO(rctmp): DistinctDedupTable to prost
-                        (key_idx as u32, dedup_table.table.to_internal_table_prost())
-                    })
+                    .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
             })
         }

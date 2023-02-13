@@ -140,12 +140,6 @@ pub struct MaterializedInputState {
     pub table_value_indices: Vec<usize>,
 }
 
-pub struct DistinctDedupTable {
-    pub table: TableCatalog, // group key | distinct key | count | count with filter1 | ...
-    pub _todo: (),
-    // TODO(rctmp): need some column mapping later
-}
-
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
@@ -367,14 +361,17 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         internal_table_catalog_builder.build(tb_dist)
     }
 
-    /// Infer the dedup table for distinct agg calls by distinct keys.
+    /// Infer the dedup table for distinct agg calls, partitioned by distinct columns.
     /// Since distinct agg calls only dedup on the first input column, the key of the result map is
-    /// `usize`, i.e. the distinct key.
+    /// `usize`, i.e. the distinct column index.
+    ///
+    /// Dedup table schema:
+    /// group key | distinct key | count for AGG1(distinct x) | count for AGG2(distinct x) | ...
     pub fn infer_distinct_dedup_table(
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
-    ) -> HashMap<usize, DistinctDedupTable> {
+    ) -> HashMap<usize, TableCatalog> {
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let in_fields = self.input.schema().fields();
 
@@ -399,8 +396,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     table_builder.add_order_column(table_col_idx, OrderType::Ascending);
                 }
 
-                // Agg calls with same distinct key share the same dedup table, but they may have
-                // different filter conditions and different distinct row count. We add one column
+                // Agg calls with same distinct column share the same dedup table, but they may have
+                // different filter conditions hence different distinct row count. We add one column
                 // for each call in the dedup table.
                 for (call_index, _) in indices_and_calls {
                     table_builder.add_column(&Field {
@@ -419,7 +416,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 }
                 let dist_key = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
                 let table = table_builder.build(dist_key);
-                (distinct_col, DistinctDedupTable { table, _todo: () })
+                (distinct_col, table)
             })
             .collect()
     }
