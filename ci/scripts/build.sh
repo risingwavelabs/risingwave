@@ -24,6 +24,13 @@ while getopts 't:p:' opt; do
 done
 shift $((OPTIND -1))
 
+echo "--- Install aws cli"
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+
+echo "--- Test s3 download speed"
+aws s3 cp --acl private --sse aws:kms s3://bulidkite-artifacts-bucket/9eed51d0-eaaf-4ea3-95a2-2e9e557607f6/01864a93-fd30-4d57-978a-9ea2a2bdd09e/01864a94-2598-4e55-bb19-b8ab16a0a109/risingwave_simulation .
+
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace
 
