@@ -234,7 +234,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
+                iter_table_storage(storages)
+                    .chain(distinct_dedup_tables.values_mut())
+                    .map(|state_table| state_table.commit(epoch)),
             )
             .await?;
 
@@ -278,9 +280,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(storages).for_each(|state_table| {
-                state_table.commit_no_data_expected(epoch);
-            });
+            iter_table_storage(storages)
+                .chain(distinct_dedup_tables.values_mut())
+                .for_each(|state_table| {
+                    state_table.commit_no_data_expected(epoch);
+                });
             result_table.commit_no_data_expected(epoch);
             Ok(None)
         }
@@ -306,13 +310,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut storages).for_each(|state_table| {
-            state_table.init_epoch(barrier.epoch);
-        });
+        iter_table_storage(&mut storages)
+            .chain(distinct_dedup_tables.values_mut())
+            .for_each(|state_table| {
+                state_table.init_epoch(barrier.epoch);
+            });
         result_table.init_epoch(barrier.epoch);
-        distinct_dedup_tables.values_mut().for_each(|state_table| {
-            state_table.init_epoch(barrier.epoch);
-        });
 
         yield Message::Barrier(barrier);
 

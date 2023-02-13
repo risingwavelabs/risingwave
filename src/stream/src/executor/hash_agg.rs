@@ -535,12 +535,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             }
 
             // Commit all state tables.
-            futures::future::try_join_all(iter_table_storage(storages).map(|state_table| async {
-                if let Some(watermark) = state_clean_watermark.as_ref() {
-                    state_table.update_watermark(watermark.clone())
-                };
-                state_table.commit(epoch).await
-            }))
+            futures::future::try_join_all(
+                iter_table_storage(storages)
+                    .chain(distinct_dedup_tables.values_mut())
+                    .map(|state_table| async {
+                        if let Some(watermark) = state_clean_watermark.as_ref() {
+                            state_table.update_watermark(watermark.clone())
+                        };
+                        state_table.commit(epoch).await
+                    }),
+            )
             .await?;
             if let Some(watermark) = state_clean_watermark.as_ref() {
                 result_table.update_watermark(watermark.clone());
@@ -552,12 +556,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(storages).for_each(|state_table| {
-                if let Some(watermark) = state_clean_watermark.as_ref() {
-                    state_table.update_watermark(watermark.clone())
-                };
-                state_table.commit_no_data_expected(epoch);
-            });
+            iter_table_storage(storages)
+                .chain(distinct_dedup_tables.values_mut())
+                .for_each(|state_table| {
+                    if let Some(watermark) = state_clean_watermark.as_ref() {
+                        state_table.update_watermark(watermark.clone())
+                    };
+                    state_table.commit_no_data_expected(epoch);
+                });
             if let Some(watermark) = state_clean_watermark.as_ref() {
                 result_table.update_watermark(watermark.clone());
             };
@@ -581,9 +587,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut extra.storages).for_each(|state_table| {
-            state_table.init_epoch(barrier.epoch);
-        });
+        iter_table_storage(&mut extra.storages)
+            .chain(extra.distinct_dedup_tables.values_mut())
+            .for_each(|state_table| {
+                state_table.init_epoch(barrier.epoch);
+            });
         extra.result_table.init_epoch(barrier.epoch);
         agg_group_cache.update_epoch(barrier.epoch.curr);
 
