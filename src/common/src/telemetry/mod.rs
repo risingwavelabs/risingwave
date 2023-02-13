@@ -14,6 +14,8 @@
 
 pub mod report;
 
+use std::time::SystemTime;
+
 use anyhow::{anyhow, Result};
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -30,6 +32,7 @@ pub enum TelemetryNodeType {
     Meta,
     Compute,
     Frontend,
+    Compactor,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -144,6 +147,13 @@ pub fn telemetry_enabled() -> bool {
         .to_ascii_lowercase()
         .parse()
         .unwrap_or(true)
+}
+
+pub fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("Clock might go backward")
+        .as_secs()
 }
 
 #[cfg(test)]

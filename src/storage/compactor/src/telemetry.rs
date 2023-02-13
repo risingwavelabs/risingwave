@@ -5,22 +5,22 @@ use risingwave_common::telemetry::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy)]
-pub(crate) struct FrontendTelemetryCreator {}
+pub(crate) struct CompactorTelemetryCreator {}
 
-impl FrontendTelemetryCreator {
+impl CompactorTelemetryCreator {
     pub(crate) fn new() -> Self {
         Self {}
     }
 }
 
-impl TelemetryReportCreator for FrontendTelemetryCreator {
+impl TelemetryReportCreator for CompactorTelemetryCreator {
     fn create_report(
         &self,
         tracking_id: String,
         session_id: String,
         up_time: u64,
-    ) -> anyhow::Result<FrontendTelemetryReport> {
-        Ok(FrontendTelemetryReport::new(
+    ) -> anyhow::Result<CompactorTelemetryReport> {
+        Ok(CompactorTelemetryReport::new(
             tracking_id,
             session_id,
             up_time,
@@ -29,19 +29,19 @@ impl TelemetryReportCreator for FrontendTelemetryCreator {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct FrontendTelemetryReport {
+pub(crate) struct CompactorTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
 }
 
-impl TelemetryReport for FrontendTelemetryReport {
+impl TelemetryReport for CompactorTelemetryReport {
     fn to_json(&self) -> anyhow::Result<String> {
         let json = serde_json::to_string(self)?;
         Ok(json)
     }
 }
 
-impl FrontendTelemetryReport {
+impl CompactorTelemetryReport {
     pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {
         Self {
             base: TelemetryReportBase {
@@ -50,7 +50,7 @@ impl FrontendTelemetryReport {
                 system_data: SystemData::new(),
                 up_time,
                 time_stamp: current_timestamp(),
-                node_type: TelemetryNodeType::Frontend,
+                node_type: TelemetryNodeType::Compactor,
             },
         }
     }

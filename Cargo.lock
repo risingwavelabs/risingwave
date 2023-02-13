@@ -5980,6 +5980,7 @@ dependencies = [
 name = "risingwave_compactor"
 version = "0.2.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "clap 3.2.23",
  "madsim-tokio",
@@ -5995,6 +5996,7 @@ dependencies = [
  "risingwave_storage",
  "risingwave_tracing",
  "serde",
+ "serde_json",
  "tokio-retry",
  "tokio-stream",
  "toml 0.5.11",

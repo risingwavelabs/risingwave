@@ -65,7 +65,7 @@ use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
-use crate::telemetry::FrontendTelemetryReport;
+use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -241,7 +241,7 @@ impl FrontendEnv {
 
         // start a telemetry reporting thread
         let (telemetry_join_handle, telemetry_shutdown_sender) =
-            start_telemetry_reporting(meta_client, FrontendTelemetryReport::new);
+            start_telemetry_reporting(meta_client, FrontendTelemetryCreator::new());
         join_handles.push(telemetry_join_handle);
         shutdown_senders.push(telemetry_shutdown_sender);
 

@@ -12,13 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::SystemTime;
-
 use anyhow::Result;
+use risingwave_common::telemetry::report::TelemetryReportCreator;
 use risingwave_common::telemetry::{
-    SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
+    current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy)]
+pub(crate) struct ComputeTelemetryCreator {}
+
+impl ComputeTelemetryCreator {
+    pub(crate) fn new() -> Self {
+        Self {}
+    }
+}
+
+impl TelemetryReportCreator for ComputeTelemetryCreator {
+    fn create_report(
+        &self,
+        tracking_id: String,
+        session_id: String,
+        up_time: u64,
+    ) -> Result<ComputeTelemetryReport> {
+        Ok(ComputeTelemetryReport::new(
+            tracking_id,
+            session_id,
+            up_time,
+        ))
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ComputeTelemetryReport {
@@ -33,22 +56,17 @@ impl TelemetryReport for ComputeTelemetryReport {
     }
 }
 
-pub(crate) fn create_telemetry_report(
-    tracking_id: String,
-    session_id: String,
-    up_time: u64,
-) -> ComputeTelemetryReport {
-    ComputeTelemetryReport {
-        base: TelemetryReportBase {
-            tracking_id,
-            session_id,
-            up_time,
-            system_data: SystemData::new(),
-            time_stamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("Clock might go backward")
-                .as_secs(),
-            node_type: TelemetryNodeType::Compute,
-        },
+impl ComputeTelemetryReport {
+    pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {
+        Self {
+            base: TelemetryReportBase {
+                tracking_id,
+                session_id,
+                up_time,
+                system_data: SystemData::new(),
+                time_stamp: current_timestamp(),
+                node_type: TelemetryNodeType::Compute,
+            },
+        }
     }
 }

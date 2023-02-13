@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::telemetry::report::start_telemetry_reporting;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
@@ -40,6 +41,7 @@ use tokio::task::JoinHandle;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::CompactorServiceImpl;
+use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
 /// Fetches and runs compaction tasks.
@@ -146,6 +148,7 @@ pub async fn compactor_serve(
             compactor_context.clone(),
             hummock_meta_client,
         ),
+        start_telemetry_reporting(meta_client.clone(), CompactorTelemetryCreator::new()),
     ];
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();

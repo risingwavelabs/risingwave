@@ -18,17 +18,24 @@ pub trait TelemetryInfoFetcher {
     async fn fetch_telemetry_info(&self) -> Result<TelemetryInfoResponse>;
 }
 
-pub fn start_telemetry_reporting<F, T, I>(
+pub trait TelemetryReportCreator {
+    // inject dependencies to impl structs if more metrics needed
+    fn create_report(
+        &self,
+        tracking_id: String,
+        session_id: String,
+        up_time: u64,
+    ) -> Result<impl TelemetryReport>;
+}
+
+pub fn start_telemetry_reporting<F, I>(
     info_fetcher: I,
-    create_report: F,
+    report_creator: F,
 ) -> (JoinHandle<()>, Sender<()>)
 where
-    // tracking_id, session_id, up_time
-    F: FnOnce(String, String, u64) -> T,
-    T: TelemetryReport,
+    F: TelemetryReportCreator,
     I: TelemetryInfoFetcher,
     F: Send + Copy + 'static,
-    T: Send + 'static,
     I: Send + Sync + 'static,
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -63,16 +70,22 @@ where
                 continue;
             }
 
-            let report = create_report(
-                tracking_id.clone(),
-                session_id.clone(),
-                begin_time.elapsed().as_secs(),
-            );
-
-            let report_json = match report.to_json() {
-                Ok(report_json) => report_json,
+            // create a report and serialize to json
+            let report_json = match report_creator
+                .create_report(
+                    tracking_id.clone(),
+                    session_id.clone(),
+                    begin_time.elapsed().as_secs(),
+                )
+                .map(|r| r.to_json())
+            {
+                Ok(Ok(report_json)) => report_json,
+                Ok(Err(e)) => {
+                    tracing::error!("Telemetry failed to serialize report to json, {}", e);
+                    continue;
+                }
                 Err(e) => {
-                    tracing::error!("Telemetry failed to serialize report{}", e);
+                    tracing::error!("Telemetry failed to create report {}", e);
                     continue;
                 }
             };
