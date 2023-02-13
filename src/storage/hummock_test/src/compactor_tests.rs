@@ -73,7 +73,7 @@ pub(crate) mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
@@ -107,7 +107,7 @@ pub(crate) mod tests {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
