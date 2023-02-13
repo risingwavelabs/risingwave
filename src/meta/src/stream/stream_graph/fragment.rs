@@ -149,7 +149,7 @@ impl Deref for BuildingFragment {
 
 /// The ID of an edge in the fragment graph. For different types of edges, the ID will be in
 /// different variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub(super) enum EdgeId {
     /// The edge between two building (internal) fragments.
     Internal {
@@ -167,7 +167,13 @@ pub(super) enum EdgeId {
         downstream_fragment_id: GlobalFragmentId,
     },
 
-    DownstreamExternal {},
+    /// TODO
+    DownstreamExternal {
+        /// TODO
+        original_upstream_fragment_id: GlobalFragmentId,
+        /// The ID of the downstream fragment.
+        downstream_fragment_id: GlobalFragmentId,
+    },
 }
 
 /// The edge in the fragment graph.
@@ -437,6 +443,15 @@ impl CompleteStreamFragmentGraph {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
 
+        let original_table_fragment_id = GlobalFragmentId::new(
+            downstream_fragments
+                .iter()
+                .flat_map(|f| f.upstream_fragment_ids.iter().copied())
+                .unique()
+                .exactly_one()
+                .expect("downstream fragments must have exactly one upstream fragment"),
+        );
+
         let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
         // Build the extra edges between the `Materialize` and the downstream `Chain` of the
@@ -445,7 +460,10 @@ impl CompleteStreamFragmentGraph {
             let id = GlobalFragmentId::new(fragment.fragment_id);
 
             let edge = StreamFragmentEdge {
-                id: EdgeId::DownstreamExternal {},
+                id: EdgeId::DownstreamExternal {
+                    original_upstream_fragment_id: original_table_fragment_id,
+                    downstream_fragment_id: id,
+                },
                 // We always use `NoShuffle` for the exchange between the upstream `Materialize`
                 // and the downstream `Chain` of the new materialized view.
                 dispatch_strategy: DispatchStrategy {

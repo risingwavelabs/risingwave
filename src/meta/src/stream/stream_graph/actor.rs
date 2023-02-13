@@ -24,6 +24,7 @@ use risingwave_common::hash::{ActorId, ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 
 use super::id::GlobalFragmentIdsExt;
@@ -251,7 +252,7 @@ struct ExternalChange {
     new_downstreams: HashMap<DispatcherId, Dispatcher>,
 
     /// The new upstreams to be added (replaced), indexed by the upstream fragment ID.
-    new_upstreams: HashMap<FragmentId, ActorUpstream>,
+    new_upstreams: HashMap<GlobalFragmentId, ActorUpstream>,
 }
 
 impl ExternalChange {
@@ -264,7 +265,7 @@ impl ExternalChange {
 
     fn add_upstream(&mut self, upstream: ActorUpstream) {
         self.new_upstreams
-            .try_insert(upstream.fragment_id.as_global_id(), upstream)
+            .try_insert(upstream.fragment_id, upstream)
             .unwrap();
     }
 }
@@ -555,8 +556,11 @@ pub struct ActorGraphBuildResult {
     /// The actual locations of the external actors.
     pub existing_locations: Locations,
 
-    /// The new dispatchers to be added to the upstream mview actors.
+    /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+
+    /// The updates to be applied to the downstream chain actors. Used for schema change.
+    pub merge_updates: Vec<MergeUpdate>,
 }
 
 /// [`ActorGraphBuilder`] builds the actor graph for the given complete fragment graph, based on the
@@ -689,18 +693,41 @@ impl ActorGraphBuilder {
             .map(|(actor_id, change)| {
                 (
                     actor_id.as_global_id(),
-                    change.new_downstreams.values().cloned().collect(),
+                    change.new_downstreams.values().cloned().collect_vec(),
                 )
             })
+            .filter(|(_, v)| !v.is_empty())
             .collect();
 
-        // TODO: extract merge update
+        // Extract the updates for merge executors from the external changes.
+        let merge_updates = external_changes
+            .iter()
+            .flat_map(|(actor_id, change)| {
+                change
+                    .new_upstreams
+                    .values()
+                    .map(move |upstream| {
+                        let EdgeId::DownstreamExternal { original_upstream_fragment_id, .. } = upstream.edge_id else {
+                            unreachable!()
+                        };
+
+                        MergeUpdate {
+                            actor_id: actor_id.as_global_id(),
+                            upstream_fragment_id: original_upstream_fragment_id.as_global_id(),
+                            new_upstream_fragment_id: Some(upstream.fragment_id.as_global_id()),
+                            added_upstream_actor_id: upstream.actors.as_global_ids(),
+                            removed_upstream_actor_id: vec![],
+                        }
+                    })
+            })
+            .collect();
 
         Ok(ActorGraphBuildResult {
             graph,
             building_locations,
             existing_locations,
             dispatchers,
+            merge_updates,
         })
     }
 

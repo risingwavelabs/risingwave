@@ -645,9 +645,11 @@ where
             building_locations,
             existing_locations,
             dispatchers,
+            merge_updates,
         } = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), stream_job)
             .await?;
+        assert!(merge_updates.is_empty());
 
         // 8. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
@@ -864,10 +866,12 @@ where
             graph,
             building_locations,
             existing_locations: _,
-            dispatchers: _,
+            dispatchers,
+            merge_updates,
         } = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), stream_job)
             .await?;
+        assert!(dispatchers.is_empty());
 
         // 8. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
@@ -875,7 +879,8 @@ where
         let table_fragments =
             TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
 
-        println!("table fragments: {:?}", table_fragments);
+        println!("table fragments: {:#?}", table_fragments);
+        println!("merge updates: {:#?}", merge_updates);
 
         Ok(())
     }
