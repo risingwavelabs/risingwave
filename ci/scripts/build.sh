@@ -29,7 +29,8 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Test s3 download speed"
-aws configure set default.s3.max_concurrent_requests 100
+aws configure set default.s3.max_concurrent_requests 20
+aws configure set default.s3.multipart_chunksize 64MB
 aws s3 cp --acl private --sse aws:kms s3://bulidkite-artifacts-bucket/9eed51d0-eaaf-4ea3-95a2-2e9e557607f6/01864a93-fd30-4d57-978a-9ea2a2bdd09e/01864a94-2598-4e55-bb19-b8ab16a0a109/risingwave_simulation .
 
 echo "--- Rust cargo-sort check"
