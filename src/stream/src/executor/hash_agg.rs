@@ -95,6 +95,10 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// table when `flush_data` is called.
     result_table: StateTable<S>,
 
+    /// State tables for deduplicating rows on distinct key for distinct agg calls.
+    /// One table per distinct column (may be shared by multiple agg calls).
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
+
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
@@ -157,6 +161,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         agg_calls: Vec<AggCall>,
         storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
+        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
         executor_id: u64,
@@ -186,6 +191,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size,
                 storages,
                 result_table,
+                distinct_dedup_tables,
                 group_key_indices,
                 watermark_epoch,
                 group_change_set: HashSet::new(),
@@ -262,6 +268,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref agg_calls,
             ref mut storages,
             ref result_table,
+            ref mut distinct_dedup_tables,
             ref input_schema,
             ref input_pk_indices,
             ref extreme_cache_size,
@@ -379,14 +386,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
                 .map(Some)
                 .collect();
-            // TODO(rctmp)
             agg_group
                 .apply_chunk(
                     storages,
                     &ops,
                     &columns,
                     visibilities,
-                    &mut Default::default(),
+                    distinct_dedup_tables,
                 )
                 .await?;
         }
@@ -402,6 +408,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref schema,
             ref mut storages,
             ref mut result_table,
+            ref mut distinct_dedup_tables,
             ref mut group_change_set,
             ref lookup_miss_count,
             ref total_lookup_count,
@@ -458,10 +465,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .get_mut(key)
                         .expect("changed group must have corresponding AggGroup")
                         .as_mut();
-                    // TODO(rctmp)
-                    let mut dedup_tables = Default::default();
                     agg_group
-                        .flush_state_if_needed(storages, &mut dedup_tables)
+                        .flush_state_if_needed(storages, distinct_dedup_tables)
                         .await?;
                 }
 
@@ -702,6 +707,7 @@ mod tests {
             agg_calls,
             agg_state_tables,
             result_table,
+            Default::default(),
             pk_indices,
             extreme_cache_size,
             executor_id,

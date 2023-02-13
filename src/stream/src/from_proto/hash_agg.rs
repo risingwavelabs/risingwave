@@ -14,6 +14,7 @@
 
 //! Global Streaming Hash Aggregators
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
@@ -37,6 +38,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     agg_calls: Vec<AggCall>,
     storages: Vec<AggStateStorage<S>>,
     result_table: StateTable<S>,
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     group_key_indices: Vec<usize>,
     group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
@@ -57,6 +59,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.agg_calls,
             self.storages,
             self.result_table,
+            self.distinct_dedup_tables,
             self.pk_indices,
             self.extreme_cache_size,
             self.executor_id,
@@ -127,6 +130,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             agg_calls,
             storages,
             result_table,
+            distinct_dedup_tables,
             group_key_indices,
             group_key_types,
             pk_indices: params.pk_indices,

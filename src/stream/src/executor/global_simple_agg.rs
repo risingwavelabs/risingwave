@@ -66,7 +66,7 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     result_table: StateTable<S>,
 
     /// State tables for deduplicating rows on distinct key for distinct agg calls.
-    /// One table per distinct key (may be shared by multiple agg calls).
+    /// One table per distinct column (may be shared by multiple agg calls).
     distinct_dedup_tables: HashMap<usize, StateTable<S>>,
 
     /// Extreme state cache size
