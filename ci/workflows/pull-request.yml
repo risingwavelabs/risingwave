@@ -37,10 +37,11 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          environment:
+            - BUILDKITE_ARTIFACT_UPLOAD_DESTINATION
     timeout_in_minutes: 15
     retry: *auto-retry
 
@@ -52,7 +53,6 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -67,7 +67,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -80,7 +79,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -95,7 +93,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -111,7 +108,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -125,7 +121,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -141,7 +136,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -157,7 +151,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -173,7 +166,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -187,7 +179,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: regress-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -204,7 +195,6 @@ steps:
           env:
             CODECOV_TOKEN: my-codecov-token
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           environment:
@@ -220,7 +210,6 @@ steps:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -233,7 +222,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env-hdfs
           config: ci/docker-compose.yml
     timeout_in_minutes: 20
@@ -244,7 +232,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -257,7 +244,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -270,7 +256,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -287,7 +272,6 @@ steps:
       #     env:
       #       BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-deterministic-token
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -303,7 +287,6 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          propagate-environment: true
           run: rw-build-env
           config: ci/docker-compose.yml
       - shellcheck#v1.2.0:
