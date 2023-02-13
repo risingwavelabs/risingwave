@@ -243,7 +243,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         &self,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
-        for (distinct_col, deduplicater) in &mut self.deduplicaters {
+        for (distinct_col, deduplicater) in &self.deduplicaters {
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
             deduplicater.flush(dedup_table);
         }

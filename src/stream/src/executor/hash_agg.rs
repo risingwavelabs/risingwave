@@ -455,7 +455,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .get_mut(key)
                         .expect("changed group must have corresponding AggGroup")
                         .as_mut();
-                    agg_group.flush_state_if_needed(storages).await?;
+                    // TODO(rctmp)
+                    let mut dedup_tables = Default::default();
+                    agg_group
+                        .flush_state_if_needed(storages, &mut dedup_tables)
+                        .await?;
                 }
 
                 // Create array builders.
