@@ -29,6 +29,7 @@ use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use self::imp::EmitPolicy;
@@ -263,7 +264,9 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
         // the order is the same as how we get distinct final columns from original columns.
         let mut unique_key_and_hash_codes = Vec::new();
 
-        for (row_idx, (key, hash_code)) in keys.iter().zip_eq(key_hash_codes.iter()).enumerate() {
+        for (row_idx, (key, hash_code)) in
+            keys.iter().zip_eq_fast(key_hash_codes.iter()).enumerate()
+        {
             // if the visibility map has already shadowed this row,
             // then we pass
             if let Some(vis_map) = visibility && !vis_map.is_set(row_idx) {
@@ -389,7 +392,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
         // Materialize input chunk if needed.
         storages
             .iter_mut()
-            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
             .for_each(|(storage, visibility)| {
                 if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
@@ -713,6 +716,7 @@ mod tests {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -1353,7 +1357,7 @@ mod tests {
         fn sorted_rows(self) -> Vec<(Op, OwnedRow)> {
             let (chunk, ops) = self.into_parts();
             ops.into_iter()
-                .zip_eq(
+                .zip_eq_debug(
                     chunk
                         .rows()
                         .map(Row::into_owned_row)

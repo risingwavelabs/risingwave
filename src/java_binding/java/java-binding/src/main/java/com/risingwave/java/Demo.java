@@ -52,11 +52,16 @@ public class Demo {
                             break;
                         }
                         System.out.printf(
-                                "key %s, id: %d, name: %s, is null: %s%n",
+                                "key %s, smallint: %s, int: %s, bigint: %s, float: %s, double: %s, bool: %s, varchar: %s, is null: %s%n",
                                 Arrays.toString(row.getKey()),
-                                row.getLong(0),
-                                row.getString(1),
-                                row.isNull(2));
+                                row.getShort(0),
+                                row.getInt(1),
+                                row.getLong(2),
+                                row.getFloat(3),
+                                row.getDouble(4),
+                                row.getBoolean(5),
+                                row.getString(6),
+                                row.isNull(7));
                     }
                 }
             }

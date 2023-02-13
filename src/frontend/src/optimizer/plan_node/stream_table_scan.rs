@@ -16,14 +16,16 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
+use super::{
+    ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamIndexScan, StreamNode,
+};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -67,8 +69,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,
@@ -231,5 +232,22 @@ impl StreamTableScan {
             },
             append_only: self.append_only(),
         }
+    }
+}
+
+impl ExprRewritable for StreamTableScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

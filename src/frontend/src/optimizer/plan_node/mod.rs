@@ -514,6 +514,7 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_watermark_filter;
 
 mod stream_share;
 mod stream_union;
@@ -589,6 +590,7 @@ pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -682,6 +684,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }
@@ -781,6 +784,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }

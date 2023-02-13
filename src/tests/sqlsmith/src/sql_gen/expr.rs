@@ -521,6 +521,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
         E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
+        E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
         E::CharLength => Some(Expr::Function(make_simple_func("char_length", &exprs))),
         E::Substr => Some(Expr::Function(make_simple_func("substr", &exprs))),

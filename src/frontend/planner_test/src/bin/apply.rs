@@ -17,6 +17,7 @@ use std::path::Path;
 use std::thread::available_parallelism;
 
 use anyhow::{anyhow, Context, Result};
+use backtrace::Backtrace;
 use console::style;
 use futures::StreamExt;
 use risingwave_planner_test::{resolve_testcase_id, TestCase};
@@ -24,13 +25,15 @@ use risingwave_planner_test::{resolve_testcase_id, TestCase};
 #[tokio::main]
 async fn main() -> Result<()> {
     std::panic::set_hook(Box::new(move |e| {
+        let backtrace = Backtrace::new();
         println!(
-            "{}{}{}{}{}\n{e}",
+            "{}{}{}{}{}\n{:?}\n{e}",
             style("ERROR: ").red().bold(),
             style("apply-planner-test").yellow(),
             style(" panicked! Try ").red().bold(),
             style("run-planner-test --no-fail-fast").yellow(),
-            style(" to find which test case panicked.").red().bold()
+            style(" to find which test case panicked.").red().bold(),
+            backtrace,
         );
         std::process::abort();
     }));
