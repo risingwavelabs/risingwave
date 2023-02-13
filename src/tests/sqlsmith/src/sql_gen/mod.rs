@@ -32,6 +32,7 @@ mod scalar;
 mod time_window;
 mod types;
 mod utils;
+mod insert;
 
 #[derive(Clone, Debug)]
 pub struct Table {
