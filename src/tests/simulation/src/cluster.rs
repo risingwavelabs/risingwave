@@ -98,6 +98,7 @@ impl Configuration {
 /// | etcd           | 192.168.10.1  |
 /// | kafka-broker   | 192.168.11.1  |
 /// | kafka-producer | 192.168.11.2  |
+/// | s3             | 192.168.12.1  |
 /// | client         | 192.168.100.1 |
 /// | ctl            | 192.168.101.1 |
 pub struct Cluster {
@@ -158,6 +159,19 @@ impl Cluster {
             .init(move || async move {
                 rdkafka::SimBroker::default()
                     .serve("0.0.0.0:29092".parse().unwrap())
+                    .await
+            })
+            .build();
+
+        // s3
+        handle
+            .create_node()
+            .name("s3")
+            .ip("192.168.12.1".parse().unwrap())
+            .init(move || async move {
+                aws_sdk_s3::server::SimServer::default()
+                    .with_bucket("hummock001")
+                    .serve("0.0.0.0:9301".parse().unwrap())
                     .await
             })
             .build();
@@ -227,7 +241,7 @@ impl Cluster {
                 "--meta-address",
                 "meta:5690",
                 "--state-store",
-                "hummock+memory-shared",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
             ]);
@@ -253,7 +267,7 @@ impl Cluster {
                 "--meta-address",
                 "meta:5690",
                 "--state-store",
-                "hummock+memory-shared",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
