@@ -1032,7 +1032,7 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::<_>::new_without_distribution(
             mem_state.clone(),
             TableId::new(table_id),
             column_descs,
@@ -1053,7 +1053,7 @@ mod tests {
             ColumnId::new(pk_indices.len() as i32),
             DataType::Int64,
         ));
-        let degree_state_table = StateTable::new_without_distribution(
+        let degree_state_table = StateTable::<_>::new_without_distribution(
             mem_state,
             TableId::new(table_id + 1),
             degree_table_column_descs,

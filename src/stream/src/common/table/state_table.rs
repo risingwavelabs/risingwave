@@ -51,18 +51,15 @@ use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution
 use risingwave_storage::StateStore;
 use tracing::trace;
 
-use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
+use super::watermark::{WatermarkBufferStrategy, WatermarkBufferStrategyByEpochDefault};
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
-
-/// This num is arbitrary and we may want to improve this choice in the future.
-const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
 pub struct StateTable<
     S: StateStore,
-    W: WatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+    W: WatermarkBufferStrategy = WatermarkBufferStrategyByEpochDefault,
 > {
     /// Id for this table.
     table_id: TableId,
@@ -508,7 +505,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
 const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 // point get
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
@@ -600,7 +597,7 @@ impl<S: StateStore> StateTable<S> {
 }
 
 // write
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     #[expect(clippy::boxed_local)]
     fn handle_mem_table_error(&self, e: Box<MemTableError>) {
         match *e {

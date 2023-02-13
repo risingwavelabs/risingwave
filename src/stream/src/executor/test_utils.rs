@@ -214,6 +214,7 @@ pub mod agg_executor {
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
+    use crate::common::table::watermark::WatermarkBufferStrategy;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
@@ -263,7 +264,7 @@ pub mod agg_executor {
                     add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
                 }
 
-                let state_table = StateTable::new_without_distribution(
+                let state_table = StateTable::<_>::new_without_distribution(
                     store,
                     table_id,
                     column_descs,
@@ -289,13 +290,13 @@ pub mod agg_executor {
     }
 
     /// Create result state table for agg executor.
-    pub async fn create_result_table<S: StateStore>(
+    pub async fn create_result_table<S: StateStore, W: WatermarkBufferStrategy>(
         store: S,
         table_id: TableId,
         agg_calls: &[AggCall],
         group_key_indices: &[usize],
         input_ref: &dyn Executor,
-    ) -> StateTable<S> {
+    ) -> StateTable<S, W> {
         let input_fields = input_ref.schema().fields();
 
         let mut column_descs = Vec::new();
@@ -319,7 +320,7 @@ pub mod agg_executor {
             add_column_desc(agg_call.return_type.clone());
         });
 
-        StateTable::new_without_distribution(
+        StateTable::<_, W>::new_without_distribution(
             store,
             table_id,
             column_descs,
@@ -411,7 +412,7 @@ pub mod top_n_executor {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_without_distribution(
+        StateTable::<_>::new_without_distribution(
             state_store,
             TableId::new(0),
             column_descs,

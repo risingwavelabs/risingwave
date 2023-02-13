@@ -25,15 +25,15 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
+use crate::executor::{ActorContextRef, EmitImmediate, EmitPolicy, HashAggExecutor, PkIndices};
 use crate::task::AtomicU64Ref;
 
-pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
+pub struct HashAggExecutorDispatcherArgs<S: StateStore, E: EmitPolicy> {
     ctx: ActorContextRef,
     input: BoxedExecutor,
     agg_calls: Vec<AggCall>,
     storages: Vec<AggStateStorage<S>>,
-    result_table: StateTable<S>,
+    result_table: StateTable<S, E::WatermarkBufferStrategy>,
     group_key_indices: Vec<usize>,
     group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
@@ -44,11 +44,11 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     chunk_size: usize,
 }
 
-impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
+impl<S: StateStore, E: EmitPolicy> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S, E> {
     type Output = StreamResult<BoxedExecutor>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        Ok(HashAggExecutor::<K, S>::new(
+        Ok(HashAggExecutor::<K, S, E>::new(
             self.ctx,
             self.input,
             self.agg_calls,
@@ -110,9 +110,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         .await;
 
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes).await;
+            StateTable::<_, <EmitImmediate as EmitPolicy>::WatermarkBufferStrategy>::from_table_catalog(node.get_result_table().unwrap(), store, vnodes).await;
 
-        let args = HashAggExecutorDispatcherArgs {
+        let args = HashAggExecutorDispatcherArgs::<_, EmitImmediate> {
             ctx: params.actor_context,
             input,
             agg_calls,

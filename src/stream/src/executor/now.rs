@@ -272,7 +272,7 @@ mod tests {
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
         let order_types = create_order_types();
         let pk_indices = create_pk_indices();
-        StateTable::new_without_distribution(
+        StateTable::<_>::new_without_distribution(
             memory_state_store,
             table_id,
             column_descs,

@@ -325,7 +325,7 @@ mod tests {
             .collect_vec();
         let mapping = StateTableColumnMapping::new(upstream_columns, None);
         let pk_len = order_types.len();
-        let table = StateTable::new_without_distribution(
+        let table = StateTable::<_>::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
             columns,

@@ -27,6 +27,7 @@ use risingwave_storage::StateStore;
 use super::agg_state::{AggState, AggStateStorage};
 use super::AggCall;
 use crate::common::table::state_table::StateTable;
+use crate::common::table::watermark::WatermarkBufferStrategy;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
@@ -67,11 +68,11 @@ pub struct AggChangesInfo {
 impl<S: StateStore> AggGroup<S> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
-    pub async fn create(
+    pub async fn create<W: WatermarkBufferStrategy>(
         group_key: Option<OwnedRow>,
         agg_calls: &[AggCall],
         storages: &[AggStateStorage<S>],
-        result_table: &StateTable<S>,
+        result_table: &StateTable<S, W>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,

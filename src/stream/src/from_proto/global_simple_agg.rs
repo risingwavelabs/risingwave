@@ -44,7 +44,8 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None).await;
+            StateTable::<_>::from_table_catalog(node.get_result_table().unwrap(), store, None)
+                .await;
 
         Ok(GlobalSimpleAggExecutor::new(
             params.actor_context,

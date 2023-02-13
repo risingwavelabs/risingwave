@@ -93,7 +93,7 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
         let agg_state_store = match agg_call_state.get_inner().unwrap() {
             agg_call_state::Inner::ResultValueState(..) => AggStateStorage::ResultValue,
             agg_call_state::Inner::TableState(state) => {
-                let table = StateTable::from_table_catalog(
+                let table = StateTable::<_>::from_table_catalog(
                     state.get_table().unwrap(),
                     store.clone(),
                     vnodes.clone(),
@@ -102,7 +102,7 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
                 AggStateStorage::Table { table }
             }
             agg_call_state::Inner::MaterializedInputState(state) => {
-                let table = StateTable::from_table_catalog(
+                let table = StateTable::<_>::from_table_catalog(
                     state.get_table().unwrap(),
                     store.clone(),
                     vnodes.clone(),

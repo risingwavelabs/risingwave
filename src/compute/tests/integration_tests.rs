@@ -427,7 +427,7 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = StateTable::new_without_distribution(
+    let mut state = StateTable::<_>::new_without_distribution(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

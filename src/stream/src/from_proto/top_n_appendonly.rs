@@ -37,7 +37,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
+        let state_table = StateTable::<_>::from_table_catalog(table, store, vnodes).await;
         let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
 

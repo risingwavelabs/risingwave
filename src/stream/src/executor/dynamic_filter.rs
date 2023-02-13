@@ -492,7 +492,7 @@ mod tests {
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
         // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let state_table_l = StateTable::new_without_distribution_no_sanity_check(
+        let state_table_l = StateTable::<_>::new_without_distribution_no_sanity_check(
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
@@ -500,7 +500,7 @@ mod tests {
             vec![0],
         )
         .await;
-        let state_table_r = StateTable::new_without_distribution_no_sanity_check(
+        let state_table_r = StateTable::<_>::new_without_distribution_no_sanity_check(
             mem_state,
             TableId::new(1),
             vec![column_descs],

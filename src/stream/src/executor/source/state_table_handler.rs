@@ -51,7 +51,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
 
         Self {
-            state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+            state_store: StateTable::<_>::from_table_catalog(table_catalog, store, None).await,
         }
     }
 
@@ -241,9 +241,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_from_table_catalog() {
         let store = MemoryStateStore::new();
-        let mut state_table =
-            StateTable::from_table_catalog(&default_source_internal_table(0x2333), store, None)
-                .await;
+        let mut state_table = StateTable::<_>::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            store,
+            None,
+        )
+        .await;
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
         let b: Arc<str> = String::from("b").into();

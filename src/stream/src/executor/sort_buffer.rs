@@ -261,7 +261,7 @@ mod tests {
         let row_pretty = |s: &str| OwnedRow::from_pretty_with_tys(&tys, s);
 
         let order_types = vec![OrderType::Ascending];
-        let mut state_table = StateTable::new_without_distribution(
+        let mut state_table = StateTable::<_>::new_without_distribution(
             state_store.clone(),
             table_id,
             column_descs.clone(),
@@ -326,7 +326,7 @@ mod tests {
         // Failover and recover
         drop(sort_buffer);
 
-        let mut state_table = StateTable::new_without_distribution(
+        let mut state_table = StateTable::<_>::new_without_distribution(
             state_store.clone(),
             table_id,
             column_descs,

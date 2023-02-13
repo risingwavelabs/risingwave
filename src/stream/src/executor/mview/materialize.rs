@@ -79,7 +79,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
         let schema = input.schema().clone();
 
-        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes).await;
+        let state_table = StateTable::<_>::from_table_catalog(table_catalog, store, vnodes).await;
 
         Self {
             input,
@@ -117,7 +117,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::<_>::new_without_distribution(
             store,
             table_id,
             columns,

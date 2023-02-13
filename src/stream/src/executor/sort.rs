@@ -504,7 +504,7 @@ mod tests {
         ];
         let order_types = vec![OrderType::Ascending];
         let pk_indices = create_pk_indices();
-        StateTable::new_without_distribution(
+        StateTable::<_>::new_without_distribution(
             memory_state_store,
             table_id,
             column_descs,

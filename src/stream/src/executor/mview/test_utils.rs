@@ -33,7 +33,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = StateTable::new_without_distribution(
+    let mut state = StateTable::<_>::new_without_distribution(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

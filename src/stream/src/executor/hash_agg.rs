@@ -32,13 +32,15 @@ use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use self::imp::EmitPolicy;
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{
     expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
+use crate::common::table::watermark::{
+    WatermarkBufferStrategy, WatermarkBufferStrategyByEpochDefault, WatermarkNoBuffer,
+};
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
@@ -49,19 +51,17 @@ use crate::task::AtomicU64Ref;
 type BoxedAggGroup<S> = Box<AggGroup<S>>;
 type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
 
-mod imp {
-    use risingwave_common::row::Row;
+pub trait EmitPolicy: Send + Sync + 'static {
+    type WatermarkBufferStrategy: WatermarkBufferStrategy;
 
-    use crate::executor::Watermark;
-
-    pub trait EmitPolicy: Send + Sync + 'static {
-        fn should_emit(key: impl Row, buffered_watermarks: &[Option<Watermark>]) -> bool;
-    }
+    fn should_emit(key: impl Row, buffered_watermarks: &[Option<Watermark>]) -> bool;
 }
 
 pub struct EmitImmediate;
 
-impl imp::EmitPolicy for EmitImmediate {
+impl EmitPolicy for EmitImmediate {
+    type WatermarkBufferStrategy = WatermarkBufferStrategyByEpochDefault;
+
     #[inline(always)]
     fn should_emit(_key: impl Row, _buffered_watermarks: &[Option<Watermark>]) -> bool {
         true
@@ -70,7 +70,9 @@ impl imp::EmitPolicy for EmitImmediate {
 
 pub struct EmitOnWatermarkClose;
 
-impl imp::EmitPolicy for EmitOnWatermarkClose {
+impl EmitPolicy for EmitOnWatermarkClose {
+    type WatermarkBufferStrategy = WatermarkNoBuffer;
+
     #[inline(always)]
     fn should_emit(key: impl Row, buffered_watermarks: &[Option<Watermark>]) -> bool {
         let Some(Some(cur_watermark)) = buffered_watermarks.get(0) else {
@@ -95,15 +97,15 @@ impl imp::EmitPolicy for EmitOnWatermarkClose {
 /// * Upon a barrier is received, the executor will call `.flush` on the storage backend, so that
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `modified_keys`, and produce a stream chunk based on the state changes.
-pub struct HashAggExecutor<K: HashKey, S: StateStore, E: imp::EmitPolicy = EmitImmediate> {
+pub struct HashAggExecutor<K: HashKey, S: StateStore, E: EmitPolicy = EmitImmediate> {
     input: Box<dyn Executor>,
 
-    extra: HashAggExecutorExtra<K, S>,
+    extra: HashAggExecutorExtra<K, S, E>,
 
     _phantom: PhantomData<E>,
 }
 
-struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
+struct HashAggExecutorExtra<K: HashKey, S: StateStore, E: EmitPolicy> {
     ctx: ActorContextRef,
 
     /// See [`Executor::schema`].
@@ -131,7 +133,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// State table for the previous result of all agg calls.
     /// The outputs of all managed agg states are collected and stored in this
     /// table when `flush_data` is called.
-    result_table: StateTable<S>,
+    result_table: StateTable<S, E::WatermarkBufferStrategy>,
 
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
@@ -188,14 +190,14 @@ impl<K: HashKey, S: StateStore, E: EmitPolicy> Executor for HashAggExecutor<K, S
     }
 }
 
-impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
+impl<K: HashKey, S: StateStore, E: EmitPolicy> HashAggExecutor<K, S, E> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         storages: Vec<AggStateStorage<S>>,
-        result_table: StateTable<S>,
+        result_table: StateTable<S, E::WatermarkBufferStrategy>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
         executor_id: u64,
@@ -294,7 +296,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
     }
 
     async fn apply_chunk(
-        HashAggExecutorExtra::<K, S> {
+        HashAggExecutorExtra::<K, S, E> {
             ref ctx,
             ref identity,
             ref group_key_indices,
@@ -311,7 +313,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
             ref mut chunk_lookup_miss_count,
             ref mut chunk_total_lookup_count,
             ..
-        }: &mut HashAggExecutorExtra<K, S>,
+        }: &mut HashAggExecutorExtra<K, S, E>,
         agg_group_cache: &mut AggGroupCache<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
@@ -427,7 +429,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn flush_data<'a>(
-        &mut HashAggExecutorExtra::<K, S> {
+        &mut HashAggExecutorExtra::<K, S, E> {
             ref ctx,
             ref group_key_indices,
             ref schema,
@@ -442,7 +444,7 @@ impl<K: HashKey, S: StateStore, E: imp::EmitPolicy> HashAggExecutor<K, S, E> {
             ref chunk_size,
             ref buffered_watermarks,
             ..
-        }: &'a mut HashAggExecutorExtra<K, S>,
+        }: &'a mut HashAggExecutorExtra<K, S, E>,
         agg_group_cache: &'a mut AggGroupCache<K, S>,
         epoch: EpochPair,
     ) {
@@ -741,6 +743,8 @@ mod tests {
         // TODO: should we use an enum here?
         emit_immediate: bool,
     ) -> Box<dyn Executor> {
+        use super::EmitPolicy;
+
         let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
             agg_state_tables.push(
@@ -756,17 +760,20 @@ mod tests {
             )
         }
 
-        let result_table = create_result_table(
-            store,
-            TableId::new(agg_calls.len() as u32),
-            &agg_calls,
-            &group_key_indices,
-            input.as_ref(),
-        )
-        .await;
-
         if emit_immediate {
-            HashAggExecutor::<SerializedKey, S, EmitImmediate>::new(
+            type E = EmitImmediate;
+
+            let result_table =
+                create_result_table::<S, <E as EmitPolicy>::WatermarkBufferStrategy>(
+                    store,
+                    TableId::new(agg_calls.len() as u32),
+                    &agg_calls,
+                    &group_key_indices,
+                    input.as_ref(),
+                )
+                .await;
+
+            HashAggExecutor::<SerializedKey, S, E>::new(
                 ActorContext::create(123),
                 input,
                 agg_calls,
@@ -783,7 +790,19 @@ mod tests {
             .unwrap()
             .boxed()
         } else {
-            HashAggExecutor::<SerializedKey, S, EmitOnWatermarkClose>::new(
+            type E = EmitOnWatermarkClose;
+
+            let result_table =
+                create_result_table::<S, <E as EmitPolicy>::WatermarkBufferStrategy>(
+                    store,
+                    TableId::new(agg_calls.len() as u32),
+                    &agg_calls,
+                    &group_key_indices,
+                    input.as_ref(),
+                )
+                .await;
+
+            HashAggExecutor::<SerializedKey, S, E>::new(
                 ActorContext::create(123),
                 input,
                 agg_calls,

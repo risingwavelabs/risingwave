@@ -41,7 +41,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
+            StateTable::<_>::from_table_catalog(node.get_state_table()?, store, None).await;
 
         Ok(Box::new(NowExecutor::new(
             barrier_receiver,

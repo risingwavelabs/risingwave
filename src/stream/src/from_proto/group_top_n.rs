@@ -43,7 +43,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             .collect();
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
+        let state_table = StateTable::<_>::from_table_catalog(table, store, vnodes).await;
         let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let group_key_types = group_by

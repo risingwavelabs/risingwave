@@ -108,7 +108,7 @@ pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::GlobalSimpleAggExecutor;
-pub use hash_agg::HashAggExecutor;
+pub use hash_agg::{EmitImmediate, EmitOnWatermarkClose, EmitPolicy, HashAggExecutor};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;

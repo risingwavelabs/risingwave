@@ -47,7 +47,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         // TODO: may enable sanity check for watermark filter after we have upsert.
         let [table]: [_; 1] = node.get_tables().clone().try_into().unwrap();
         let table =
-            StateTable::from_table_catalog_no_sanity_check(&table, store, Some(vnodes)).await;
+            StateTable::<_>::from_table_catalog_no_sanity_check(&table, store, Some(vnodes)).await;
 
         Ok(WatermarkFilterExecutor::new(
             input,

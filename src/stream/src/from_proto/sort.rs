@@ -35,7 +35,7 @@ impl ExecutorBuilder for SortExecutorBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for sort"));
         let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, Some(vnodes)).await;
+            StateTable::<_>::from_table_catalog(node.get_state_table()?, store, Some(vnodes)).await;
         Ok(Box::new(SortExecutor::new(
             params.actor_context,
             input,

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /// Strategy to decide how to buffer the watermarks, used for state cleaning.
-pub trait WatermarkBufferStrategy: Default {
+pub trait WatermarkBufferStrategy: Default + Send + Sync + 'static {
     /// Trigger when a epoch is committed.
     fn tick(&mut self);
 
@@ -58,3 +58,9 @@ impl<const PERIOD: usize> WatermarkBufferStrategy for WatermarkBufferByEpoch<PER
         }
     }
 }
+
+/// This num is arbitrary and we may want to improve this choice in the future.
+const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
+
+pub type WatermarkBufferStrategyByEpochDefault =
+    WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>;

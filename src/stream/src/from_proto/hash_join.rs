@@ -90,15 +90,18 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
-        let degree_state_table_l =
-            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()))
-                .await;
+            StateTable::<_>::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
+        let degree_state_table_l = StateTable::<_>::from_table_catalog(
+            degree_table_l,
+            store.clone(),
+            Some(vnodes.clone()),
+        )
+        .await;
 
         let state_table_r =
-            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
+            StateTable::<_>::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
         let degree_state_table_r =
-            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
+            StateTable::<_>::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
