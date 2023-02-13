@@ -18,7 +18,7 @@ use std::{fmt, iter};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
@@ -682,12 +682,12 @@ impl LogicalAggBuilder {
                                 .unwrap(),
                             ),
                             match agg {
-                                AggKind::StddevPop => count_expr,
+                                AggKind::StddevPop => count_expr.clone(),
                                 AggKind::StddevSamp => ExprImpl::from(
                                     FunctionCall::new(
                                         ExprType::Subtract,
                                         vec![
-                                            count_expr,
+                                            count_expr.clone(),
                                             ExprImpl::from(Literal::new(
                                                 Datum::from(ScalarImpl::Int16(1)),
                                                 DataType::Int16,
@@ -696,7 +696,6 @@ impl LogicalAggBuilder {
                                     )
                                     .unwrap(),
                                 ),
-
                                 _ => unreachable!(),
                             },
                         ],
@@ -704,7 +703,54 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
-                Ok(expr_impl)
+                let expr_impl1 = ExprImpl::from(
+                    FunctionCall::new(
+                        ExprType::Pow,
+                        vec![
+                            expr_impl,
+                            ExprImpl::from(Literal::new(
+                                Datum::from(ScalarImpl::Float64(OrderedF64::from(0.5))),
+                                DataType::Float64,
+                            )),
+                        ],
+                    )
+                    .unwrap(),
+                );
+
+                match agg {
+                    AggKind::StddevPop => Ok(expr_impl1),
+                    AggKind::StddevSamp => {
+                        // ExprImpl::from()
+                        let case_expr = ExprImpl::from(
+                            FunctionCall::new(
+                                ExprType::Case,
+                                vec![
+                                    ExprImpl::from(
+                                        FunctionCall::new(
+                                            ExprType::LessThanOrEqual,
+                                            vec![
+                                                count_expr,
+                                                ExprImpl::from(Literal::new(
+                                                    Datum::from(ScalarImpl::Int64(1)),
+                                                    DataType::Int64,
+                                                )),
+                                            ],
+                                        )
+                                        .unwrap(),
+                                    ),
+                                    ExprImpl::from(Literal::new(Datum::None, DataType::Float64)),
+                                    expr_impl1,
+                                ],
+                            )
+                            .unwrap(),
+                        );
+
+                        Ok(case_expr)
+
+                        // Ok(expr_impl1)
+                    }
+                    _ => unreachable!(),
+                }
             }
 
             _ => {
