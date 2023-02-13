@@ -333,7 +333,7 @@ pub mod tests {
     use crate::hummock::compaction::level_selector::{LevelSelector, ManualCompactionSelector};
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::LocalSelectorStatistic;
-    use crate::hummock::compaction_group::CompactionGroup;
+    use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     fn clean_task_state(level_handler: &mut LevelHandler) {
@@ -397,6 +397,7 @@ pub mod tests {
         let mut levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let mut levels_handler = vec![
             LevelHandler::new(0),
@@ -582,6 +583,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
 
         let levels_handler = vec![
@@ -609,6 +611,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
 
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -628,6 +631,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let option = ManualCompactionOption {
@@ -1167,6 +1171,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
@@ -1273,6 +1278,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(l0),
+            ..Default::default()
         };
         let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();

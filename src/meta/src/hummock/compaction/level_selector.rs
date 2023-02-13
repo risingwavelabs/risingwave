@@ -36,8 +36,8 @@ use crate::hummock::compaction::{
     create_overlap_strategy, CompactionPicker, CompactionTask, LocalPickerStatistic,
     LocalSelectorStatistic, MinOverlappingPicker,
 };
-use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::level_handler::LevelHandler;
+use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
 const SCORE_BASE: u64 = 100;
@@ -364,7 +364,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let mut picker = SpaceReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
-            group.member_table_ids.clone(),
+            levels.member_table_ids.iter().cloned().collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let state = self
@@ -636,6 +636,7 @@ pub mod tests {
         let mut levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
@@ -712,6 +713,7 @@ pub mod tests {
                 3,
                 10,
             ))),
+            ..Default::default()
         };
 
         let mut selector = DynamicLevelSelector::default();
