@@ -30,7 +30,6 @@ use crate::executor::StreamExecutorResult;
 /// Deduplicater for one distinct column.
 struct Deduplicater<S: StateStore> {
     agg_call_indices: Vec<usize>,
-    // TODO(rctmp): need a cache
     _phantom: PhantomData<S>,
 }
 
@@ -52,7 +51,8 @@ impl<S: StateStore> Deduplicater<S> {
         &self.agg_call_indices
     }
 
-    /// Update the `visibilities` of distinct agg calls that distinct on the `column`.
+    /// Update the `visibilities` of distinct agg calls that distinct on the `column`,
+    /// according to the counts of distinct keys for each call.
     ///
     /// * `ops`: Ops for each datum in `column`.
     /// * `column`: The column to distinct on.
@@ -69,10 +69,11 @@ impl<S: StateStore> Deduplicater<S> {
         assert_eq!(visibilities.len(), self.agg_call_indices.len());
         println!("[rc] column: {:?}", column);
 
-        // TODO(rctmp): move to struct field
+        // TODO(rc): move to field of `Deduplicater`
         let mut cache = HashMap::new();
         let mut old_rows = HashMap::new();
 
+        // inverted masks for visibilities, 1 means hidden, 0 means visible
         let mut vis_masks_inv = (0..visibilities.len())
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
@@ -163,8 +164,8 @@ impl<S: StateStore> Deduplicater<S> {
     }
 
     /// Flush the deduplication table.
-    fn flush(&mut self, dedup_table: &mut StateTable<S>) {
-        todo!()
+    fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
+        // TODO(rc): now we flush the table in `dedup` method.
     }
 }
 

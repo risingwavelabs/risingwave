@@ -38,7 +38,6 @@
 #![feature(btree_drain_filter)]
 #![feature(bound_map)]
 #![feature(iter_order_by)]
-#![feature(get_many_mut)]
 
 #[macro_use]
 extern crate tracing;
