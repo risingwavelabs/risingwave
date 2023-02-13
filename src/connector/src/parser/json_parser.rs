@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -20,7 +22,7 @@ use simd_json::{BorrowedValue, ValueAccess};
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{ErrorReportingContext, SourceColumnDesc};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -28,11 +30,25 @@ impl_common_parser_logic!(JsonParser);
 #[derive(Debug)]
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,
+    error_ctx: ErrorReportingContext,
 }
 
 impl JsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        Ok(Self { rw_columns })
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        error_ctx: ErrorReportingContext,
+    ) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            error_ctx,
+        })
+    }
+
+    pub fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            error_ctx: ErrorReportingContext::for_test(),
+        })
     }
 
     #[allow(clippy::unused_async)]
@@ -76,6 +92,7 @@ mod tests {
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
+    use crate::source::ErrorReportingContext;
 
     #[tokio::test]
     async fn test_json_parser() {
@@ -92,7 +109,7 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
-        let parser = JsonParser::new(descs.clone()).unwrap();
+        let parser = JsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -184,7 +201,7 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
-        let parser = JsonParser::new(descs.clone()).unwrap();
+        let parser = JsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
@@ -245,7 +262,7 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(descs.clone()).unwrap();
+        let parser = JsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
         let payload = br#"
         {
             "data": {

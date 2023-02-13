@@ -28,7 +28,7 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{ErrorReportingContext, SourceColumnDesc};
 use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
 
 const AFTER: &str = "data";
@@ -40,11 +40,18 @@ impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
 pub struct CanalJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
+    error_ctx: ErrorReportingContext,
 }
 
 impl CanalJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        Ok(Self { rw_columns })
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        error_ctx: ErrorReportingContext,
+    ) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            error_ctx,
+        })
     }
 
     #[allow(clippy::unused_async)]

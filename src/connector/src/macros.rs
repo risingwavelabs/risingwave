@@ -182,6 +182,7 @@ macro_rules! impl_common_parser_logic {
                             if let Err(e) = self.parse_inner(content.as_ref(), builder.row_writer())
                                 .await
                             {
+                                self.error_ctx.report_stream_source_error(&e);
                                 tracing::warn!("message parsing failed {}, skipping", e.to_string());
                                 continue;
                             }
@@ -241,6 +242,11 @@ macro_rules! impl_common_split_reader_logic {
                 let source_id = self.source_info.source_id.to_string();
                 let split_id = self.split_id.clone();
                 let metrics = self.metrics.clone();
+                let error_ctx = $crate::source::base::ErrorReportingContext::new(
+                    self.source_info.source_id.table_id,
+                    self.source_info.fragment_id,
+                    self.metrics.clone()
+                );
 
                 let data_stream = self.into_data_stream();
 
@@ -265,7 +271,7 @@ macro_rules! impl_common_split_reader_logic {
                     })
                     .boxed();
                 let parser =
-                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config)?;
+                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config, error_ctx)?;
                 #[for_await]
                 for msg_batch in parser.into_stream(data_stream) {
                     yield msg_batch?;

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -80,13 +80,78 @@ pub trait SplitEnumerator: Sized {
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
+    // There should be a 1-1 mapping between `source_id` & `fragment_id`
+    pub fragment_id: u32,
 }
 
 impl SourceInfo {
-    pub fn new(actor_id: u32, source_id: TableId) -> Self {
+    pub fn new(actor_id: u32, source_id: TableId, fragment_id: u32) -> Self {
         SourceInfo {
             actor_id,
             source_id,
+            fragment_id,
+        }
+    }
+}
+
+// const MAX_BLACKLISTED_STREAM_ERROR_MSGS: usize = 50;
+
+// struct ErrorTruncator {
+//     max_size_reached: bool,
+//     // We will only report a maximum of `MAX_UNIQUE_ERROR_MSGS` unique errors before
+//     // we truncate the error messages to reduce their cardinality
+//     past_error_msgs: Arc<RwLock<HashSet<String>>>
+// }
+
+// impl ErrorTrucator {
+//     fn should_truncate_msg(&self, msg: &str) -> bool {
+//         if !self.past_error_msgs.read().contains(msg) {
+
+//         }
+//         false
+//     }
+// }
+
+#[derive(Debug, Clone)]
+pub struct ErrorReportingContext {
+    metrics: Arc<SourceMetrics>,
+    table_id: u32,
+    fragment_id: u32,
+}
+
+impl ErrorReportingContext {
+    pub(crate) fn new(table_id: u32, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
+        Self {
+            metrics,
+            table_id,
+            fragment_id,
+        }
+    }
+
+    pub(crate) fn report_stream_source_error(&self, e: &RwError) {
+        // Do not report for batch
+        if self.fragment_id == u32::MAX {
+            return;
+        }
+        self.metrics
+            .source_error_count
+            .with_label_values(&[
+                "SourceError",
+                // TODO(jon-chuang): add the error msg truncator to truncate these
+                &e.inner().to_string(),
+                // Let's be a bit more specific for SourceExecutor
+                "SourceExecutor",
+                &self.fragment_id.to_string(),
+                &self.table_id.to_string(),
+            ])
+            .inc();
+    }
+
+    pub(crate) fn for_test() -> Self {
+        Self {
+            metrics: Arc::new(SourceMetrics::unused()),
+            table_id: u32::MAX,
+            fragment_id: u32::MAX,
         }
     }
 }

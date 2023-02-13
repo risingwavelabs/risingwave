@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
@@ -28,7 +29,8 @@ use crate::parser::{
     BoxSourceWithStateStream, ByteStreamSourceParser, SourceColumnDesc, SourceStreamChunkBuilder,
     SourceStreamChunkRowWriter, StreamChunkWithState, WriteGuard,
 };
-use crate::source::{BoxSourceStream, SplitId};
+use crate::source::monitor::SourceMetrics;
+use crate::source::{BoxSourceStream, ErrorReportingContext, SplitId};
 
 macro_rules! to_rust_type {
     ($v:ident, $t:ty) => {
@@ -53,10 +55,15 @@ pub struct CsvParser {
     output_cursor: usize,
     ends: Vec<usize>,
     ends_cursor: usize,
+    error_ctx: ErrorReportingContext,
 }
 
 impl CsvParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, parser_config: CsvParserConfig) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        parser_config: CsvParserConfig,
+        error_ctx: ErrorReportingContext,
+    ) -> Result<Self> {
         let CsvParserConfig {
             delimiter,
             has_header,
@@ -70,6 +77,7 @@ impl CsvParser {
             output_cursor: 0,
             ends: vec![0],
             ends_cursor: 1,
+            error_ctx,
         })
     }
 
@@ -316,7 +324,7 @@ mod tests {
             delimiter: b',',
             has_header: true,
         };
-        let parser = CsvParser::new(descs, config).unwrap();
+        let parser = CsvParser::new(descs, config, ErrorReportingContext::for_test()).unwrap();
         let data = b"
 name,age
 pite,20
@@ -341,7 +349,7 @@ alex,10";
             delimiter: b',',
             has_header: true,
         };
-        let parser = CsvParser::new(descs, config).unwrap();
+        let parser = CsvParser::new(descs, config, ErrorReportingContext::for_test()).unwrap();
         let data = b"
 name,age
 pite,20

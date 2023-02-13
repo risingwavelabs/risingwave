@@ -52,6 +52,19 @@ pub struct StreamError {
     backtrace: Backtrace,
 }
 
+pub enum StreamUserError {
+    ExprError(String),
+    ConnectorError(String),
+    ParserError(String),
+}
+
+// impl From<ExprError> for StreamUserError {
+//     fn from(expr: ExprError) -> Self {
+//         // Probably expect finite cardinality
+//         UnsupportedFunction(_)
+//     }
+// }
+
 impl std::fmt::Debug for StreamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;

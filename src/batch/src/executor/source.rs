@@ -159,7 +159,7 @@ impl SourceExecutor {
                 Some(vec![self.split]),
                 self.column_ids,
                 self.metrics,
-                SourceInfo::new(u32::MAX, self.source_id),
+                SourceInfo::new(u32::MAX, self.source_id, u32::MAX),
             )
             .await?;
 

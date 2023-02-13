@@ -24,7 +24,6 @@ use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
-use risingwave_expr::expr::Expression;
 use tokio_stream::StreamExt;
 
 use super::monitor::StreamingMetrics;
@@ -36,7 +35,7 @@ use crate::task::{ActorId, SharedContext};
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
-    fragment_id: u32,
+    pub fragment_id: u32,
 
     // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
@@ -79,14 +78,14 @@ impl ActorContext {
         })
     }
 
-    pub fn on_compute_error(&self, expr: &Box<dyn Expression>, err: ExprError, identity: &str) {
+    pub fn on_compute_error(&self, err: ExprError, identity: &str) {
         tracing::error!("Compute error: {}, executor: {identity}", err);
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         self.streaming_metrics
-            .user_error_count
+            .compute_error_count
             .with_label_values(&[
                 "ExprError",
-                &format!("In {expr}: {}", err.to_string()),
+                &err.to_string(),
                 executor_name,
                 &self.fragment_id.to_string(),
             ])

@@ -100,6 +100,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 SourceInfo::new(
                     self.ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id,
+                    self.ctx.fragment_id,
                 ),
             )
             .await

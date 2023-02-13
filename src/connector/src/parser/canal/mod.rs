@@ -31,7 +31,7 @@ mod tests {
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
-    use crate::source::SourceColumnDesc;
+    use crate::source::{ErrorReportingContext, SourceColumnDesc};
 
     #[tokio::test]
     async fn test_json_parser() {
@@ -46,7 +46,8 @@ mod tests {
             SourceColumnDesc::simple("win_rate", DataType::Float64, 5.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone()).unwrap();
+        let parser =
+            CanalJsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -123,7 +124,8 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int32, 1.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone()).unwrap();
+        let parser =
+            CanalJsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 

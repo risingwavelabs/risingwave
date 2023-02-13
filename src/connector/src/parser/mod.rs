@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 pub use avro::*;
 pub use canal::*;
@@ -31,8 +32,10 @@ use risingwave_pb::catalog::StreamSourceInfo;
 
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
+use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceFormat, StreamChunkWithState,
+    BoxSourceStream, BoxSourceWithStateStream, ErrorReportingContext, SourceColumnDesc,
+    SourceFormat, StreamChunkWithState,
 };
 
 mod avro;
@@ -244,11 +247,11 @@ impl SourceStreamChunkRowWriter<'_> {
 
     /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
     /// builder. e.g after insert
-    /// `data_budiler` = [1], `meta_column_builder` = [], `op` = [insert]
+    /// `data_builder` = [1], `meta_column_builder` = [], `op` = [insert]
     ///
     /// This function is used to fulfill this hollow in `meta_column_builder`.
     /// e.g after fulfill
-    /// `data_budiler` = [1], `meta_column_builder` = [1], `op` = [insert]
+    /// `data_builder` = [1], `meta_column_builder` = [1], `op` = [insert]
     pub fn fulfill_meta_column(
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
@@ -332,24 +335,28 @@ impl ByteStreamSourceParserImpl {
         }
     }
 
-    pub fn create(parser_config: ParserConfig) -> Result<Self> {
+    pub fn create(parser_config: ParserConfig, error_ctx: ErrorReportingContext) -> Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         match parser_config.specific {
-            SpecificParserConfig::Csv(config) => CsvParser::new(rw_columns, config).map(Self::Csv),
+            SpecificParserConfig::Csv(config) => {
+                CsvParser::new(rw_columns, config, error_ctx).map(Self::Csv)
+            }
             SpecificParserConfig::Avro(config) => {
-                AvroParser::new(rw_columns, config).map(Self::Avro)
+                AvroParser::new(rw_columns, config, error_ctx).map(Self::Avro)
             }
             SpecificParserConfig::Protobuf(config) => {
-                ProtobufParser::new(rw_columns, config).map(Self::Protobuf)
+                ProtobufParser::new(rw_columns, config, error_ctx).map(Self::Protobuf)
             }
-            SpecificParserConfig::Json => JsonParser::new(rw_columns).map(Self::Json),
+            SpecificParserConfig::Json => JsonParser::new(rw_columns, error_ctx).map(Self::Json),
             SpecificParserConfig::CanalJson => {
-                CanalJsonParser::new(rw_columns).map(Self::CanalJson)
+                CanalJsonParser::new(rw_columns, error_ctx).map(Self::CanalJson)
             }
             SpecificParserConfig::DebeziumJson => {
-                DebeziumJsonParser::new(rw_columns).map(Self::DebeziumJson)
+                DebeziumJsonParser::new(rw_columns, error_ctx).map(Self::DebeziumJson)
             }
-            SpecificParserConfig::Maxwell => MaxwellParser::new(rw_columns).map(Self::Maxwell),
+            SpecificParserConfig::Maxwell => {
+                MaxwellParser::new(rw_columns, error_ctx).map(Self::Maxwell)
+            }
         }
     }
 }

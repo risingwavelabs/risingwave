@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -33,7 +34,7 @@ use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{ErrorReportingContext, SourceColumnDesc};
 
 impl_common_parser_logic!(ProtobufParser);
 
@@ -42,6 +43,7 @@ pub struct ProtobufParser {
     message_descriptor: MessageDescriptor,
     confluent_wire_type: bool,
     rw_columns: Vec<SourceColumnDesc>,
+    error_ctx: ErrorReportingContext,
 }
 
 #[derive(Debug, Clone)]
@@ -167,7 +169,11 @@ impl ProtobufParserConfig {
 }
 
 impl ProtobufParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, config: ProtobufParserConfig) -> Result<Self> {
+    pub fn new(
+        rw_columns: Vec<SourceColumnDesc>,
+        config: ProtobufParserConfig,
+        error_ctx: ErrorReportingContext,
+    ) -> Result<Self> {
         let ProtobufParserConfig {
             confluent_wire_type,
             message_descriptor,
@@ -176,6 +182,7 @@ impl ProtobufParser {
             message_descriptor,
             confluent_wire_type,
             rw_columns,
+            error_ctx,
         })
     }
 
@@ -362,7 +369,7 @@ mod test {
         println!("location: {}", location);
         let conf =
             ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
-        let parser = ProtobufParser::new(Vec::default(), conf)?;
+        let parser = ProtobufParser::new(Vec::default(), conf, ErrorReportingContext::for_test())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(
