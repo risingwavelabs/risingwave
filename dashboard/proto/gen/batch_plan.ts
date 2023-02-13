@@ -464,6 +464,10 @@ export const RowSeqScanNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<RowSeqScanNode>, I>>(base?: I): RowSeqScanNode {
+    return RowSeqScanNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<RowSeqScanNode>, I>>(object: I): RowSeqScanNode {
     const message = createBaseRowSeqScanNode();
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
@@ -497,6 +501,10 @@ export const RowSeqScanNode_ChunkSize = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<RowSeqScanNode_ChunkSize>, I>>(base?: I): RowSeqScanNode_ChunkSize {
+    return RowSeqScanNode_ChunkSize.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<RowSeqScanNode_ChunkSize>, I>>(object: I): RowSeqScanNode_ChunkSize {
     const message = createBaseRowSeqScanNode_ChunkSize();
     message.chunkSize = object.chunkSize ?? 0;
@@ -525,6 +533,10 @@ export const SysRowSeqScanNode = {
       obj.columnDescs = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SysRowSeqScanNode>, I>>(base?: I): SysRowSeqScanNode {
+    return SysRowSeqScanNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SysRowSeqScanNode>, I>>(object: I): SysRowSeqScanNode {
@@ -562,6 +574,10 @@ export const ScanRange = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ScanRange>, I>>(base?: I): ScanRange {
+    return ScanRange.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ScanRange>, I>>(object: I): ScanRange {
     const message = createBaseScanRange();
     message.eqConds = object.eqConds?.map((e) => e) || [];
@@ -593,6 +609,10 @@ export const ScanRange_Bound = {
       (obj.value = base64FromBytes(message.value !== undefined ? message.value : new Uint8Array()));
     message.inclusive !== undefined && (obj.inclusive = message.inclusive);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ScanRange_Bound>, I>>(base?: I): ScanRange_Bound {
+    return ScanRange_Bound.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ScanRange_Bound>, I>>(object: I): ScanRange_Bound {
@@ -643,6 +663,10 @@ export const SourceNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SourceNode>, I>>(base?: I): SourceNode {
+    return SourceNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SourceNode>, I>>(object: I): SourceNode {
     const message = createBaseSourceNode();
     message.sourceId = object.sourceId ?? 0;
@@ -680,6 +704,10 @@ export const SourceNode_PropertiesEntry = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SourceNode_PropertiesEntry>, I>>(base?: I): SourceNode_PropertiesEntry {
+    return SourceNode_PropertiesEntry.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SourceNode_PropertiesEntry>, I>>(object: I): SourceNode_PropertiesEntry {
     const message = createBaseSourceNode_PropertiesEntry();
     message.key = object.key ?? "";
@@ -709,6 +737,10 @@ export const ProjectNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ProjectNode>, I>>(base?: I): ProjectNode {
+    return ProjectNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ProjectNode>, I>>(object: I): ProjectNode {
     const message = createBaseProjectNode();
     message.selectList = object.selectList?.map((e) => ExprNode.fromPartial(e)) || [];
@@ -730,6 +762,10 @@ export const FilterNode = {
     message.searchCondition !== undefined &&
       (obj.searchCondition = message.searchCondition ? ExprNode.toJSON(message.searchCondition) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<FilterNode>, I>>(base?: I): FilterNode {
+    return FilterNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<FilterNode>, I>>(object: I): FilterNode {
@@ -769,6 +805,10 @@ export const InsertNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<InsertNode>, I>>(base?: I): InsertNode {
+    return InsertNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<InsertNode>, I>>(object: I): InsertNode {
     const message = createBaseInsertNode();
     message.tableId = object.tableId ?? 0;
@@ -798,6 +838,10 @@ export const DeleteNode = {
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     message.returning !== undefined && (obj.returning = message.returning);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DeleteNode>, I>>(base?: I): DeleteNode {
+    return DeleteNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DeleteNode>, I>>(object: I): DeleteNode {
@@ -831,6 +875,10 @@ export const UpdateNode = {
     }
     message.returning !== undefined && (obj.returning = message.returning);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UpdateNode>, I>>(base?: I): UpdateNode {
+    return UpdateNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UpdateNode>, I>>(object: I): UpdateNode {
@@ -869,6 +917,10 @@ export const ValuesNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ValuesNode>, I>>(base?: I): ValuesNode {
+    return ValuesNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ValuesNode>, I>>(object: I): ValuesNode {
     const message = createBaseValuesNode();
     message.tuples = object.tuples?.map((e) => ValuesNode_ExprTuple.fromPartial(e)) || [];
@@ -894,6 +946,10 @@ export const ValuesNode_ExprTuple = {
       obj.cells = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ValuesNode_ExprTuple>, I>>(base?: I): ValuesNode_ExprTuple {
+    return ValuesNode_ExprTuple.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ValuesNode_ExprTuple>, I>>(object: I): ValuesNode_ExprTuple {
@@ -924,6 +980,10 @@ export const SortNode = {
       obj.columnOrders = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SortNode>, I>>(base?: I): SortNode {
+    return SortNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SortNode>, I>>(object: I): SortNode {
@@ -960,6 +1020,10 @@ export const TopNNode = {
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TopNNode>, I>>(base?: I): TopNNode {
+    return TopNNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TopNNode>, I>>(object: I): TopNNode {
@@ -1009,6 +1073,10 @@ export const GroupTopNNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GroupTopNNode>, I>>(base?: I): GroupTopNNode {
+    return GroupTopNNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GroupTopNNode>, I>>(object: I): GroupTopNNode {
     const message = createBaseGroupTopNNode();
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
@@ -1037,6 +1105,10 @@ export const LimitNode = {
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<LimitNode>, I>>(base?: I): LimitNode {
+    return LimitNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<LimitNode>, I>>(object: I): LimitNode {
@@ -1070,6 +1142,10 @@ export const NestedLoopJoinNode = {
       obj.outputIndices = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<NestedLoopJoinNode>, I>>(base?: I): NestedLoopJoinNode {
+    return NestedLoopJoinNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<NestedLoopJoinNode>, I>>(object: I): NestedLoopJoinNode {
@@ -1110,6 +1186,10 @@ export const HashAggNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<HashAggNode>, I>>(base?: I): HashAggNode {
+    return HashAggNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<HashAggNode>, I>>(object: I): HashAggNode {
     const message = createBaseHashAggNode();
     message.groupKey = object.groupKey?.map((e) => e) || [];
@@ -1141,6 +1221,10 @@ export const ExpandNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ExpandNode>, I>>(base?: I): ExpandNode {
+    return ExpandNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ExpandNode>, I>>(object: I): ExpandNode {
     const message = createBaseExpandNode();
     message.columnSubsets = object.columnSubsets?.map((e) => ExpandNode_Subset.fromPartial(e)) || [];
@@ -1167,6 +1251,10 @@ export const ExpandNode_Subset = {
       obj.columnIndices = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExpandNode_Subset>, I>>(base?: I): ExpandNode_Subset {
+    return ExpandNode_Subset.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ExpandNode_Subset>, I>>(object: I): ExpandNode_Subset {
@@ -1197,6 +1285,10 @@ export const ProjectSetNode = {
       obj.selectList = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ProjectSetNode>, I>>(base?: I): ProjectSetNode {
+    return ProjectSetNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ProjectSetNode>, I>>(object: I): ProjectSetNode {
@@ -1231,6 +1323,10 @@ export const SortAggNode = {
       obj.aggCalls = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SortAggNode>, I>>(base?: I): SortAggNode {
+    return SortAggNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SortAggNode>, I>>(object: I): SortAggNode {
@@ -1292,6 +1388,10 @@ export const HashJoinNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<HashJoinNode>, I>>(base?: I): HashJoinNode {
+    return HashJoinNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<HashJoinNode>, I>>(object: I): HashJoinNode {
     const message = createBaseHashJoinNode();
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
@@ -1349,6 +1449,10 @@ export const SortMergeJoinNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SortMergeJoinNode>, I>>(base?: I): SortMergeJoinNode {
+    return SortMergeJoinNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SortMergeJoinNode>, I>>(object: I): SortMergeJoinNode {
     const message = createBaseSortMergeJoinNode();
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
@@ -1389,6 +1493,10 @@ export const HopWindowNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<HopWindowNode>, I>>(base?: I): HopWindowNode {
+    return HopWindowNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<HopWindowNode>, I>>(object: I): HopWindowNode {
     const message = createBaseHopWindowNode();
     message.timeCol = (object.timeCol !== undefined && object.timeCol !== null)
@@ -1421,6 +1529,10 @@ export const TableFunctionNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<TableFunctionNode>, I>>(base?: I): TableFunctionNode {
+    return TableFunctionNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<TableFunctionNode>, I>>(object: I): TableFunctionNode {
     const message = createBaseTableFunctionNode();
     message.tableFunction = (object.tableFunction !== undefined && object.tableFunction !== null)
@@ -1451,6 +1563,10 @@ export const TaskId = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<TaskId>, I>>(base?: I): TaskId {
+    return TaskId.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<TaskId>, I>>(object: I): TaskId {
     const message = createBaseTaskId();
     message.queryId = object.queryId ?? "";
@@ -1477,6 +1593,10 @@ export const TaskOutputId = {
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId.toJSON(message.taskId) : undefined);
     message.outputId !== undefined && (obj.outputId = Math.round(message.outputId));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TaskOutputId>, I>>(base?: I): TaskOutputId {
+    return TaskOutputId.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TaskOutputId>, I>>(object: I): TaskOutputId {
@@ -1506,6 +1626,10 @@ export const LocalExecutePlan = {
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
     message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<LocalExecutePlan>, I>>(base?: I): LocalExecutePlan {
+    return LocalExecutePlan.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<LocalExecutePlan>, I>>(object: I): LocalExecutePlan {
@@ -1543,6 +1667,10 @@ export const ExchangeSource = {
     message.localExecutePlan?.$case === "plan" &&
       (obj.plan = message.localExecutePlan?.plan ? LocalExecutePlan.toJSON(message.localExecutePlan?.plan) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExchangeSource>, I>>(base?: I): ExchangeSource {
+    return ExchangeSource.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ExchangeSource>, I>>(object: I): ExchangeSource {
@@ -1591,6 +1719,10 @@ export const ExchangeNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ExchangeNode>, I>>(base?: I): ExchangeNode {
+    return ExchangeNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ExchangeNode>, I>>(object: I): ExchangeNode {
     const message = createBaseExchangeNode();
     message.sources = object.sources?.map((e) => ExchangeSource.fromPartial(e)) || [];
@@ -1623,6 +1755,10 @@ export const MergeSortExchangeNode = {
       obj.columnOrders = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<MergeSortExchangeNode>, I>>(base?: I): MergeSortExchangeNode {
+    return MergeSortExchangeNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<MergeSortExchangeNode>, I>>(object: I): MergeSortExchangeNode {
@@ -1723,6 +1859,10 @@ export const LocalLookupJoinNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<LocalLookupJoinNode>, I>>(base?: I): LocalLookupJoinNode {
+    return LocalLookupJoinNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<LocalLookupJoinNode>, I>>(object: I): LocalLookupJoinNode {
     const message = createBaseLocalLookupJoinNode();
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
@@ -1814,6 +1954,10 @@ export const DistributedLookupJoinNode = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<DistributedLookupJoinNode>, I>>(base?: I): DistributedLookupJoinNode {
+    return DistributedLookupJoinNode.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<DistributedLookupJoinNode>, I>>(object: I): DistributedLookupJoinNode {
     const message = createBaseDistributedLookupJoinNode();
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
@@ -1845,6 +1989,10 @@ export const UnionNode = {
   toJSON(_: UnionNode): unknown {
     const obj: any = {};
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UnionNode>, I>>(base?: I): UnionNode {
+    return UnionNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UnionNode>, I>>(_: I): UnionNode {
@@ -1989,6 +2137,10 @@ export const PlanNode = {
       (obj.source = message.nodeBody?.source ? SourceNode.toJSON(message.nodeBody?.source) : undefined);
     message.identity !== undefined && (obj.identity = message.identity);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<PlanNode>, I>>(base?: I): PlanNode {
+    return PlanNode.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<PlanNode>, I>>(object: I): PlanNode {
@@ -2208,6 +2360,10 @@ export const ExchangeInfo = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ExchangeInfo>, I>>(base?: I): ExchangeInfo {
+    return ExchangeInfo.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo>, I>>(object: I): ExchangeInfo {
     const message = createBaseExchangeInfo();
     message.mode = object.mode ?? ExchangeInfo_DistributionMode.UNSPECIFIED;
@@ -2260,6 +2416,10 @@ export const ExchangeInfo_BroadcastInfo = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ExchangeInfo_BroadcastInfo>, I>>(base?: I): ExchangeInfo_BroadcastInfo {
+    return ExchangeInfo_BroadcastInfo.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo_BroadcastInfo>, I>>(object: I): ExchangeInfo_BroadcastInfo {
     const message = createBaseExchangeInfo_BroadcastInfo();
     message.count = object.count ?? 0;
@@ -2288,6 +2448,10 @@ export const ExchangeInfo_HashInfo = {
       obj.key = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ExchangeInfo_HashInfo>, I>>(base?: I): ExchangeInfo_HashInfo {
+    return ExchangeInfo_HashInfo.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo_HashInfo>, I>>(object: I): ExchangeInfo_HashInfo {
@@ -2325,6 +2489,10 @@ export const ExchangeInfo_ConsistentHashInfo = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ExchangeInfo_ConsistentHashInfo>, I>>(base?: I): ExchangeInfo_ConsistentHashInfo {
+    return ExchangeInfo_ConsistentHashInfo.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ExchangeInfo_ConsistentHashInfo>, I>>(
     object: I,
   ): ExchangeInfo_ConsistentHashInfo {
@@ -2355,6 +2523,10 @@ export const PlanFragment = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<PlanFragment>, I>>(base?: I): PlanFragment {
+    return PlanFragment.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<PlanFragment>, I>>(object: I): PlanFragment {
     const message = createBasePlanFragment();
     message.root = (object.root !== undefined && object.root !== null) ? PlanNode.fromPartial(object.root) : undefined;
@@ -2368,7 +2540,7 @@ export const PlanFragment = {
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var globalThis: any = (() => {
+var tsProtoGlobalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -2385,10 +2557,10 @@ var globalThis: any = (() => {
 })();
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if (globalThis.Buffer) {
-    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+  if (tsProtoGlobalThis.Buffer) {
+    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = globalThis.atob(b64);
+    const bin = tsProtoGlobalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -2398,14 +2570,14 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (globalThis.Buffer) {
-    return globalThis.Buffer.from(arr).toString("base64");
+  if (tsProtoGlobalThis.Buffer) {
+    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
       bin.push(String.fromCharCode(byte));
     });
-    return globalThis.btoa(bin.join(""));
+    return tsProtoGlobalThis.btoa(bin.join(""));
   }
 }
 

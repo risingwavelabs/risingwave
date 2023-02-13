@@ -43,6 +43,10 @@ export const StackTraceRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<StackTraceRequest>, I>>(base?: I): StackTraceRequest {
+    return StackTraceRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<StackTraceRequest>, I>>(_: I): StackTraceRequest {
     const message = createBaseStackTraceRequest();
     return message;
@@ -88,6 +92,10 @@ export const StackTraceResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<StackTraceResponse>, I>>(base?: I): StackTraceResponse {
+    return StackTraceResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<StackTraceResponse>, I>>(object: I): StackTraceResponse {
     const message = createBaseStackTraceResponse();
     message.actorTraces = Object.entries(object.actorTraces ?? {}).reduce<{ [key: number]: string }>(
@@ -128,6 +136,12 @@ export const StackTraceResponse_ActorTracesEntry = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<StackTraceResponse_ActorTracesEntry>, I>>(
+    base?: I,
+  ): StackTraceResponse_ActorTracesEntry {
+    return StackTraceResponse_ActorTracesEntry.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<StackTraceResponse_ActorTracesEntry>, I>>(
     object: I,
   ): StackTraceResponse_ActorTracesEntry {
@@ -152,6 +166,12 @@ export const StackTraceResponse_RpcTracesEntry = {
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<StackTraceResponse_RpcTracesEntry>, I>>(
+    base?: I,
+  ): StackTraceResponse_RpcTracesEntry {
+    return StackTraceResponse_RpcTracesEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<StackTraceResponse_RpcTracesEntry>, I>>(
@@ -179,6 +199,10 @@ export const ProfilingRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ProfilingRequest>, I>>(base?: I): ProfilingRequest {
+    return ProfilingRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ProfilingRequest>, I>>(object: I): ProfilingRequest {
     const message = createBaseProfilingRequest();
     message.sleepS = object.sleepS ?? 0;
@@ -202,6 +226,10 @@ export const ProfilingResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ProfilingResponse>, I>>(base?: I): ProfilingResponse {
+    return ProfilingResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ProfilingResponse>, I>>(object: I): ProfilingResponse {
     const message = createBaseProfilingResponse();
     message.result = object.result ?? new Uint8Array();
@@ -212,7 +240,7 @@ export const ProfilingResponse = {
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var globalThis: any = (() => {
+var tsProtoGlobalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -229,10 +257,10 @@ var globalThis: any = (() => {
 })();
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if (globalThis.Buffer) {
-    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+  if (tsProtoGlobalThis.Buffer) {
+    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = globalThis.atob(b64);
+    const bin = tsProtoGlobalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -242,14 +270,14 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (globalThis.Buffer) {
-    return globalThis.Buffer.from(arr).toString("base64");
+  if (tsProtoGlobalThis.Buffer) {
+    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
       bin.push(String.fromCharCode(byte));
     });
-    return globalThis.btoa(bin.join(""));
+    return tsProtoGlobalThis.btoa(bin.join(""));
   }
 }
 

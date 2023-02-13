@@ -515,6 +515,10 @@ export const IntervalUnit = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<IntervalUnit>, I>>(base?: I): IntervalUnit {
+    return IntervalUnit.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<IntervalUnit>, I>>(object: I): IntervalUnit {
     const message = createBaseIntervalUnit();
     message.months = object.months ?? 0;
@@ -573,6 +577,10 @@ export const DataType = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<DataType>, I>>(base?: I): DataType {
+    return DataType.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<DataType>, I>>(object: I): DataType {
     const message = createBaseDataType();
     message.typeName = object.typeName ?? DataType_TypeName.TYPE_UNSPECIFIED;
@@ -617,6 +625,10 @@ export const StructRwArrayData = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<StructRwArrayData>, I>>(base?: I): StructRwArrayData {
+    return StructRwArrayData.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<StructRwArrayData>, I>>(object: I): StructRwArrayData {
     const message = createBaseStructRwArrayData();
     message.childrenArray = object.childrenArray?.map((e) => RwArray.fromPartial(e)) || [];
@@ -649,6 +661,10 @@ export const ListRwArrayData = {
     message.valueType !== undefined &&
       (obj.valueType = message.valueType ? DataType.toJSON(message.valueType) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ListRwArrayData>, I>>(base?: I): ListRwArrayData {
+    return ListRwArrayData.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ListRwArrayData>, I>>(object: I): ListRwArrayData {
@@ -702,6 +718,10 @@ export const RwArray = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<RwArray>, I>>(base?: I): RwArray {
+    return RwArray.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<RwArray>, I>>(object: I): RwArray {
     const message = createBaseRwArray();
     message.arrayType = object.arrayType ?? RwArrayType.UNSPECIFIED;
@@ -735,6 +755,10 @@ export const Datum = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<Datum>, I>>(base?: I): Datum {
+    return Datum.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<Datum>, I>>(object: I): Datum {
     const message = createBaseDatum();
     message.body = object.body ?? new Uint8Array();
@@ -755,6 +779,10 @@ export const Column = {
     const obj: any = {};
     message.array !== undefined && (obj.array = message.array ? RwArray.toJSON(message.array) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<Column>, I>>(base?: I): Column {
+    return Column.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<Column>, I>>(object: I): Column {
@@ -787,6 +815,10 @@ export const DataChunk = {
       obj.columns = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DataChunk>, I>>(base?: I): DataChunk {
+    return DataChunk.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DataChunk>, I>>(object: I): DataChunk {
@@ -826,6 +858,10 @@ export const StreamChunk = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<StreamChunk>, I>>(base?: I): StreamChunk {
+    return StreamChunk.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<StreamChunk>, I>>(object: I): StreamChunk {
     const message = createBaseStreamChunk();
     message.cardinality = object.cardinality ?? 0;
@@ -851,6 +887,10 @@ export const Epoch = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<Epoch>, I>>(base?: I): Epoch {
+    return Epoch.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<Epoch>, I>>(object: I): Epoch {
     const message = createBaseEpoch();
     message.curr = object.curr ?? 0;
@@ -873,6 +913,10 @@ export const Terminate = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<Terminate>, I>>(base?: I): Terminate {
+    return Terminate.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<Terminate>, I>>(_: I): Terminate {
     const message = createBaseTerminate();
     return message;
@@ -882,7 +926,7 @@ export const Terminate = {
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var globalThis: any = (() => {
+var tsProtoGlobalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -899,10 +943,10 @@ var globalThis: any = (() => {
 })();
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if (globalThis.Buffer) {
-    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+  if (tsProtoGlobalThis.Buffer) {
+    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = globalThis.atob(b64);
+    const bin = tsProtoGlobalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -912,14 +956,14 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (globalThis.Buffer) {
-    return globalThis.Buffer.from(arr).toString("base64");
+  if (tsProtoGlobalThis.Buffer) {
+    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
       bin.push(String.fromCharCode(byte));
     });
-    return globalThis.btoa(bin.join(""));
+    return tsProtoGlobalThis.btoa(bin.join(""));
   }
 }
 

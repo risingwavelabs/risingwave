@@ -268,6 +268,10 @@ export const Field = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<Field>, I>>(base?: I): Field {
+    return Field.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<Field>, I>>(object: I): Field {
     const message = createBaseField();
     message.dataType = (object.dataType !== undefined && object.dataType !== null)
@@ -308,6 +312,10 @@ export const ColumnDesc = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ColumnDesc>, I>>(base?: I): ColumnDesc {
+    return ColumnDesc.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ColumnDesc>, I>>(object: I): ColumnDesc {
     const message = createBaseColumnDesc();
     message.columnType = (object.columnType !== undefined && object.columnType !== null)
@@ -339,6 +347,10 @@ export const ColumnCatalog = {
       (obj.columnDesc = message.columnDesc ? ColumnDesc.toJSON(message.columnDesc) : undefined);
     message.isHidden !== undefined && (obj.isHidden = message.isHidden);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ColumnCatalog>, I>>(base?: I): ColumnCatalog {
+    return ColumnCatalog.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ColumnCatalog>, I>>(object: I): ColumnCatalog {
@@ -404,6 +416,10 @@ export const StorageTableDesc = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<StorageTableDesc>, I>>(base?: I): StorageTableDesc {
+    return StorageTableDesc.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<StorageTableDesc>, I>>(object: I): StorageTableDesc {
     const message = createBaseStorageTableDesc();
     message.tableId = object.tableId ?? 0;
@@ -434,6 +450,10 @@ export const ColumnOrder = {
     message.orderType !== undefined && (obj.orderType = orderTypeToJSON(message.orderType));
     message.index !== undefined && (obj.index = Math.round(message.index));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<ColumnOrder>, I>>(base?: I): ColumnOrder {
+    return ColumnOrder.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<ColumnOrder>, I>>(object: I): ColumnOrder {

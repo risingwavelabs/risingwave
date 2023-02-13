@@ -302,6 +302,10 @@ export const AuthInfo = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<AuthInfo>, I>>(base?: I): AuthInfo {
+    return AuthInfo.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<AuthInfo>, I>>(object: I): AuthInfo {
     const message = createBaseAuthInfo();
     message.encryptionType = object.encryptionType ?? AuthInfo_EncryptionType.UNSPECIFIED;
@@ -354,6 +358,10 @@ export const UserInfo = {
       obj.grantPrivileges = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UserInfo>, I>>(base?: I): UserInfo {
+    return UserInfo.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UserInfo>, I>>(object: I): UserInfo {
@@ -425,6 +433,10 @@ export const GrantPrivilege = {
       obj.actionWithOpts = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GrantPrivilege>, I>>(base?: I): GrantPrivilege {
+    return GrantPrivilege.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GrantPrivilege>, I>>(object: I): GrantPrivilege {
@@ -503,6 +515,12 @@ export const GrantPrivilege_ActionWithGrantOption = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GrantPrivilege_ActionWithGrantOption>, I>>(
+    base?: I,
+  ): GrantPrivilege_ActionWithGrantOption {
+    return GrantPrivilege_ActionWithGrantOption.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GrantPrivilege_ActionWithGrantOption>, I>>(
     object: I,
   ): GrantPrivilege_ActionWithGrantOption {
@@ -527,6 +545,10 @@ export const CreateUserRequest = {
     const obj: any = {};
     message.user !== undefined && (obj.user = message.user ? UserInfo.toJSON(message.user) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CreateUserRequest>, I>>(base?: I): CreateUserRequest {
+    return CreateUserRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CreateUserRequest>, I>>(object: I): CreateUserRequest {
@@ -555,6 +577,10 @@ export const CreateUserResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<CreateUserResponse>, I>>(base?: I): CreateUserResponse {
+    return CreateUserResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<CreateUserResponse>, I>>(object: I): CreateUserResponse {
     const message = createBaseCreateUserResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -578,6 +604,10 @@ export const DropUserRequest = {
     const obj: any = {};
     message.userId !== undefined && (obj.userId = Math.round(message.userId));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DropUserRequest>, I>>(base?: I): DropUserRequest {
+    return DropUserRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropUserRequest>, I>>(object: I): DropUserRequest {
@@ -604,6 +634,10 @@ export const DropUserResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<DropUserResponse>, I>>(base?: I): DropUserResponse {
+    return DropUserResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<DropUserResponse>, I>>(object: I): DropUserResponse {
@@ -641,6 +675,10 @@ export const UpdateUserRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<UpdateUserRequest>, I>>(base?: I): UpdateUserRequest {
+    return UpdateUserRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<UpdateUserRequest>, I>>(object: I): UpdateUserRequest {
     const message = createBaseUpdateUserRequest();
     message.user = (object.user !== undefined && object.user !== null) ? UserInfo.fromPartial(object.user) : undefined;
@@ -666,6 +704,10 @@ export const UpdateUserResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<UpdateUserResponse>, I>>(base?: I): UpdateUserResponse {
+    return UpdateUserResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<UpdateUserResponse>, I>>(object: I): UpdateUserResponse {
@@ -711,6 +753,10 @@ export const GrantPrivilegeRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GrantPrivilegeRequest>, I>>(base?: I): GrantPrivilegeRequest {
+    return GrantPrivilegeRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GrantPrivilegeRequest>, I>>(object: I): GrantPrivilegeRequest {
     const message = createBaseGrantPrivilegeRequest();
     message.userIds = object.userIds?.map((e) => e) || [];
@@ -738,6 +784,10 @@ export const GrantPrivilegeResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GrantPrivilegeResponse>, I>>(base?: I): GrantPrivilegeResponse {
+    return GrantPrivilegeResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GrantPrivilegeResponse>, I>>(object: I): GrantPrivilegeResponse {
@@ -787,6 +837,10 @@ export const RevokePrivilegeRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<RevokePrivilegeRequest>, I>>(base?: I): RevokePrivilegeRequest {
+    return RevokePrivilegeRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<RevokePrivilegeRequest>, I>>(object: I): RevokePrivilegeRequest {
     const message = createBaseRevokePrivilegeRequest();
     message.userIds = object.userIds?.map((e) => e) || [];
@@ -818,6 +872,10 @@ export const RevokePrivilegeResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<RevokePrivilegeResponse>, I>>(base?: I): RevokePrivilegeResponse {
+    return RevokePrivilegeResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<RevokePrivilegeResponse>, I>>(object: I): RevokePrivilegeResponse {
     const message = createBaseRevokePrivilegeResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -831,7 +889,7 @@ export const RevokePrivilegeResponse = {
 declare var self: any | undefined;
 declare var window: any | undefined;
 declare var global: any | undefined;
-var globalThis: any = (() => {
+var tsProtoGlobalThis: any = (() => {
   if (typeof globalThis !== "undefined") {
     return globalThis;
   }
@@ -848,10 +906,10 @@ var globalThis: any = (() => {
 })();
 
 function bytesFromBase64(b64: string): Uint8Array {
-  if (globalThis.Buffer) {
-    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
+  if (tsProtoGlobalThis.Buffer) {
+    return Uint8Array.from(tsProtoGlobalThis.Buffer.from(b64, "base64"));
   } else {
-    const bin = globalThis.atob(b64);
+    const bin = tsProtoGlobalThis.atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) {
       arr[i] = bin.charCodeAt(i);
@@ -861,14 +919,14 @@ function bytesFromBase64(b64: string): Uint8Array {
 }
 
 function base64FromBytes(arr: Uint8Array): string {
-  if (globalThis.Buffer) {
-    return globalThis.Buffer.from(arr).toString("base64");
+  if (tsProtoGlobalThis.Buffer) {
+    return tsProtoGlobalThis.Buffer.from(arr).toString("base64");
   } else {
     const bin: string[] = [];
     arr.forEach((byte) => {
       bin.push(String.fromCharCode(byte));
     });
-    return globalThis.btoa(bin.join(""));
+    return tsProtoGlobalThis.btoa(bin.join(""));
   }
 }
 

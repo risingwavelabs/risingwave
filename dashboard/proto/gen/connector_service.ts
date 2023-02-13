@@ -200,6 +200,10 @@ export const TableSchema = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<TableSchema>, I>>(base?: I): TableSchema {
+    return TableSchema.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<TableSchema>, I>>(object: I): TableSchema {
     const message = createBaseTableSchema();
     message.columns = object.columns?.map((e) => TableSchema_Column.fromPartial(e)) || [];
@@ -227,6 +231,10 @@ export const TableSchema_Column = {
     message.name !== undefined && (obj.name = message.name);
     message.dataType !== undefined && (obj.dataType = dataType_TypeNameToJSON(message.dataType));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TableSchema_Column>, I>>(base?: I): TableSchema_Column {
+    return TableSchema_Column.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TableSchema_Column>, I>>(object: I): TableSchema_Column {
@@ -269,6 +277,10 @@ export const SinkConfig = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkConfig>, I>>(base?: I): SinkConfig {
+    return SinkConfig.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkConfig>, I>>(object: I): SinkConfig {
     const message = createBaseSinkConfig();
     message.sinkType = object.sinkType ?? "";
@@ -302,6 +314,10 @@ export const SinkConfig_PropertiesEntry = {
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SinkConfig_PropertiesEntry>, I>>(base?: I): SinkConfig_PropertiesEntry {
+    return SinkConfig_PropertiesEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SinkConfig_PropertiesEntry>, I>>(object: I): SinkConfig_PropertiesEntry {
@@ -345,6 +361,10 @@ export const SinkStreamRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkStreamRequest>, I>>(base?: I): SinkStreamRequest {
+    return SinkStreamRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest>, I>>(object: I): SinkStreamRequest {
     const message = createBaseSinkStreamRequest();
     if (object.request?.$case === "start" && object.request?.start !== undefined && object.request?.start !== null) {
@@ -386,6 +406,10 @@ export const SinkStreamRequest_StartSink = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkStreamRequest_StartSink>, I>>(base?: I): SinkStreamRequest_StartSink {
+    return SinkStreamRequest_StartSink.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest_StartSink>, I>>(object: I): SinkStreamRequest_StartSink {
     const message = createBaseSinkStreamRequest_StartSink();
     message.sinkConfig = (object.sinkConfig !== undefined && object.sinkConfig !== null)
@@ -418,6 +442,10 @@ export const SinkStreamRequest_WriteBatch = {
     message.batchId !== undefined && (obj.batchId = Math.round(message.batchId));
     message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SinkStreamRequest_WriteBatch>, I>>(base?: I): SinkStreamRequest_WriteBatch {
+    return SinkStreamRequest_WriteBatch.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest_WriteBatch>, I>>(object: I): SinkStreamRequest_WriteBatch {
@@ -461,6 +489,12 @@ export const SinkStreamRequest_WriteBatch_JsonPayload = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkStreamRequest_WriteBatch_JsonPayload>, I>>(
+    base?: I,
+  ): SinkStreamRequest_WriteBatch_JsonPayload {
+    return SinkStreamRequest_WriteBatch_JsonPayload.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest_WriteBatch_JsonPayload>, I>>(
     object: I,
   ): SinkStreamRequest_WriteBatch_JsonPayload {
@@ -489,6 +523,12 @@ export const SinkStreamRequest_WriteBatch_JsonPayload_RowOp = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkStreamRequest_WriteBatch_JsonPayload_RowOp>, I>>(
+    base?: I,
+  ): SinkStreamRequest_WriteBatch_JsonPayload_RowOp {
+    return SinkStreamRequest_WriteBatch_JsonPayload_RowOp.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest_WriteBatch_JsonPayload_RowOp>, I>>(
     object: I,
   ): SinkStreamRequest_WriteBatch_JsonPayload_RowOp {
@@ -514,6 +554,10 @@ export const SinkStreamRequest_StartEpoch = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkStreamRequest_StartEpoch>, I>>(base?: I): SinkStreamRequest_StartEpoch {
+    return SinkStreamRequest_StartEpoch.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest_StartEpoch>, I>>(object: I): SinkStreamRequest_StartEpoch {
     const message = createBaseSinkStreamRequest_StartEpoch();
     message.epoch = object.epoch ?? 0;
@@ -534,6 +578,10 @@ export const SinkStreamRequest_SyncBatch = {
     const obj: any = {};
     message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SinkStreamRequest_SyncBatch>, I>>(base?: I): SinkStreamRequest_SyncBatch {
+    return SinkStreamRequest_SyncBatch.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SinkStreamRequest_SyncBatch>, I>>(object: I): SinkStreamRequest_SyncBatch {
@@ -576,6 +624,10 @@ export const SinkResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkResponse>, I>>(base?: I): SinkResponse {
+    return SinkResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkResponse>, I>>(object: I): SinkResponse {
     const message = createBaseSinkResponse();
     if (object.response?.$case === "sync" && object.response?.sync !== undefined && object.response?.sync !== null) {
@@ -616,6 +668,10 @@ export const SinkResponse_SyncResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkResponse_SyncResponse>, I>>(base?: I): SinkResponse_SyncResponse {
+    return SinkResponse_SyncResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkResponse_SyncResponse>, I>>(object: I): SinkResponse_SyncResponse {
     const message = createBaseSinkResponse_SyncResponse();
     message.epoch = object.epoch ?? 0;
@@ -636,6 +692,10 @@ export const SinkResponse_StartEpochResponse = {
     const obj: any = {};
     message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SinkResponse_StartEpochResponse>, I>>(base?: I): SinkResponse_StartEpochResponse {
+    return SinkResponse_StartEpochResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SinkResponse_StartEpochResponse>, I>>(
@@ -666,6 +726,10 @@ export const SinkResponse_WriteResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<SinkResponse_WriteResponse>, I>>(base?: I): SinkResponse_WriteResponse {
+    return SinkResponse_WriteResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<SinkResponse_WriteResponse>, I>>(object: I): SinkResponse_WriteResponse {
     const message = createBaseSinkResponse_WriteResponse();
     message.epoch = object.epoch ?? 0;
@@ -686,6 +750,10 @@ export const SinkResponse_StartResponse = {
   toJSON(_: SinkResponse_StartResponse): unknown {
     const obj: any = {};
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<SinkResponse_StartResponse>, I>>(base?: I): SinkResponse_StartResponse {
+    return SinkResponse_StartResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<SinkResponse_StartResponse>, I>>(_: I): SinkResponse_StartResponse {
@@ -713,6 +781,10 @@ export const CdcMessage = {
     message.partition !== undefined && (obj.partition = message.partition);
     message.offset !== undefined && (obj.offset = message.offset);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<CdcMessage>, I>>(base?: I): CdcMessage {
+    return CdcMessage.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<CdcMessage>, I>>(object: I): CdcMessage {
@@ -749,6 +821,10 @@ export const GetEventStreamRequest = {
         ? GetEventStreamRequest_StartSource.toJSON(message.request?.start)
         : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetEventStreamRequest>, I>>(base?: I): GetEventStreamRequest {
+    return GetEventStreamRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest>, I>>(object: I): GetEventStreamRequest {
@@ -804,6 +880,12 @@ export const GetEventStreamRequest_ValidateProperties = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GetEventStreamRequest_ValidateProperties>, I>>(
+    base?: I,
+  ): GetEventStreamRequest_ValidateProperties {
+    return GetEventStreamRequest_ValidateProperties.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest_ValidateProperties>, I>>(
     object: I,
   ): GetEventStreamRequest_ValidateProperties {
@@ -840,6 +922,12 @@ export const GetEventStreamRequest_ValidateProperties_PropertiesEntry = {
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetEventStreamRequest_ValidateProperties_PropertiesEntry>, I>>(
+    base?: I,
+  ): GetEventStreamRequest_ValidateProperties_PropertiesEntry {
+    return GetEventStreamRequest_ValidateProperties_PropertiesEntry.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest_ValidateProperties_PropertiesEntry>, I>>(
@@ -885,6 +973,12 @@ export const GetEventStreamRequest_StartSource = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GetEventStreamRequest_StartSource>, I>>(
+    base?: I,
+  ): GetEventStreamRequest_StartSource {
+    return GetEventStreamRequest_StartSource.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest_StartSource>, I>>(
     object: I,
   ): GetEventStreamRequest_StartSource {
@@ -921,6 +1015,12 @@ export const GetEventStreamRequest_StartSource_PropertiesEntry = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GetEventStreamRequest_StartSource_PropertiesEntry>, I>>(
+    base?: I,
+  ): GetEventStreamRequest_StartSource_PropertiesEntry {
+    return GetEventStreamRequest_StartSource_PropertiesEntry.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GetEventStreamRequest_StartSource_PropertiesEntry>, I>>(
     object: I,
   ): GetEventStreamRequest_StartSource_PropertiesEntry {
@@ -952,6 +1052,10 @@ export const GetEventStreamResponse = {
       obj.events = [];
     }
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetEventStreamResponse>, I>>(base?: I): GetEventStreamResponse {
+    return GetEventStreamResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetEventStreamResponse>, I>>(object: I): GetEventStreamResponse {

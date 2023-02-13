@@ -67,6 +67,10 @@ export const HealthCheckRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<HealthCheckRequest>, I>>(base?: I): HealthCheckRequest {
+    return HealthCheckRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<HealthCheckRequest>, I>>(object: I): HealthCheckRequest {
     const message = createBaseHealthCheckRequest();
     message.service = object.service ?? "";
@@ -91,6 +95,10 @@ export const HealthCheckResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = healthCheckResponse_ServingStatusToJSON(message.status));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<HealthCheckResponse>, I>>(base?: I): HealthCheckResponse {
+    return HealthCheckResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<HealthCheckResponse>, I>>(object: I): HealthCheckResponse {

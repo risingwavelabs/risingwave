@@ -165,6 +165,10 @@ export const TaskId = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<TaskId>, I>>(base?: I): TaskId {
+    return TaskId.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<TaskId>, I>>(object: I): TaskId {
     const message = createBaseTaskId();
     message.queryId = object.queryId ?? "";
@@ -193,6 +197,10 @@ export const TaskInfo = {
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
     message.taskStatus !== undefined && (obj.taskStatus = taskInfo_TaskStatusToJSON(message.taskStatus));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TaskInfo>, I>>(base?: I): TaskInfo {
+    return TaskInfo.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TaskInfo>, I>>(object: I): TaskInfo {
@@ -226,6 +234,10 @@ export const CreateTaskRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<CreateTaskRequest>, I>>(base?: I): CreateTaskRequest {
+    return CreateTaskRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<CreateTaskRequest>, I>>(object: I): CreateTaskRequest {
     const message = createBaseCreateTaskRequest();
     message.taskId = (object.taskId !== undefined && object.taskId !== null)
@@ -256,6 +268,10 @@ export const AbortTaskRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<AbortTaskRequest>, I>>(base?: I): AbortTaskRequest {
+    return AbortTaskRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<AbortTaskRequest>, I>>(object: I): AbortTaskRequest {
     const message = createBaseAbortTaskRequest();
     message.taskId = (object.taskId !== undefined && object.taskId !== null)
@@ -280,6 +296,10 @@ export const AbortTaskResponse = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<AbortTaskResponse>, I>>(base?: I): AbortTaskResponse {
+    return AbortTaskResponse.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<AbortTaskResponse>, I>>(object: I): AbortTaskResponse {
     const message = createBaseAbortTaskResponse();
     message.status = (object.status !== undefined && object.status !== null)
@@ -302,6 +322,10 @@ export const GetTaskInfoRequest = {
     const obj: any = {};
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetTaskInfoRequest>, I>>(base?: I): GetTaskInfoRequest {
+    return GetTaskInfoRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetTaskInfoRequest>, I>>(object: I): GetTaskInfoRequest {
@@ -330,6 +354,10 @@ export const TaskInfoResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.taskInfo !== undefined && (obj.taskInfo = message.taskInfo ? TaskInfo.toJSON(message.taskInfo) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<TaskInfoResponse>, I>>(base?: I): TaskInfoResponse {
+    return TaskInfoResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<TaskInfoResponse>, I>>(object: I): TaskInfoResponse {
@@ -362,6 +390,10 @@ export const GetDataResponse = {
     message.recordBatch !== undefined &&
       (obj.recordBatch = message.recordBatch ? DataChunk.toJSON(message.recordBatch) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetDataResponse>, I>>(base?: I): GetDataResponse {
+    return GetDataResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetDataResponse>, I>>(object: I): GetDataResponse {
@@ -397,6 +429,10 @@ export const ExecuteRequest = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<ExecuteRequest>, I>>(base?: I): ExecuteRequest {
+    return ExecuteRequest.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<ExecuteRequest>, I>>(object: I): ExecuteRequest {
     const message = createBaseExecuteRequest();
     message.taskId = (object.taskId !== undefined && object.taskId !== null)
@@ -426,6 +462,10 @@ export const GetDataRequest = {
     message.taskOutputId !== undefined &&
       (obj.taskOutputId = message.taskOutputId ? TaskOutputId.toJSON(message.taskOutputId) : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetDataRequest>, I>>(base?: I): GetDataRequest {
+    return GetDataRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetDataRequest>, I>>(object: I): GetDataRequest {
@@ -460,6 +500,10 @@ export const GetStreamRequest = {
       ? GetStreamRequest_AddPermits.toJSON(message.value?.addPermits)
       : undefined);
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetStreamRequest>, I>>(base?: I): GetStreamRequest {
+    return GetStreamRequest.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetStreamRequest>, I>>(object: I): GetStreamRequest {
@@ -504,6 +548,10 @@ export const GetStreamRequest_Get = {
     return obj;
   },
 
+  create<I extends Exact<DeepPartial<GetStreamRequest_Get>, I>>(base?: I): GetStreamRequest_Get {
+    return GetStreamRequest_Get.fromPartial(base ?? {});
+  },
+
   fromPartial<I extends Exact<DeepPartial<GetStreamRequest_Get>, I>>(object: I): GetStreamRequest_Get {
     const message = createBaseGetStreamRequest_Get();
     message.upActorId = object.upActorId ?? 0;
@@ -527,6 +575,10 @@ export const GetStreamRequest_AddPermits = {
     const obj: any = {};
     message.permits !== undefined && (obj.permits = Math.round(message.permits));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetStreamRequest_AddPermits>, I>>(base?: I): GetStreamRequest_AddPermits {
+    return GetStreamRequest_AddPermits.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetStreamRequest_AddPermits>, I>>(object: I): GetStreamRequest_AddPermits {
@@ -554,6 +606,10 @@ export const GetStreamResponse = {
       (obj.message = message.message ? StreamMessage.toJSON(message.message) : undefined);
     message.permits !== undefined && (obj.permits = Math.round(message.permits));
     return obj;
+  },
+
+  create<I extends Exact<DeepPartial<GetStreamResponse>, I>>(base?: I): GetStreamResponse {
+    return GetStreamResponse.fromPartial(base ?? {});
   },
 
   fromPartial<I extends Exact<DeepPartial<GetStreamResponse>, I>>(object: I): GetStreamResponse {
