@@ -28,7 +28,7 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
-pub mod row_encoding;
+pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -237,75 +237,4 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     let mut bytes = [0; 16];
     data.copy_to_slice(&mut bytes);
     Ok(Decimal::unordered_deserialize(bytes))
-}
-
-#[cfg(test)]
-mod tests {
-    use row_encoding;
-
-    use super::*;
-    use crate::catalog::ColumnId;
-    use crate::row::OwnedRow;
-    use crate::types::ScalarImpl::*;
-
-    #[test]
-    fn test_row_encoding() {
-        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
-        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let row2 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abd".into()))]);
-        let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
-        let rows = vec![row1, row2, row3];
-        let mut array = vec![];
-        let serializer = row_encoding::Serializer::new(&column_ids);
-        for row in &rows {
-            let row_bytes = serializer.serialize_row_column_aware(row);
-            array.push(row_bytes);
-        }
-        let zero_le_bytes = 0_i32.to_le_bytes();
-        let one_le_bytes = 1_i32.to_le_bytes();
-
-        assert_eq!(
-            array[0],
-            [
-                0b10000001, // flag mid WW mid BB
-                2,
-                0,
-                0,
-                0,                // column nums
-                zero_le_bytes[0], // start id 0
-                zero_le_bytes[1],
-                zero_le_bytes[2],
-                zero_le_bytes[3],
-                one_le_bytes[0], // start id 1
-                one_le_bytes[1],
-                one_le_bytes[2],
-                one_le_bytes[3],
-                0, // offset0: 0
-                2, // offset1: 2
-                5, // i16: 5
-                0,
-                3, // str: abc
-                0,
-                0,
-                0,
-                b'a',
-                b'b',
-                b'c'
-            ]
-        );
-    }
-    #[test]
-    fn test_row_decoding() {
-        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
-        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let serializer = row_encoding::Serializer::new(&column_ids);
-        let row_bytes = serializer.serialize_row_column_aware(row1);
-        let data_types = vec![DataType::Int16, DataType::Varchar];
-        let deserializer = row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
-        let decoded = deserializer.decode(&row_bytes[..]);
-        assert_eq!(
-            decoded.unwrap(),
-            vec![Some(Int16(5)), Some(Utf8("abc".into()))]
-        );
-    }
 }

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Value encoding is an encoding format which converts row into a binary form that remains
-//! explanable after schema changes
+//! Column-aware row encoding is an encoding format which converts row into a binary form that
+//! remains explanable after schema changes
 //! Current design of flag just contains 1 meaningful information: the 2 LSBs represents
 //! the size of offsets: `u8`/`u16`/`u32`
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
@@ -62,7 +62,7 @@ impl RowEncoding {
     }
 
     fn set_offsets(&mut self, usize_offsets: &[usize], max_offset: usize) {
-        assert!(self.offsets.is_empty());
+        debug_assert!(self.offsets.is_empty());
         match max_offset {
             _n @ ..=const { u8::MAX as usize } => {
                 self.flag |= Flag::OFFSET8;
@@ -87,7 +87,7 @@ impl RowEncoding {
     }
 
     fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
-        assert!(
+        debug_assert!(
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
         );
@@ -113,6 +113,7 @@ pub struct Serializer {
 }
 
 impl Serializer {
+    /// Create a new `Serializer` with current `column_ids`
     pub fn new(column_ids: &[ColumnId]) -> Self {
         // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
@@ -126,6 +127,7 @@ impl Serializer {
         }
     }
 
+    /// Serialize a row under the schema of the Serializer
     pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
         assert_eq!(row.len(), self.datum_num as usize);
         let mut encoding = RowEncoding::new();
@@ -134,7 +136,9 @@ impl Serializer {
     }
 
     fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
-        let mut row_bytes = vec![];
+        let mut row_bytes = Vec::with_capacity(
+            5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
+        );
         row_bytes.put_u8(encoding.flag.bits);
         row_bytes.put_u32_le(self.datum_num);
         row_bytes.extend(&self.encoded_column_ids);
@@ -221,5 +225,77 @@ fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
         2 => data.get_u16_le() as usize,
         4 => data.get_u32_le() as usize,
         _ => unreachable!("Width's len should be either 1, 2, or 4"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use column_aware_row_encoding;
+
+    use super::*;
+    use crate::catalog::ColumnId;
+    use crate::row::OwnedRow;
+    use crate::types::ScalarImpl::*;
+
+    #[test]
+    fn test_row_encoding() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
+        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let row2 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abd".into()))]);
+        let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
+        let rows = vec![row1, row2, row3];
+        let mut array = vec![];
+        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        for row in &rows {
+            let row_bytes = serializer.serialize_row_column_aware(row);
+            array.push(row_bytes);
+        }
+        let zero_le_bytes = 0_i32.to_le_bytes();
+        let one_le_bytes = 1_i32.to_le_bytes();
+
+        assert_eq!(
+            array[0],
+            [
+                0b10000001, // flag mid WW mid BB
+                2,
+                0,
+                0,
+                0,                // column nums
+                zero_le_bytes[0], // start id 0
+                zero_le_bytes[1],
+                zero_le_bytes[2],
+                zero_le_bytes[3],
+                one_le_bytes[0], // start id 1
+                one_le_bytes[1],
+                one_le_bytes[2],
+                one_le_bytes[3],
+                0, // offset0: 0
+                2, // offset1: 2
+                5, // i16: 5
+                0,
+                3, // str: abc
+                0,
+                0,
+                0,
+                b'a',
+                b'b',
+                b'c'
+            ]
+        );
+    }
+    #[test]
+    fn test_row_decoding() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
+        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
+        let row_bytes = serializer.serialize_row_column_aware(row1);
+        let data_types = vec![DataType::Int16, DataType::Varchar];
+        let deserializer =
+            column_aware_row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
+        let decoded = deserializer.decode(&row_bytes[..]);
+        assert_eq!(
+            decoded.unwrap(),
+            vec![Some(Int16(5)), Some(Utf8("abc".into()))]
+        );
     }
 }
