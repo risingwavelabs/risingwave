@@ -438,7 +438,7 @@ impl CompactionGroupManager {
             .get(&compaction_group_id)
             .cloned()
             .unwrap_or_else(|| {
-                CompactionGroup::new(compaction_group_id, CompactionConfigBuilder::new().build())
+                CompactionGroup::new(compaction_group_id, self.default_config.clone())
             })
     }
 
