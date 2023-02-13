@@ -6,7 +6,7 @@ set -euo pipefail
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
-connector-node-version=$(cat ./connector-node)
+connector-node-version=$(cat ci/connector-node-version)
 
 # Git clone risingwave-connector-node repo
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
