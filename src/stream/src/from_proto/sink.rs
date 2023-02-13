@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::SinkConfig;
 use risingwave_pb::stream_plan::SinkNode;
 
@@ -33,6 +34,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
+        let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let mut properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
             .pk
@@ -56,6 +58,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             params.env.connector_params(),
             schema,
             pk_indices,
+            sink_type,
         )))
     }
 }

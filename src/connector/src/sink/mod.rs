@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
+use self::catalog::SinkType;
 use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -117,6 +118,7 @@ impl SinkImpl {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
+        _sink_type: SinkType,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
