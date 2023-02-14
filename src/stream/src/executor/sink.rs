@@ -125,9 +125,9 @@ impl SinkExecutor {
                                     self.config.get_connector(),
                                 ])
                                 .observe(start_time.elapsed().as_millis() as f64);
+                            in_transaction = false;
                         }
                     }
-                    in_transaction = false;
                     empty_epoch_flag = true;
                     epoch = barrier.epoch.curr;
                     yield Message::Barrier(barrier);
