@@ -22,6 +22,7 @@ profile:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
 
+      
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
@@ -112,6 +113,24 @@ profile:
         persist-data: true
       - use: kafka
         persist-data: true
+
+  hdfs:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: opendal
+        engine: hdfs
+        namenode: "127.0.0.1:9000"
+        root: risingwave
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
+      # - use: zookeeper
+      #   persist-data: true
+      # - use: kafka
+      #   persist-data: true
 
   full-benchmark:
     steps:
@@ -653,6 +672,9 @@ template:
     provide-minio: "minio*"
 
     # AWS s3 bucket used by this compute node
+    provide-opendal: "opendal*"
+
+    # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
     # Meta-nodes used by this compute node
@@ -798,6 +820,8 @@ template:
     provide-minio: "minio*"
 
     # AWS s3 bucket used by this compute node
+    provide-opendal: "opendal*"
+    # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
     # Meta-nodes used by this compute node
@@ -847,6 +871,16 @@ template:
 
     # Jaeger has a lot of ports open, and we don't want to make this config more complex.
     # So we keep the default value of jaeger instead of making it part of RiseDev config.
+
+  # opendal:
+  opendal:
+    id: opendal
+
+    engine: hdfs
+
+    namenode: 127.0.0.1:9000"
+
+    root: risingwave
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:
