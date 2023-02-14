@@ -149,21 +149,10 @@
           └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(1:Int32)] }
-    └─LogicalProject { exprs: [1:Int32] }
-      └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalAgg { aggs: [] }
-        | └─LogicalScan { table: t1, columns: [] }
-        └─LogicalScan { table: t2, columns: [] }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchSimpleAgg { aggs: [count(1:Int32)] }
-    └─BatchProject { exprs: [1:Int32] }
-      └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-        ├─BatchSimpleAgg { aggs: [] }
-        | └─BatchExchange { order: [], dist: Single }
-        |   └─BatchSimpleAgg { aggs: [] }
-        |     └─BatchScan { table: t1, columns: [], distribution: SomeShard }
-        └─BatchExchange { order: [], dist: Single }
-          └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+    └─BatchValues { rows: [[1:Int32]] }
 - sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
@@ -262,11 +251,7 @@
             └─LogicalProject { exprs: [] }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalJoin { type: LeftSemi, on: true, output: all }
-      ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
-      └─LogicalAgg { aggs: [] }
-        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);
@@ -284,22 +269,7 @@
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 }] }
             └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
-      ├─LogicalScan { table: a, columns: [a.a1] }
-      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
-        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
-        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   | └─LogicalScan { table: a, columns: [a.a1] }
-        |   └─LogicalJoin { type: Inner, on: true, output: all }
-        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |     | └─LogicalScan { table: a, columns: [a.a1] }
-        |     └─LogicalScan { table: b, columns: [] }
-        └─LogicalJoin { type: Inner, on: true, output: all }
-          ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-          | └─LogicalScan { table: a, columns: [a.a1] }
-          └─LogicalScan { table: c, columns: [] }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table a(a1 int, a2 int);
     create table b(b1 int, b2 int);

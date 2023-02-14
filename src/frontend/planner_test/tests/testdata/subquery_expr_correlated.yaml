@@ -373,22 +373,7 @@
       )
     );
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
-      ├─LogicalScan { table: a, columns: [a.a1] }
-      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
-        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
-        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   | └─LogicalScan { table: a, columns: [a.a1] }
-        |   └─LogicalJoin { type: Inner, on: true, output: all }
-        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |     | └─LogicalScan { table: a, columns: [a.a1] }
-        |     └─LogicalScan { table: b, columns: [] }
-        └─LogicalJoin { type: Inner, on: true, output: all }
-          ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-          | └─LogicalScan { table: a, columns: [a.a1] }
-          └─LogicalScan { table: c, columns: [] }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table a (a1 int, a2 int);
     create table b (b1 int, b2 int);

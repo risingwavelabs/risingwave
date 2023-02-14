@@ -170,9 +170,8 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: ['2020-01-01 01:02:03':Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
-          └─BatchScan { table: t, columns: [], distribution: SomeShard }
+      └─BatchProject { exprs: ['2020-01-01 01:02:03':Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
+        └─BatchValues { rows: [['2020-01-01 01:02:03':Timestamp, 11:Int32, 4.5:Decimal]] }
 - name: insert into select with cast error
   sql: |
     create table t (v1 timestamp, v2 real);

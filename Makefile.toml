@@ -755,7 +755,7 @@ if [ $# -gt 0 ]; then
   cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
-  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged --
 fi
 """
 

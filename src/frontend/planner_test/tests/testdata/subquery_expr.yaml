@@ -10,8 +10,7 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-    └─LogicalProject { exprs: [1:Int32] }
-      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
     select (select x from t), 1 from t;
@@ -124,10 +123,7 @@
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalJoin { type: LeftSemi, on: true, output: all }
-      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalScan { table: t, columns: [] }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
     select 1 where not exists (select * from t);
@@ -138,10 +134,7 @@
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalJoin { type: LeftAnti, on: true, output: all }
-      ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalScan { table: t, columns: [] }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t1(x int);
     create table t2(x int);
