@@ -19,6 +19,7 @@ pub use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
+use crate::hummock::model::HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -67,8 +68,6 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
         }
     }
 }
-
-const HUMMOCK_COMPACTION_GROUP_CONFIG_CF_NAME: &str = "cf/hummock_compaction_group_config";
 
 impl MetadataModel for CompactionGroup {
     type KeyType = CompactionGroupId;
