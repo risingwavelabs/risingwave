@@ -206,12 +206,12 @@ async fn create_tables(
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(testdata);
     let statements = parse_sql(&sql);
-    let mut tables = vec![];
+    let mut mvs_and_base_tables = vec![];
     let base_tables = statements
         .iter()
         .map(create_table_statement_to_table)
         .collect_vec();
-    tables.extend_from_slice(&base_tables);
+    mvs_and_base_tables.extend_from_slice(&base_tables);
 
     for stmt in &statements {
         let create_sql = stmt.to_string();
