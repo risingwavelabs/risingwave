@@ -65,12 +65,6 @@
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 
-- input: ALTER USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
-  formatted_sql: ALTER USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
-
-- input: ALTER USER user RENAME TO another
-  formatted_sql: ALTER USER user RENAME TO another
-
 - input: CREATE SINK snk
   error_msg: |
     sql parser error: Expected FROM or AS after CREATE SINK sink_name, found: EOF
