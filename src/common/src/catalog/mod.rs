@@ -204,8 +204,6 @@ impl From<TableId> for u32 {
     }
 }
 
-// TODO: TableOption is duplicated with the properties in table catalog, We can refactor later to
-// directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
     pub retention_seconds: Option<u32>, // second

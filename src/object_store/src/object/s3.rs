@@ -116,7 +116,7 @@ impl S3StreamingUploader {
                 .key(&self.key)
                 .send()
                 .await?;
-            self.upload_id = Some(resp.upload_id.unwrap());
+            self.upload_id = Some(resp.upload_id().unwrap().into());
         }
 
         // Get the data to upload for the next part.
@@ -187,7 +187,7 @@ impl S3StreamingUploader {
                 .iter()
                 .map(|(part_id, output)| {
                     CompletedPart::builder()
-                        .set_e_tag(output.e_tag.clone())
+                        .set_e_tag(output.e_tag().map(|s| s.into()))
                         .set_part_number(Some(*part_id))
                         .build()
                 })
@@ -389,7 +389,7 @@ impl ObjectStore for S3ObjectStore {
                 .last_modified()
                 .expect("last_modified required")
                 .as_secs_f64(),
-            total_size: resp.content_length as usize,
+            total_size: resp.content_length() as usize,
         })
     }
 
@@ -484,7 +484,7 @@ impl ObjectStore for S3ObjectStore {
                 request = request.continuation_token(continuation_token);
             }
             let result = request.send().await?;
-            let is_truncated = result.is_truncated;
+            let is_truncated = result.is_truncated();
             ret.append(
                 &mut result
                     .contents()
@@ -500,7 +500,7 @@ impl ObjectStore for S3ObjectStore {
                     })
                     .collect_vec(),
             );
-            next_continuation_token = result.next_continuation_token;
+            next_continuation_token = result.next_continuation_token().map(|s| s.to_string());
             if !is_truncated {
                 break;
             }
@@ -610,8 +610,13 @@ impl S3ObjectStore {
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let loader = aws_config::ConfigLoader::default();
-        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await)
+        #[cfg(madsim)]
+        let builder = aws_sdk_s3::config::Builder::new();
+        #[cfg(not(madsim))]
+        let builder =
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+
+        let config = builder
             .region(Region::new("custom"))
             .endpoint_resolver(Endpoint::immutable(
                 format!("http://{}", address).try_into().unwrap(),
@@ -620,8 +625,8 @@ impl S3ObjectStore {
                 access_key_id,
                 secret_access_key,
                 None,
-            ));
-        let config = builder.build();
+            ))
+            .build();
         let client = Client::from_conf(config);
 
         Self {

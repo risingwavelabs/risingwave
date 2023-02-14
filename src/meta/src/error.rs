@@ -58,6 +58,9 @@ enum MetaErrorInner {
     #[error("Election failed: {0}")]
     Election(etcd_client::Error),
 
+    #[error("SystemParam error: {0}")]
+    SystemParam(String),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -114,6 +117,10 @@ impl MetaError {
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
+    }
+
+    pub fn system_param<T: Into<String>>(s: T) -> Self {
+        MetaErrorInner::SystemParam(s.into()).into()
     }
 
     pub fn unavailable(s: String) -> Self {
