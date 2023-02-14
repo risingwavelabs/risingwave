@@ -344,7 +344,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
             table_name,
