@@ -362,7 +362,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     }
 
     /// Infer dedup tables for distinct agg calls, partitioned by distinct columns.
-    /// Since distinct agg calls only dedup on the first input column, the key of the result map is
+    /// Since distinct agg calls only dedup on the first argument, the key of the result map is
     /// `usize`, i.e. the distinct column index.
     ///
     /// Dedup table schema:
