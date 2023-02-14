@@ -20,19 +20,18 @@ use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
 use chrono::Datelike;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
-    ScalarImpl,
+    Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
 use crate::impl_common_parser_logic;
+use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
@@ -42,21 +41,6 @@ fn unix_epoch_days() -> i32 {
     NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
         .0
         .num_days_from_ce()
-}
-
-pub fn get_from_avro_record<'a>(avro_value: &'a Value, field_name: &str) -> Result<&'a Value> {
-    if let Value::Record(fields) = avro_value {
-        fields
-            .iter()
-            .find(|val| val.0.eq(field_name))
-            .map(|entry| &entry.1)
-            .ok_or_else(|| RwError::from(ProtocolError("no payload in debezium event".to_owned())))
-    } else {
-        Err(RwError::from(ProtocolError(format!(
-            "avro parse unexpected field {}",
-            field_name
-        ))))
-    }
 }
 
 impl_common_parser_logic!(AvroParser);
@@ -117,9 +101,7 @@ impl AvroParserConfig {
             let mut index = 0;
             let fields = fields
                 .iter()
-                .map(|field| {
-                    Self::avro_field_to_column_desc(&field.name, &field.schema, &mut index)
-                })
+                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                 .collect::<Result<Vec<_>>>()?;
             tracing::info!("fields is {:?}", fields);
             Ok(fields)
@@ -128,95 +110,6 @@ impl AvroParserConfig {
                 "schema invalid, record required".into(),
             )))
         }
-    }
-
-    fn avro_field_to_column_desc(
-        name: &str,
-        schema: &Schema,
-        index: &mut i32,
-    ) -> Result<ColumnDesc> {
-        let data_type = Self::avro_type_mapping(schema)?;
-        match schema {
-            Schema::Record {
-                name: schema_name,
-                fields,
-                ..
-            } => {
-                let vec_column = fields
-                    .iter()
-                    .map(|f| Self::avro_field_to_column_desc(&f.name, &f.schema, index))
-                    .collect::<Result<Vec<_>>>()?;
-                *index += 1;
-                Ok(ColumnDesc {
-                    column_type: Some(data_type.to_protobuf()),
-                    column_id: *index,
-                    name: name.to_owned(),
-                    field_descs: vec_column,
-                    type_name: schema_name.to_string(),
-                })
-            }
-            _ => {
-                *index += 1;
-                Ok(ColumnDesc {
-                    column_type: Some(data_type.to_protobuf()),
-                    column_id: *index,
-                    name: name.to_owned(),
-                    ..Default::default()
-                })
-            }
-        }
-    }
-
-    fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
-        let data_type = match schema {
-            Schema::String => DataType::Varchar,
-            Schema::Int => DataType::Int32,
-            Schema::Long => DataType::Int64,
-            Schema::Boolean => DataType::Boolean,
-            Schema::Float => DataType::Float32,
-            Schema::Double => DataType::Float64,
-            Schema::Date => DataType::Date,
-            Schema::TimestampMillis => DataType::Timestamp,
-            Schema::TimestampMicros => DataType::Timestamp,
-            Schema::Duration => DataType::Interval,
-            Schema::Enum { .. } => DataType::Varchar,
-            Schema::Record { fields, .. } => {
-                let struct_fields = fields
-                    .iter()
-                    .map(|f| Self::avro_type_mapping(&f.schema))
-                    .collect::<Result<Vec<_>>>()?;
-                let struct_names = fields.iter().map(|f| f.name.clone()).collect_vec();
-                DataType::new_struct(struct_fields, struct_names)
-            }
-            Schema::Array(item_schema) => {
-                let item_type = Self::avro_type_mapping(item_schema.as_ref())?;
-                DataType::List {
-                    datatype: Box::new(item_type),
-                }
-            }
-            Schema::Union(union_schema) if union_schema.is_nullable() => {
-                let nested_schema = union_schema
-                    .variants()
-                    .iter()
-                    .find_or_first(|s| **s != Schema::Null)
-                    .ok_or_else(|| {
-                        RwError::from(InternalError(format!(
-                            "unsupported type in Avro: {:?}",
-                            union_schema
-                        )))
-                    })?;
-
-                Self::avro_type_mapping(nested_schema)?
-            }
-            _ => {
-                return Err(RwError::from(InternalError(format!(
-                    "unsupported type in Avro: {:?}",
-                    schema
-                ))));
-            }
-        };
-
-        Ok(data_type)
     }
 }
 

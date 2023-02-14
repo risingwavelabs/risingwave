@@ -14,5 +14,6 @@
 
 mod parser;
 pub mod schema_resolver;
+pub mod util;
 
 pub use parser::*;

@@ -20,14 +20,17 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::parser::{AvroParserConfig, ProtobufParserConfig};
+use risingwave_connector::parser::{
+    AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, WatermarkDesc,
 };
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema, SourceWatermark,
+    AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
+    SourceWatermark,
 };
 
 use super::create_table::bind_sql_table_constraints;
@@ -53,6 +56,23 @@ async fn extract_avro_table_schema(
         schema.use_schema_registry,
     )
     .await?;
+    let vec_column_desc = parser.map_to_columns()?;
+    Ok(vec_column_desc
+        .into_iter()
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
+            is_hidden: false,
+        })
+        .collect_vec())
+}
+
+async fn extract_debezium_avro_table_schema(
+    schema: &DebeziumAvroSchema,
+    with_properties: HashMap<String, String>,
+) -> Result<Vec<ColumnCatalog>> {
+    let parser =
+        DebeziumAvroParserConfig::new(&with_properties, schema.row_schema_location.0.as_str())
+            .await?;
     let vec_column_desc = parser.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
@@ -242,29 +262,42 @@ pub(crate) async fn resolve_source_schema(
         },
 
         SourceSchema::DebeziumAvro(avro_schema) => {
-            // TODO: support schemaless create source
-            // let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
-            //     // The first column is `_rw_kafka_timestamp`.
-            //     (2, 1)
-            // } else {
-            //     (1, 0)
-            // };
-            // if columns.len() != expected_column_len
-            //     || pk_column_ids != vec![ROW_ID_COLUMN_ID]
-            //     || row_id_index != Some(expected_row_id_index)
-            // {
-            //     return Err(RwError::from(ProtocolError(
-            //         "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
-            //     )));
-            // }
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating table with row format
+            debezium_avro."
+                        .to_string(),
+                )));
+            }
 
-            // columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+            if columns.len() != pk_column_ids.len() {
+                return Err(RwError::from(ProtocolError(
+                    "User can only specify primary key columns when creating table with row
+            format debezium_avro."
+                        .to_string(),
+                )));
+            }
 
+            let mut full_columns =
+                extract_debezium_avro_table_schema(avro_schema, with_properties.clone()).await?;
+
+            for pk_column in columns.iter() {
+                let index = full_columns
+                    .iter()
+                    .position(|c| c.column_desc.name == pk_column.column_desc.name)
+                    .ok_or_else(|| {
+                        RwError::from(ProtocolError(format!(
+                            "pk column {} not exists",
+                            pk_column.column_desc.name
+                        )))
+                    })?;
+                let _ = full_columns.remove(index);
+            }
+
+            columns.extend(full_columns);
             StreamSourceInfo {
                 row_format: RowFormatType::DebeziumAvro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
-                use_schema_registry: avro_schema.use_schema_registry,
-                proto_message_name: "".to_owned(),
                 ..Default::default()
             }
         }

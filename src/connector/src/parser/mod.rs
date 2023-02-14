@@ -384,7 +384,7 @@ pub enum SpecificParserConfig {
     CanalJson,
     #[default]
     Native,
-    DebeziumAvro(AvroParserConfig),
+    DebeziumAvro(DebeziumAvroParserConfig),
 }
 
 impl SpecificParserConfig {
@@ -430,17 +430,9 @@ impl SpecificParserConfig {
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,
-            SourceFormat::DebeziumAvro => {
-                debug_assert!(info.use_schema_registry);
-                SpecificParserConfig::DebeziumAvro(
-                    AvroParserConfig::new(
-                        props,
-                        &info.row_schema_location,
-                        info.use_schema_registry,
-                    )
-                    .await?,
-                )
-            }
+            SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
+                DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
+            ),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "invalid source format".to_string(),

@@ -61,8 +61,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
-    CatalogManager, CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification,
-    MetaSrvEnv, META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
