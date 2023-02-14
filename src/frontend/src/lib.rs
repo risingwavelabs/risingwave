@@ -28,6 +28,7 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
+#![feature(result_flattening)]
 #![recursion_limit = "256"]
 
 #[macro_use]

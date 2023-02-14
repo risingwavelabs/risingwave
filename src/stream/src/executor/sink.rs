@@ -265,7 +265,7 @@ mod test {
         let properties = maplit::hashmap! {
             "connector".into() => "console".into(),
             "format".into() => "append_only".into(),
-            "force-append-only".into() => "true".into()
+            "force_append_only".into() => "true".into()
         };
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int64, "v1"),
