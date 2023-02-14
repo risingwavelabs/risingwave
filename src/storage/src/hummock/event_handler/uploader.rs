@@ -29,7 +29,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use tracing::error;
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -113,7 +113,7 @@ impl UploadingTask {
             .buffer_tracker
             .global_upload_task_size()
             .fetch_add(task_size, Relaxed);
-        info!("start upload task: {:?}", task_info);
+        info_in_release!("start upload task: {:?}", task_info);
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
@@ -128,7 +128,7 @@ impl UploadingTask {
     fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<StagingSstableInfo>> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result
-                .inspect(|_| info!("upload task finish {:?}", self.task_info))
+                .inspect(|_| info_in_release!("upload task finish {:?}", self.task_info))
                 .map(|ssts| {
                     StagingSstableInfo::new(
                         ssts,
@@ -474,15 +474,15 @@ impl HummockUploader {
                     .expect("we have checked non-empty");
                 self.sealed_data.seal_new_epoch(epoch, unsealed_data);
             } else {
-                warn!("epoch {} to seal has no data", epoch);
+                info_in_release!("epoch {} to seal has no data", epoch);
             }
         } else {
-            warn!("epoch {} to seal has no data", epoch);
+            info_in_release!("epoch {} to seal has no data", epoch);
         }
     }
 
     pub(crate) fn start_sync_epoch(&mut self, epoch: HummockEpoch) {
-        info!("start sync epoch: {}", epoch);
+        info_in_release!("start sync epoch: {}", epoch);
         assert!(
             epoch > self.max_syncing_epoch,
             "the epoch {} has started syncing already: {}",

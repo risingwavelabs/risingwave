@@ -211,7 +211,7 @@ impl HummockEventHandler {
         epoch: HummockEpoch,
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
-        info!("epoch has been synced: {}.", epoch);
+        info_in_release!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
             newly_uploaded_sstables
                 .into_iter()
@@ -283,7 +283,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
-        info!("receive await sync epoch: {}", new_sync_epoch);
+        info_in_release!("receive await sync epoch: {}", new_sync_epoch);
         // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
@@ -298,7 +298,7 @@ impl HummockEventHandler {
         }
         // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
-            info!(
+            info_in_release!(
                 "epoch {} has been synced. Current max_sync_epoch {}",
                 new_sync_epoch,
                 self.uploader.max_synced_epoch()
@@ -317,7 +317,7 @@ impl HummockEventHandler {
             return;
         }
 
-        info!(
+        info_in_release!(
             "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
             new_sync_epoch,
             self.uploader.max_synced_epoch()
@@ -425,7 +425,7 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
-        info!(
+        info_in_release!(
             "update to hummock version: {}, epoch: {}",
             new_pinned_version.id(),
             new_pinned_version.max_committed_epoch()
