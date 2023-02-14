@@ -222,17 +222,18 @@ async fn create_tables(
     let mut mviews = vec![];
     // Generate some mviews
     for i in 0..10 {
-        let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        let (create_sql, table) =
+            mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
         let response = client.simple_query(&create_sql).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
-            tables.push(table.clone());
+            mvs_and_base_tables.push(table.clone());
             mviews.push(table);
         }
     }
-    (tables, base_tables, mviews, setup_sql)
+    (mvs_and_base_tables, base_tables, mviews, setup_sql)
 }
 
 /// Drops mview tables.
