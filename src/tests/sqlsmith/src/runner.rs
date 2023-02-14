@@ -13,11 +13,8 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
-use std::time::Duration;
-
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
-use tokio::time::sleep;
 use tokio_postgres::error::Error as PgError;
 
 use crate::validation::is_permissible_error;

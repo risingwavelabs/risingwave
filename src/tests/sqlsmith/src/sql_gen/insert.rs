@@ -16,7 +16,7 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Ident, ObjectName, Query, SetExpr, Statement, Values};
+use risingwave_sqlparser::ast::{Expr, ObjectName, Query, SetExpr, Statement, Values};
 
 use crate::sql_gen::SqlGenerator;
 
