@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 
 use super::{DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
@@ -179,6 +180,10 @@ impl DatabaseManager {
         }
     }
 
+    pub fn list_databases(&self) -> Vec<Database> {
+        self.databases.values().cloned().collect_vec()
+    }
+
     pub fn list_creating_tables(&self) -> Vec<Table> {
         self.in_progress_creating_tables
             .values()
@@ -188,6 +193,18 @@ impl DatabaseManager {
 
     pub fn list_tables(&self) -> Vec<Table> {
         self.tables.values().cloned().collect_vec()
+    }
+
+    pub fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
+        self.tables
+            .iter()
+            .filter_map(|(id, table)| {
+                if table_ids.contains(id) {
+                    return Some((*id, TableOption::build_table_option(&table.properties)));
+                }
+                None
+            })
+            .collect()
     }
 
     pub fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {

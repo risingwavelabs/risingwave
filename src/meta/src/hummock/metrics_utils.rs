@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ pub fn trigger_version_stat(
         .set(current_version.encoded_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
+    metrics.version_stats.reset();
     for (table_id, stats) in &version_stats.table_stats {
         let table_id = format!("{}", table_id);
         metrics
@@ -216,4 +217,8 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
             .min_safepoint_version_id
             .set(HummockVersionId::MAX as _);
     }
+}
+
+pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
+    metrics.stale_ssts_count.set(total_number as _);
 }

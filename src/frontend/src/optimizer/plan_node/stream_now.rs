@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::NowNode;
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use super::{LogicalNow, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::OptimizerContextRef;
@@ -42,8 +42,8 @@ impl StreamNow {
             sub_fields: vec![],
             type_name: String::default(),
         }]);
-        let mut watermark_cols = FixedBitSet::with_capacity(1);
-        watermark_cols.set(0, true);
+        let mut watermark_columns = FixedBitSet::with_capacity(1);
+        watermark_columns.set(0, true);
         let base = PlanBase::new_stream(
             ctx,
             schema,
@@ -51,7 +51,7 @@ impl StreamNow {
             FunctionalDependencySet::default(),
             Distribution::Single,
             false,
-            watermark_cols,
+            watermark_columns,
         );
         Self { base }
     }
@@ -97,3 +97,5 @@ impl StreamNode for StreamNow {
         })
     }
 }
+
+impl ExprRewritable for StreamNow {}

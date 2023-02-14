@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,6 +61,7 @@ async fn test_merger_sum_aggr() {
                     order_pairs: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
                 AggCall {
                     kind: AggKind::Sum,
@@ -69,6 +70,7 @@ async fn test_merger_sum_aggr() {
                     order_pairs: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
             ],
             vec![],
@@ -152,6 +154,7 @@ async fn test_merger_sum_aggr() {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -160,6 +163,7 @@ async fn test_merger_sum_aggr() {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ],
         vec![],

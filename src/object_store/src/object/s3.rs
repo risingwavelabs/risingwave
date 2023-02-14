@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
+use random_string::generate;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
@@ -115,7 +116,7 @@ impl S3StreamingUploader {
                 .key(&self.key)
                 .send()
                 .await?;
-            self.upload_id = Some(resp.upload_id.unwrap());
+            self.upload_id = Some(resp.upload_id().unwrap().into());
         }
 
         // Get the data to upload for the next part.
@@ -186,7 +187,7 @@ impl S3StreamingUploader {
                 .iter()
                 .map(|(part_id, output)| {
                     CompletedPart::builder()
-                        .set_e_tag(output.e_tag.clone())
+                        .set_e_tag(output.e_tag().map(|s| s.into()))
                         .set_part_number(Some(*part_id))
                         .build()
                 })
@@ -388,7 +389,7 @@ impl ObjectStore for S3ObjectStore {
                 .last_modified()
                 .expect("last_modified required")
                 .as_secs_f64(),
-            total_size: resp.content_length as usize,
+            total_size: resp.content_length() as usize,
         })
     }
 
@@ -483,7 +484,7 @@ impl ObjectStore for S3ObjectStore {
                 request = request.continuation_token(continuation_token);
             }
             let result = request.send().await?;
-            let is_truncated = result.is_truncated;
+            let is_truncated = result.is_truncated();
             ret.append(
                 &mut result
                     .contents()
@@ -499,7 +500,7 @@ impl ObjectStore for S3ObjectStore {
                     })
                     .collect_vec(),
             );
-            next_continuation_token = result.next_continuation_token;
+            next_continuation_token = result.next_continuation_token().map(|s| s.to_string());
             if !is_truncated {
                 break;
             }
@@ -526,6 +527,7 @@ impl S3ObjectStore {
         Self::configure_bucket_lifecycle(&client, &bucket)
             .await
             .unwrap();
+
         Self {
             client,
             bucket,
@@ -535,11 +537,7 @@ impl S3ObjectStore {
         }
     }
 
-    pub async fn new_s3_compatible(
-        bucket: String,
-        metrics: Arc<ObjectStoreMetrics>,
-        object_store_use_batch_delete: bool,
-    ) -> Self {
+    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         // load from env
         let region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
@@ -571,6 +569,31 @@ impl S3ObjectStore {
         Self::configure_bucket_lifecycle(&client, bucket.as_str())
             .await
             .unwrap();
+
+        // check whether use batch delete
+        let charset = "1234567890";
+        let test_path = "risingwave_check_batch_delete/".to_string() + &generate(10, charset);
+        client
+            .put_object()
+            .bucket(&bucket)
+            .body(aws_sdk_s3::types::ByteStream::from(Bytes::from(
+                "test batch delete",
+            )))
+            .key(&test_path)
+            .send()
+            .await
+            .unwrap();
+        let obj_ids = vec![ObjectIdentifier::builder().key(&test_path).build()];
+
+        let delete_builder = Delete::builder().set_objects(Some(obj_ids));
+        let object_store_use_batch_delete = client
+            .delete_objects()
+            .bucket(&bucket)
+            .delete(delete_builder.build())
+            .send()
+            .await
+            .is_ok();
+
         Self {
             client,
             bucket: bucket.to_string(),
@@ -587,8 +610,13 @@ impl S3ObjectStore {
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let loader = aws_config::ConfigLoader::default();
-        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await)
+        #[cfg(madsim)]
+        let builder = aws_sdk_s3::config::Builder::new();
+        #[cfg(not(madsim))]
+        let builder =
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+
+        let config = builder
             .region(Region::new("custom"))
             .endpoint_resolver(Endpoint::immutable(
                 format!("http://{}", address).try_into().unwrap(),
@@ -597,8 +625,8 @@ impl S3ObjectStore {
                 access_key_id,
                 secret_access_key,
                 None,
-            ));
-        let config = builder.build();
+            ))
+            .build();
         let client = Client::from_conf(config);
 
         Self {

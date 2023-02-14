@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,10 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
-use super::{LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, ToLocalBatch};
+use super::{
+    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch,
+    ToLocalBatch,
+};
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
@@ -105,3 +108,4 @@ impl ToBatchProst for BatchSource {
         })
     }
 }
+impl ExprRewritable for BatchSource {}

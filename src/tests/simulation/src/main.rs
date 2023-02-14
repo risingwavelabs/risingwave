@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,6 +50,10 @@ pub struct Args {
     /// The number of compactor nodes.
     #[clap(long, default_value = "2")]
     compactor_nodes: usize,
+
+    /// The number of meta nodes.
+    #[clap(long, default_value = "3")]
+    meta_nodes: usize,
 
     /// The number of CPU cores for each compute node.
     ///
@@ -130,6 +134,7 @@ async fn main() {
         .with_env_filter(EnvFilter::from_default_env())
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
+        .with_writer(std::io::stderr)
         .init();
 
     let args = Args::parse();
@@ -139,6 +144,7 @@ async fn main() {
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
+        meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
     };
@@ -157,14 +163,15 @@ async fn main() {
     );
 
     if let Some(datadir) = args.kafka_datadir {
-        cluster.create_kafka_producer(&datadir);
+        cluster.create_kafka_producer(&datadir).await;
     }
 
     if let Some(count) = args.sqlsmith {
-        let host = cluster.rand_frontend_ip();
         cluster
             .run_on_client(async move {
-                let rw = RisingWave::connect(host, "dev".into()).await.unwrap();
+                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                    .await
+                    .unwrap();
                 risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
             })
             .await;
@@ -176,7 +183,7 @@ async fn main() {
         .run_on_client(async move {
             let glob = &args.files;
             if let Some(jobs) = args.jobs {
-                run_parallel_slt_task(cluster0, glob, jobs).await.unwrap();
+                run_parallel_slt_task(glob, jobs).await.unwrap();
             } else {
                 run_slt_task(cluster0, glob, &kill_opts).await;
             }
@@ -194,4 +201,5 @@ async fn main() {
             })
             .await;
     }
+    cluster.graceful_shutdown().await;
 }

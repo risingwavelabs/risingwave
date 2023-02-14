@@ -624,9 +624,9 @@
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 right join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t1.y), output: all }
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.y, t2.y), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalJoin { type: LeftOuter, on: (t2.x = t3.x) AND (t2.y = t3.y) AND IsNotDistinctFrom(t2.y, t1.y), output: [t1.y] }
+    └─LogicalJoin { type: LeftOuter, on: (t2.x = t3.x) AND (t2.y = t3.y) AND IsNotDistinctFrom(t2.y, t1.y), output: [t2.y] }
       ├─LogicalJoin { type: Inner, on: true, output: all }
       | ├─LogicalAgg { group_key: [t1.y], aggs: [] }
       | | └─LogicalScan { table: t1, columns: [t1.y] }
@@ -737,3 +737,31 @@
             ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
             | └─LogicalScan { table: strings, columns: [strings.v1] }
             └─LogicalScan { table: strings, columns: [strings.v1] }
+- name: Existential join on outer join with correlated condition
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(a varchar, z int);
+    select x from t1 where y in (select y from t3 full join t2 where t1.x = t2.x and z IS NOT DISTINCT FROM t2.x);
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x), output: [t1.x] }
+    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    └─LogicalProject { exprs: [t2.y, t2.x] }
+      └─LogicalFilter { predicate: IsNotDistinctFrom(t3.z, t2.x) }
+        └─LogicalJoin { type: FullOuter, on: true, output: all }
+          ├─LogicalScan { table: t3, columns: [t3.z] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+- name: Correlated condition in RHS of right outer join
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    create table t3(a varchar, z int);
+    select x from t1 where y in (select y from t3 right join t2 where t1.x = t2.x and z IS NOT DISTINCT FROM t2.x);
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x), output: [t1.x] }
+    ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+    └─LogicalProject { exprs: [t2.y, t2.x] }
+      └─LogicalFilter { predicate: IsNotDistinctFrom(t3.z, t2.x) }
+        └─LogicalJoin { type: LeftOuter, on: true, output: [t3.z, t2.x, t2.y] }
+          ├─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+          └─LogicalScan { table: t3, columns: [t3.z] }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
 
 use crate::validation::is_permissible_error;
-use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
+use crate::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, session_sql_gen, sql_gen, Table,
+};
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
@@ -65,6 +67,22 @@ async fn test_sqlsmith<R: Rng>(
     }
 }
 
+/// `SET QUERY_MODE TO DISTRIBUTED`.
+/// Panics if it fails.
+async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
+    client
+        .query("SET query_mode TO distributed;", &[])
+        .await
+        .unwrap();
+}
+
+#[allow(dead_code)]
+async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
+    let session_sql = session_sql_gen(rng);
+    tracing::info!("Executing: {}", session_sql);
+    client.query(session_sql.as_str(), &[]).await.unwrap();
+}
+
 /// Test batch queries, returns skipped query statistics
 /// Runs in distributed mode, since queries can be complex and cause overflow in local execution
 /// mode.
@@ -75,12 +93,11 @@ async fn test_batch_queries<R: Rng>(
     setup_sql: &str,
     sample_size: usize,
 ) -> f64 {
-    client
-        .query("SET query_mode TO distributed;", &[])
-        .await
-        .unwrap();
+    set_distributed_query_mode(client).await;
     let mut skipped = 0;
     for _ in 0..sample_size {
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
@@ -99,6 +116,8 @@ async fn test_stream_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;

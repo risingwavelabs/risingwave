@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,10 +36,12 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
+use risingwave_rpc_client::SystemParamsReader;
 use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
@@ -91,7 +93,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), false).await
+        self.session_ref().run_statement(sql.as_str(), vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -103,7 +105,7 @@ impl LocalFrontend {
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), false)
+            .run_statement(sql.as_str(), vec![])
             .await
     }
 
@@ -227,8 +229,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, _view: ProstView) -> Result<()> {
-        todo!()
+    async fn create_view(&self, mut view: ProstView) -> Result<()> {
+        view.id = self.gen_id();
+        self.catalog.write().create_view(&view);
+        self.add_table_or_source_id(view.id, view.schema_id, view.database_id);
+        Ok(())
     }
 
     async fn create_table(
@@ -671,6 +676,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
+    }
+
+    async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
+        Ok(SystemParams::default().into())
     }
 }
 

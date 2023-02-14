@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,17 +50,18 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::hash::{ParallelUnitId, VnodeMapping};
+use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::scheduler::BatchPlanFragmenter;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,7 +109,12 @@ pub enum RequiredDist {
 }
 
 impl Distribution {
-    pub fn to_prost(&self, output_count: u32, fragmenter: &BatchPlanFragmenter) -> ExchangeInfo {
+    pub fn to_prost(
+        &self,
+        output_count: u32,
+        catalog_reader: &CatalogReader,
+        worker_node_manager: &WorkerNodeManagerRef,
+    ) -> ExchangeInfo {
         ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
@@ -139,19 +145,18 @@ impl Distribution {
                         "hash key should not be empty, use `Single` instead"
                     );
 
-                    let vnode_mapping = Self::get_vnode_mapping(fragmenter, table_id)
-                        .expect("vnode_mapping of UpstreamHashShard should not be none");
+                    let vnode_mapping =
+                        Self::get_vnode_mapping(catalog_reader, worker_node_manager, table_id)
+                            .expect("vnode_mapping of UpstreamHashShard should not be none");
 
                     let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
-                        .iter()
-                        .sorted()
-                        .dedup()
+                        .iter_unique()
                         .enumerate()
-                        .map(|(i, &pu)| (pu, i as u32))
+                        .map(|(i, pu)| (pu, i as u32))
                         .collect();
 
                     Some(DistributionProst::ConsistentHashInfo(ConsistentHashInfo {
-                        vmap: vnode_mapping.iter().map(|x| pu2id_map[x]).collect_vec(),
+                        vmap: vnode_mapping.iter().map(|x| pu2id_map[&x]).collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
                 }
@@ -196,18 +201,14 @@ impl Distribution {
 
     #[inline(always)]
     fn get_vnode_mapping(
-        fragmenter: &BatchPlanFragmenter,
+        catalog_reader: &CatalogReader,
+        worker_node_manager: &WorkerNodeManagerRef,
         table_id: &TableId,
-    ) -> Option<VnodeMapping> {
-        fragmenter
-            .catalog_reader()
+    ) -> Option<ParallelUnitMapping> {
+        catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
-            .map(|table| {
-                fragmenter
-                    .worker_node_manager()
-                    .get_fragment_mapping(&table.fragment_id)
-            })
+            .map(|table| worker_node_manager.get_fragment_mapping(&table.fragment_id))
             .ok()
             .flatten()
     }

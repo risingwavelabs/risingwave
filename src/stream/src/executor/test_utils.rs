@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -368,6 +368,7 @@ pub mod agg_executor {
                 agg_calls,
                 agg_state_tables,
                 result_table,
+                Default::default(),
                 pk_indices,
                 executor_id,
                 1 << 10,

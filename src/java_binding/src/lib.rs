@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![feature(once_cell)]
 
 mod iterator;
 
@@ -21,41 +22,84 @@ use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::panic::catch_unwind;
+use std::slice::from_raw_parts;
+use std::sync::LazyLock;
 
 use iterator::{Iterator, KeyedRow};
-use jni::objects::{JClass, JObject, JString};
-use jni::sys::{jboolean, jbyteArray, jint, jlong};
+use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
+use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
+use prost::{DecodeError, Message};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
+use tokio::runtime::Runtime;
+
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
 #[derive(Error, Debug)]
 enum BindingError {
     #[error("JniError {error}")]
-    JniError {
+    Jni {
         #[from]
         error: jni::errors::Error,
         backtrace: Backtrace,
     },
 
     #[error("StorageError {error}")]
-    StorageError {
+    Storage {
         #[from]
         error: StorageError,
+        backtrace: Backtrace,
+    },
+
+    #[error("DecodeError {error}")]
+    Decode {
+        #[from]
+        error: DecodeError,
         backtrace: Backtrace,
     },
 }
 
 type Result<T> = std::result::Result<T, BindingError>;
 
+/// Wrapper around [`jbyteArray`] that adds a lifetime and provides utilities to manipulate the
+/// underlying array. It matches C's representation of a raw pointer, so it can be used in any of
+/// the extern function argument positions that would take a [`jbyteArray`].
+// Note: use `JObject` internally to conveniently derive `Default` so that it can be returned
+// instead of `jbyteArray` in `execute_and_catch`.
 #[repr(transparent)]
 #[derive(Default)]
-pub struct ByteArray<'a>(JObject<'a>);
+pub struct JByteArray<'a>(JObject<'a>);
 
-impl<'a> From<jbyteArray> for ByteArray<'a> {
+impl<'a> From<jbyteArray> for JByteArray<'a> {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from(inner: jbyteArray) -> Self {
         unsafe { Self(JObject::from_raw(inner)) }
+    }
+}
+
+impl<'a> JByteArray<'a> {
+    fn to_guarded_slice(&self, env: JNIEnv<'a>) -> Result<SliceGuard<'a>> {
+        let array = env.get_byte_array_elements(self.0.into_raw(), ReleaseMode::NoCopyBack)?;
+        let slice = unsafe { from_raw_parts(array.as_ptr() as *mut u8, array.size()? as usize) };
+        Ok(SliceGuard {
+            _array: array,
+            slice,
+        })
+    }
+}
+
+/// Wrapper around `&[u8]` derived from `jbyteArray` to prevent it from being auto-released.
+pub struct SliceGuard<'a> {
+    _array: AutoArray<'a, jbyte>,
+    slice: &'a [u8],
+}
+
+impl<'a> Deref for SliceGuard<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.slice
     }
 }
 
@@ -141,7 +185,7 @@ where
         Ok(Ok(ret)) => ret,
         Ok(Err(e)) => {
             match e {
-                BindingError::JniError {
+                BindingError::Jni {
                     error: jni::errors::Error::JavaException,
                     backtrace,
                 } => {
@@ -164,10 +208,15 @@ where
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew(
-    env: EnvParam<'_>,
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
+    env: EnvParam<'a>,
+    read_plan: JByteArray<'a>,
 ) -> Pointer<'static, Iterator> {
-    execute_and_catch(env, move || Ok(Iterator::new()?.into()))
+    execute_and_catch(env, move || {
+        let read_plan = Message::decode(read_plan.to_guarded_slice(*env)?.deref())?;
+        let iter = RUNTIME.block_on(Iterator::new(read_plan))?;
+        Ok(iter.into())
+    })
 }
 
 #[no_mangle]
@@ -175,9 +224,11 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, Iterator>,
 ) -> Pointer<'static, KeyedRow> {
-    execute_and_catch(env, move || match pointer.as_mut().next()? {
-        None => Ok(Pointer::null()),
-        Some(row) => Ok(row.into()),
+    execute_and_catch(env, move || {
+        match RUNTIME.block_on(pointer.as_mut().next())? {
+            None => Ok(Pointer::null()),
+            Some(row) => Ok(row.into()),
+        }
     })
 }
 
@@ -193,9 +244,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetKey<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, KeyedRow>,
-) -> ByteArray<'a> {
+) -> JByteArray<'a> {
     execute_and_catch(env, move || {
-        Ok(ByteArray::from(
+        Ok(JByteArray::from(
             env.byte_array_from_slice(pointer.as_ref().key())?,
         ))
     })
@@ -207,10 +258,27 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowIsNull<'a>(
     pointer: Pointer<'a, KeyedRow>,
     idx: jint,
 ) -> jboolean {
-    execute_and_catch(
-        env,
-        move || Ok(pointer.as_ref().is_null(idx as usize) as u8),
-    )
+    execute_and_catch(env, move || {
+        Ok(pointer.as_ref().is_null(idx as usize) as jboolean)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt16Value<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jshort {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_int16(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt32Value<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jint {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_int32(idx as usize)))
 }
 
 #[no_mangle]
@@ -220,6 +288,35 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt64Value
     idx: jint,
 ) -> jlong {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_int64(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetFloatValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jfloat {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_f32(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDoubleValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jdouble {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_f64(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetBooleanValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jboolean {
+    execute_and_catch(env, move || {
+        Ok(pointer.as_ref().get_bool(idx as usize) as jboolean)
+    })
 }
 
 #[no_mangle]

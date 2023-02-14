@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "expr",
         "health",
         "hummock",
-        "leader",
+        "java_binding",
         "meta",
         "monitor_service",
         "plan_common",
@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .file_descriptor_set_path(file_descriptor_set_path.as_path())
         .compile_well_known_types(true)
+        .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(prost_helpers::AnyPB)]")
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

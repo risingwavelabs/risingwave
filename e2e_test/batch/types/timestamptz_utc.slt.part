@@ -119,3 +119,12 @@ query T
 select '2022-03-13 09:00:00Z'::timestamptz + interval '1' day - interval '24' hour;
 ----
 2022-03-13 09:00:00+00:00
+
+# Issue #7566
+# timestamptz_interval_sub
+statement error out of range
+select TIMESTAMP WITH TIME ZONE '2022-08-09 00:00:00' - (INTERVAL '-2147483648 days');
+
+# timestamptz_interval_add
+statement error out of range
+select TIMESTAMP WITH TIME ZONE '2022-08-09 00:00:00' + (INTERVAL '-2147483648 days');

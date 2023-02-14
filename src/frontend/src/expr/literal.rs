@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
 use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{literal_type_match, DataType, Datum};
-use risingwave_common::util::value_encoding::serialize_datum;
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_pb::data::Datum as ProstDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -77,6 +78,16 @@ impl Literal {
     pub fn get_data(&self) -> &Datum {
         &self.data
     }
+
+    pub(super) fn from_expr_proto(
+        proto: &risingwave_pb::expr::ExprNode,
+    ) -> risingwave_common::error::Result<Self> {
+        let data_type = proto.get_return_type()?;
+        Ok(Self {
+            data: value_encoding_to_literal(&proto.rex_node, &data_type.into())?,
+            data_type: data_type.into(),
+        })
+    }
 }
 
 impl Expr for Literal {
@@ -99,10 +110,28 @@ fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
     if d.is_none() {
         return None;
     }
-    use risingwave_pb::data::Datum as ProstDatum;
 
     let body = serialize_datum(d.as_ref());
     Some(RexNode::Constant(ProstDatum { body }))
+}
+
+/// Convert protobuf into a literal value (datum).
+fn value_encoding_to_literal(
+    proto: &Option<RexNode>,
+    ty: &DataType,
+) -> risingwave_common::error::Result<Datum> {
+    if let Some(rex_node) = proto {
+        if let RexNode::Constant(prost_datum) = rex_node {
+            let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
+            // remove unwrap
+            // https://github.com/risingwavelabs/risingwave/issues/7862
+            Ok(Some(datum.unwrap()))
+        } else {
+            unreachable!()
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]

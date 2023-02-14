@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -212,8 +212,8 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
     ];
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         table_type: TableType::Internal as i32,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,6 +60,7 @@ pub trait PlanNode:
     + Display
     + Downcast
     + ColPrunable
+    + ExprRewritable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -83,6 +84,22 @@ pub enum Convention {
     Logical,
     Batch,
     Stream,
+}
+
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
+}
+
+impl RewriteExprsRecursive for PlanRef {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
 }
 
 impl ColPrunable for PlanRef {
@@ -224,6 +241,11 @@ impl PlanTreeNode for PlanRef {
             assert_eq!(inputs.len(), 1);
             // We can't clone `LogicalShare`, but only can replace input instead.
             logical_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else if let Some(stream_share) = self.clone().as_stream_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `StreamShare`, but only can replace input instead.
+            stream_share.replace_input(inputs[0].clone());
             self.clone()
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
@@ -407,6 +429,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod expr_rewritable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -490,6 +514,7 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_watermark_filter;
 
 mod stream_share;
 mod stream_union;
@@ -565,8 +590,9 @@ pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
@@ -658,6 +684,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }
@@ -757,6 +784,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -352,6 +353,8 @@ impl ColPrunable for LogicalTopN {
         }
     }
 }
+
+impl ExprRewritable for LogicalTopN {}
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(

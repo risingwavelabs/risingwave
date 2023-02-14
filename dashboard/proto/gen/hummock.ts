@@ -91,16 +91,23 @@ export interface GroupConstruct {
   /** If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially. */
   parentGroupId: number;
   tableIds: number[];
+  groupId: number;
+}
+
+export interface GroupMetaChange {
+  tableIdsAdd: number[];
+  tableIdsRemove: number[];
 }
 
 export interface GroupDestroy {
 }
 
 export interface GroupDelta {
-  deltaType?: { $case: "intraLevel"; intraLevel: IntraLevelDelta } | {
-    $case: "groupConstruct";
-    groupConstruct: GroupConstruct;
-  } | { $case: "groupDestroy"; groupDestroy: GroupDestroy };
+  deltaType?:
+    | { $case: "intraLevel"; intraLevel: IntraLevelDelta }
+    | { $case: "groupConstruct"; groupConstruct: GroupConstruct }
+    | { $case: "groupDestroy"; groupDestroy: GroupDestroy }
+    | { $case: "groupMetaChange"; groupMetaChange: GroupMetaChange };
 }
 
 export interface UncommittedEpoch {
@@ -123,6 +130,9 @@ export interface HummockVersion {
 export interface HummockVersion_Levels {
   levels: Level[];
   l0: OverlappingLevel | undefined;
+  groupId: number;
+  parentGroupId: number;
+  memberTableIds: number[];
 }
 
 export interface HummockVersion_LevelsEntry {
@@ -166,13 +176,7 @@ export interface HummockSnapshot {
   currentEpoch: number;
 }
 
-export interface PinVersionRequest {
-  contextId: number;
-  lastPinned: number;
-}
-
-export interface PinVersionResponse {
-  status: Status | undefined;
+export interface VersionUpdatePayload {
   payload?: { $case: "versionDeltas"; versionDeltas: HummockVersionDeltas } | {
     $case: "pinnedVersion";
     pinnedVersion: HummockVersion;
@@ -292,6 +296,8 @@ export interface CompactTask {
   tableOptions: { [key: number]: TableOption };
   currentEpochTime: number;
   targetSubLevelId: number;
+  /** Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum */
+  taskType: CompactTask_TaskType;
 }
 
 export const CompactTask_TaskStatus = {
@@ -389,6 +395,65 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
   }
 }
 
+export const CompactTask_TaskType = {
+  TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
+  DYNAMIC: "DYNAMIC",
+  SPACE_RECLAIM: "SPACE_RECLAIM",
+  MANUAL: "MANUAL",
+  SHARED_BUFFER: "SHARED_BUFFER",
+  TTL: "TTL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type CompactTask_TaskType = typeof CompactTask_TaskType[keyof typeof CompactTask_TaskType];
+
+export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType {
+  switch (object) {
+    case 0:
+    case "TYPE_UNSPECIFIED":
+      return CompactTask_TaskType.TYPE_UNSPECIFIED;
+    case 1:
+    case "DYNAMIC":
+      return CompactTask_TaskType.DYNAMIC;
+    case 2:
+    case "SPACE_RECLAIM":
+      return CompactTask_TaskType.SPACE_RECLAIM;
+    case 3:
+    case "MANUAL":
+      return CompactTask_TaskType.MANUAL;
+    case 4:
+    case "SHARED_BUFFER":
+      return CompactTask_TaskType.SHARED_BUFFER;
+    case 5:
+    case "TTL":
+      return CompactTask_TaskType.TTL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return CompactTask_TaskType.UNRECOGNIZED;
+  }
+}
+
+export function compactTask_TaskTypeToJSON(object: CompactTask_TaskType): string {
+  switch (object) {
+    case CompactTask_TaskType.TYPE_UNSPECIFIED:
+      return "TYPE_UNSPECIFIED";
+    case CompactTask_TaskType.DYNAMIC:
+      return "DYNAMIC";
+    case CompactTask_TaskType.SPACE_RECLAIM:
+      return "SPACE_RECLAIM";
+    case CompactTask_TaskType.MANUAL:
+      return "MANUAL";
+    case CompactTask_TaskType.SHARED_BUFFER:
+      return "SHARED_BUFFER";
+    case CompactTask_TaskType.TTL:
+      return "TTL";
+    case CompactTask_TaskType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface CompactTask_TableOptionsEntry {
   key: number;
   value: TableOption | undefined;
@@ -411,17 +476,21 @@ export interface CompactStatus {
   levelHandlers: LevelHandler[];
 }
 
+/** Config info of compaction group. */
 export interface CompactionGroup {
+  id: number;
+  compactionConfig: CompactionConfig | undefined;
+}
+
+/**
+ * Complete info of compaction group.
+ * The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
+ */
+export interface CompactionGroupInfo {
   id: number;
   parentId: number;
   memberTableIds: number[];
   compactionConfig: CompactionConfig | undefined;
-  tableIdToOptions: { [key: number]: TableOption };
-}
-
-export interface CompactionGroup_TableIdToOptionsEntry {
-  key: number;
-  value: TableOption | undefined;
 }
 
 export interface CompactTaskAssignment {
@@ -545,14 +614,6 @@ export interface ReportVacuumTaskResponse {
   status: Status | undefined;
 }
 
-export interface GetCompactionGroupsRequest {
-}
-
-export interface GetCompactionGroupsResponse {
-  status: Status | undefined;
-  compactionGroups: CompactionGroup[];
-}
-
 export interface TriggerManualCompactionRequest {
   compactionGroupId: number;
   keyRange: KeyRange | undefined;
@@ -627,7 +688,7 @@ export interface RiseCtlGetPinnedSnapshotsSummaryResponse {
 
 export interface InitMetadataForReplayRequest {
   tables: Table[];
-  compactionGroups: CompactionGroup[];
+  compactionGroups: CompactionGroupInfo[];
 }
 
 export interface InitMetadataForReplayResponse {
@@ -662,7 +723,7 @@ export interface RiseCtlListCompactionGroupRequest {
 
 export interface RiseCtlListCompactionGroupResponse {
   status: Status | undefined;
-  compactionGroups: CompactionGroup[];
+  compactionGroups: CompactionGroupInfo[];
 }
 
 export interface RiseCtlUpdateCompactionConfigRequest {
@@ -694,6 +755,14 @@ export interface SetCompactorRuntimeConfigRequest {
 export interface SetCompactorRuntimeConfigResponse {
 }
 
+export interface PinVersionRequest {
+  contextId: number;
+}
+
+export interface PinVersionResponse {
+  pinnedVersion: HummockVersion | undefined;
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -706,6 +775,7 @@ export interface CompactionConfig {
   targetFileSizeBase: number;
   compactionFilterMask: number;
   maxSubCompaction: number;
+  maxSpaceReclaimBytes: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -969,7 +1039,7 @@ export const IntraLevelDelta = {
 };
 
 function createBaseGroupConstruct(): GroupConstruct {
-  return { groupConfig: undefined, parentGroupId: 0, tableIds: [] };
+  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0 };
 }
 
 export const GroupConstruct = {
@@ -978,6 +1048,7 @@ export const GroupConstruct = {
       groupConfig: isSet(object.groupConfig) ? CompactionConfig.fromJSON(object.groupConfig) : undefined,
       parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
     };
   },
 
@@ -991,6 +1062,7 @@ export const GroupConstruct = {
     } else {
       obj.tableIds = [];
     }
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
     return obj;
   },
 
@@ -1001,6 +1073,42 @@ export const GroupConstruct = {
       : undefined;
     message.parentGroupId = object.parentGroupId ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
+    message.groupId = object.groupId ?? 0;
+    return message;
+  },
+};
+
+function createBaseGroupMetaChange(): GroupMetaChange {
+  return { tableIdsAdd: [], tableIdsRemove: [] };
+}
+
+export const GroupMetaChange = {
+  fromJSON(object: any): GroupMetaChange {
+    return {
+      tableIdsAdd: Array.isArray(object?.tableIdsAdd) ? object.tableIdsAdd.map((e: any) => Number(e)) : [],
+      tableIdsRemove: Array.isArray(object?.tableIdsRemove) ? object.tableIdsRemove.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: GroupMetaChange): unknown {
+    const obj: any = {};
+    if (message.tableIdsAdd) {
+      obj.tableIdsAdd = message.tableIdsAdd.map((e) => Math.round(e));
+    } else {
+      obj.tableIdsAdd = [];
+    }
+    if (message.tableIdsRemove) {
+      obj.tableIdsRemove = message.tableIdsRemove.map((e) => Math.round(e));
+    } else {
+      obj.tableIdsRemove = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupMetaChange>, I>>(object: I): GroupMetaChange {
+    const message = createBaseGroupMetaChange();
+    message.tableIdsAdd = object.tableIdsAdd?.map((e) => e) || [];
+    message.tableIdsRemove = object.tableIdsRemove?.map((e) => e) || [];
     return message;
   },
 };
@@ -1038,6 +1146,8 @@ export const GroupDelta = {
         ? { $case: "groupConstruct", groupConstruct: GroupConstruct.fromJSON(object.groupConstruct) }
         : isSet(object.groupDestroy)
         ? { $case: "groupDestroy", groupDestroy: GroupDestroy.fromJSON(object.groupDestroy) }
+        : isSet(object.groupMetaChange)
+        ? { $case: "groupMetaChange", groupMetaChange: GroupMetaChange.fromJSON(object.groupMetaChange) }
         : undefined,
     };
   },
@@ -1052,6 +1162,9 @@ export const GroupDelta = {
       : undefined);
     message.deltaType?.$case === "groupDestroy" && (obj.groupDestroy = message.deltaType?.groupDestroy
       ? GroupDestroy.toJSON(message.deltaType?.groupDestroy)
+      : undefined);
+    message.deltaType?.$case === "groupMetaChange" && (obj.groupMetaChange = message.deltaType?.groupMetaChange
+      ? GroupMetaChange.toJSON(message.deltaType?.groupMetaChange)
       : undefined);
     return obj;
   },
@@ -1083,6 +1196,16 @@ export const GroupDelta = {
       message.deltaType = {
         $case: "groupDestroy",
         groupDestroy: GroupDestroy.fromPartial(object.deltaType.groupDestroy),
+      };
+    }
+    if (
+      object.deltaType?.$case === "groupMetaChange" &&
+      object.deltaType?.groupMetaChange !== undefined &&
+      object.deltaType?.groupMetaChange !== null
+    ) {
+      message.deltaType = {
+        $case: "groupMetaChange",
+        groupMetaChange: GroupMetaChange.fromPartial(object.deltaType.groupMetaChange),
       };
     }
     return message;
@@ -1172,7 +1295,7 @@ export const HummockVersion = {
 };
 
 function createBaseHummockVersion_Levels(): HummockVersion_Levels {
-  return { levels: [], l0: undefined };
+  return { levels: [], l0: undefined, groupId: 0, parentGroupId: 0, memberTableIds: [] };
 }
 
 export const HummockVersion_Levels = {
@@ -1180,6 +1303,9 @@ export const HummockVersion_Levels = {
     return {
       levels: Array.isArray(object?.levels) ? object.levels.map((e: any) => Level.fromJSON(e)) : [],
       l0: isSet(object.l0) ? OverlappingLevel.fromJSON(object.l0) : undefined,
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
+      memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -1191,6 +1317,13 @@ export const HummockVersion_Levels = {
       obj.levels = [];
     }
     message.l0 !== undefined && (obj.l0 = message.l0 ? OverlappingLevel.toJSON(message.l0) : undefined);
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    message.parentGroupId !== undefined && (obj.parentGroupId = Math.round(message.parentGroupId));
+    if (message.memberTableIds) {
+      obj.memberTableIds = message.memberTableIds.map((e) => Math.round(e));
+    } else {
+      obj.memberTableIds = [];
+    }
     return obj;
   },
 
@@ -1198,6 +1331,9 @@ export const HummockVersion_Levels = {
     const message = createBaseHummockVersion_Levels();
     message.levels = object.levels?.map((e) => Level.fromPartial(e)) || [];
     message.l0 = (object.l0 !== undefined && object.l0 !== null) ? OverlappingLevel.fromPartial(object.l0) : undefined;
+    message.groupId = object.groupId ?? 0;
+    message.parentGroupId = object.parentGroupId ?? 0;
+    message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -1419,41 +1555,13 @@ export const HummockSnapshot = {
   },
 };
 
-function createBasePinVersionRequest(): PinVersionRequest {
-  return { contextId: 0, lastPinned: 0 };
+function createBaseVersionUpdatePayload(): VersionUpdatePayload {
+  return { payload: undefined };
 }
 
-export const PinVersionRequest = {
-  fromJSON(object: any): PinVersionRequest {
+export const VersionUpdatePayload = {
+  fromJSON(object: any): VersionUpdatePayload {
     return {
-      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
-      lastPinned: isSet(object.lastPinned) ? Number(object.lastPinned) : 0,
-    };
-  },
-
-  toJSON(message: PinVersionRequest): unknown {
-    const obj: any = {};
-    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
-    message.lastPinned !== undefined && (obj.lastPinned = Math.round(message.lastPinned));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
-    const message = createBasePinVersionRequest();
-    message.contextId = object.contextId ?? 0;
-    message.lastPinned = object.lastPinned ?? 0;
-    return message;
-  },
-};
-
-function createBasePinVersionResponse(): PinVersionResponse {
-  return { status: undefined, payload: undefined };
-}
-
-export const PinVersionResponse = {
-  fromJSON(object: any): PinVersionResponse {
-    return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       payload: isSet(object.versionDeltas)
         ? { $case: "versionDeltas", versionDeltas: HummockVersionDeltas.fromJSON(object.versionDeltas) }
         : isSet(object.pinnedVersion)
@@ -1462,9 +1570,8 @@ export const PinVersionResponse = {
     };
   },
 
-  toJSON(message: PinVersionResponse): unknown {
+  toJSON(message: VersionUpdatePayload): unknown {
     const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.payload?.$case === "versionDeltas" && (obj.versionDeltas = message.payload?.versionDeltas
       ? HummockVersionDeltas.toJSON(message.payload?.versionDeltas)
       : undefined);
@@ -1474,11 +1581,8 @@ export const PinVersionResponse = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
-    const message = createBasePinVersionResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
+  fromPartial<I extends Exact<DeepPartial<VersionUpdatePayload>, I>>(object: I): VersionUpdatePayload {
+    const message = createBaseVersionUpdatePayload();
     if (
       object.payload?.$case === "versionDeltas" &&
       object.payload?.versionDeltas !== undefined &&
@@ -2003,6 +2107,7 @@ function createBaseCompactTask(): CompactTask {
     tableOptions: {},
     currentEpochTime: 0,
     targetSubLevelId: 0,
+    taskType: CompactTask_TaskType.TYPE_UNSPECIFIED,
   };
 }
 
@@ -2036,6 +2141,9 @@ export const CompactTask = {
         : {},
       currentEpochTime: isSet(object.currentEpochTime) ? Number(object.currentEpochTime) : 0,
       targetSubLevelId: isSet(object.targetSubLevelId) ? Number(object.targetSubLevelId) : 0,
+      taskType: isSet(object.taskType)
+        ? compactTask_TaskTypeFromJSON(object.taskType)
+        : CompactTask_TaskType.TYPE_UNSPECIFIED,
     };
   },
 
@@ -2078,6 +2186,7 @@ export const CompactTask = {
     }
     message.currentEpochTime !== undefined && (obj.currentEpochTime = Math.round(message.currentEpochTime));
     message.targetSubLevelId !== undefined && (obj.targetSubLevelId = Math.round(message.targetSubLevelId));
+    message.taskType !== undefined && (obj.taskType = compactTask_TaskTypeToJSON(message.taskType));
     return obj;
   },
 
@@ -2107,6 +2216,7 @@ export const CompactTask = {
     );
     message.currentEpochTime = object.currentEpochTime ?? 0;
     message.targetSubLevelId = object.targetSubLevelId ?? 0;
+    message.taskType = object.taskType ?? CompactTask_TaskType.TYPE_UNSPECIFIED;
     return message;
   },
 };
@@ -2248,26 +2358,50 @@ export const CompactStatus = {
 };
 
 function createBaseCompactionGroup(): CompactionGroup {
-  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined, tableIdToOptions: {} };
+  return { id: 0, compactionConfig: undefined };
 }
 
 export const CompactionGroup = {
   fromJSON(object: any): CompactionGroup {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
-      parentId: isSet(object.parentId) ? Number(object.parentId) : 0,
-      memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
       compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
-      tableIdToOptions: isObject(object.tableIdToOptions)
-        ? Object.entries(object.tableIdToOptions).reduce<{ [key: number]: TableOption }>((acc, [key, value]) => {
-          acc[Number(key)] = TableOption.fromJSON(value);
-          return acc;
-        }, {})
-        : {},
     };
   },
 
   toJSON(message: CompactionGroup): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.compactionConfig !== undefined &&
+      (obj.compactionConfig = message.compactionConfig ? CompactionConfig.toJSON(message.compactionConfig) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
+    const message = createBaseCompactionGroup();
+    message.id = object.id ?? 0;
+    message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
+      ? CompactionConfig.fromPartial(object.compactionConfig)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCompactionGroupInfo(): CompactionGroupInfo {
+  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined };
+}
+
+export const CompactionGroupInfo = {
+  fromJSON(object: any): CompactionGroupInfo {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      parentId: isSet(object.parentId) ? Number(object.parentId) : 0,
+      memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
+      compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
+    };
+  },
+
+  toJSON(message: CompactionGroupInfo): unknown {
     const obj: any = {};
     message.id !== undefined && (obj.id = Math.round(message.id));
     message.parentId !== undefined && (obj.parentId = Math.round(message.parentId));
@@ -2278,62 +2412,16 @@ export const CompactionGroup = {
     }
     message.compactionConfig !== undefined &&
       (obj.compactionConfig = message.compactionConfig ? CompactionConfig.toJSON(message.compactionConfig) : undefined);
-    obj.tableIdToOptions = {};
-    if (message.tableIdToOptions) {
-      Object.entries(message.tableIdToOptions).forEach(([k, v]) => {
-        obj.tableIdToOptions[k] = TableOption.toJSON(v);
-      });
-    }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
-    const message = createBaseCompactionGroup();
+  fromPartial<I extends Exact<DeepPartial<CompactionGroupInfo>, I>>(object: I): CompactionGroupInfo {
+    const message = createBaseCompactionGroupInfo();
     message.id = object.id ?? 0;
     message.parentId = object.parentId ?? 0;
     message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
     message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
       ? CompactionConfig.fromPartial(object.compactionConfig)
-      : undefined;
-    message.tableIdToOptions = Object.entries(object.tableIdToOptions ?? {}).reduce<{ [key: number]: TableOption }>(
-      (acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[Number(key)] = TableOption.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    return message;
-  },
-};
-
-function createBaseCompactionGroup_TableIdToOptionsEntry(): CompactionGroup_TableIdToOptionsEntry {
-  return { key: 0, value: undefined };
-}
-
-export const CompactionGroup_TableIdToOptionsEntry = {
-  fromJSON(object: any): CompactionGroup_TableIdToOptionsEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? TableOption.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: CompactionGroup_TableIdToOptionsEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? TableOption.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<CompactionGroup_TableIdToOptionsEntry>, I>>(
-    object: I,
-  ): CompactionGroup_TableIdToOptionsEntry {
-    const message = createBaseCompactionGroup_TableIdToOptionsEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? TableOption.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -3042,61 +3130,6 @@ export const ReportVacuumTaskResponse = {
   },
 };
 
-function createBaseGetCompactionGroupsRequest(): GetCompactionGroupsRequest {
-  return {};
-}
-
-export const GetCompactionGroupsRequest = {
-  fromJSON(_: any): GetCompactionGroupsRequest {
-    return {};
-  },
-
-  toJSON(_: GetCompactionGroupsRequest): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GetCompactionGroupsRequest>, I>>(_: I): GetCompactionGroupsRequest {
-    const message = createBaseGetCompactionGroupsRequest();
-    return message;
-  },
-};
-
-function createBaseGetCompactionGroupsResponse(): GetCompactionGroupsResponse {
-  return { status: undefined, compactionGroups: [] };
-}
-
-export const GetCompactionGroupsResponse = {
-  fromJSON(object: any): GetCompactionGroupsResponse {
-    return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
-        : [],
-    };
-  },
-
-  toJSON(message: GetCompactionGroupsResponse): unknown {
-    const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
-    } else {
-      obj.compactionGroups = [];
-    }
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GetCompactionGroupsResponse>, I>>(object: I): GetCompactionGroupsResponse {
-    const message = createBaseGetCompactionGroupsResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
-    return message;
-  },
-};
-
 function createBaseTriggerManualCompactionRequest(): TriggerManualCompactionRequest {
   return { compactionGroupId: 0, keyRange: undefined, tableId: 0, level: 0, sstIds: [] };
 }
@@ -3591,7 +3624,7 @@ export const InitMetadataForReplayRequest = {
     return {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        ? object.compactionGroups.map((e: any) => CompactionGroupInfo.fromJSON(e))
         : [],
     };
   },
@@ -3604,7 +3637,7 @@ export const InitMetadataForReplayRequest = {
       obj.tables = [];
     }
     if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroupInfo.toJSON(e) : undefined);
     } else {
       obj.compactionGroups = [];
     }
@@ -3614,7 +3647,7 @@ export const InitMetadataForReplayRequest = {
   fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(object: I): InitMetadataForReplayRequest {
     const message = createBaseInitMetadataForReplayRequest();
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroupInfo.fromPartial(e)) || [];
     return message;
   },
 };
@@ -3835,7 +3868,7 @@ export const RiseCtlListCompactionGroupResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        ? object.compactionGroups.map((e: any) => CompactionGroupInfo.fromJSON(e))
         : [],
     };
   },
@@ -3844,7 +3877,7 @@ export const RiseCtlListCompactionGroupResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroupInfo.toJSON(e) : undefined);
     } else {
       obj.compactionGroups = [];
     }
@@ -3858,7 +3891,7 @@ export const RiseCtlListCompactionGroupResponse = {
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroupInfo.fromPartial(e)) || [];
     return message;
   },
 };
@@ -4123,6 +4156,53 @@ export const SetCompactorRuntimeConfigResponse = {
   },
 };
 
+function createBasePinVersionRequest(): PinVersionRequest {
+  return { contextId: 0 };
+}
+
+export const PinVersionRequest = {
+  fromJSON(object: any): PinVersionRequest {
+    return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
+  },
+
+  toJSON(message: PinVersionRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
+    const message = createBasePinVersionRequest();
+    message.contextId = object.contextId ?? 0;
+    return message;
+  },
+};
+
+function createBasePinVersionResponse(): PinVersionResponse {
+  return { pinnedVersion: undefined };
+}
+
+export const PinVersionResponse = {
+  fromJSON(object: any): PinVersionResponse {
+    return { pinnedVersion: isSet(object.pinnedVersion) ? HummockVersion.fromJSON(object.pinnedVersion) : undefined };
+  },
+
+  toJSON(message: PinVersionResponse): unknown {
+    const obj: any = {};
+    message.pinnedVersion !== undefined &&
+      (obj.pinnedVersion = message.pinnedVersion ? HummockVersion.toJSON(message.pinnedVersion) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinVersionResponse>, I>>(object: I): PinVersionResponse {
+    const message = createBasePinVersionResponse();
+    message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
+      ? HummockVersion.fromPartial(object.pinnedVersion)
+      : undefined;
+    return message;
+  },
+};
+
 function createBaseCompactionConfig(): CompactionConfig {
   return {
     maxBytesForLevelBase: 0,
@@ -4136,6 +4216,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     targetFileSizeBase: 0,
     compactionFilterMask: 0,
     maxSubCompaction: 0,
+    maxSpaceReclaimBytes: 0,
   };
 }
 
@@ -4163,6 +4244,7 @@ export const CompactionConfig = {
       targetFileSizeBase: isSet(object.targetFileSizeBase) ? Number(object.targetFileSizeBase) : 0,
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
+      maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
     };
   },
 
@@ -4187,6 +4269,7 @@ export const CompactionConfig = {
     message.targetFileSizeBase !== undefined && (obj.targetFileSizeBase = Math.round(message.targetFileSizeBase));
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
+    message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
     return obj;
   },
 
@@ -4203,6 +4286,7 @@ export const CompactionConfig = {
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
+    message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
     return message;
   },
 };

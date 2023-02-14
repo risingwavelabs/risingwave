@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use futures_async_stream::try_stream;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
 };
-use risingwave_source::source_desc::SourceDesc;
+use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -91,7 +91,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        Ok(source_desc
+        source_desc
             .source
             .stream_reader(
                 state,
@@ -103,8 +103,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 ),
             )
             .await
-            .map_err(StreamExecutorError::connector_error)?
-            .into_stream())
+            .map_err(StreamExecutorError::connector_error)
     }
 
     async fn apply_split_change(
@@ -239,10 +238,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut core = self.stream_source_core.unwrap();
 
         // Build source description from the builder.
-        let source_desc = core
-            .source_desc_builder
-            .take()
-            .unwrap()
+        let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
+        let source_desc = source_desc_builder
             .build()
             .await
             .map_err(StreamExecutorError::connector_error)?;
@@ -504,20 +501,17 @@ mod tests {
     async fn test_source_executor() {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::with_name(DataType::Int32, "sequence_int"),
-            ],
+            fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
         };
-        let row_id_index = Some(0);
+        let row_id_index = None;
         let pk_column_ids = vec![0];
         let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Json as i32,
+            row_format: ProstRowFormatType::Native as i32,
             ..Default::default()
         };
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let column_ids = vec![0, 1].into_iter().map(ColumnId::from).collect();
+        let column_ids = vec![0].into_iter().map(ColumnId::from).collect();
 
         // This datagen will generate 3 rows at one time.
         let properties: HashMap<String, String> = convert_args!(hashmap!(
@@ -586,10 +580,10 @@ mod tests {
         assert_eq!(
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
-                " I i
-                + . 11
-                + . 12
-                + . 13"
+                " i
+                + 11
+                + 12
+                + 13"
             )
         );
     }
@@ -604,7 +598,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Json as i32,
+            row_format: ProstRowFormatType::Native as i32,
             ..Default::default()
         };
         let properties = convert_args!(hashmap!(

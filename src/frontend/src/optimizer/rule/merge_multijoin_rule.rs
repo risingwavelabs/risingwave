@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ impl MergeMultiJoinRule {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::plan_common::JoinType;
 
@@ -115,12 +115,11 @@ mod tests {
         let multijoin_builder = LogicalMultiJoinBuilder::new(join_1.into());
         let multi_join = multijoin_builder.build();
 
-        for (input, schema) in
-            multi_join
-                .inputs()
-                .iter()
-                .zip_eq(vec![mid.schema(), left.schema(), right.schema()])
-        {
+        for (input, schema) in multi_join.inputs().iter().zip_eq_fast(vec![
+            mid.schema(),
+            left.schema(),
+            right.schema(),
+        ]) {
             assert_eq!(input.schema(), schema);
         }
 

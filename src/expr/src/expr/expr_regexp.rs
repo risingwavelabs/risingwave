@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -205,7 +206,7 @@ impl Expression for RegexpMatchExpression {
             },
         );
 
-        for (text, vis) in text_arr.iter().zip_eq(input.vis().iter()) {
+        for (text, vis) in text_arr.iter().zip_eq_debug(input.vis().iter()) {
             if !vis {
                 output.append_null();
             } else if let Some(list) = self.match_one(text) {

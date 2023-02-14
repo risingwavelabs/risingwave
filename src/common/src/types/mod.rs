@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use crate::error::BoxedError;
 mod native_type;
 mod ops;
 mod scalar_impl;
+mod successor;
 
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -37,6 +38,7 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
 pub use scalar_impl::*;
+pub use successor::*;
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
@@ -337,18 +339,6 @@ impl DataType {
             DataType::Timestamptz => Some(DataType::Timestamptz),
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
             _ => None,
-        }
-    }
-
-    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
-    pub fn mem_cmp_eq_value_enc(&self) -> bool {
-        use DataType::*;
-        match self {
-            Boolean | Int16 | Int32 | Int64 => true,
-            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestamptz
-            | Interval | Bytea => false,
-            Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
-            List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
     }
 

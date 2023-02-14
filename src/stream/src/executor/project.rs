@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,8 +169,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{new_binary_expr, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::test_utils::MockSource;

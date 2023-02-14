@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,36 +140,25 @@ impl<S: StateStore> SortBuffer<S> {
             // Only records with timestamp greater than the last watermark will be output, so
             // records will only be emitted exactly once unless recovery.
             let start_bound = if let Some(last_watermark) = last_watermark.clone() {
-                // TODO: `start_bound` is wrong here, only values with `val.0 > last_watermark`
-                // should be output, but it's hard to represent `OwnedRow::MAX`. A possible
-                // implementation is introducing `next_unit` on a subset of `ScalarImpl` variants.
-                // Currently, we can skip some values explicitly.
-                Bound::Excluded((last_watermark, OwnedRow::empty().into()))
+                Bound::Excluded((
+                    // TODO: unsupported type or watermark overflow. Do we have better ways instead
+                    // of unwrap?
+                    last_watermark.successor().unwrap(),
+                    OwnedRow::empty().into(),
+                ))
             } else {
                 Bound::Unbounded
             };
-            // TODO: `end_bound` = `Bound::Inclusive((watermark_value + 1, OwnedRow::empty()))`, but
-            // it's hard to represent now, so we end the loop by an explicit break.
-            let end_bound = Bound::Unbounded;
+            let end_bound = Bound::Excluded((
+                (watermark_val.successor().unwrap()),
+                OwnedRow::empty().into(),
+            ));
 
-            for ((time_col, _), (row, _)) in self.buffer.range((start_bound, end_bound)) {
-                if let Some(ref last_watermark) = &last_watermark && time_col == last_watermark {
-                    continue;
-                }
-                // Only when a record's timestamp is prior to the watermark should it be
-                // sent to downstream.
-                if time_col <= watermark_val {
-                    // Add the record to stream chunk data. Note that we retrieve the
-                    // record from a BTreeMap, so data in this chunk should be ordered
-                    // by timestamp and pk.
-                    if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
-                        // When the chunk size reaches its maximum, we construct a data chunk and
-                        // send it to downstream.
-                        yield data_chunk;
-                    }
-                } else {
-                    // We have collected all data below watermark.
-                    break;
+            for (_, (row, _)) in self.buffer.range((start_bound, end_bound)) {
+                if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
+                    // When the chunk size reaches its maximum, we construct a data chunk and
+                    // send it to downstream.
+                    yield data_chunk;
                 }
             }
 

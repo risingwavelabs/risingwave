@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,8 +26,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_schema, create_source, create_table, drop_table, explain,
-    variable, HandlerArgs,
+    create_index, create_mv, create_schema, create_source, create_table, create_view, drop_table,
+    explain, variable, HandlerArgs,
 };
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
@@ -408,6 +408,16 @@ impl TestCase {
                 } => {
                     create_mv::handle_create_mv(handler_args, name, *query, columns).await?;
                 }
+                Statement::CreateView {
+                    materialized: false,
+                    or_replace: false,
+                    name,
+                    query,
+                    columns,
+                    ..
+                } => {
+                    create_view::handle_create_view(handler_args, name, columns, *query).await?;
+                }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(
                         handler_args,
@@ -431,7 +441,8 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp = explain::handle_explain(handler_args, *statement, options, analyze)?;
+                    let rsp =
+                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
 
                     let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {

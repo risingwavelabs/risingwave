@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -253,13 +253,15 @@ fn build_fragment(
             current_fragment.is_singleton = node.is_singleton;
         }
 
-        NodeBody::Now(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32,
+        NodeBody::Now(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
+            current_fragment.is_singleton = true;
+        }
 
         _ => {}
     };
 
     // handle join logic
-    // TODO: frontend won't generate delta index join now, so this branch will never hit.
     if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap() {
         if delta_index_join.get_join_type()? == JoinType::Inner
             && delta_index_join.condition.is_none()
@@ -293,7 +295,6 @@ fn build_fragment(
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
                             dispatch_strategy: exchange_node_strategy,
-                            same_worker_node: false,
                             link_id: child_node.operator_id,
                         },
                     );

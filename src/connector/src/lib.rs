@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,11 @@
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 
+use std::time::Duration;
+
+use duration_str::parse_std;
+use serde::de;
+
 pub mod aws_utils;
 pub mod error;
 mod macros;
@@ -34,6 +39,8 @@ mod macros;
 pub mod parser;
 pub mod sink;
 pub mod source;
+
+pub mod common;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
@@ -46,4 +53,33 @@ impl ConnectorParams {
             connector_rpc_endpoint,
         }
     }
+}
+
+pub(crate) fn deserialize_bool_from_string<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    let s = s.to_ascii_lowercase();
+    match s.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(de::Error::invalid_value(
+            de::Unexpected::Str(&s),
+            &"true or false",
+        )),
+    }
+}
+
+pub(crate) fn deserialize_duration_from_string<'de, D>(
+    deserializer: D,
+) -> Result<Duration, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: String = de::Deserialize::deserialize(deserializer)?;
+    parse_std(&s).map_err(|_| de::Error::invalid_value(
+        de::Unexpected::Str(&s),
+        &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
+    ))
 }

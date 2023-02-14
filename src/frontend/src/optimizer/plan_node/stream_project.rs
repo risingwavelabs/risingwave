@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::generic::GenericPlanRef;
-use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl};
+use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -70,17 +70,18 @@ impl StreamProject {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
         let mut watermark_derivations = vec![];
-        let mut watermark_cols = FixedBitSet::with_capacity(logical.schema().len());
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
         for (expr_idx, expr) in logical.exprs().iter().enumerate() {
             if let Some(input_idx) = try_derive_watermark(expr) {
                 if input.watermark_columns().contains(input_idx) {
                     watermark_derivations.push((input_idx, expr_idx));
-                    watermark_cols.insert(expr_idx);
+                    watermark_columns.insert(expr_idx);
                 }
             }
         }
@@ -88,13 +89,12 @@ impl StreamProject {
         // input's `append_only`.
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             distribution,
             logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            watermark_cols,
+            watermark_columns,
         );
         StreamProject {
             base,
@@ -148,5 +148,22 @@ impl StreamNode for StreamProject {
                 .map(|(_, y)| *y as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamProject {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_project()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }
