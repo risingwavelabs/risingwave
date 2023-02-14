@@ -1292,7 +1292,7 @@ async fn test_state_table_may_exist() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
