@@ -8,7 +8,10 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
@@ -33,7 +36,6 @@ humantime = "2.1"
 itertools = "0.10"
 itoa = "1.0"
 memcomparable = { version = "0.1", features = ["decimal"] }
-more-asserts = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
@@ -57,14 +59,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi
 toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-twox-hash = "1"
 url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
 procfs = { version = "0.12", default-features = false }
 libc = "0.2"
 
@@ -75,11 +75,17 @@ mach = "0.3.2"
 
 [dev-dependencies]
 criterion = "0.4"
+more-asserts = "0.3"
 rand = "0.8"
 tempfile = "3"
+twox-hash = "1"
 
 [[bench]]
 name = "bench_encoding"
+harness = false
+
+[[bench]]
+name = "bench_row"
 harness = false
 
 [[bench]]

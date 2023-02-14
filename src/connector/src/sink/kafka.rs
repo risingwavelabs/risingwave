@@ -110,7 +110,7 @@ enum KafkaSinkState {
     Running(u64),
 }
 
-pub struct KafkaSink {
+pub struct KafkaSink<const APPEND_ONLY: bool> {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
@@ -118,7 +118,7 @@ pub struct KafkaSink {
     in_transaction_epoch: Option<u64>,
 }
 
-impl KafkaSink {
+impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
@@ -256,31 +256,25 @@ impl KafkaSink {
 }
 
 #[async_trait::async_trait]
-impl Sink for KafkaSink {
+impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
-        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
-        // }
-
-        match self.config.format.as_str() {
-            "append_only" => self.append_only(chunk, &self.schema).await,
-            "debezium" => {
-                self.debezium_update(
-                    chunk,
-                    &self.schema,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64,
-                )
-                .await
-            }
-            _ => unreachable!(),
+        if APPEND_ONLY {
+            self.append_only(chunk, &self.schema).await
+        } else {
+            // TODO: Distinguish "upsert" from "debezium" later.
+            self.debezium_update(
+                chunk,
+                &self.schema,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            )
+            .await
         }
     }
 
-    //  Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
+    // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
@@ -318,7 +312,7 @@ impl Sink for KafkaSink {
     }
 }
 
-impl Debug for KafkaSink {
+impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
     fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         unimplemented!();
     }
@@ -579,7 +573,9 @@ mod test {
             },
         ]);
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
+        let mut sink = KafkaSink::<true>::new(kafka_config.clone(), schema)
+            .await
+            .unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

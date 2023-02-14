@@ -23,8 +23,8 @@ use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -75,7 +75,19 @@ impl StateStoreWrite for PanicStateStore {
     }
 }
 
-impl LocalStateStore for PanicStateStore {}
+impl LocalStateStore for PanicStateStore {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move {
+            panic!("should not call may_exist from the state store!");
+        }
+    }
+}
 
 impl StateStore for PanicStateStore {
     type Local = Self;
