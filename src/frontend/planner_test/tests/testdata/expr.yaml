@@ -28,7 +28,9 @@
     create table t ();
     select (((((false is not true) is true) is not false) is false) is not null) is null from t;
   batch_plan: |
-    BatchValues { rows: [[IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))]] }
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))] }
+      └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - name: bind between
   sql: |
     SELECT 1 between 2 and 3
@@ -163,7 +165,9 @@
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
-    BatchValues { rows: [[Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar)]] }
+    BatchProject { exprs: [Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar)] }
+    └─BatchFilter { predicate: Like('12':Varchar, '%1':Varchar) }
+      └─BatchValues { rows: [[]] }
 - name: case searched form with else
   sql: |
     create table t (v1 int);

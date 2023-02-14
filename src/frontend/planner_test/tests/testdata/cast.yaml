@@ -3,12 +3,17 @@
   sql: |
     select 1 having NULL;
   batch_plan: |
-    BatchValues { rows: [[1:Int32]] }
+    BatchProject { exprs: [1:Int32] }
+    └─BatchFilter { predicate: null:Boolean }
+      └─BatchSimpleAgg { aggs: [] }
+        └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (WHERE NULL)
   sql: |
     select 1 where NULL;
   batch_plan: |
-    BatchValues { rows: [[1:Int32]] }
+    BatchProject { exprs: [1:Int32] }
+    └─BatchFilter { predicate: null:Boolean }
+      └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (CASE NULL)
   sql: |
     select case when NULL then 1 end;

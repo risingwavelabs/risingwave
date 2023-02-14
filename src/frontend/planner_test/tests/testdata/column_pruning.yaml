@@ -65,7 +65,8 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalScan { table: t, columns: [] }
 - name: constant + filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
@@ -75,7 +76,8 @@
     └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32) }
 - name: constant agg
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
@@ -87,7 +89,8 @@
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(1:Int32)] }
-    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    └─LogicalProject { exprs: [1:Int32] }
+      └─LogicalScan { table: t, columns: [] }
 - name: constant agg + filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
@@ -100,7 +103,8 @@
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [count(1:Int32)] }
-    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    └─LogicalProject { exprs: [1:Int32] }
+      └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32) }
 - name: join + filter
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
