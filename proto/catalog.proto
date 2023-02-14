@@ -61,7 +61,6 @@ enum SinkType {
   APPEND_ONLY = 1;
   FORCE_APPEND_ONLY = 2;
   UPSERT = 3;
-  ANY = 4;
 }
 
 message Sink {

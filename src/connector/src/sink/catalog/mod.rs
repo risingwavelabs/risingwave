@@ -64,9 +64,6 @@ pub enum SinkType {
     ForceAppendOnly,
     /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
     Upsert,
-    /// The sink can be either append-only or upsert. We should try append-only first. If
-    /// unavailable, fall back to upsert.
-    Any,
 }
 
 impl SinkType {
@@ -78,16 +75,11 @@ impl SinkType {
         self == &Self::Upsert
     }
 
-    pub fn is_any(&self) -> bool {
-        self == &Self::Any
-    }
-
     pub fn to_proto(self) -> ProstSinkType {
         match self {
             SinkType::AppendOnly => ProstSinkType::AppendOnly,
             SinkType::ForceAppendOnly => ProstSinkType::ForceAppendOnly,
             SinkType::Upsert => ProstSinkType::Upsert,
-            SinkType::Any => ProstSinkType::Any,
         }
     }
 
@@ -96,7 +88,6 @@ impl SinkType {
             ProstSinkType::AppendOnly => SinkType::AppendOnly,
             ProstSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
             ProstSinkType::Upsert => SinkType::Upsert,
-            ProstSinkType::Any => SinkType::Any,
             ProstSinkType::Unspecified => unreachable!(),
         }
     }

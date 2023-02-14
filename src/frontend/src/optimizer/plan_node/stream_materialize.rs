@@ -285,7 +285,7 @@ impl StreamMaterialize {
         // TODO(Yuanxin): Deduce sink type here.
         StreamSink::new(
             self.input,
-            self.table.to_sink_desc(properties, SinkType::Any),
+            self.table.to_sink_desc(properties, SinkType::AppendOnly),
         )
     }
 }

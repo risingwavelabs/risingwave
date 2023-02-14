@@ -125,7 +125,7 @@ impl SinkImpl {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
             SinkConfig::Kafka(cfg) => {
-                if sink_type.is_append_only() || sink_type.is_any() {
+                if sink_type.is_append_only() {
                     // Append-only Kafka sink
                     SinkImpl::Kafka(Box::new(KafkaSink::<true>::new(*cfg, schema).await?))
                 } else {
@@ -135,7 +135,7 @@ impl SinkImpl {
             }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => {
-                if sink_type.is_append_only() || sink_type.is_any() {
+                if sink_type.is_append_only() {
                     // Append-only remote sink
                     SinkImpl::Remote(Box::new(
                         RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,

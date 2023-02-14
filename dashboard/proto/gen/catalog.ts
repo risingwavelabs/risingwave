@@ -17,7 +17,6 @@ export const SinkType = {
   APPEND_ONLY: "APPEND_ONLY",
   FORCE_APPEND_ONLY: "FORCE_APPEND_ONLY",
   UPSERT: "UPSERT",
-  ANY: "ANY",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -37,9 +36,6 @@ export function sinkTypeFromJSON(object: any): SinkType {
     case 3:
     case "UPSERT":
       return SinkType.UPSERT;
-    case 4:
-    case "ANY":
-      return SinkType.ANY;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -57,8 +53,6 @@ export function sinkTypeToJSON(object: SinkType): string {
       return "FORCE_APPEND_ONLY";
     case SinkType.UPSERT:
       return "UPSERT";
-    case SinkType.ANY:
-      return "ANY";
     case SinkType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
