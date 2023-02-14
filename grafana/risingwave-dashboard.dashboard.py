@@ -1696,6 +1696,23 @@ def section_hummock(panels):
                 ),
             ],
         ),
+        panels.timeseries_latency(
+            "Read Duration - MayExist",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_may_exist_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"p{legend}" + " - {{table_id}} @ {{job}} @ {{instance}}",
+                    ),
+                    [50, 90, 99, "max"],
+                ),
+                panels.target(
+                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_may_exist_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_may_exist_duration_count')}[$__rate_interval]))",
+                    "avg - {{table_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
         panels.timeseries_ops(
             "Read Bloom Filter",
             "",
@@ -2090,6 +2107,14 @@ def section_hummock_manager(outer_panels):
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_count_filter)}",
                                       "table{{table_id}} {{metric}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Stale SST Total Number",
+                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    [
+                        panels.target(f"{metric('storage_stale_ssts_count')}",
+                                      "stale SST total number"),
                     ],
                 ),
             ],

@@ -469,7 +469,7 @@ where
 
         let checkpoint_id = versioning_guard.checkpoint_version.id;
         versioning_guard.ssts_to_delete.clear();
-        versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id);
+        versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
         let preserved_deltas: HashSet<HummockVersionId> =
             HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
         versioning_guard.deltas_to_delete = versioning_guard
@@ -1545,10 +1545,10 @@ where
             return Ok(0);
         }
         commit_multi_var!(self, None, Transaction::default(), checkpoint)?;
-        versioning.extend_ssts_to_delete_from_deltas((
-            Excluded(old_checkpoint_id),
-            Included(new_checkpoint_id),
-        ));
+        versioning.extend_ssts_to_delete_from_deltas(
+            (Excluded(old_checkpoint_id), Included(new_checkpoint_id)),
+            &self.metrics,
+        );
         #[cfg(test)]
         {
             drop(versioning_guard);
