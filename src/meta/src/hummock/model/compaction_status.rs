@@ -18,9 +18,8 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
 
 use crate::hummock::compaction::CompactStatus;
+use crate::hummock::model::HUMMOCK_COMPACTION_STATUS_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-const HUMMOCK_COMPACTION_STATUS_CF_NAME: &str = "cf/hummock_compaction_status";
 
 impl MetadataModel for CompactStatus {
     type KeyType = CompactionGroupId;

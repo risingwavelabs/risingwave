@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
 };
@@ -366,7 +366,7 @@ impl TableCatalog {
         }
     }
 
-    pub fn to_sink_desc(&self, properties: WithOptions) -> SinkDesc {
+    pub fn to_sink_desc(&self, properties: WithOptions, sink_type: SinkType) -> SinkDesc {
         SinkDesc {
             id: SinkId::placeholder(),
             name: self.name.clone(),
@@ -374,9 +374,9 @@ impl TableCatalog {
             pk: self.pk.iter().map(|x| x.to_order_pair()).collect(),
             stream_key: self.stream_key.clone(),
             distribution_key: self.distribution_key.clone(),
-            append_only: self.append_only,
             definition: self.definition.clone(),
             properties: properties.into_inner(),
+            sink_type,
         }
     }
 }
