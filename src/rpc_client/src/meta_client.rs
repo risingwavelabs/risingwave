@@ -68,6 +68,7 @@ use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Streaming};
+use tracing::warn;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -937,16 +938,13 @@ impl SystemParamsReader {
     }
 
     // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store<'a>(&'a self, from_local_config: Option<&'a String>) -> &'a str {
+    pub fn state_store(&self, from_local: String) -> String {
         let from_prost = self.prost.state_store.as_ref().unwrap();
         if from_prost.is_empty() {
-            if let Some(s) = from_local_config {
-                s
-            } else {
-                panic!("State store url is neither specified from CLI args nor on meta node");
-            }
+            warn!("--state-store is not specified on meta node, reading from CLI instead");
+            from_local
         } else {
-            from_prost
+            from_prost.clone()
         }
     }
 
