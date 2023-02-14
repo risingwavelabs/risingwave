@@ -96,7 +96,7 @@ impl SinkExecutor {
     async fn execute_inner(self) {
         // the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
-        let mut empty_epoch_flag = true;
+        let mut empty_checkpoint_flag = true;
         let mut in_transaction = false;
         let mut epoch = 0;
         let data_types = self.schema.data_types();
@@ -134,32 +134,34 @@ impl SinkExecutor {
                         sink.abort().await?;
                         return Err(e.into());
                     }
-                    empty_epoch_flag = false;
+                    empty_checkpoint_flag = false;
 
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
-                    if in_transaction {
-                        if empty_epoch_flag {
-                            sink.abort().await?;
-                            tracing::debug!(
-                                "transaction abort due to empty epoch, epoch: {:?}",
-                                epoch
-                            );
-                        } else if barrier.checkpoint {
-                            let start_time = Instant::now();
-                            sink.commit().await?;
-                            self.metrics
-                                .sink_commit_duration
-                                .with_label_values(&[
-                                    self.identity.as_str(),
-                                    self.config.get_connector(),
-                                ])
-                                .observe(start_time.elapsed().as_millis() as f64);
-                            in_transaction = false;
+                    if barrier.checkpoint {
+                        if in_transaction {
+                            if empty_checkpoint_flag {
+                                sink.abort().await?;
+                                tracing::debug!(
+                                    "transaction abort due to empty epoch, epoch: {:?}",
+                                    epoch
+                                );
+                            } else {
+                                let start_time = Instant::now();
+                                sink.commit().await?;
+                                self.metrics
+                                    .sink_commit_duration
+                                    .with_label_values(&[
+                                        self.identity.as_str(),
+                                        self.config.get_connector(),
+                                    ])
+                                    .observe(start_time.elapsed().as_millis() as f64);
+                            }
                         }
+                        in_transaction = false;
+                        empty_checkpoint_flag = true;
                     }
-                    empty_epoch_flag = true;
                     epoch = barrier.epoch.curr;
                     yield Message::Barrier(barrier);
                 }
