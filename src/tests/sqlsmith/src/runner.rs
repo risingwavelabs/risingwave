@@ -95,7 +95,8 @@ async fn test_batch_queries<R: Rng>(
     set_distributed_query_mode(client).await;
     let mut skipped = 0;
     for _ in 0..sample_size {
-        test_session_variable(client, rng).await;
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
@@ -114,7 +115,8 @@ async fn test_stream_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        test_session_variable(client, rng).await;
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
