@@ -24,6 +24,7 @@ pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
+pub use bloom::BloomFilterBuilder;
 use bloom::BloomFilterReader;
 pub mod builder;
 pub use builder::*;
@@ -43,12 +44,15 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
+mod filter;
 mod sstable_id_manager;
 mod utils;
+
 pub use delete_range_aggregator::{
     get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
     RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
+pub use filter::FilterBuilder;
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};

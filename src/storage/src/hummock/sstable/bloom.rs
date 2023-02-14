@@ -18,6 +18,7 @@ use std::f64;
 
 use bytes::BufMut;
 
+use super::filter::FilterBuilder;
 use super::Sstable;
 
 pub trait BitSlice {
@@ -27,13 +28,6 @@ pub trait BitSlice {
 
 pub trait BitSliceMut {
     fn set_bit(&mut self, idx: usize, val: bool);
-}
-
-pub trait FilterBuilder {
-    /// add key which need to be filter for construct filter data.
-    fn add_key(&mut self, dist_key: &[u8], table_id: u32);
-    /// Builds Bloom filter from key hashes
-    fn finish(&mut self) -> Vec<u8>;
 }
 
 impl<T: AsRef<[u8]>> BitSlice for T {
@@ -116,7 +110,7 @@ impl BloomFilterReader {
 
 pub struct BloomFilterBuilder {
     key_hash_entries: Vec<u32>,
-    bloom_false_positive: f64,
+    bits_per_key: usize,
 }
 
 impl BloomFilterBuilder {
@@ -126,22 +120,19 @@ impl BloomFilterBuilder {
         } else {
             vec![]
         };
+        let bits_per_key = bloom_bits_per_key(capacity, bloom_false_positive);
         Self {
             key_hash_entries,
-            bloom_false_positive,
+            bits_per_key,
         }
     }
+}
 
-    pub fn approximate_len(&self) -> usize {
-        self.key_hash_entries.len() * 4
-    }
-
-    /// Gets Bloom filter bits per key from entries count and FPR
-    fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
-        let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
-        let locs = (size / (entries as f64)).ceil();
-        locs as usize
-    }
+/// Gets Bloom filter bits per key from entries count and FPR
+pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
+    let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
+    let locs = (size / (entries as f64)).ceil();
+    locs as usize
 }
 
 impl FilterBuilder for BloomFilterBuilder {
@@ -150,15 +141,17 @@ impl FilterBuilder for BloomFilterBuilder {
             .push(Sstable::hash_for_bloom_filter(key, table_id));
     }
 
+    fn approximate_len(&self) -> usize {
+        self.key_hash_entries.len() * 4
+    }
+
     fn finish(&mut self) -> Vec<u8> {
-        let bits_per_key =
-            Self::bloom_bits_per_key(self.key_hash_entries.len(), self.bloom_false_positive);
         // 0.69 is approximately ln(2)
-        let k = ((bits_per_key as f64) * 0.69) as u32;
+        let k = ((self.bits_per_key as f64) * 0.69) as u32;
         // limit k in [1, 30]
         let k = k.clamp(1, 30);
         // For small len(keys), we set a minimum Bloom filter length to avoid high FPR
-        let nbits = (self.key_hash_entries.len() * bits_per_key).max(64);
+        let nbits = (self.key_hash_entries.len() * self.bits_per_key).max(64);
         let nbytes = (nbits + 7) / 8;
         // nbits is always multiplication of 8
         let nbits = nbytes * 8;
@@ -176,6 +169,10 @@ impl FilterBuilder for BloomFilterBuilder {
         filter.put_u8(k as u8);
         self.key_hash_entries.clear();
         filter
+    }
+
+    fn create(fpr: f64, capacity: usize) -> Self {
+        BloomFilterBuilder::new(fpr, capacity)
     }
 }
 
@@ -213,12 +210,9 @@ mod tests {
         assert!(f.may_match(check_hash[1]));
         assert!(!f.may_match(check_hash[2]));
         assert!(!f.may_match(check_hash[3]));
-        let t = BloomFilterBuilder::bloom_bits_per_key(
-            10000,
-            SstableBuilderOptions::default().bloom_false_positive,
-        );
+        let t = bloom_bits_per_key(10000, SstableBuilderOptions::default().bloom_false_positive);
         println!("expected bits: {}", t);
-        let t = BloomFilterBuilder::bloom_bits_per_key(
+        let t = bloom_bits_per_key(
             1000000,
             SstableBuilderOptions::default().bloom_false_positive,
         );

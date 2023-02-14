@@ -30,7 +30,7 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use crate::hummock::sstable::bloom::{BloomFilterBuilder, FilterBuilder};
+use crate::hummock::sstable::{BloomFilterBuilder, FilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
 use crate::opts::StorageOpts;
@@ -84,7 +84,7 @@ pub struct SstableBuilderOutput<WO> {
     pub avg_value_size: usize,
 }
 
-pub struct SstableBuilder<W: SstableWriter> {
+pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// Options.
     options: SstableBuilderOptions,
     /// Data writer.
@@ -115,24 +115,31 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
-    filter_builder: BloomFilterBuilder,
+    filter_builder: F,
 }
 
-impl<W: SstableWriter> SstableBuilder<W> {
+impl<W: SstableWriter> SstableBuilder<W, BloomFilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
             sstable_id,
             writer,
+            BloomFilterBuilder::new(
+                options.bloom_false_positive,
+                options.capacity / DEFAULT_ENTRY_SIZE + 1,
+            ),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
         )
     }
+}
 
+impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     pub fn new(
         sstable_id: u64,
         writer: W,
+        filter_builder: F,
         options: SstableBuilderOptions,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     ) -> Self {
@@ -144,10 +151,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 restart_interval: options.restart_interval,
                 compression_algorithm: options.compression_algorithm,
             }),
-            filter_builder: BloomFilterBuilder::new(
-                options.bloom_false_positive,
-                options.capacity / DEFAULT_ENTRY_SIZE + 1,
-            ),
+            filter_builder,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             last_table_id: None,
