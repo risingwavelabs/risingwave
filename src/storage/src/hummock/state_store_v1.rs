@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::future::Future;
-use std::ops::Bound::{Excluded, Included};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +29,7 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, map_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_hummock_sdk::{can_concat, HummockReadEpoch};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::LevelType;
 use tokio::sync::oneshot;
 use tracing::log::warn;
@@ -51,7 +50,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::ReadVersion;
 use crate::hummock::shared_buffer::build_ordered_merge_iter;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::utils::{prune_ssts, search_sst_idx};
+use crate::hummock::utils::{prune_nonoverlapping_ssts, prune_overlapping_ssts};
 use crate::hummock::{
     DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
     HummockResult, Sstable,
@@ -62,8 +61,8 @@ use crate::monitor::{
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 impl HummockStorageV1 {
@@ -139,8 +138,12 @@ impl HummockStorageV1 {
             }
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos =
-                        prune_ssts(level.table_infos.iter(), table_id, &(table_key..=table_key));
+                    let single_table_key_range = table_key..=table_key;
+                    let sstable_infos = prune_overlapping_ssts(
+                        &level.table_infos,
+                        table_id,
+                        &single_table_key_range,
+                    );
                     for sstable_info in sstable_infos {
                         stats_guard.local_stats.sub_iter_count += 1;
                         if let Some(v) = get_from_sstable_info(
@@ -300,24 +303,12 @@ impl HummockStorageV1 {
                 continue;
             }
             if level.level_type == LevelType::Nonoverlapping as i32 {
-                debug_assert!(can_concat(&level.table_infos));
-                let start_table_idx = match encoded_user_key_range.start_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
-                    _ => 0,
-                };
-                let end_table_idx = match encoded_user_key_range.end_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
-                    _ => level.table_infos.len().saturating_sub(1),
-                };
-                assert!(
-                    start_table_idx < level.table_infos.len()
-                        && end_table_idx < level.table_infos.len()
-                );
-                let matched_table_infos = &level.table_infos[start_table_idx..=end_table_idx];
+                let matched_table_infos =
+                    prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range);
 
                 let pruned_sstables = match T::Direction::direction() {
-                    DirectionEnum::Backward => matched_table_infos.iter().rev().collect_vec(),
-                    DirectionEnum::Forward => matched_table_infos.iter().collect_vec(),
+                    DirectionEnum::Backward => matched_table_infos.rev().collect_vec(),
+                    DirectionEnum::Forward => matched_table_infos.collect_vec(),
                 };
 
                 let mut sstables = vec![];
@@ -346,7 +337,8 @@ impl HummockStorageV1 {
                     iter_read_options.clone(),
                 )));
             } else {
-                let table_infos = prune_ssts(level.table_infos.iter(), table_id, &table_key_range);
+                let table_infos =
+                    prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
@@ -463,7 +455,17 @@ impl StateStoreWrite for HummockStorageV1 {
     }
 }
 
-impl LocalStateStore for HummockStorageV1 {}
+impl LocalStateStore for HummockStorageV1 {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move { Ok(true) }
+    }
+}
 
 impl StateStore for HummockStorageV1 {
     type Local = Self;

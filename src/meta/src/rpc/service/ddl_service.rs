@@ -575,7 +575,7 @@ where
         }
     }
 
-    /// Prepares a stream job and returns the context and table fragments.
+    /// `prepare_stream_job` prepares a stream job and returns the context and table fragments.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,

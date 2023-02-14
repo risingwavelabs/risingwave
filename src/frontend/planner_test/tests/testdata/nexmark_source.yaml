@@ -14,7 +14,7 @@
     with (
       connector = 'nexmark',
       nexmark.table.type = 'Auction'
-    ) row format JSON;
+    );
 
     create source bid (
       auction INTEGER,
@@ -27,7 +27,7 @@
     with (
       connector = 'nexmark',
       nexmark.table.type = 'Bid'
-    ) row format JSON;
+    );
 
     create source person (
       id INTEGER,
@@ -40,7 +40,7 @@
     with (
       connector = 'nexmark',
       nexmark.table.type = 'Person'
-    ) row format JSON;
+    );
 - id: nexmark_q0
   before:
   - create_sources

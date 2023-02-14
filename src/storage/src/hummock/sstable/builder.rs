@@ -183,22 +183,15 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        // Rotate block builder if the previous one has been built.
-        if self.block_builder.is_empty() {
-            self.block_metas.push(BlockMeta {
-                offset: self.writer.data_len() as u32,
-                len: 0,
-                smallest_key: full_key.encode(),
-                uncompressed_size: 0,
-            })
-        }
+        let mut is_new_table = false;
 
         // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         if is_new_user_key {
             let table_id = full_key.user_key.table_id.table_id();
-            if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
+            is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
+            if is_new_table {
                 self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
@@ -222,6 +215,20 @@ impl<W: SstableWriter> SstableBuilder<W> {
         }
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;
+
+        if is_new_table && !self.block_builder.is_empty() {
+            self.build_block().await?;
+        }
+
+        // Rotate block builder if the previous one has been built.
+        if self.block_builder.is_empty() {
+            self.block_metas.push(BlockMeta {
+                offset: self.writer.data_len() as u32,
+                len: 0,
+                smallest_key: full_key.encode(),
+                uncompressed_size: 0,
+            })
+        }
 
         self.block_builder
             .add(self.raw_key.as_ref(), self.raw_value.as_ref());
