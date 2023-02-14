@@ -56,7 +56,7 @@ pub(crate) fn avro_field_to_column_desc(
     }
 }
 
-pub(crate) fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
+fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
     let data_type = match schema {
         Schema::String => DataType::Varchar,
         Schema::Int => DataType::Int32,
@@ -83,20 +83,20 @@ pub(crate) fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
                 datatype: Box::new(item_type),
             }
         }
-        // Schema::Union(union_schema) if union_schema.is_nullable() => {
-        //     let nested_schema = union_schema
-        //         .variants()
-        //         .iter()
-        //         .find_or_first(|s| **s != Schema::Null)
-        //         .ok_or_else(|| {
-        //             RwError::from(InternalError(format!(
-        //                 "unsupported type in Avro: {:?}",
-        //                 union_schema
-        //             )))
-        //         })?;
+        Schema::Union(union_schema) if union_schema.is_nullable() => {
+            let nested_schema = union_schema
+                .variants()
+                .iter()
+                .find_or_first(|s| **s != Schema::Null)
+                .ok_or_else(|| {
+                    RwError::from(InternalError(format!(
+                        "unsupported type in Avro: {:?}",
+                        union_schema
+                    )))
+                })?;
 
-        //     avro_type_mapping(nested_schema)?
-        // }
+            avro_type_mapping(nested_schema)?
+        }
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "unsupported type in Avro: {:?}",

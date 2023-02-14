@@ -250,6 +250,7 @@ where
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
     ) -> HummockManagerRef<S> {
+        use crate::manager::CatalogManager;
         let compaction_group_manager =
             Self::build_compaction_group_manager_with_config(&env, config)
                 .await
