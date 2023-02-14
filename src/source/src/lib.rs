@@ -21,6 +21,7 @@
 #![feature(generators)]
 #![feature(hash_drain_filter)]
 #![feature(type_alias_impl_trait)]
+#![feature(box_patterns)]
 
 pub use table::*;
 
