@@ -120,17 +120,33 @@ impl SinkImpl {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
-        _sink_type: SinkType,
+        sink_type: SinkType,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
             SinkConfig::Kafka(cfg) => {
-                SinkImpl::Kafka(Box::new(KafkaSink::new(*cfg, schema).await?))
+                if sink_type.is_append_only() || sink_type.is_any() {
+                    // Append-only Kafka sink
+                    SinkImpl::Kafka(Box::new(KafkaSink::<true>::new(*cfg, schema).await?))
+                } else {
+                    // Upsert Kafka sink
+                    SinkImpl::UpsertKafka(Box::new(KafkaSink::<false>::new(*cfg, schema).await?))
+                }
             }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
-            SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
-                RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
-            )),
+            SinkConfig::Remote(cfg) => {
+                if sink_type.is_append_only() || sink_type.is_any() {
+                    // Append-only remote sink
+                    SinkImpl::Remote(Box::new(
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
+                    ))
+                } else {
+                    // Upsert remote sink
+                    SinkImpl::UpsertRemote(Box::new(
+                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
+                    ))
+                }
+            }
             SinkConfig::BlackHole => SinkImpl::Blackhole,
         })
     }

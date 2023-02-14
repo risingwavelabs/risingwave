@@ -54,16 +54,34 @@ impl From<SinkId> for u32 {
     }
 }
 
-// TODO(Yuanxin): comment
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SinkType {
+    /// The data written into the sink connector can only be INSERT. No UPDATE or DELETE is
+    /// allowed.
     AppendOnly,
+    /// The input of the sink operator can be INSERT, UPDATE, or DELETE, but it must drop any
+    /// UPDATE or DELETE and write only INSERT into the sink connector.
     ForceAppendOnly,
+    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
     Upsert,
+    /// The sink can be either append-only or upsert. We should try append-only first. If
+    /// unavailable, fall back to upsert.
     Any,
 }
 
 impl SinkType {
+    pub fn is_append_only(&self) -> bool {
+        self == &Self::AppendOnly || self == &Self::ForceAppendOnly
+    }
+
+    pub fn is_upsert(&self) -> bool {
+        self == &Self::Upsert
+    }
+
+    pub fn is_any(&self) -> bool {
+        self == &Self::Any
+    }
+
     pub fn to_proto(self) -> ProstSinkType {
         match self {
             SinkType::AppendOnly => ProstSinkType::AppendOnly,
