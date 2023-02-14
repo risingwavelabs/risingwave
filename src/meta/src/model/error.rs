@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
@@ -43,5 +44,11 @@ impl From<ProstFieldNotFound> for MetadataModelError {
 impl From<MetadataModelError> for tonic::Status {
     fn from(e: MetadataModelError) -> Self {
         tonic::Status::new(tonic::Code::Internal, format!("{}", e))
+    }
+}
+
+impl MetadataModelError {
+    pub fn internal(msg: impl ToString) -> Self {
+        MetadataModelError::InternalError(anyhow!(msg.to_string()))
     }
 }
