@@ -62,6 +62,22 @@ impl StreamWatermarkFilter {
 
 impl fmt::Display for StreamWatermarkFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct DisplayWatermarkDesc<'a> {
+            watermark_idx: u32,
+            expr: ExprImpl,
+            input_schema: &'a Schema,
+        }
+
+        impl fmt::Debug for DisplayWatermarkDesc<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let expr_display = ExprDisplay {
+                    expr: &self.expr,
+                    input_schema: self.input_schema,
+                };
+                write!(f, "idx: {}, expr: {}", self.watermark_idx, expr_display)
+            }
+        }
+
         let mut builder = f.debug_struct("StreamWatermarkFilter");
         let input_schema = self.input.schema();
 
@@ -141,23 +157,3 @@ impl StreamNode for StreamWatermarkFilter {
 
 // TODO(yuhao): may impl a `ExprRewritable` after store `ExplImpl` in catalog.
 impl ExprRewritable for StreamWatermarkFilter {}
-
-struct DisplayWatermarkDesc<'a> {
-    watermark_idx: u32,
-    expr: ExprImpl,
-    input_schema: &'a Schema,
-}
-
-impl fmt::Debug for DisplayWatermarkDesc<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let expr_display = ExprDisplay {
-            expr: &self.expr,
-            input_schema: self.input_schema,
-        };
-        write!(
-            f,
-            "watermark_idx: {}, expr: {}",
-            self.watermark_idx, expr_display
-        )
-    }
-}
