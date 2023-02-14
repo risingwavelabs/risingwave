@@ -23,7 +23,6 @@ use super::{
     ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
@@ -120,11 +119,7 @@ impl ColPrunable for LogicalShare {
     }
 }
 
-impl ExprRewritable for LogicalShare {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalShare {}
 
 impl PredicatePushdown for LogicalShare {
     fn predicate_pushdown(

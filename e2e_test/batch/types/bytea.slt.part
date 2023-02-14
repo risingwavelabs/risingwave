@@ -32,6 +32,16 @@ select * from bytes;
 \x666768
 \xdeadbeef
 
+query T
+select * from bytes order by i;
+----
+\x12cd
+\x3078666768
+\x31323334
+\x31324344
+\x666768
+\xdeadbeef
+
 statement ok
 drop table bytes;
 

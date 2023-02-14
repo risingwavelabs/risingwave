@@ -34,8 +34,10 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let watermark_expr = build_from_prost(node.get_watermark_expr()?)?;
-        let event_time_col_idx = node.get_event_time_col_idx() as usize;
+        let watermark_descs = node.get_watermark_descs().clone();
+        let [watermark_desc]: [_; 1] = watermark_descs.try_into().unwrap();
+        let watermark_expr = build_from_prost(&watermark_desc.expr.unwrap())?;
+        let event_time_col_idx = watermark_desc.watermark_idx as usize;
         let vnodes = Arc::new(
             params
                 .vnode_bitmap
@@ -43,9 +45,9 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
         );
 
         // TODO: may use consistent op for watermark filter after we have upsert.
+        let [table]: [_; 1] = node.get_tables().clone().try_into().unwrap();
         let table =
-            StateTable::from_table_catalog_inconsistent_op(node.get_table()?, store, Some(vnodes))
-                .await;
+            StateTable::from_table_catalog_inconsistent_op(&table, store, Some(vnodes)).await;
 
         Ok(WatermarkFilterExecutor::new(
             input,

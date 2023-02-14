@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table } from "./catalog";
+import { ColumnIndex, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
 import { Buffer } from "./common";
 import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
@@ -357,16 +357,25 @@ export interface SourceNode {
   sourceInner: StreamSource | undefined;
 }
 
-export interface SinkNode {
-  tableId: number;
+export interface SinkDesc {
+  id: number;
+  name: string;
+  definition: string;
+  columns: ColumnDesc[];
+  pk: ColumnOrder[];
+  streamKey: number[];
+  distributionKey: number[];
+  appendOnly: boolean;
   properties: { [key: string]: string };
-  fields: Field[];
-  sinkPk: number[];
 }
 
-export interface SinkNode_PropertiesEntry {
+export interface SinkDesc_PropertiesEntry {
   key: string;
   value: string;
+}
+
+export interface SinkNode {
+  sinkDesc: SinkDesc | undefined;
 }
 
 export interface ProjectNode {
@@ -613,8 +622,6 @@ export interface ChainNode {
    * ChainType is used to decide which implementation for the ChainNode.
    */
   chainType: ChainType;
-  /** Whether to place this chain on the same worker node as upstream actors. */
-  sameWorkerNode: boolean;
   /**
    * Whether the upstream materialize is and this chain should be a singleton.
    * FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
@@ -689,14 +696,10 @@ export interface LookupNode {
 
 /** WatermarkFilter needs to filter the upstream data by the water mark. */
 export interface WatermarkFilterNode {
-  /** The expression to calculate the watermark value. */
-  watermarkExpr:
-    | ExprNode
-    | undefined;
-  /** The column the event time belongs. */
-  eventTimeColIdx: number;
-  /** The table used to persist watermark, the key is vnode. */
-  table: Table | undefined;
+  /** The watermark descs */
+  watermarkDescs: WatermarkDesc[];
+  /** The tables used to persist watermarks, the key is vnode. */
+  tables: Table[];
 }
 
 /** Acts like a merger, but on different inputs. */
@@ -778,7 +781,8 @@ export interface StreamNode {
     | { $case: "watermarkFilter"; watermarkFilter: WatermarkFilterNode }
     | { $case: "dml"; dml: DmlNode }
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
-    | { $case: "now"; now: NowNode };
+    | { $case: "now"; now: NowNode }
+    | { $case: "appendOnlyGroupTopN"; appendOnlyGroupTopN: GroupTopNNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -828,11 +832,6 @@ export interface Dispatcher {
   downstreamActorId: number[];
 }
 
-/** Used to place an actor together with another actor in the same worker node. */
-export interface ColocatedActorId {
-  id: number;
-}
-
 /** A StreamActor is a running fragment of the overall stream graph, */
 export interface StreamActor {
   actorId: number;
@@ -846,10 +845,6 @@ export interface StreamActor {
    * We duplicate the information here to ease the parsing logic in stream manager.
    */
   upstreamActorId: number[];
-  /** Placement rule for actor, need to stay on the same node as a specified upstream actor. */
-  colocatedUpstreamActorId:
-    | ColocatedActorId
-    | undefined;
   /**
    * Vnodes that the executors in this actor own.
    * If the fragment is a singleton, this field will not be set and leave a `None`.
@@ -903,8 +898,6 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   dispatchStrategy:
     | DispatchStrategy
     | undefined;
-  /** Whether the two linked nodes should be placed on the same worker node */
-  sameWorkerNode: boolean;
   /**
    * A unique identifier of this edge. Generally it should be exchange node's operator id. When
    * rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
@@ -1829,54 +1822,87 @@ export const SourceNode = {
   },
 };
 
-function createBaseSinkNode(): SinkNode {
-  return { tableId: 0, properties: {}, fields: [], sinkPk: [] };
+function createBaseSinkDesc(): SinkDesc {
+  return {
+    id: 0,
+    name: "",
+    definition: "",
+    columns: [],
+    pk: [],
+    streamKey: [],
+    distributionKey: [],
+    appendOnly: false,
+    properties: {},
+  };
 }
 
-export const SinkNode = {
-  fromJSON(object: any): SinkNode {
+export const SinkDesc = {
+  fromJSON(object: any): SinkDesc {
     return {
-      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      id: isSet(object.id) ? Number(object.id) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      definition: isSet(object.definition) ? String(object.definition) : "",
+      columns: Array.isArray(object?.columns)
+        ? object.columns.map((e: any) => ColumnDesc.fromJSON(e))
+        : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
+      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
-      fields: Array.isArray(object?.fields)
-        ? object.fields.map((e: any) => Field.fromJSON(e))
-        : [],
-      sinkPk: Array.isArray(object?.sinkPk)
-        ? object.sinkPk.map((e: any) => Number(e))
-        : [],
     };
   },
 
-  toJSON(message: SinkNode): unknown {
+  toJSON(message: SinkDesc): unknown {
     const obj: any = {};
-    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.name !== undefined && (obj.name = message.name);
+    message.definition !== undefined && (obj.definition = message.definition);
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
+    } else {
+      obj.columns = [];
+    }
+    if (message.pk) {
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.pk = [];
+    }
+    if (message.streamKey) {
+      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    } else {
+      obj.streamKey = [];
+    }
+    if (message.distributionKey) {
+      obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
+    } else {
+      obj.distributionKey = [];
+    }
+    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
     }
-    if (message.fields) {
-      obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
-    } else {
-      obj.fields = [];
-    }
-    if (message.sinkPk) {
-      obj.sinkPk = message.sinkPk.map((e) => Math.round(e));
-    } else {
-      obj.sinkPk = [];
-    }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SinkNode>, I>>(object: I): SinkNode {
-    const message = createBaseSinkNode();
-    message.tableId = object.tableId ?? 0;
+  fromPartial<I extends Exact<DeepPartial<SinkDesc>, I>>(object: I): SinkDesc {
+    const message = createBaseSinkDesc();
+    message.id = object.id ?? 0;
+    message.name = object.name ?? "";
+    message.definition = object.definition ?? "";
+    message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.distributionKey = object.distributionKey?.map((e) => e) || [];
+    message.appendOnly = object.appendOnly ?? false;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -1886,32 +1912,54 @@ export const SinkNode = {
       },
       {},
     );
-    message.fields = object.fields?.map((e) => Field.fromPartial(e)) || [];
-    message.sinkPk = object.sinkPk?.map((e) => e) || [];
     return message;
   },
 };
 
-function createBaseSinkNode_PropertiesEntry(): SinkNode_PropertiesEntry {
+function createBaseSinkDesc_PropertiesEntry(): SinkDesc_PropertiesEntry {
   return { key: "", value: "" };
 }
 
-export const SinkNode_PropertiesEntry = {
-  fromJSON(object: any): SinkNode_PropertiesEntry {
+export const SinkDesc_PropertiesEntry = {
+  fromJSON(object: any): SinkDesc_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
 
-  toJSON(message: SinkNode_PropertiesEntry): unknown {
+  toJSON(message: SinkDesc_PropertiesEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SinkNode_PropertiesEntry>, I>>(object: I): SinkNode_PropertiesEntry {
-    const message = createBaseSinkNode_PropertiesEntry();
+  fromPartial<I extends Exact<DeepPartial<SinkDesc_PropertiesEntry>, I>>(object: I): SinkDesc_PropertiesEntry {
+    const message = createBaseSinkDesc_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseSinkNode(): SinkNode {
+  return { sinkDesc: undefined };
+}
+
+export const SinkNode = {
+  fromJSON(object: any): SinkNode {
+    return { sinkDesc: isSet(object.sinkDesc) ? SinkDesc.fromJSON(object.sinkDesc) : undefined };
+  },
+
+  toJSON(message: SinkNode): unknown {
+    const obj: any = {};
+    message.sinkDesc !== undefined && (obj.sinkDesc = message.sinkDesc ? SinkDesc.toJSON(message.sinkDesc) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SinkNode>, I>>(object: I): SinkNode {
+    const message = createBaseSinkNode();
+    message.sinkDesc = (object.sinkDesc !== undefined && object.sinkDesc !== null)
+      ? SinkDesc.fromPartial(object.sinkDesc)
+      : undefined;
     return message;
   },
 };
@@ -2734,7 +2782,6 @@ function createBaseChainNode(): ChainNode {
     upstreamFields: [],
     upstreamColumnIndices: [],
     chainType: ChainType.CHAIN_UNSPECIFIED,
-    sameWorkerNode: false,
     isSingleton: false,
     tableDesc: undefined,
   };
@@ -2751,7 +2798,6 @@ export const ChainNode = {
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
       chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
-      sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
@@ -2771,7 +2817,6 @@ export const ChainNode = {
       obj.upstreamColumnIndices = [];
     }
     message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
-    message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableDesc !== undefined &&
       (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
@@ -2784,7 +2829,6 @@ export const ChainNode = {
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
     message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
-    message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.isSingleton = object.isSingleton ?? false;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
       ? StorageTableDesc.fromPartial(object.tableDesc)
@@ -2995,34 +3039,40 @@ export const LookupNode = {
 };
 
 function createBaseWatermarkFilterNode(): WatermarkFilterNode {
-  return { watermarkExpr: undefined, eventTimeColIdx: 0, table: undefined };
+  return { watermarkDescs: [], tables: [] };
 }
 
 export const WatermarkFilterNode = {
   fromJSON(object: any): WatermarkFilterNode {
     return {
-      watermarkExpr: isSet(object.watermarkExpr) ? ExprNode.fromJSON(object.watermarkExpr) : undefined,
-      eventTimeColIdx: isSet(object.eventTimeColIdx) ? Number(object.eventTimeColIdx) : 0,
-      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
+      tables: Array.isArray(object?.tables)
+        ? object.tables.map((e: any) => Table.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: WatermarkFilterNode): unknown {
     const obj: any = {};
-    message.watermarkExpr !== undefined &&
-      (obj.watermarkExpr = message.watermarkExpr ? ExprNode.toJSON(message.watermarkExpr) : undefined);
-    message.eventTimeColIdx !== undefined && (obj.eventTimeColIdx = Math.round(message.eventTimeColIdx));
-    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
+    if (message.tables) {
+      obj.tables = message.tables.map((e) => e ? Table.toJSON(e) : undefined);
+    } else {
+      obj.tables = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<WatermarkFilterNode>, I>>(object: I): WatermarkFilterNode {
     const message = createBaseWatermarkFilterNode();
-    message.watermarkExpr = (object.watermarkExpr !== undefined && object.watermarkExpr !== null)
-      ? ExprNode.fromPartial(object.watermarkExpr)
-      : undefined;
-    message.eventTimeColIdx = object.eventTimeColIdx ?? 0;
-    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
+    message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     return message;
   },
 };
@@ -3336,6 +3386,8 @@ export const StreamNode = {
         ? { $case: "rowIdGen", rowIdGen: RowIdGenNode.fromJSON(object.rowIdGen) }
         : isSet(object.now)
         ? { $case: "now", now: NowNode.fromJSON(object.now) }
+        : isSet(object.appendOnlyGroupTopN)
+        ? { $case: "appendOnlyGroupTopN", appendOnlyGroupTopN: GroupTopNNode.fromJSON(object.appendOnlyGroupTopN) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3418,6 +3470,10 @@ export const StreamNode = {
       (obj.rowIdGen = message.nodeBody?.rowIdGen ? RowIdGenNode.toJSON(message.nodeBody?.rowIdGen) : undefined);
     message.nodeBody?.$case === "now" &&
       (obj.now = message.nodeBody?.now ? NowNode.toJSON(message.nodeBody?.now) : undefined);
+    message.nodeBody?.$case === "appendOnlyGroupTopN" &&
+      (obj.appendOnlyGroupTopN = message.nodeBody?.appendOnlyGroupTopN
+        ? GroupTopNNode.toJSON(message.nodeBody?.appendOnlyGroupTopN)
+        : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3639,6 +3695,16 @@ export const StreamNode = {
     if (object.nodeBody?.$case === "now" && object.nodeBody?.now !== undefined && object.nodeBody?.now !== null) {
       message.nodeBody = { $case: "now", now: NowNode.fromPartial(object.nodeBody.now) };
     }
+    if (
+      object.nodeBody?.$case === "appendOnlyGroupTopN" &&
+      object.nodeBody?.appendOnlyGroupTopN !== undefined &&
+      object.nodeBody?.appendOnlyGroupTopN !== null
+    ) {
+      message.nodeBody = {
+        $case: "appendOnlyGroupTopN",
+        appendOnlyGroupTopN: GroupTopNNode.fromPartial(object.nodeBody.appendOnlyGroupTopN),
+      };
+    }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
@@ -3735,28 +3801,6 @@ export const Dispatcher = {
   },
 };
 
-function createBaseColocatedActorId(): ColocatedActorId {
-  return { id: 0 };
-}
-
-export const ColocatedActorId = {
-  fromJSON(object: any): ColocatedActorId {
-    return { id: isSet(object.id) ? Number(object.id) : 0 };
-  },
-
-  toJSON(message: ColocatedActorId): unknown {
-    const obj: any = {};
-    message.id !== undefined && (obj.id = Math.round(message.id));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColocatedActorId>, I>>(object: I): ColocatedActorId {
-    const message = createBaseColocatedActorId();
-    message.id = object.id ?? 0;
-    return message;
-  },
-};
-
 function createBaseStreamActor(): StreamActor {
   return {
     actorId: 0,
@@ -3764,7 +3808,6 @@ function createBaseStreamActor(): StreamActor {
     nodes: undefined,
     dispatcher: [],
     upstreamActorId: [],
-    colocatedUpstreamActorId: undefined,
     vnodeBitmap: undefined,
     mviewDefinition: "",
   };
@@ -3778,9 +3821,6 @@ export const StreamActor = {
       nodes: isSet(object.nodes) ? StreamNode.fromJSON(object.nodes) : undefined,
       dispatcher: Array.isArray(object?.dispatcher) ? object.dispatcher.map((e: any) => Dispatcher.fromJSON(e)) : [],
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
-      colocatedUpstreamActorId: isSet(object.colocatedUpstreamActorId)
-        ? ColocatedActorId.fromJSON(object.colocatedUpstreamActorId)
-        : undefined,
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       mviewDefinition: isSet(object.mviewDefinition) ? String(object.mviewDefinition) : "",
     };
@@ -3801,9 +3841,6 @@ export const StreamActor = {
     } else {
       obj.upstreamActorId = [];
     }
-    message.colocatedUpstreamActorId !== undefined && (obj.colocatedUpstreamActorId = message.colocatedUpstreamActorId
-      ? ColocatedActorId.toJSON(message.colocatedUpstreamActorId)
-      : undefined);
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.mviewDefinition !== undefined && (obj.mviewDefinition = message.mviewDefinition);
@@ -3819,10 +3856,6 @@ export const StreamActor = {
       : undefined;
     message.dispatcher = object.dispatcher?.map((e) => Dispatcher.fromPartial(e)) || [];
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
-    message.colocatedUpstreamActorId =
-      (object.colocatedUpstreamActorId !== undefined && object.colocatedUpstreamActorId !== null)
-        ? ColocatedActorId.fromPartial(object.colocatedUpstreamActorId)
-        : undefined;
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
@@ -3986,14 +4019,13 @@ export const StreamFragmentGraph_StreamFragment = {
 };
 
 function createBaseStreamFragmentGraph_StreamFragmentEdge(): StreamFragmentGraph_StreamFragmentEdge {
-  return { dispatchStrategy: undefined, sameWorkerNode: false, linkId: 0, upstreamId: 0, downstreamId: 0 };
+  return { dispatchStrategy: undefined, linkId: 0, upstreamId: 0, downstreamId: 0 };
 }
 
 export const StreamFragmentGraph_StreamFragmentEdge = {
   fromJSON(object: any): StreamFragmentGraph_StreamFragmentEdge {
     return {
       dispatchStrategy: isSet(object.dispatchStrategy) ? DispatchStrategy.fromJSON(object.dispatchStrategy) : undefined,
-      sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       linkId: isSet(object.linkId) ? Number(object.linkId) : 0,
       upstreamId: isSet(object.upstreamId) ? Number(object.upstreamId) : 0,
       downstreamId: isSet(object.downstreamId) ? Number(object.downstreamId) : 0,
@@ -4004,7 +4036,6 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     const obj: any = {};
     message.dispatchStrategy !== undefined &&
       (obj.dispatchStrategy = message.dispatchStrategy ? DispatchStrategy.toJSON(message.dispatchStrategy) : undefined);
-    message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.linkId !== undefined && (obj.linkId = Math.round(message.linkId));
     message.upstreamId !== undefined && (obj.upstreamId = Math.round(message.upstreamId));
     message.downstreamId !== undefined && (obj.downstreamId = Math.round(message.downstreamId));
@@ -4018,7 +4049,6 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.dispatchStrategy = (object.dispatchStrategy !== undefined && object.dispatchStrategy !== null)
       ? DispatchStrategy.fromPartial(object.dispatchStrategy)
       : undefined;
-    message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;

@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
+use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -62,8 +62,7 @@ impl StreamIndexScan {
             logical.functional_dependency().clone(),
             distribution,
             false, // TODO: determine the `append-only` field of table scan
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,
@@ -89,17 +88,14 @@ impl fmt::Display for StreamIndexScan {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamIndexScan");
 
-        builder.field("index", &self.logical.table_name()).field(
-            "columns",
-            &format_args!(
-                "[{}]",
-                match verbose {
-                    false => self.logical.column_names(),
-                    true => self.logical.column_names_with_table_prefix(),
-                }
-                .join(", ")
-            ),
-        );
+        let v = match verbose {
+            false => self.logical.column_names(),
+            true => self.logical.column_names_with_table_prefix(),
+        }
+        .join(", ");
+        builder
+            .field("index", &format_args!("{}", self.logical.table_name()))
+            .field("columns", &format_args!("[{}]", v));
 
         if verbose {
             builder.field(
@@ -151,6 +147,21 @@ impl StreamIndexScan {
                 // The merge node should be empty
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::Merge(Default::default())),
+                    identity: "Upstream".into(),
+                    fields: self
+                        .logical
+                        .table_desc()
+                        .columns
+                        .iter()
+                        .map(|c| risingwave_common::catalog::Field::from(c).to_prost())
+                        .collect(),
+                    stream_key: self
+                        .logical
+                        .table_desc()
+                        .stream_key
+                        .iter()
+                        .map(|i| *i as _)
+                        .collect(),
                     ..Default::default()
                 },
                 ProstStreamPlan {
@@ -165,7 +176,6 @@ impl StreamIndexScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                same_worker_node: true,
                 chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
@@ -193,5 +203,23 @@ impl StreamIndexScan {
             identity: format!("{}", self),
             append_only: self.append_only(),
         }
+    }
+}
+
+impl ExprRewritable for StreamIndexScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.chain_type,
+        )
+        .into()
     }
 }

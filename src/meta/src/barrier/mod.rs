@@ -748,9 +748,9 @@ where
         });
 
         let result = try_join_all(collect_futures).await;
-        barrier_complete_tx
+        let _ = barrier_complete_tx
             .send((prev_epoch, result.map_err(Into::into)))
-            .unwrap();
+            .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
     }
 
     /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
@@ -822,6 +822,10 @@ where
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
             *tracker = CreateMviewProgressTracker::new();
+            self.snapshot_manager
+                .unpin_all()
+                .await
+                .expect("unpin meta's snapshots");
             let new_epoch = self.recovery(state.in_flight_prev_epoch).await;
             state.in_flight_prev_epoch = new_epoch;
             state

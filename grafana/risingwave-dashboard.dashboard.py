@@ -480,6 +480,7 @@ def metric(name, filter=None):
 
 def quantile(f, percentiles):
     quantile_map = {
+        "60": ["0.6", "60"],
         "50": ["0.5", "50"],
         "90": ["0.9", "90"],
         "99": ["0.99", "99"],
@@ -557,8 +558,8 @@ def section_compaction(outer_panels):
                     "num of compactions from each level to next level",
                     [
                         panels.target(
-                            f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, result)",
-                            "{{result}} - group-{{group}} @ {{compactor}}",
+                            f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, task_type, result)",
+                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
                         ),
                     ],
                 ),
@@ -1460,7 +1461,7 @@ def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Batch Exchange",
+            "Batch Metrics",
             [
                 panels.timeseries_row(
                     "Exchange Recv Row Number",
@@ -1469,6 +1470,16 @@ def section_batch_exchange(outer_panels):
                         panels.target(
                             f"{metric('batch_task_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mpp Task Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_task_num')}",
+                            "",
                         ),
                     ],
                 ),
@@ -1579,18 +1590,6 @@ def section_hummock(panels):
                     f"sum(rate({metric('state_store_iter_in_process_counts')}[$__rate_interval])) by(job,instance,table_id)",
                     "iter - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter false positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
             ],
         ),
         panels.timeseries_latency(
@@ -1617,13 +1616,13 @@ def section_hummock(panels):
                 *quantile(
                     lambda quantile, legend: panels.target(
                         f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
-                        f"total_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
+                        f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
                 ),
                 panels.target(
                     f"sum by(le, job, instance)(rate({metric('state_store_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_duration_count')}[$__rate_interval]))",
-                    "total_time avg - {{job}} @ {{instance}}",
+                    "create_iter_time avg - {{job}} @ {{instance}}",
                 ),
                 *quantile(
                     lambda quantile, legend: panels.target(
@@ -1706,8 +1705,16 @@ def section_hummock(panels):
                     "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter check count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),

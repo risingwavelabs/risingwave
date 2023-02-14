@@ -377,7 +377,7 @@ mod tests {
 
         // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
         // Delta of v1->v2 cannot be deleted yet because it's used by ssts_to_delete.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 2);
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 5);
         // No SST deletion is scheduled because no available worker.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -461,7 +461,7 @@ mod tests {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec overwrite user provided value.
+        // min_sst_retention_time_sec override user provided value.
         assert_eq!(
             vacuum.env.opts.min_sst_retention_time_sec,
             full_scan_task.sst_retention_time_sec
@@ -479,7 +479,7 @@ mod tests {
                 panic!()
             }
         };
-        // min_sst_retention_time_sec doesn't overwrite user provided value.
+        // min_sst_retention_time_sec doesn't override user provided value.
         assert_eq!(
             vacuum.env.opts.min_sst_retention_time_sec + 1,
             full_scan_task.sst_retention_time_sec

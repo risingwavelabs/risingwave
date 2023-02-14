@@ -26,9 +26,9 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, TableId as StreamingJobId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
-    DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
+    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
+    DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
+    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -1458,6 +1458,10 @@ where
         self.core.lock().await.database.list_tables()
     }
 
+    pub async fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
+        self.core.lock().await.database.get_table_options(table_ids)
+    }
+
     pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
         self.core.lock().await.database.list_table_ids(schema_id)
     }
@@ -1612,12 +1616,6 @@ where
             return Err(MetaError::permission_denied(format!(
                 "User {} cannot be dropped because some objects depend on it",
                 user.name
-            )));
-        }
-        if !user.grant_privileges.is_empty() {
-            return Err(MetaError::permission_denied(format!(
-                "Cannot drop user {} with privileges",
-                id
             )));
         }
         if user_core

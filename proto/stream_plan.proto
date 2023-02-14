@@ -135,11 +135,20 @@ message SourceNode {
   StreamSource source_inner = 1;
 }
 
+message SinkDesc {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated plan_common.ColumnDesc columns = 4;
+  repeated plan_common.ColumnOrder pk = 5;
+  repeated uint32 stream_key = 6;
+  repeated uint32 distribution_key = 7;
+  bool append_only = 8;
+  map<string, string> properties = 9;
+}
+
 message SinkNode {
-  uint32 table_id = 1;
-  map<string, string> properties = 3;
-  repeated plan_common.Field fields = 4;
-  repeated uint32 sink_pk = 5;
+  SinkDesc sink_desc = 1;
 }
 
 message ProjectNode {
@@ -346,6 +355,9 @@ enum ChainType {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
+  reserved 5;
+  reserved "same_worker_node";
+
   uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
@@ -356,8 +368,6 @@ message ChainNode {
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
   // ChainType is used to decide which implementation for the ChainNode.
   ChainType chain_type = 4;
-  // Whether to place this chain on the same worker node as upstream actors.
-  bool same_worker_node = 5;
   // Whether the upstream materialize is and this chain should be a singleton.
   // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
   // fragment in the downstream mview. Remove this when we refactor the fragmenter.
@@ -422,12 +432,10 @@ message LookupNode {
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
 message WatermarkFilterNode {
-  // The expression to calculate the watermark value.
-  expr.ExprNode watermark_expr = 1;
-  // The column the event time belongs.
-  uint64 event_time_col_idx = 2;
-  // The table used to persist watermark, the key is vnode.
-  catalog.Table table = 3;
+  // The watermark descs
+  repeated catalog.WatermarkDesc watermark_descs = 1;
+  // The tables used to persist watermarks, the key is vnode.
+  repeated catalog.Table tables = 2;
 }
 
 // Acts like a merger, but on different inputs.
@@ -506,6 +514,7 @@ message StreamNode {
     DmlNode dml = 127;
     RowIdGenNode row_id_gen = 128;
     NowNode now = 129;
+    GroupTopNNode append_only_group_top_n = 130;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -561,13 +570,11 @@ message Dispatcher {
   repeated uint32 downstream_actor_id = 5;
 }
 
-// Used to place an actor together with another actor in the same worker node.
-message ColocatedActorId {
-  uint32 id = 1;
-}
-
 // A StreamActor is a running fragment of the overall stream graph,
 message StreamActor {
+  reserved 7;
+  reserved "colocated_upstream_actor_id";
+
   uint32 actor_id = 1;
   uint32 fragment_id = 2;
   StreamNode nodes = 3;
@@ -577,8 +584,6 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
-  // Placement rule for actor, need to stay on the same node as a specified upstream actor.
-  ColocatedActorId colocated_upstream_actor_id = 7;
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
@@ -618,10 +623,11 @@ message StreamFragmentGraph {
   }
 
   message StreamFragmentEdge {
+    reserved 2;
+    reserved "same_worker_node";
+
     // Dispatch strategy for the fragment.
     DispatchStrategy dispatch_strategy = 1;
-    // Whether the two linked nodes should be placed on the same worker node
-    bool same_worker_node = 2;
     // A unique identifier of this edge. Generally it should be exchange node's operator id. When
     // rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
     // virtual links generated.

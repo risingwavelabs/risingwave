@@ -86,6 +86,22 @@ pub enum Convention {
     Stream,
 }
 
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
+}
+
+impl RewriteExprsRecursive for PlanRef {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+}
+
 impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
@@ -378,16 +394,6 @@ impl dyn PlanNode {
         }
     }
 
-    pub fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
-        let new = self.rewrite_exprs(r);
-        let inputs: Vec<PlanRef> = new
-            .inputs()
-            .iter()
-            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
-            .collect();
-        new.clone_with_inputs(&inputs[..])
-    }
-
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         self.to_batch_prost_identity(true)
@@ -508,6 +514,7 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_watermark_filter;
 
 mod stream_share;
 mod stream_union;
@@ -583,6 +590,7 @@ pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -676,6 +684,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }
@@ -775,6 +784,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }

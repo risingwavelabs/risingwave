@@ -23,6 +23,7 @@ pub mod concat_op;
 pub mod conjunction;
 pub mod date_trunc;
 pub mod extract;
+pub mod format_type;
 pub mod length;
 pub mod like;
 pub mod lower;

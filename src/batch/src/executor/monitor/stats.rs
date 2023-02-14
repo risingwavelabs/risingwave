@@ -17,7 +17,7 @@ use std::sync::Arc;
 use prometheus::core::{AtomicF64, AtomicU64, Collector, Desc, GenericCounterVec, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, opts, proto, GaugeVec, HistogramOpts, HistogramVec, IntCounterVec,
-    Registry,
+    IntGauge, Registry,
 };
 
 use crate::task::TaskId;
@@ -205,5 +205,24 @@ impl BatchTaskMetricsWithTaskLabels {
 
     pub fn task_labels(&self) -> Vec<&str> {
         self.task_labels.iter().map(AsRef::as_ref).collect()
+    }
+}
+
+#[derive(Clone)]
+pub struct BatchManagerMetrics {
+    pub task_num: IntGauge,
+}
+
+impl BatchManagerMetrics {
+    pub fn new(registry: Registry) -> Self {
+        let task_num = IntGauge::new("batch_task_num", "Number of batch task in memory").unwrap();
+
+        registry.register(Box::new(task_num.clone())).unwrap();
+        Self { task_num }
+    }
+
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self::new(Registry::new())
     }
 }

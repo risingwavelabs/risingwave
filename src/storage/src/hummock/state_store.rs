@@ -37,6 +37,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
+use crate::monitor::StoreLocalStatistic;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type, StateStore,
@@ -268,6 +269,7 @@ impl StateStore for HummockStorage {
                 is_checkpoint,
             })
             .expect("should send success");
+        StoreLocalStatistic::flush_all();
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
