@@ -312,8 +312,8 @@ mod tests {
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
 
-        // TODO: may enable sanity check for watermark filter after we have upsert.
-        StateTable::new_with_distribution_no_sanity_check(
+        // TODO: use consistent operations for watermark filter after we have upsert.
+        StateTable::new_with_distribution_inconsistent_op(
             mem_state,
             TableId::new(table_id),
             column_descs,
