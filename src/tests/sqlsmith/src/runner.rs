@@ -66,6 +66,7 @@ async fn populate_tables<R: Rng>(
     row_count: usize,
 ) {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
+    tracing::info!("Executing: {}", &inserts);
     client.query(&inserts, &[]).await.unwrap();
 }
 
@@ -78,8 +79,10 @@ async fn test_sqlsmith<R: Rng>(
     base_tables: Vec<Table>,
     row_count: usize,
 ) {
-    // Test inserted rows should be same as population count.
+    // Test inserted rows should be at least 50% population count,
+    // otherwise we don't have sufficient data in our system.
     test_population_count(client, base_tables, row_count).await;
+    tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.20; // permit at most 20% of queries to be skipped.
