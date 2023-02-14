@@ -57,12 +57,7 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
             .insert_sender(subscribe_type, worker_key.clone(), tx.clone())
             .await;
 
-        let hummock_version = self
-            .hummock_manager
-            .get_read_guard()
-            .await
-            .current_version
-            .clone();
+        let hummock_version = self.hummock_manager.get_current_version().await;
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version),
             version: Some(Default::default()),

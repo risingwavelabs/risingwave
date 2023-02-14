@@ -338,6 +338,7 @@ export interface AddWorkerNodeRequest {
 export interface AddWorkerNodeResponse {
   status: Status | undefined;
   node: WorkerNode | undefined;
+  systemParams: SystemParams | undefined;
 }
 
 export interface ActivateWorkerNodeRequest {
@@ -534,6 +535,24 @@ export interface MetaMember {
 
 export interface MembersResponse {
   members: MetaMember[];
+}
+
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields.
+ * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ */
+export interface SystemParams {
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -1288,7 +1307,7 @@ export const AddWorkerNodeRequest = {
 };
 
 function createBaseAddWorkerNodeResponse(): AddWorkerNodeResponse {
-  return { status: undefined, node: undefined };
+  return { status: undefined, node: undefined, systemParams: undefined };
 }
 
 export const AddWorkerNodeResponse = {
@@ -1296,6 +1315,7 @@ export const AddWorkerNodeResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       node: isSet(object.node) ? WorkerNode.fromJSON(object.node) : undefined,
+      systemParams: isSet(object.systemParams) ? SystemParams.fromJSON(object.systemParams) : undefined,
     };
   },
 
@@ -1303,6 +1323,8 @@ export const AddWorkerNodeResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.node !== undefined && (obj.node = message.node ? WorkerNode.toJSON(message.node) : undefined);
+    message.systemParams !== undefined &&
+      (obj.systemParams = message.systemParams ? SystemParams.toJSON(message.systemParams) : undefined);
     return obj;
   },
 
@@ -1313,6 +1335,9 @@ export const AddWorkerNodeResponse = {
       : undefined;
     message.node = (object.node !== undefined && object.node !== null)
       ? WorkerNode.fromPartial(object.node)
+      : undefined;
+    message.systemParams = (object.systemParams !== undefined && object.systemParams !== null)
+      ? SystemParams.fromPartial(object.systemParams)
       : undefined;
     return message;
   },
@@ -2316,6 +2341,64 @@ export const MembersResponse = {
   fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
     const message = createBaseMembersResponse();
     message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return {
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
+  };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
     return message;
   },
 };
