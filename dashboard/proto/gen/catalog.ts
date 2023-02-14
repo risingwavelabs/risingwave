@@ -138,10 +138,10 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
+  sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
-  sinkType: SinkType;
 }
 
 export interface Sink_PropertiesEntry {
@@ -561,10 +561,10 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
+    sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
     definition: "",
-    sinkType: SinkType.UNSPECIFIED,
   };
 }
 
@@ -584,6 +584,7 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -592,7 +593,6 @@ export const Sink = {
         }, {})
         : {},
       definition: isSet(object.definition) ? String(object.definition) : "",
-      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
     };
   },
 
@@ -627,6 +627,7 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -635,7 +636,6 @@ export const Sink = {
       });
     }
     message.definition !== undefined && (obj.definition = message.definition);
-    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     return obj;
   },
 
@@ -650,6 +650,7 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -661,7 +662,6 @@ export const Sink = {
       {},
     );
     message.definition = object.definition ?? "";
-    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     return message;
   },
 };
