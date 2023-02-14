@@ -53,9 +53,6 @@ pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
-pub const LOCAL_SST_ID_MASK: HummockSstableId = 1 << (HummockSstableId::BITS - 1);
-pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
-
 #[derive(Debug, Clone)]
 pub struct LocalSstableInfo {
     pub compaction_group_id: CompactionGroupId,
@@ -146,18 +143,6 @@ impl PartialEq for LocalSstableInfo {
     fn eq(&self, other: &Self) -> bool {
         self.compaction_group_id == other.compaction_group_id && self.sst_info == other.sst_info
     }
-}
-
-pub fn get_remote_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id & REMOTE_SST_ID_MASK
-}
-
-pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id | LOCAL_SST_ID_MASK
-}
-
-pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
-    id & LOCAL_SST_ID_MASK == 0
 }
 
 /// Package read epoch of hummock, it be used for `wait_epoch`

@@ -578,3 +578,33 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1)], distribution: UpstreamHashShard(idx1.a) }
+- name: topn on index
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a);
+    select * from t1 order by a limit 1
+  batch_plan: |
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchExchange { order: [idx1.a ASC], dist: Single }
+      └─BatchLimit { limit: 1, offset: 0 }
+        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
+- name: topn on primary key
+  sql: |
+    create table t1 (a int primary key, b int);
+    create index idx1 on t1(a);
+    select * from t1 order by a limit 1
+  batch_plan: |
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchExchange { order: [t1.a ASC], dist: Single }
+      └─BatchLimit { limit: 1, offset: 0 }
+        └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: UpstreamHashShard(t1.a) }
+- name: topn on index with descending ordering
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a desc);
+    select * from t1 order by a desc limit 1
+  batch_plan: |
+    BatchLimit { limit: 1, offset: 0 }
+    └─BatchExchange { order: [idx1.a DESC], dist: Single }
+      └─BatchLimit { limit: 1, offset: 0 }
+        └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }

@@ -1,0 +1,61 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET RW_ENABLE_TWO_PHASE_AGG=false;
+
+# This should override `RW_ENABLE_TWO_PHASE_AGG`, enabling it.
+statement ok
+SET RW_FORCE_TWO_PHASE_AGG=true;
+
+query T
+SHOW RW_ENABLE_TWO_PHASE_AGG;
+----
+true
+
+statement ok
+create table t(v1 int, v2 smallint, v3 varchar);
+
+statement ok
+insert into t values
+(1, 2, 'abc'),
+(3, 4, 'aaaaaaaaaaaaabc'),
+(1, 2222, 'ajhaajaj'),
+(1, -2, 'aj22jj1j1'),
+(0, 2, 'aaaaaaaaaanz');
+
+statement ok
+create materialized view m1 as select min(v3) as c1, sum(v1) as c2 from t group by v1, v3, v2;
+
+query TI
+select * from m1 order by c1 ASC;
+----
+aaaaaaaaaaaaabc 3
+aaaaaaaaaanz 0
+abc 1
+aj22jj1j1 1
+ajhaajaj 1
+
+statement ok
+drop materialized view m1;
+
+statement ok
+create materialized view m1 as
+select
+    min(v3) as c1,
+    sum(v1) as c2,
+    min(v1) as c3
+from t group by v1;
+
+query TII
+select * from m1 order by c1 ASC;
+----
+aaaaaaaaaaaaabc 3 3
+aaaaaaaaaanz 0 0
+abc 3 1
+
+statement ok
+drop materialized view m1;
+
+statement ok
+drop table t;
