@@ -145,6 +145,8 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
+  reserved 3;
+  reserved "system_params";
   common.Status status = 1;
   common.WorkerNode node = 2;
 }
