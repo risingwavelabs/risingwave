@@ -69,6 +69,7 @@ fn force_append_only(chunk: StreamChunk, data_types: Vec<DataType>) -> StreamChu
 }
 
 impl SinkExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         materialize_executor: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
