@@ -23,12 +23,14 @@ impl Rule for TrivialProjectToValuesRule {
         let project = plan.as_logical_project()?;
         if project.exprs().iter().all(|e| e.is_const()) {
             let mut count_rows = CountRows;
-            count_rows.visit(project.input()).map(|count| LogicalValues::new(
-                        vec![project.exprs().clone(); count],
-                        project.schema().clone(),
-                        project.ctx(),
-                    )
-                    .into())
+            count_rows.visit(project.input()).map(|count| {
+                LogicalValues::new(
+                    vec![project.exprs().clone(); count],
+                    project.schema().clone(),
+                    project.ctx(),
+                )
+                .into()
+            })
         } else {
             None
         }
