@@ -82,6 +82,7 @@ macro_rules! commit_meta {
     };
 }
 pub(crate) use commit_meta;
+use risingwave_pb::meta::CreatingJobInfo;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
@@ -1485,17 +1486,21 @@ where
         Ok(all_streaming_jobs)
     }
 
-    pub async fn find_creating_streaming_job_id(
+    pub async fn find_creating_streaming_job_ids(
         &self,
-        database_id: DatabaseId,
-        schema_id: SchemaId,
-        name: String,
-    ) -> Option<TableId> {
-        self.core
-            .lock()
-            .await
-            .database
-            .find_creating_streaming_job_id(&(database_id, schema_id, name))
+        infos: Vec<CreatingJobInfo>,
+    ) -> Vec<TableId> {
+        let guard = self.core.lock().await;
+        infos
+            .into_iter()
+            .flat_map(|info| {
+                guard.database.find_creating_streaming_job_id(&(
+                    info.database_id,
+                    info.schema_id,
+                    info.name,
+                ))
+            })
+            .collect_vec()
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

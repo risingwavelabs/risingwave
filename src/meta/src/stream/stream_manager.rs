@@ -106,13 +106,15 @@ impl CreatingStreamingJobInfo {
         jobs.remove(&job_id);
     }
 
-    async fn cancel_jobs(&self, job_id: &TableId) {
+    async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
-        if let Some(job) = jobs.get_mut(job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
+        for job_id in job_ids {
+            if let Some(job) = jobs.get_mut(&job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
                 let _ = shutdown_tx.send(CreatingState::Canceling).await.inspect_err(|_| {
                     tracing::warn!("failed to send canceling state");
                 });
             }
+        }
     }
 }
 
@@ -226,7 +228,7 @@ where
                         // try to cancel buffered creating command.
                         if self
                             .barrier_scheduler
-                            .try_cancel_scheduled_create(table_id.clone())
+                            .try_cancel_scheduled_create(table_id)
                             .await
                         {
                             tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
@@ -497,8 +499,8 @@ where
         Ok(())
     }
 
-    pub async fn cancel_streaming_jobs(&self, table_id: &TableId) {
-        self.creating_job_info.cancel_jobs(table_id).await;
+    pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) {
+        self.creating_job_info.cancel_jobs(table_ids).await;
     }
 }
 

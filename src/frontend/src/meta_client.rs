@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::CreatingJobInfo;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -33,8 +34,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
-    async fn cancel_creating_job(&self, database_id: u32, schema_id: u32, name: &str)
-        -> Result<()>;
+    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()>;
 
     async fn list_table_fragments(
         &self,
@@ -64,15 +64,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.flush(checkpoint).await
     }
 
-    async fn cancel_creating_job(
-        &self,
-        database_id: u32,
-        schema_id: u32,
-        name: &str,
-    ) -> Result<()> {
-        self.0
-            .cancel_creating_job(database_id, schema_id, name)
-            .await
+    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        self.0.cancel_creating_jobs(infos).await
     }
 
     async fn list_table_fragments(

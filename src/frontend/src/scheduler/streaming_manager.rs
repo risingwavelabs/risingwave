@@ -19,6 +19,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use pgwire::pg_server::SessionId;
+use risingwave_pb::meta::CreatingJobInfo;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, SchemaId};
@@ -63,9 +64,7 @@ impl StreamingJobTracker {
 pub struct CreatingStreamingJobInfo {
     /// Identified by process_id, secret_key.
     session_id: SessionId,
-    namespace: (DatabaseId, SchemaId),
-    /// Streaming job name.
-    name: String,
+    info: CreatingJobInfo,
 }
 
 impl CreatingStreamingJobInfo {
@@ -77,8 +76,11 @@ impl CreatingStreamingJobInfo {
     ) -> Self {
         Self {
             session_id,
-            namespace: (database_id, schema_id),
-            name,
+            info: CreatingJobInfo {
+                database_id,
+                schema_id,
+                name,
+            },
         }
     }
 }
@@ -101,13 +103,11 @@ impl StreamingJobTracker {
             .cloned()
             .collect_vec();
 
-        for job in jobs {
-            let client = self.meta_client.clone();
-            tokio::spawn(async move {
-                client
-                    .cancel_creating_job(job.namespace.0, job.namespace.1, &job.name)
-                    .await
-            });
-        }
+        let client = self.meta_client.clone();
+        tokio::spawn(async move {
+            client
+                .cancel_creating_jobs(jobs.into_iter().map(|job| job.info).collect_vec())
+                .await
+        });
     }
 }

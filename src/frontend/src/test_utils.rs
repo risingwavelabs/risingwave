@@ -36,6 +36,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::CreatingJobInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -661,12 +662,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn cancel_creating_job(
-        &self,
-        _database_id: u32,
-        _schema_id: u32,
-        _name: &str,
-    ) -> RpcResult<()> {
+    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
         Ok(())
     }
 

@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -79,18 +80,18 @@ where
         }))
     }
 
-    async fn cancel_creating_job(
+    async fn cancel_creating_jobs(
         &self,
         request: Request<CancelCreatingJobRequest>,
     ) -> TonicResponse<CancelCreatingJobResponse> {
         let req = request.into_inner();
-        if let Some(table_id) = self
+        let table_ids = self
             .catalog_manager
-            .find_creating_streaming_job_id(req.database_id, req.schema_id, req.name)
-            .await
-        {
+            .find_creating_streaming_job_ids(req.infos)
+            .await;
+        if !table_ids.is_empty() {
             self.stream_manager
-                .cancel_streaming_jobs(&table_id.into())
+                .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
                 .await;
         }
         Ok(Response::new(CancelCreatingJobResponse { status: None }))

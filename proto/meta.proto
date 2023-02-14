@@ -110,10 +110,14 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
-message CancelCreatingJobRequest {
+message CreatingJobInfo {
   uint32 database_id = 1;
   uint32 schema_id = 2;
   string name = 3;
+}
+
+message CancelCreatingJobRequest {
+  repeated CreatingJobInfo infos = 1;
 }
 
 message CancelCreatingJobResponse {
@@ -143,7 +147,7 @@ message ListTableFragmentsResponse {
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
-  rpc CancelCreatingJob(CancelCreatingJobRequest) returns (CancelCreatingJobResponse);
+  rpc CancelCreatingJobs(CancelCreatingJobRequest) returns (CancelCreatingJobResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 
