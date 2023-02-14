@@ -254,7 +254,7 @@ mod test {
 
     #[ignore]
     #[tokio::test]
-    async fn test_force_sink() {
+    async fn test_force_append_only_sink() {
         use risingwave_common::array::stream_chunk::StreamChunk;
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::catalog::Field;
