@@ -379,7 +379,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .iter()
             .enumerate()
             .filter(|(_, call)| call.distinct) // only distinct agg calls need dedup table
-            .into_group_map_by(|(_, call)| call.inputs[0].index) // a table per distinct key
+            .into_group_map_by(|(_, call)| call.inputs[0].index) // one table per distinct column
             .into_iter()
             .map(|(distinct_col, indices_and_calls)| {
                 let mut table_builder =
