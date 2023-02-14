@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
+use self::catalog::SinkType;
 use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -119,16 +120,33 @@ impl SinkImpl {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
+        sink_type: SinkType,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
             SinkConfig::Kafka(cfg) => {
-                SinkImpl::Kafka(Box::new(KafkaSink::new(*cfg, schema).await?))
+                if sink_type.is_append_only() {
+                    // Append-only Kafka sink
+                    SinkImpl::Kafka(Box::new(KafkaSink::<true>::new(*cfg, schema).await?))
+                } else {
+                    // Upsert Kafka sink
+                    SinkImpl::UpsertKafka(Box::new(KafkaSink::<false>::new(*cfg, schema).await?))
+                }
             }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
-            SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
-                RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
-            )),
+            SinkConfig::Remote(cfg) => {
+                if sink_type.is_append_only() {
+                    // Append-only remote sink
+                    SinkImpl::Remote(Box::new(
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
+                    ))
+                } else {
+                    // Upsert remote sink
+                    SinkImpl::UpsertRemote(Box::new(
+                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
+                    ))
+                }
+            }
             SinkConfig::BlackHole => SinkImpl::Blackhole,
         })
     }
