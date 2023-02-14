@@ -21,23 +21,6 @@ use crate::error::{ErrorCode, RwError};
 
 type Result<T> = core::result::Result<T, RwError>;
 
-// Includes deprecated params. Used to define key constants.
-macro_rules! for_all_params {
-    ($macro:ident) => {
-        $macro! {
-            { barrier_interval_ms },
-            { checkpoint_frequency },
-            { sstable_size_mb },
-            { block_size_kb },
-            { bloom_false_positive },
-            { state_store },
-            { data_directory },
-            { backup_storage_url },
-            { backup_storage_directory },
-        }
-    };
-}
-
 // Only includes undeprecated params.
 // Macro input is { field identifier, mutability }
 macro_rules! for_all_undeprecated_params {
@@ -56,6 +39,14 @@ macro_rules! for_all_undeprecated_params {
     };
 }
 
+// Only includes deprecated params. Used to define key constants.
+// Macro input is { field identifier, mutability }
+macro_rules! for_all_deprecated_params {
+    ($macro:ident) => {
+        $macro! {}
+    };
+}
+
 /// Convert field name to string.
 macro_rules! key_of {
     ($field:ident) => {
@@ -65,7 +56,7 @@ macro_rules! key_of {
 
 /// Define key constants for fields in `SystemParams` for use of other modules.
 macro_rules! def_key {
-    ($({ $field:ident },)*) => {
+    ($({ $field:ident, $_:expr },)*) => {
         paste! {
             $(
                 pub const [<$field:upper _KEY>]: &str = key_of!($field);
@@ -75,7 +66,8 @@ macro_rules! def_key {
     };
 }
 
-for_all_params!(def_key);
+for_all_undeprecated_params!(def_key);
+for_all_deprecated_params!(def_key);
 
 macro_rules! impl_system_params_to_kv {
     ($({ $field:ident, $_:expr },)*) => {
