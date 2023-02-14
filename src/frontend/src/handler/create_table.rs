@@ -18,7 +18,9 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, USER_COLUMN_ID_OFFSET, TableVersionId, INITIAL_TABLE_VERSION_ID};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, TableVersionId, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
