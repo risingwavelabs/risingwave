@@ -179,6 +179,20 @@ impl AvroParserConfig {
                     datatype: Box::new(item_type),
                 }
             }
+            Schema::Union(union_schema) if union_schema.is_nullable() => {
+                let nested_schema = union_schema
+                    .variants()
+                    .iter()
+                    .find_or_first(|s| **s != Schema::Null)
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "unsupported type in Avro: {:?}",
+                            union_schema
+                        )))
+                    })?;
+
+                Self::avro_type_mapping(nested_schema)?
+            }
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "unsupported type in Avro: {:?}",
@@ -226,7 +240,7 @@ impl AvroParser {
                 None => {
                     return Err(RwError::from(ProtocolError(
                         "avro parse unexpected eof".to_string(),
-                    )))
+                    )));
                 }
             }
         };
@@ -263,6 +277,9 @@ impl AvroParser {
 #[inline]
 fn from_avro_value(value: Value) -> Result<Datum> {
     let v = match value {
+        Value::Null => {
+            return Ok(None);
+        }
         Value::Boolean(b) => ScalarImpl::Bool(b),
         Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
@@ -322,6 +339,7 @@ fn from_avro_value(value: Value) -> Result<Datum> {
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::List(ListValue::new(rw_values))
         }
+        Value::Union(_, value) => return from_avro_value(*value),
         _ => {
             let err_msg = format!("avro parse error.unsupported value {:?}", value);
             return Err(RwError::from(InternalError(err_msg)));
@@ -338,7 +356,8 @@ mod test {
     use std::ops::Sub;
 
     use apache_avro::types::{Record, Value};
-    use apache_avro::{Codec, Days, Duration, Millis, Months, Schema, Writer};
+    use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
+    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
@@ -416,15 +435,14 @@ mod test {
 
     #[tokio::test]
     async fn test_avro_parser() {
-        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        assert!(avro_parser_rs.is_ok());
-        let avro_parser = avro_parser_rs.unwrap();
+        let avro_parser = new_avro_parser_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
         let schema = &avro_parser.schema;
         let record = build_avro_data(schema);
         assert_eq!(record.fields.len(), 10);
         let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
-        let append_rs = writer.append(record.clone());
-        assert!(append_rs.is_ok());
+        writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
@@ -444,7 +462,7 @@ mod test {
         for (i, field) in record.fields.iter().enumerate() {
             let value = field.clone().1;
             match value {
-                Value::String(str) => {
+                Value::String(str) | Value::Union(_, box Value::String(str)) => {
                     assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
                 }
                 Value::Boolean(bool_val) => {
@@ -589,6 +607,65 @@ mod test {
         ]
     }
 
+    fn build_field(schema: &Schema) -> Option<Value> {
+        match schema {
+            Schema::String => Some(Value::String("str_value".to_string())),
+            Schema::Int => Some(Value::Int(32_i32)),
+            Schema::Long => Some(Value::Long(64_i64)),
+            Schema::Float => Some(Value::Float(32_f32)),
+            Schema::Double => Some(Value::Double(64_f64)),
+            Schema::Boolean => Some(Value::Boolean(true)),
+
+            Schema::Date => {
+                let original_date =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let naive_date =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
+                Some(Value::Date(num_days))
+            }
+            Schema::TimestampMillis => {
+                let datetime =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let timestamp_mills = Value::TimestampMillis(datetime.0.timestamp() * 1_000);
+                Some(timestamp_mills)
+            }
+            Schema::TimestampMicros => {
+                let datetime =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let timestamp_micros = Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
+                Some(timestamp_micros)
+            }
+            Schema::Duration => {
+                let months = Months::new(1);
+                let days = Days::new(1);
+                let millis = Millis::new(1000);
+                Some(Value::Duration(Duration::new(months, days, millis)))
+            }
+
+            Schema::Union(union_schema) => {
+                let inner_schema = union_schema
+                    .variants()
+                    .iter()
+                    .find_or_first(|s| s != &&Schema::Null)
+                    .unwrap();
+
+                match build_field(inner_schema) {
+                    None => {
+                        let index_of_union =
+                            union_schema.find_schema(&Value::Null).unwrap().0 as u32;
+                        Some(Value::Union(index_of_union, Box::new(Value::Null)))
+                    }
+                    Some(value) => {
+                        let index_of_union = union_schema.find_schema(&value).unwrap().0 as u32;
+                        Some(Value::Union(index_of_union, Box::new(value)))
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
         if let Schema::Record {
@@ -596,60 +673,9 @@ mod test {
         } = schema.clone()
         {
             for field in &fields {
-                match field.schema {
-                    Schema::String => {
-                        record.put(field.name.as_str(), "str_value".to_string());
-                    }
-                    Schema::Int => {
-                        record.put(field.name.as_str(), 32_i32);
-                    }
-                    Schema::Long => {
-                        record.put(field.name.as_str(), 64_i64);
-                    }
-                    Schema::Float => {
-                        record.put(field.name.as_str(), 32_f32);
-                    }
-                    Schema::Double => {
-                        record.put(field.name.as_str(), 64_f64);
-                    }
-                    Schema::Boolean => {
-                        record.put(field.name.as_str(), true);
-                    }
-                    Schema::Date => {
-                        let original_date =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let naive_date =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
-                        record.put(field.name.as_str(), Value::Date(num_days));
-                    }
-                    Schema::TimestampMillis => {
-                        let datetime =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let timestamp_mills =
-                            Value::TimestampMillis(datetime.0.timestamp() * 1_000);
-                        record.put(field.name.as_str(), timestamp_mills);
-                    }
-                    Schema::TimestampMicros => {
-                        let datetime =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let timestamp_micros =
-                            Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
-                        record.put(field.name.as_str(), timestamp_micros);
-                    }
-                    Schema::Duration => {
-                        let months = Months::new(1);
-                        let days = Days::new(1);
-                        let millis = Millis::new(1000);
-                        record.put(
-                            field.name.as_str(),
-                            Value::Duration(Duration::new(months, days, millis)),
-                        );
-                    }
-                    _ => {
-                        unreachable!()
-                    }
-                }
+                let value = build_field(&field.schema)
+                    .unwrap_or_else(|| panic!("No value defined for field, {}", field.name));
+                record.put(field.name.as_str(), value)
             }
         }
         record
@@ -660,7 +686,9 @@ mod test {
         let conf = new_avro_conf_from_local("simple-schema.avsc")
             .await
             .unwrap();
-        println!("{:?}", conf.map_to_columns().unwrap());
+        let columns = conf.map_to_columns().unwrap();
+        assert_eq!(columns.len(), 10);
+        println!("{:?}", columns);
     }
 
     #[tokio::test]
@@ -669,5 +697,74 @@ mod test {
         assert!(avro_parser_rs.is_ok());
         let avro_parser = avro_parser_rs.unwrap();
         println!("avro_parser = {:?}", avro_parser);
+    }
+
+    #[tokio::test]
+    async fn test_avro_union_type() {
+        let avro_parser = new_avro_parser_from_local("union-schema.avsc")
+            .await
+            .unwrap();
+        let schema = &avro_parser.schema;
+        let mut null_record = Record::new(schema).unwrap();
+        null_record.put("id", Value::Int(5));
+        null_record.put("age", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("sequence_id", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("name", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("score", Value::Union(1, Box::new(Value::Null)));
+        null_record.put("avg_score", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("is_lasted", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("entrance_date", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("birthday", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("anniversary", Value::Union(0, Box::new(Value::Null)));
+
+        let mut writer = Writer::new(schema, Vec::new());
+        writer.append(null_record).unwrap();
+        writer.flush().unwrap();
+
+        let record = build_avro_data(schema);
+        writer.append(record).unwrap();
+        writer.flush().unwrap();
+
+        let records = writer.into_inner().unwrap();
+
+        let reader: Vec<_> = Reader::with_schema(schema, &records[..]).unwrap().collect();
+        assert_eq!(2, reader.len());
+        let null_record_expected: Vec<(String, Value)> = vec![
+            ("id".to_string(), Value::Int(5)),
+            ("age".to_string(), Value::Union(0, Box::new(Value::Null))),
+            (
+                "sequence_id".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            ("name".to_string(), Value::Union(0, Box::new(Value::Null))),
+            ("score".to_string(), Value::Union(1, Box::new(Value::Null))),
+            (
+                "avg_score".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "is_lasted".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "entrance_date".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "birthday".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+            (
+                "anniversary".to_string(),
+                Value::Union(0, Box::new(Value::Null)),
+            ),
+        ];
+        let null_record_value = reader.get(0).unwrap().as_ref().unwrap();
+        match null_record_value {
+            Value::Record(values) => {
+                assert_eq!(values, &null_record_expected)
+            }
+            _ => unreachable!(),
+        }
     }
 }

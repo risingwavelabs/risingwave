@@ -61,6 +61,7 @@ async fn test_merger_sum_aggr() {
                     order_pairs: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
                 AggCall {
                     kind: AggKind::Sum,
@@ -69,6 +70,7 @@ async fn test_merger_sum_aggr() {
                     order_pairs: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
             ],
             vec![],
@@ -152,6 +154,7 @@ async fn test_merger_sum_aggr() {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -160,6 +163,7 @@ async fn test_merger_sum_aggr() {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ],
         vec![],
