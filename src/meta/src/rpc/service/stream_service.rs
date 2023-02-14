@@ -82,8 +82,8 @@ where
 
     async fn cancel_creating_jobs(
         &self,
-        request: Request<CancelCreatingJobRequest>,
-    ) -> TonicResponse<CancelCreatingJobResponse> {
+        request: Request<CancelCreatingJobsRequest>,
+    ) -> TonicResponse<CancelCreatingJobsResponse> {
         let req = request.into_inner();
         let table_ids = self
             .catalog_manager
@@ -94,7 +94,7 @@ where
                 .cancel_streaming_jobs(table_ids.into_iter().map(TableId::from).collect_vec())
                 .await;
         }
-        Ok(Response::new(CancelCreatingJobResponse { status: None }))
+        Ok(Response::new(CancelCreatingJobsResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]

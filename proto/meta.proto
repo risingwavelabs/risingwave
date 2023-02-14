@@ -116,11 +116,11 @@ message CreatingJobInfo {
   string name = 3;
 }
 
-message CancelCreatingJobRequest {
+message CancelCreatingJobsRequest {
   repeated CreatingJobInfo infos = 1;
 }
 
-message CancelCreatingJobResponse {
+message CancelCreatingJobsResponse {
   common.Status status = 1;
 }
 
@@ -147,7 +147,7 @@ message ListTableFragmentsResponse {
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
-  rpc CancelCreatingJobs(CancelCreatingJobRequest) returns (CancelCreatingJobResponse);
+  rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 

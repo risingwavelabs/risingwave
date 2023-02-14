@@ -306,11 +306,11 @@ export interface CreatingJobInfo {
   name: string;
 }
 
-export interface CancelCreatingJobRequest {
+export interface CancelCreatingJobsRequest {
   infos: CreatingJobInfo[];
 }
 
-export interface CancelCreatingJobResponse {
+export interface CancelCreatingJobsResponse {
   status: Status | undefined;
 }
 
@@ -1105,16 +1105,16 @@ export const CreatingJobInfo = {
   },
 };
 
-function createBaseCancelCreatingJobRequest(): CancelCreatingJobRequest {
+function createBaseCancelCreatingJobsRequest(): CancelCreatingJobsRequest {
   return { infos: [] };
 }
 
-export const CancelCreatingJobRequest = {
-  fromJSON(object: any): CancelCreatingJobRequest {
+export const CancelCreatingJobsRequest = {
+  fromJSON(object: any): CancelCreatingJobsRequest {
     return { infos: Array.isArray(object?.infos) ? object.infos.map((e: any) => CreatingJobInfo.fromJSON(e)) : [] };
   },
 
-  toJSON(message: CancelCreatingJobRequest): unknown {
+  toJSON(message: CancelCreatingJobsRequest): unknown {
     const obj: any = {};
     if (message.infos) {
       obj.infos = message.infos.map((e) => e ? CreatingJobInfo.toJSON(e) : undefined);
@@ -1124,30 +1124,30 @@ export const CancelCreatingJobRequest = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobRequest>, I>>(object: I): CancelCreatingJobRequest {
-    const message = createBaseCancelCreatingJobRequest();
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsRequest>, I>>(object: I): CancelCreatingJobsRequest {
+    const message = createBaseCancelCreatingJobsRequest();
     message.infos = object.infos?.map((e) => CreatingJobInfo.fromPartial(e)) || [];
     return message;
   },
 };
 
-function createBaseCancelCreatingJobResponse(): CancelCreatingJobResponse {
+function createBaseCancelCreatingJobsResponse(): CancelCreatingJobsResponse {
   return { status: undefined };
 }
 
-export const CancelCreatingJobResponse = {
-  fromJSON(object: any): CancelCreatingJobResponse {
+export const CancelCreatingJobsResponse = {
+  fromJSON(object: any): CancelCreatingJobsResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
 
-  toJSON(message: CancelCreatingJobResponse): unknown {
+  toJSON(message: CancelCreatingJobsResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobResponse>, I>>(object: I): CancelCreatingJobResponse {
-    const message = createBaseCancelCreatingJobResponse();
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsResponse>, I>>(object: I): CancelCreatingJobsResponse {
+    const message = createBaseCancelCreatingJobsResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
