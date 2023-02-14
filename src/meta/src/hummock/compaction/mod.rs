@@ -15,7 +15,6 @@
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
-mod prost_type;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
@@ -42,7 +41,7 @@ use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
 pub struct CompactStatus {
-    compaction_group_id: CompactionGroupId,
+    pub(crate) compaction_group_id: CompactionGroupId,
     pub(crate) level_handlers: Vec<LevelHandler>,
 }
 
