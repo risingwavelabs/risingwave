@@ -20,9 +20,10 @@ use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
-use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::{
+    CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 fn cal_file_size(table_infos: &[SstableInfo]) -> u64 {
@@ -37,7 +38,7 @@ pub struct LevelCompactionPicker {
 
 impl CompactionPicker for LevelCompactionPicker {
     fn pick_compaction(
-        &self,
+        &mut self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
@@ -228,7 +229,7 @@ pub mod tests {
 
     #[test]
     fn test_compact_l0_to_l1() {
-        let picker = create_compaction_picker_for_test();
+        let mut picker = create_compaction_picker_for_test();
         let l0 = generate_level(
             0,
             vec![
@@ -250,6 +251,7 @@ pub mod tests {
                     generate_table(0, 1, 301, 400, 1),
                 ],
             )],
+            ..Default::default()
         };
         let mut local_stats = LocalPickerStatistic::default();
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -314,7 +316,7 @@ pub mod tests {
                 .compaction_mode(CompactionMode::Range as i32)
                 .build(),
         );
-        let picker =
+        let mut picker =
             LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
 
         let levels = vec![Level {
@@ -334,6 +336,7 @@ pub mod tests {
                 sub_levels: vec![],
                 total_file_size: 0,
             }),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
         push_tables_level0_nonoverlapping(
@@ -375,7 +378,7 @@ pub mod tests {
     fn test_l0_to_l1_compact_conflict() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
-        let picker = create_compaction_picker_for_test();
+        let mut picker = create_compaction_picker_for_test();
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
@@ -389,6 +392,7 @@ pub mod tests {
                 sub_levels: vec![],
                 total_file_size: 0,
             }),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(
             &mut levels,
@@ -406,7 +410,7 @@ pub mod tests {
         ret.add_pending_task(0, &mut levels_handler);
 
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
-        let picker =
+        let mut picker =
             TierCompactionPicker::new(picker.config.clone(), picker.overlap_strategy.clone());
         assert!(picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -417,7 +421,7 @@ pub mod tests {
     fn test_compact_to_l1_concurrently() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with any L1 files
         // under compaction.
-        let picker = create_compaction_picker_for_test();
+        let mut picker = create_compaction_picker_for_test();
 
         let mut levels = Levels {
             levels: vec![Level {
@@ -430,6 +434,7 @@ pub mod tests {
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![generate_table(
                 1, 1, 160, 280, 2,
             )])),
+            ..Default::default()
         };
 
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -472,7 +477,7 @@ pub mod tests {
     fn test_compacting_key_range_overlap_intra_l0() {
         // When picking L0->L0, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
-        let picker = create_compaction_picker_for_test();
+        let mut picker = create_compaction_picker_for_test();
 
         let mut levels = Levels {
             levels: vec![Level {
@@ -486,6 +491,7 @@ pub mod tests {
                 generate_table(1, 1, 100, 210, 2),
                 generate_table(2, 1, 200, 250, 2),
             ])),
+            ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
@@ -508,7 +514,7 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .max_compaction_bytes(1000)
             .build();
-        let picker = LevelCompactionPicker::new(
+        let mut picker = LevelCompactionPicker::new(
             1,
             Arc::new(config),
             Arc::new(RangeOverlapStrategy::default()),
@@ -527,6 +533,7 @@ pub mod tests {
                 sub_level_id: 0,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(
             &mut levels,
@@ -567,7 +574,7 @@ pub mod tests {
 
     #[test]
     fn test_skip_compact_write_amplification_limit() {
-        let picker = create_compaction_picker_for_test();
+        let mut picker = create_compaction_picker_for_test();
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
@@ -581,6 +588,7 @@ pub mod tests {
                 sub_level_id: 0,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(
             &mut levels,
@@ -615,6 +623,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
@@ -626,7 +635,7 @@ pub mod tests {
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
-        let picker =
+        let mut picker =
             LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -651,7 +660,7 @@ pub mod tests {
                 .max_compaction_bytes(50000)
                 .build(),
         );
-        let picker =
+        let mut picker =
             LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -688,6 +697,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let mut local_stats = LocalPickerStatistic::default();
@@ -717,7 +727,7 @@ pub mod tests {
 
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
-        let picker = LevelCompactionPicker::new(
+        let mut picker = LevelCompactionPicker::new(
             1,
             config.clone(),
             Arc::new(RangeOverlapStrategy::default()),
@@ -732,7 +742,7 @@ pub mod tests {
         }
 
         // No more pending sub-level so we can get a task now.
-        let picker =
+        let mut picker =
             LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
         picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)

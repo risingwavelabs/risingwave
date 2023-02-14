@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
@@ -31,9 +31,8 @@ use risingwave_sqlparser::ast::{
 use super::create_source::resolve_source_schema;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, ColumnId, USER_COLUMN_ID_OFFSET};
+use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -393,6 +392,7 @@ fn gen_table_plan_inner(
         properties: context.with_options().inner().clone(),
         info: Some(source_info),
         owner: session.user_id(),
+        watermark_descs: vec![],
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
@@ -534,12 +534,13 @@ pub fn check_create_table_with_source(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{
+        row_id_column_name, Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     #[test]

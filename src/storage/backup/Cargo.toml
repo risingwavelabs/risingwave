@@ -7,6 +7,12 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
@@ -19,7 +25,6 @@ risingwave_hummock_sdk = { path = "../hummock_sdk" }
 risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 serde = { version = "1", features = ["derive"] }
-serde_derive = "1"
 serde_json = "1"
 thiserror = "1"
 twox-hash = "1"

@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -24,10 +24,10 @@ use anyhow::anyhow;
 use bytes::{BufMut, BytesMut};
 use clap::Parser;
 use futures::TryStreamExt;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, StorageConfig, NO_OVERRIDE};
+use risingwave_common::config::{load_config, NO_OVERRIDE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
@@ -38,6 +38,7 @@ use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
@@ -235,7 +236,7 @@ async fn init_metadata_for_replay(
             std::process::exit(0);
         },
         ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0) => {
-            meta_client = ret.unwrap();
+            (meta_client, _) = ret.unwrap();
         },
     }
     let worker_id = meta_client.worker_id();
@@ -243,9 +244,8 @@ async fn init_metadata_for_replay(
     meta_client.activate(advertise_addr).await.unwrap();
 
     let tables = meta_client.risectl_list_state_tables().await?;
-    let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
-    let new_meta_client =
+    let (new_meta_client, _) =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0).await?;
     new_meta_client.activate(advertise_addr).await.unwrap();
     if ci_mode {
@@ -253,8 +253,9 @@ async fn init_metadata_for_replay(
         *table_id = table_to_check.id;
     }
 
+    // No need to init compaction_groups, because it will be done when replaying version delta.
     new_meta_client
-        .init_metadata_for_replay(tables, compaction_groups)
+        .init_metadata_for_replay(tables, vec![])
         .await?;
 
     // shift the sst id to avoid conflict with the original meta node
@@ -270,7 +271,7 @@ async fn pull_version_deltas(
 ) -> anyhow::Result<Vec<HummockVersionDelta>> {
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client = MetaClient::register_new(
+    let (meta_client, _) = MetaClient::register_new(
         cluster_meta_endpoint,
         WorkerType::RiseCtl,
         advertise_addr,
@@ -323,7 +324,7 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client =
+    let (meta_client, system_params) =
         MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &advertise_addr, 0)
             .await?;
     let worker_id = meta_client.worker_id();
@@ -349,9 +350,8 @@ async fn start_replay(
     }
 
     // Creates a hummock state store *after* we reset the hummock version
-    let storage_config = Arc::new(config.storage.clone());
-    let hummock =
-        create_hummock_store_with_metrics(&meta_client, storage_config.clone(), &opts).await?;
+    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+    let hummock = create_hummock_store_with_metrics(&meta_client, storage_opts, &opts).await?;
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
@@ -635,7 +635,9 @@ pub async fn check_compaction_results(
     mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
     mut actual_resutls: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
-    let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
+    let combined = expect_results
+        .iter_mut()
+        .zip_eq_fast(actual_resutls.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {
         assert_eq!(e1, e2);
         tracing::info!(
@@ -677,7 +679,7 @@ struct StorageMetrics {
 
 pub async fn create_hummock_store_with_metrics(
     meta_client: &MetaClient,
-    storage_config: Arc<StorageConfig>,
+    storage_opts: Arc<StorageOpts>,
     opts: &CompactionTestOpts,
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
     let metrics = StorageMetrics {
@@ -687,15 +689,10 @@ pub async fn create_hummock_store_with_metrics(
         storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
         compactor_metrics: Arc::new(CompactorMetrics::unused()),
     };
-    let rw_config = RwConfig {
-        storage: storage_config.deref().clone(),
-        ..Default::default()
-    };
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
-        "",
-        &rw_config,
+        storage_opts,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),

@@ -32,6 +32,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{
@@ -50,6 +51,7 @@ use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution
 use risingwave_storage::StateStore;
 use tracing::trace;
 
+use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -58,7 +60,10 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<S: StateStore> {
+pub struct StateTable<
+    S: StateStore,
+    W: WatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+> {
     /// Id for this table.
     table_id: TableId,
 
@@ -118,12 +123,11 @@ pub struct StateTable<S: StateStore> {
     /// latest watermark
     cur_watermark: Option<ScalarImpl>,
 
-    /// number of commits with watermark since the last time we did state cleaning by watermark.
-    num_wmked_commits_since_last_clean: usize,
+    watermark_buffer_strategy: W,
 }
 
 // initialize
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     /// Create state table from table catalog and store.
     pub async fn from_table_catalog(
         table_catalog: &Table,
@@ -242,7 +246,7 @@ impl<S: StateStore> StateTable<S> {
             epoch: None,
             last_watermark: None,
             cur_watermark: None,
-            num_wmked_commits_since_last_clean: 0,
+            watermark_buffer_strategy: W::default(),
         }
     }
 
@@ -266,8 +270,8 @@ impl<S: StateStore> StateTable<S> {
         .await
     }
 
-    /// Create a state table without distribution, used for unit tests.
-    pub async fn new_with_value_indices_without_distribution(
+    /// Create a state table without distribution, with given `value_indices`, used for unit tests.
+    pub async fn new_without_distribution_with_value_indices(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
@@ -304,27 +308,6 @@ impl<S: StateStore> StateTable<S> {
             Distribution::fallback(),
             None,
             true,
-        )
-        .await
-    }
-
-    /// Create a state table with given `value_indices`, used for unit tests.
-    pub async fn new_without_distribution_partial(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        value_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-            Some(value_indices),
         )
         .await
     }
@@ -423,7 +406,7 @@ impl<S: StateStore> StateTable<S> {
             epoch: None,
             last_watermark: None,
             cur_watermark: None,
-            num_wmked_commits_since_last_clean: 0,
+            watermark_buffer_strategy: W::default(),
         }
     }
 
@@ -580,7 +563,7 @@ impl<S: StateStore> StateTable<S> {
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        if self.dist_key_indices.is_empty() {
+        if self.vnode_col_idx_in_pk.is_none() && self.dist_key_indices.is_empty() {
             assert_eq!(
                 new_vnodes, self.vnodes,
                 "should not update vnode bitmap for singleton table"
@@ -594,6 +577,7 @@ impl<S: StateStore> StateTable<S> {
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
 }
+
 // write
 impl<S: StateStore> StateTable<S> {
     #[expect(clippy::boxed_local)]
@@ -682,7 +666,7 @@ impl<S: StateStore> StateTable<S> {
         let key_chunk = chunk.reorder_columns(self.pk_indices());
         let vnode_and_pks = key_chunk
             .rows_with_holes()
-            .zip_eq(vnodes.iter())
+            .zip_eq_debug(vnodes.iter())
             .map(|(r, vnode)| {
                 let mut buffer = BytesMut::new();
                 buffer.put_slice(&vnode.to_be_bytes()[..]);
@@ -696,7 +680,9 @@ impl<S: StateStore> StateTable<S> {
         let (_, vis) = key_chunk.into_parts();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(op, vnode_and_pks, values).zip_eq(vis.iter()) {
+                for ((op, key, value), vis) in
+                    izip!(op, vnode_and_pks, values).zip_eq_debug(vis.iter())
+                {
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.mem_table.insert(key, value),
@@ -748,7 +734,7 @@ impl<S: StateStore> StateTable<S> {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
         if self.cur_watermark.is_some() {
-            self.num_wmked_commits_since_last_clean += 1;
+            self.watermark_buffer_strategy.tick();
         }
         self.update_epoch(new_epoch);
     }
@@ -759,15 +745,19 @@ impl<S: StateStore> StateTable<S> {
         buffer: BTreeMap<Bytes, KeyOp>,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
-        let watermark = self.cur_watermark.as_ref().and_then(|cur_watermark_ref| {
-            self.num_wmked_commits_since_last_clean += 1;
-
-            if self.num_wmked_commits_since_last_clean >= STATE_CLEANING_PERIOD_EPOCH {
-                Some(cur_watermark_ref)
+        let watermark = {
+            if let Some(watermark) = self.cur_watermark.take() {
+                self.watermark_buffer_strategy.tick();
+                if !self.watermark_buffer_strategy.apply() {
+                    self.cur_watermark = Some(watermark);
+                    None
+                } else {
+                    Some(watermark)
+                }
             } else {
                 None
             }
-        });
+        };
 
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
@@ -781,7 +771,7 @@ impl<S: StateStore> StateTable<S> {
         };
         let range_end_suffix = watermark.map(|watermark| {
             serialize_pk(
-                row::once(Some(watermark.clone())),
+                row::once(Some(watermark)),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
@@ -832,10 +822,6 @@ impl<S: StateStore> StateTable<S> {
             }
         }
         write_batch.ingest().await?;
-        if watermark.is_some() {
-            self.last_watermark = self.cur_watermark.take();
-            self.num_wmked_commits_since_last_clean = 0;
-        }
         Ok(())
     }
 
@@ -947,7 +933,7 @@ fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U
 }
 
 // Iterator functions
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S>> {
         self.iter_with_pk_prefix(row::empty()).await
@@ -1121,6 +1107,55 @@ impl<S: StateStore> StateTable<S> {
 
     pub fn get_vnodes(&self) -> Arc<Bitmap> {
         self.vnodes.clone()
+    }
+
+    /// Returns:
+    /// false: the provided pk prefix is absent in state store.
+    /// true: the provided pk prefix may or may not be present in state store.
+    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
+        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+        let encoded_key_range = range_of_prefix(&encoded_prefix);
+
+        // We assume that all usages of iterating the state table only access a single vnode.
+        // If this assertion fails, then something must be wrong with the operator implementation or
+        // the distribution derivation from the optimizer.
+        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
+        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
+        let (l, r) = encoded_key_range_with_vnode.clone();
+        let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
+        if self.mem_table.iter(bytes_key_range).next().is_some() {
+            return Ok(true);
+        }
+
+        // Construct prefix hint for prefix bloom filter.
+        if self.prefix_hint_len != 0 {
+            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
+        }
+        let prefix_hint = {
+            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
+                panic!();
+            } else {
+                let encoded_prefix_len = self
+                    .pk_serde
+                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
+
+                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+            }
+        };
+
+        let read_options = ReadOptions {
+            prefix_hint,
+            ignore_range_tombstone: false,
+            retention_seconds: None,
+            table_id: self.table_id,
+            read_version_from_backup: false,
+        };
+
+        self.local_store
+            .may_exist(encoded_key_range_with_vnode, read_options)
+            .await
+            .map_err(Into::into)
     }
 }
 

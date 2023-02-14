@@ -550,6 +550,8 @@ impl From<&ProstBuffer> for Bitmap {
 }
 
 /// Bitmap iterator.
+///
+/// TODO: add `count_ones` to make it [`ExactSizeIterator`]?
 pub struct BitmapIter<'a> {
     bits: &'a [usize],
     idx: usize,

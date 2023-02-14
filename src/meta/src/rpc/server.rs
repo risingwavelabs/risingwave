@@ -49,6 +49,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    SystemParamManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::MetaMetrics;
@@ -182,10 +183,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let join_handle = tokio::spawn(async move {
         if let Some(election_client) = election_client.clone() {
             let mut is_leader_watcher = election_client.subscribe();
-            let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
+            let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
             let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
 
-            let _resp = is_leader_watcher.changed().await;
+            tokio::select! {
+                _ = svc_shutdown_rx_clone.changed() => return,
+                res = is_leader_watcher.changed() => {
+                    if let Err(err) = res {
+                        tracing::error!("leader watcher recv failed {}", err.to_string());
+                    }
+                }
+            }
+            let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
 
             // If not the leader, spawn a follower.
             let follower_handle: Option<JoinHandle<()>> = if !*is_leader_watcher.borrow() {
@@ -206,9 +215,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 None
             };
 
+            let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
             while !*is_leader_watcher.borrow_and_update() {
-                if let Err(e) = is_leader_watcher.changed().await {
-                    tracing::error!("leader watcher recv failed {}", e.to_string());
+                tokio::select! {
+                    _ = svc_shutdown_rx_clone.changed() => {
+                        return;
+                    }
+                    res = is_leader_watcher.changed() => {
+                        if let Err(err) = res {
+                            tracing::error!("leader watcher recv failed {}", err.to_string());
+                        }
+                    }
                 }
             }
 
@@ -252,7 +269,6 @@ pub async fn start_service_as_election_follower(
         .add_service(HealthServer::new(health_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {},
                 // shutdown service if all services should be shut down
                 res = svc_shutdown_rx.changed() =>  {
                     match res {
@@ -289,6 +305,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
+    let init_system_param = opts.init_system_params();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -308,11 +325,13 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .unwrap(),
     );
 
+    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
+        catalog_manager.clone(),
     )
     .await
     .unwrap();
@@ -338,8 +357,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
-
-    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
@@ -386,7 +403,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     hummock_manager
-        .purge_stale(
+        .purge(
             &fragment_manager
                 .list_table_fragments()
                 .await
@@ -400,7 +417,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         parse_remote_object_store(
             &env.opts.backup_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
-            true,
             "Meta Backup",
         )
         .await,
@@ -424,6 +440,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
+    let system_param_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_param).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -446,7 +464,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         stream_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
+    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone(), system_param_manager);
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),
@@ -507,14 +525,29 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .await,
     );
 
+    let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
+    let notification_mgr = env.notification_manager_ref();
+    let abort_notification_handler = tokio::spawn(async move {
+        abort_recv.await.unwrap();
+        notification_mgr.abort_all().await;
+    });
+    sub_tasks.push((abort_notification_handler, abort_sender));
+
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
-                // Maybe it is already shut down
                 continue;
             }
-            if let Err(err) = join_handle.await {
-                tracing::warn!("Failed to join shutdown: {:?}", err);
+            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+            // abort it using timeout.
+            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
+                Ok(Err(err)) => {
+                    tracing::warn!("Failed to join shutdown: {:?}", err);
+                }
+                Err(e) => {
+                    tracing::warn!("Join shutdown timeout: {:?}", e);
+                }
+                _ => {}
             }
         }
     };
@@ -534,7 +567,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(BackupServiceServer::new(backup_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {},
                 res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
