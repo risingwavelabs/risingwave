@@ -13,22 +13,27 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::LogicalValues;
-use crate::optimizer::PlanRef;
+use crate::optimizer::{plan_visitor::CountRows, plan_node::LogicalValues};
+use crate::optimizer::{PlanRef, plan_node::PlanTreeNodeUnary, PlanVisitor};
 
 pub struct TrivialProjectToValuesRule {}
 impl Rule for TrivialProjectToValuesRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         if project.exprs().iter().all(|e| e.is_const()) {
-            Some(
-                LogicalValues::new(
-                    vec![project.exprs().clone()],
-                    project.schema().clone(),
-                    project.ctx(),
+            let mut count_rows = CountRows;
+            if let Some(count) = count_rows.visit(project.input()) {
+                Some(
+                    LogicalValues::new(
+                        vec![project.exprs().clone(); count],
+                        project.schema().clone(),
+                        project.ctx(),
+                    )
+                    .into(),
                 )
-                .into(),
-            )
+            } else {
+                None
+            }
         } else {
             None
         }

@@ -17,9 +17,9 @@ use std::collections::HashSet;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
     LogicalNow, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
-    PlanTreeNodeUnary,
+    PlanTreeNodeUnary, LogicalProject,
 };
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::{PlanTreeNode, plan_visitor::PlanVisitor};
 
 pub struct MaxOneRowVisitor;
 
@@ -43,6 +43,10 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 
     fn visit_logical_now(&mut self, _plan: &LogicalNow) -> bool {
         true
+    }
+
+    fn visit_logical_project(&mut self, plan: &LogicalProject) -> bool {
+        self.visit(plan.input())
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {
@@ -90,5 +94,40 @@ impl PlanVisitor<bool> for HasMaxOneRowApply {
 
     fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
         plan.max_one_row() | self.visit(plan.left()) | self.visit(plan.right())
+    }
+}
+
+pub struct CountRows;
+
+impl PlanVisitor<Option<usize>> for CountRows {
+    fn merge(_a: Option<usize>, _b: Option<usize>) -> Option<usize> {
+        // Impossible to determine count e.g. after a join
+        None
+    }
+
+    fn visit_logical_values(&mut self, plan: &LogicalValues) -> Option<usize> {
+        Some(plan.rows().len())
+    }
+
+    fn visit_logical_project(&mut self, plan: &LogicalProject) -> Option<usize> {
+        self.visit(plan.input())
+    }
+
+    fn visit_logical_union(&mut self, plan: &LogicalUnion) -> Option<usize> {
+        if !plan.all() {
+            // We cannot deal with deduplication
+            return None
+        }
+        plan.inputs().iter().fold(Some(0), |init, i| {
+            match (init, self.visit(i.clone())) {
+                (None, _) => None,
+                (_, None) => None,
+                (Some(a), Some(b)) => Some(a + b)
+            }
+        })
+    }
+
+    fn visit_logical_now(&mut self, _plan: &LogicalNow) -> Option<usize> {
+        Some(1)
     }
 }

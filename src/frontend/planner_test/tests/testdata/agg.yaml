@@ -290,7 +290,12 @@
     create table t (v1 real);
     select 1 from t having sum(v1) > 5;
   batch_plan: |
-    BatchValues { rows: [[1:Int32]] }
+    BatchProject { exprs: [1:Int32] }
+    └─BatchFilter { predicate: (sum(sum(t.v1)) > 5:Int32) }
+      └─BatchSimpleAgg { aggs: [sum(sum(t.v1))] }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchSimpleAgg { aggs: [sum(t.v1)] }
+            └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: having with group column
   sql: |
     create table t (v1 real);
