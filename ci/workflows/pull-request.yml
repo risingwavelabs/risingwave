@@ -220,7 +220,7 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
-          run: rw-build-env-hdfs
+          run: rw-build-env
           config: ci/docker-compose.yml
     timeout_in_minutes: 20
     retry: *auto-retry

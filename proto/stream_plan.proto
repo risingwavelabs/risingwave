@@ -143,8 +143,8 @@ message SinkDesc {
   repeated plan_common.ColumnOrder pk = 5;
   repeated uint32 stream_key = 6;
   repeated uint32 distribution_key = 7;
-  bool append_only = 8;
-  map<string, string> properties = 9;
+  map<string, string> properties = 8;
+  catalog.SinkType sink_type = 9;
 }
 
 message SinkNode {

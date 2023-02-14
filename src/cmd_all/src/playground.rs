@@ -59,33 +59,37 @@ max_heartbeat_interval_secs = 600",
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     let mut services = match profile {
         "playground" => vec![
-            RisingWaveService::Meta(osstrs(["--dashboard-host", "0.0.0.0:5691"])),
+            RisingWaveService::Meta(osstrs([
+                "--dashboard-host",
+                "0.0.0.0:5691",
+                "--state-store",
+                "hummock+memory",
+            ])),
             RisingWaveService::Compute(osstrs([])),
             RisingWaveService::Frontend(osstrs([])),
         ],
         "playground-3cn" => vec![
-            RisingWaveService::Meta(osstrs(["--dashboard-host", "0.0.0.0:5691"])),
+            RisingWaveService::Meta(osstrs([
+                "--dashboard-host",
+                "0.0.0.0:5691",
+                "--state-store",
+                "hummock+memory-shared",
+            ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",
-                "--state-store",
-                "hummock+memory-shared",
                 "--parallelism",
                 "4",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5688",
-                "--state-store",
-                "hummock+memory-shared",
                 "--parallelism",
                 "4",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5689",
-                "--state-store",
-                "hummock+memory-shared",
                 "--parallelism",
                 "4",
             ])),
@@ -100,6 +104,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                     "127.0.0.1:5690",
                     "--dashboard-host",
                     "0.0.0.0:5691",
+                    "--state-store",
+                    "hummock+memory",
                 ])),
                 RisingWaveService::Compute(osstrs([
                     "--listen-addr",
