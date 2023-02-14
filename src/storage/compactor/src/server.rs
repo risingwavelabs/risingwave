@@ -84,7 +84,10 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    let state_store_url = system_params.state_store(opts.state_store.as_ref());
+    let state_store_url = {
+        let from_local = opts.state_store.unwrap_or("".to_string());
+        system_params.state_store(from_local)
+    };
 
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
     let object_store = Arc::new(
