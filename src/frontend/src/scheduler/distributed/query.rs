@@ -414,6 +414,7 @@ impl QueryRunner {
             // Query Result Fetcher.
         }
 
+        tracing::trace!("Cleaning stages in query [{:?}]", self.query.query_id);
         // Stop all running stages.
         for stage_execution in self.stage_executions.values() {
             // The stop is return immediately so no need to spawn tasks.
