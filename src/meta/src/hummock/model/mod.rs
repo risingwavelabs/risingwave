@@ -29,7 +29,7 @@ pub use version::*;
 pub use version_delta::*;
 
 /// Column family names for hummock.
-/// Deprecated cf_name should be reserved for backward compatibility.
+/// Deprecated `cf_name` should be reserved for backward compatibility.
 const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_0";
 const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_1";
 const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_2";
