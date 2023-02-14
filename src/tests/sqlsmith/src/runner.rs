@@ -76,6 +76,7 @@ async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
         .unwrap();
 }
 
+#[allow(dead_code)]
 async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
     let session_sql = session_sql_gen(rng);
     tracing::info!("Executing: {}", session_sql);
