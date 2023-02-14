@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
@@ -172,7 +172,7 @@ impl TableType {
 /// The version of a table, used by schema change. See [`ProstTableVersion`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableVersion {
-    pub version_id: u64,
+    pub version_id: TableVersionId,
     pub next_column_id: ColumnId,
 }
 
@@ -180,8 +180,10 @@ impl TableVersion {
     /// Create an initial version for a table, with the given max column id.
     #[cfg(test)]
     pub fn new_initial_for_test(max_column_id: ColumnId) -> Self {
+        use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
+
         Self {
-            version_id: 0,
+            version_id: INITIAL_TABLE_VERSION_ID,
             next_column_id: max_column_id.next(),
         }
     }

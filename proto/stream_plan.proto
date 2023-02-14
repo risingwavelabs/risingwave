@@ -469,6 +469,8 @@ message SortNode {
 message DmlNode {
   // Id of the table on which DML performs.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
 }
