@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-connector-node-version=$(cat ci/connector-node-version)
+connector_node_version=$(cat ci/connector-node-version)
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -59,7 +59,7 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
 
   echo "--- Release build and upload risingwave connector node jar asset"
   git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
-  cd risingwave-connector-node && git checkout ${connector-node-version} && mvn -B package -Dmaven.test.skip=true
+  cd risingwave-connector-node && git checkout ${connector_node_version} && mvn -B package -Dmaven.test.skip=true
   cd assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
