@@ -14,15 +14,19 @@
 
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::LogicalValues;
-use crate::optimizer::PlanRef;
-use crate::optimizer::PlanTreeNode;
+use crate::optimizer::{PlanRef, PlanTreeNode};
 
 pub struct UnionInputValuesMergeRule {}
 impl Rule for UnionInputValuesMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let union = plan.as_logical_union()?;
         // !union.all() is already handled by [`UnionToDistinctRule`]
-        if union.inputs().iter().all(|p| p.as_logical_values().is_some()) && union.all() {
+        if union
+            .inputs()
+            .iter()
+            .all(|p| p.as_logical_values().is_some())
+            && union.all()
+        {
             let mut rows = vec![];
             union.inputs().iter().for_each(|v| {
                 rows.extend_from_slice(v.as_logical_values().unwrap().rows());
