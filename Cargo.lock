@@ -3497,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8ec77ebfe5067154eb35baeb03c402e3c57a3db4866e9a1a276d40435c7fb8"
+checksum = "ff08a176759ae5e6cf2c5153028d258cdbb318cfee2e89f986cbd33dc40e1671"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3525,9 +3525,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfa6b576864ca304aa1248d800e56a906f5daa6c8a6e6132374648aea7ea86f1"
+checksum = "7e0798f5f47c2c9265e22bb0b9b16c73c8eabbceb79b7fec0610569fdcd293be"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
