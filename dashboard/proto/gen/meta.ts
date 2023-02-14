@@ -300,6 +300,20 @@ export interface FlushResponse {
   snapshot: HummockSnapshot | undefined;
 }
 
+export interface CreatingJobInfo {
+  databaseId: number;
+  schemaId: number;
+  name: string;
+}
+
+export interface CancelCreatingJobRequest {
+  infos: CreatingJobInfo[];
+}
+
+export interface CancelCreatingJobResponse {
+  status: Status | undefined;
+}
+
 export interface ListTableFragmentsRequest {
   tableIds: number[];
 }
@@ -1056,6 +1070,86 @@ export const FlushResponse = {
       : undefined;
     message.snapshot = (object.snapshot !== undefined && object.snapshot !== null)
       ? HummockSnapshot.fromPartial(object.snapshot)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreatingJobInfo(): CreatingJobInfo {
+  return { databaseId: 0, schemaId: 0, name: "" };
+}
+
+export const CreatingJobInfo = {
+  fromJSON(object: any): CreatingJobInfo {
+    return {
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+    };
+  },
+
+  toJSON(message: CreatingJobInfo): unknown {
+    const obj: any = {};
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreatingJobInfo>, I>>(object: I): CreatingJobInfo {
+    const message = createBaseCreatingJobInfo();
+    message.databaseId = object.databaseId ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobRequest(): CancelCreatingJobRequest {
+  return { infos: [] };
+}
+
+export const CancelCreatingJobRequest = {
+  fromJSON(object: any): CancelCreatingJobRequest {
+    return { infos: Array.isArray(object?.infos) ? object.infos.map((e: any) => CreatingJobInfo.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: CancelCreatingJobRequest): unknown {
+    const obj: any = {};
+    if (message.infos) {
+      obj.infos = message.infos.map((e) => e ? CreatingJobInfo.toJSON(e) : undefined);
+    } else {
+      obj.infos = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobRequest>, I>>(object: I): CancelCreatingJobRequest {
+    const message = createBaseCancelCreatingJobRequest();
+    message.infos = object.infos?.map((e) => CreatingJobInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobResponse(): CancelCreatingJobResponse {
+  return { status: undefined };
+}
+
+export const CancelCreatingJobResponse = {
+  fromJSON(object: any): CancelCreatingJobResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: CancelCreatingJobResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobResponse>, I>>(object: I): CancelCreatingJobResponse {
+    const message = createBaseCancelCreatingJobResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
       : undefined;
     return message;
   },
