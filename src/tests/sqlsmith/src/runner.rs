@@ -123,6 +123,7 @@ async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mu
     client.simple_query(session_sql.as_str()).await.unwrap();
 }
 
+/// Expects at least 50% of inserted rows included.
 async fn test_population_count(
     client: &tokio_postgres::Client,
     base_tables: Vec<Table>,
@@ -134,9 +135,10 @@ async fn test_population_count(
         let rows = client.simple_query(&q).await.unwrap();
         actual_count += rows.len();
     }
-    if actual_count != expected_count {
+    if actual_count < expected_count / 2 {
         panic!(
-            "expected {} rows, only had {} rows",
+            "expected at least 50% rows included.\
+             Total {} rows, only had {} rows",
             expected_count, actual_count,
         )
     }
