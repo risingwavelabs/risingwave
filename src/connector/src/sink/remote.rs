@@ -101,7 +101,7 @@ impl ResponseStreamImpl {
 }
 
 #[derive(Debug)]
-pub struct RemoteSink {
+pub struct RemoteSink<const APPEND_ONLY: bool> {
     pub sink_type: String,
     properties: HashMap<String, String>,
     epoch: Option<u64>,
@@ -112,7 +112,7 @@ pub struct RemoteSink {
     response_stream: ResponseStreamImpl,
 }
 
-impl RemoteSink {
+impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
     pub async fn new(
         config: RemoteConfig,
         schema: Schema,
@@ -237,7 +237,7 @@ impl RemoteSink {
 }
 
 #[async_trait]
-impl Sink for RemoteSink {
+impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut row_ops = vec![];
         for (op, row_ref) in chunk.rows() {
@@ -360,7 +360,7 @@ mod test {
         let (request_sender, mut request_recv) = mpsc::unbounded_channel();
         let (_, resp_recv) = mpsc::unbounded_channel();
 
-        let mut sink = RemoteSink::for_test(resp_recv, request_sender);
+        let mut sink = RemoteSink::<true>::for_test(resp_recv, request_sender);
         let chunk = StreamChunk::new(
             vec![Op::Insert],
             vec![
@@ -403,7 +403,7 @@ mod test {
     async fn test_remote_sink() {
         let (request_sender, mut request_receiver) = mpsc::unbounded_channel();
         let (response_sender, response_receiver) = mpsc::unbounded_channel();
-        let mut sink = RemoteSink::for_test(response_receiver, request_sender);
+        let mut sink = RemoteSink::<true>::for_test(response_receiver, request_sender);
 
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],

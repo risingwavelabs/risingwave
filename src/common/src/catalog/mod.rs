@@ -204,8 +204,6 @@ impl From<TableId> for u32 {
     }
 }
 
-// TODO: TableOption is duplicated with the properties in table catalog, We can refactor later to
-// directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
     pub retention_seconds: Option<u32>, // second
@@ -321,5 +319,40 @@ impl From<&u32> for FunctionId {
 impl From<FunctionId> for u32 {
     fn from(id: FunctionId) -> Self {
         id.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct UserId {
+    pub user_id: u32,
+}
+
+impl UserId {
+    pub const fn new(user_id: u32) -> Self {
+        UserId { user_id }
+    }
+
+    pub const fn placeholder() -> Self {
+        UserId {
+            user_id: u32::MAX - 1,
+        }
+    }
+}
+
+impl From<u32> for UserId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for UserId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<UserId> for u32 {
+    fn from(id: UserId) -> Self {
+        id.user_id
     }
 }

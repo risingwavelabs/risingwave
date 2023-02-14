@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
     Function as ProstFunction, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
@@ -27,7 +28,6 @@ use super::source_catalog::SourceCatalog;
 use super::ViewId;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
-use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;

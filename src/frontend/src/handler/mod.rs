@@ -316,10 +316,18 @@ pub async fn handle(
 
             with_options: _, // It is put in OptimizerContext
             or_replace,      // not supported
+            emit_mode,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
                     "CREATE OR REPLACE VIEW".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if emit_mode == Some(EmitMode::OnWindowClose) {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE MATERIALIZED VIEW EMIT ON WINDOW CLOSE".to_string(),
                     None.into(),
                 )
                 .into());
