@@ -1657,6 +1657,11 @@ impl Parser {
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
         let columns = self.parse_parenthesized_column_list(Optional)?;
+        let emit_mode = if materialized {
+            self.parse_emit_mode()?
+        } else {
+            None
+        };
         let with_options = self.parse_options(Keyword::WITH)?;
         self.expect_keyword(Keyword::AS)?;
         let query = Box::new(self.parse_query()?);
@@ -1668,6 +1673,7 @@ impl Parser {
             materialized,
             or_replace,
             with_options,
+            emit_mode,
         })
     }
 
@@ -1907,19 +1913,36 @@ impl Parser {
         let option = with_options
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
-        let source_schema = if let Some(opt) = option {
-            // Table is created with an external connector.
-            if opt.value.to_string().contains("-cdc") {
-                // cdc connectors
+        let connector = option.map(|opt| opt.value.to_string());
+        // row format for cdc source must be debezium json
+        // row format for nexmark source must be native
+        // default row format for datagen source is native
+        let source_schema = if let Some(connector) = connector {
+            if connector.contains("-cdc") {
                 if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
                     && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
                 {
                     return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+                }
+                Some(SourceSchema::DebeziumJson)
+            } else if connector.contains("nexmark") {
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
+                }
+                Some(SourceSchema::Native)
+            } else if connector.contains("datagen") {
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
+                    Some(SourceSchema::parse_to(self)?)
                 } else {
-                    Some(SourceSchema::DebeziumJson)
+                    Some(SourceSchema::Native)
                 }
             } else {
-                // non-cdc connectors
+                // other connectors
                 self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
                 Some(SourceSchema::parse_to(self)?)
             }
@@ -2204,11 +2227,32 @@ impl Parser {
         Ok(SqlOption { name, value })
     }
 
+    pub fn parse_emit_mode(&mut self) -> Result<Option<EmitMode>, ParserError> {
+        if self.parse_keyword(Keyword::EMIT) {
+            match self.parse_one_of_keywords(&[Keyword::IMMEDIATELY, Keyword::ON]) {
+                Some(Keyword::IMMEDIATELY) => Ok(Some(EmitMode::Immediately)),
+                Some(Keyword::ON) => {
+                    self.expect_keywords(&[Keyword::WINDOW, Keyword::CLOSE])?;
+                    Ok(Some(EmitMode::OnWindowClose))
+                }
+                Some(_) => unreachable!(),
+                None => self.expected(
+                    "IMMEDIATELY or ON WINDOW CLOSE after EMIT",
+                    self.peek_token(),
+                ),
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_alter_table()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
+        } else if self.parse_keyword(Keyword::SYSTEM) {
+            self.parse_alter_system()
         } else {
             self.expected("TABLE or USER after ALTER", self.peek_token())
         }
@@ -2305,6 +2349,16 @@ impl Parser {
         })
     }
 
+    pub fn parse_alter_system(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::SET)?;
+        let param = self.parse_identifier()?;
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER SYSTEM SET", self.peek_token());
+        }
+        let value = self.parse_set_variable()?;
+        Ok(Statement::AlterSystem { param, value })
+    }
+
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> Result<Statement, ParserError> {
         let table_name = self.parse_object_name()?;
@@ -2376,6 +2430,21 @@ impl Parser {
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected),
+        }
+    }
+
+    fn parse_set_variable(&mut self) -> Result<SetVariableValue, ParserError> {
+        let token = self.peek_token();
+        match (self.parse_value(), token) {
+            (Ok(value), _) => Ok(SetVariableValue::Literal(value)),
+            (Err(_), Token::Word(ident)) => {
+                if ident.keyword == Keyword::DEFAULT {
+                    Ok(SetVariableValue::Default)
+                } else {
+                    Ok(SetVariableValue::Ident(ident.to_ident()))
+                }
+            }
+            (Err(_), unexpected) => self.expected("variable value", unexpected),
         }
     }
 
@@ -3105,12 +3174,7 @@ impl Parser {
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
             let mut values = vec![];
             loop {
-                let token = self.peek_token();
-                let value = match (self.parse_value(), token) {
-                    (Ok(value), _) => SetVariableValue::Literal(value),
-                    (Err(_), Token::Word(ident)) => SetVariableValue::Ident(ident.to_ident()),
-                    (Err(_), unexpected) => self.expected("variable value", unexpected)?,
-                };
+                let value = self.parse_set_variable()?;
                 values.push(value);
                 if self.consume_token(&Token::Comma) {
                     continue;

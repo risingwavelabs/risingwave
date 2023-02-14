@@ -121,6 +121,16 @@ impl InputRef {
             r#type: Some(self.data_type.to_protobuf()),
         }
     }
+
+    pub(super) fn from_expr_proto(
+        input_ref: &risingwave_pb::expr::InputRefExpr,
+        ret_type: DataType,
+    ) -> risingwave_common::error::Result<Self> {
+        Ok(Self {
+            index: input_ref.get_column_idx() as usize,
+            data_type: ret_type,
+        })
+    }
 }
 
 impl Expr for InputRef {

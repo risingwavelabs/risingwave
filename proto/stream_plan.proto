@@ -135,11 +135,20 @@ message SourceNode {
   StreamSource source_inner = 1;
 }
 
+message SinkDesc {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated plan_common.ColumnDesc columns = 4;
+  repeated plan_common.ColumnOrder pk = 5;
+  repeated uint32 stream_key = 6;
+  repeated uint32 distribution_key = 7;
+  map<string, string> properties = 8;
+  catalog.SinkType sink_type = 9;
+}
+
 message SinkNode {
-  uint32 table_id = 1;
-  map<string, string> properties = 3;
-  repeated plan_common.Field fields = 4;
-  repeated uint32 sink_pk = 5;
+  SinkDesc sink_desc = 1;
 }
 
 message ProjectNode {
@@ -205,6 +214,7 @@ message SimpleAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message HashAggNode {
@@ -215,6 +225,7 @@ message HashAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message TopNNode {

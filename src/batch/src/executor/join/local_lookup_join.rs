@@ -28,8 +28,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_expr::expr::expr_unary::new_unary_expr;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, new_unary_expr, BoxedExpression, LiteralExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -115,6 +114,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             scan_ranges,
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
+            chunk_size: None,
         });
 
         Ok(row_seq_scan_node)
@@ -472,8 +472,9 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{
+        new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
+    };
     use risingwave_pb::expr::expr_node::Type;
 
     use super::LocalLookupJoinExecutorArgs;
