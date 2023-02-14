@@ -27,9 +27,9 @@ use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -452,7 +452,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
-        info!("epoch {} is sealed", epoch);
+        info_in_release!("epoch {} is sealed", epoch);
         assert!(
             epoch > self.max_sealed_epoch,
             "sealing a sealed epoch {}. {}",
@@ -474,10 +474,10 @@ impl HummockUploader {
                     .expect("we have checked non-empty");
                 self.sealed_data.seal_new_epoch(epoch, unsealed_data);
             } else {
-                info!("epoch {} to seal has no data", epoch);
+                warn!("epoch {} to seal has no data", epoch);
             }
         } else {
-            info!("epoch {} to seal has no data", epoch);
+            warn!("epoch {} to seal has no data", epoch);
         }
     }
 
