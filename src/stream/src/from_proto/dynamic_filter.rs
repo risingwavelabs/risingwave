@@ -56,8 +56,8 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let state_table_l = StateTable::from_table_catalog_no_sanity_check(
+        // TODO: use consistent operation for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
+        let state_table_l = StateTable::from_table_catalog_inconsistent_op(
             node.get_left_table()?,
             store.clone(),
             Some(vnodes),
@@ -65,7 +65,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         .await;
 
         let state_table_r =
-            StateTable::from_table_catalog_no_sanity_check(node.get_right_table()?, store, None)
+            StateTable::from_table_catalog_inconsistent_op(node.get_right_table()?, store, None)
                 .await;
 
         Ok(Box::new(DynamicFilterExecutor::new(
