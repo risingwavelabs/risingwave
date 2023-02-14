@@ -21,7 +21,14 @@ impl Rule for TrivialProjectToValuesRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         if project.exprs().iter().all(|e| e.is_const()) {
-            Some(LogicalValues::new(vec![project.exprs().clone()], project.schema().clone(), project.ctx()).into())
+            Some(
+                LogicalValues::new(
+                    vec![project.exprs().clone()],
+                    project.schema().clone(),
+                    project.ctx(),
+                )
+                .into(),
+            )
         } else {
             None
         }
