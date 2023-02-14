@@ -1,5 +1,13 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
+import {
+  ColumnIndex,
+  SinkType,
+  sinkTypeFromJSON,
+  sinkTypeToJSON,
+  StreamSourceInfo,
+  Table,
+  WatermarkDesc,
+} from "./catalog";
 import { Buffer } from "./common";
 import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
@@ -365,8 +373,8 @@ export interface SinkDesc {
   pk: ColumnOrder[];
   streamKey: number[];
   distributionKey: number[];
-  appendOnly: boolean;
   properties: { [key: string]: string };
+  sinkType: SinkType;
 }
 
 export interface SinkDesc_PropertiesEntry {
@@ -1831,8 +1839,8 @@ function createBaseSinkDesc(): SinkDesc {
     pk: [],
     streamKey: [],
     distributionKey: [],
-    appendOnly: false,
     properties: {},
+    sinkType: SinkType.UNSPECIFIED,
   };
 }
 
@@ -1848,13 +1856,13 @@ export const SinkDesc = {
       pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
-      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
     };
   },
 
@@ -1883,13 +1891,13 @@ export const SinkDesc = {
     } else {
       obj.distributionKey = [];
     }
-    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
     }
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     return obj;
   },
 
@@ -1902,7 +1910,6 @@ export const SinkDesc = {
     message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
-    message.appendOnly = object.appendOnly ?? false;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -1912,6 +1919,7 @@ export const SinkDesc = {
       },
       {},
     );
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     return message;
   },
 };

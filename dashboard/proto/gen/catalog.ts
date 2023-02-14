@@ -12,6 +12,59 @@ import {
 
 export const protobufPackage = "catalog";
 
+export const SinkType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  APPEND_ONLY: "APPEND_ONLY",
+  FORCE_APPEND_ONLY: "FORCE_APPEND_ONLY",
+  UPSERT: "UPSERT",
+  ANY: "ANY",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SinkType = typeof SinkType[keyof typeof SinkType];
+
+export function sinkTypeFromJSON(object: any): SinkType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return SinkType.UNSPECIFIED;
+    case 1:
+    case "APPEND_ONLY":
+      return SinkType.APPEND_ONLY;
+    case 2:
+    case "FORCE_APPEND_ONLY":
+      return SinkType.FORCE_APPEND_ONLY;
+    case 3:
+    case "UPSERT":
+      return SinkType.UPSERT;
+    case 4:
+    case "ANY":
+      return SinkType.ANY;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SinkType.UNRECOGNIZED;
+  }
+}
+
+export function sinkTypeToJSON(object: SinkType): string {
+  switch (object) {
+    case SinkType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case SinkType.APPEND_ONLY:
+      return "APPEND_ONLY";
+    case SinkType.FORCE_APPEND_ONLY:
+      return "FORCE_APPEND_ONLY";
+    case SinkType.UPSERT:
+      return "UPSERT";
+    case SinkType.ANY:
+      return "ANY";
+    case SinkType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /**
  * The rust prost library always treats uint64 as required and message as
  * optional. In order to allow `row_id_index` as an optional field, we wrap
@@ -85,10 +138,10 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendOnly: boolean;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
+  sinkType: SinkType;
 }
 
 export interface Sink_PropertiesEntry {
@@ -508,10 +561,10 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
-    appendOnly: false,
     owner: 0,
     properties: {},
     definition: "",
+    sinkType: SinkType.UNSPECIFIED,
   };
 }
 
@@ -531,7 +584,6 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
-      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -540,6 +592,7 @@ export const Sink = {
         }, {})
         : {},
       definition: isSet(object.definition) ? String(object.definition) : "",
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
     };
   },
 
@@ -574,7 +627,6 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
-    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -583,6 +635,7 @@ export const Sink = {
       });
     }
     message.definition !== undefined && (obj.definition = message.definition);
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     return obj;
   },
 
@@ -597,7 +650,6 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendOnly = object.appendOnly ?? false;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -609,6 +661,7 @@ export const Sink = {
       {},
     );
     message.definition = object.definition ?? "";
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     return message;
   },
 };
