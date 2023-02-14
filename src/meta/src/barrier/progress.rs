@@ -115,8 +115,14 @@ impl Progress {
 
     /// `progress` = `done_ratio` + (1 - `done_ratio`) * (`consumed_rows` / `remaining_rows`).
     fn calculate_progress(&mut self) -> f64 {
+        if self.states.is_empty() {
+            return 1.0;
+        }
         let done_ratio: f64 = (self.done_count) as f64 / self.states.len() as f64;
-        let remaining_rows = self.upstream_total_key_count as f64 * (1_f64 - done_ratio);
+        let mut remaining_rows = self.upstream_total_key_count as f64 * (1_f64 - done_ratio);
+        if remaining_rows == 0.0 {
+            remaining_rows = 1.0;
+        }
         let consumed_rows: u64 = self
             .states
             .values()
