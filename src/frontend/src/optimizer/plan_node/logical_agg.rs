@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::{fmt, iter};
 
 use fixedbitset::FixedBitSet;
@@ -67,6 +68,15 @@ impl LogicalAgg {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
         self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
+    }
+
+    /// Infer dedup tables for distinct agg calls.
+    pub fn infer_distinct_dedup_tables(
+        &self,
+        vnode_col_idx: Option<usize>,
+    ) -> HashMap<usize, TableCatalog> {
+        self.core
+            .infer_distinct_dedup_tables(&self.base, vnode_col_idx)
     }
 
     /// Generate plan for stateless 2-phase streaming agg.
@@ -469,16 +479,14 @@ impl LogicalAggBuilder {
         agg_call: AggCall,
     ) -> std::result::Result<ExprImpl, ErrorCode> {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
+        let (agg_kind, inputs, mut distinct, mut order_by, filter) = agg_call.decompose();
         match &agg_kind {
-            AggKind::Min
-            | AggKind::Max
-            | AggKind::Sum
-            | AggKind::Count
-            | AggKind::Avg
-            | AggKind::ApproxCountDistinct => {
-                // this order by is unnecessary.
-                order_by = OrderBy::new(vec![]);
+            AggKind::Min | AggKind::Max => {
+                distinct = false;
+                order_by = OrderBy::any();
+            }
+            AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
+                order_by = OrderBy::any();
             }
             _ => {
                 // To be conservative, we just treat newly added AggKind in the future as not
