@@ -16,7 +16,6 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -51,8 +50,8 @@ struct Progress {
     /// Creating mv id.
     creating_mv_id: TableId,
 
-    /// Upstream mv ids.
-    upstream_mv_ids: Vec<TableId>,
+    /// Upstream mv count. Keep track of how many times each upstream MV appears.
+    upstream_mv_count: HashMap<TableId, usize>,
 
     /// Upstream mvs total key count.
     upstream_total_key_count: u64,
@@ -66,7 +65,7 @@ impl Progress {
     fn new(
         actors: impl IntoIterator<Item = ActorId>,
         creating_mv_id: TableId,
-        upstream_mv_ids: Vec<TableId>,
+        upstream_mv_count: HashMap<TableId, usize>,
         upstream_total_key_count: u64,
         definition: String,
     ) -> Self {
@@ -81,7 +80,7 @@ impl Progress {
             done_count: 0,
             progress: 0.0,
             creating_mv_id,
-            upstream_mv_ids,
+            upstream_mv_count,
             upstream_total_key_count,
             definition,
         }
@@ -200,28 +199,40 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             self.actor_map.insert(actor, ddl_epoch);
         }
 
-        let (creating_mv_id, upstream_mv_ids, upstream_total_key_count, definition) =
+        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition) =
             if let Command::CreateStreamingJob {
                 table_fragments,
+                dispatchers,
                 table_mview_map,
                 definition,
                 ..
             } = &command.context.command
             {
-                let upstream_mv_ids = table_mview_map.keys().cloned().collect_vec();
+                // Keep track of how many times each upstream MV appears.
+                let mut upstream_mv_count = HashMap::new();
+                for (table_id, actors) in table_mview_map {
+                    assert!(!actors.is_empty());
+                    let dispatch_count: usize = dispatchers
+                        .iter()
+                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                        .map(|(_, v)| v.len())
+                        .sum();
+                    upstream_mv_count.insert(*table_id, dispatch_count / actors.len());
+                }
 
-                let upstream_total_key_count: u64 = upstream_mv_ids
+                let upstream_total_key_count: u64 = upstream_mv_count
                     .iter()
-                    .map(|upstream_mv| {
-                        version_stats
-                            .table_stats
-                            .get(&upstream_mv.table_id)
-                            .map_or(0, |stat| stat.total_key_count as u64)
+                    .map(|(upstream_mv, count)| {
+                        *count as u64
+                            * version_stats
+                                .table_stats
+                                .get(&upstream_mv.table_id)
+                                .map_or(0, |stat| stat.total_key_count as u64)
                     })
                     .sum();
                 (
                     table_fragments.table_id(),
-                    upstream_mv_ids,
+                    upstream_mv_count,
                     upstream_total_key_count,
                     definition.to_string(),
                 )
@@ -232,7 +243,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         let progress = Progress::new(
             actors,
             creating_mv_id,
-            upstream_mv_ids,
+            upstream_mv_count,
             upstream_total_key_count,
             definition,
         );
@@ -265,13 +276,14 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
                 let progress = &mut o.get_mut().0;
 
                 let upstream_total_key_count: u64 = progress
-                    .upstream_mv_ids
+                    .upstream_mv_count
                     .iter()
-                    .map(|upstream_mv| {
-                        version_stats
-                            .table_stats
-                            .get(&upstream_mv.table_id)
-                            .map_or(0, |stat| stat.total_key_count as u64)
+                    .map(|(upstream_mv, count)| {
+                        *count as u64
+                            * version_stats
+                                .table_stats
+                                .get(&upstream_mv.table_id)
+                                .map_or(0, |stat| stat.total_key_count as u64)
                     })
                     .sum();
 
