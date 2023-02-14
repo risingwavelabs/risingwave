@@ -51,6 +51,15 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
         });
     }
 
+    pub fn clear(&mut self) {
+        self.first_buffered_watermarks.clear();
+        self.other_buffered_watermarks
+            .values_mut()
+            .for_each(|staged_watermarks| {
+                std::mem::take(staged_watermarks);
+            });
+    }
+
     /// Handle a new watermark message. Optionally returns the watermark message to emit and the
     /// buffer id.
     pub fn handle_watermark(&mut self, buffer_id: ID, watermark: Watermark) -> Option<Watermark> {

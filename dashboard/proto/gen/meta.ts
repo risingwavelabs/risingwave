@@ -338,6 +338,7 @@ export interface AddWorkerNodeRequest {
 export interface AddWorkerNodeResponse {
   status: Status | undefined;
   node: WorkerNode | undefined;
+  systemParams: SystemParams | undefined;
 }
 
 export interface ActivateWorkerNodeRequest {
@@ -473,17 +474,6 @@ export function subscribeResponse_OperationToJSON(object: SubscribeResponse_Oper
   }
 }
 
-export interface MetaLeaderInfo {
-  nodeAddress: string;
-  leaseId: number;
-}
-
-export interface MetaLeaseInfo {
-  leader: MetaLeaderInfo | undefined;
-  leaseRegisterTime: number;
-  leaseExpireTime: number;
-}
-
 export interface PauseRequest {
 }
 
@@ -533,6 +523,36 @@ export interface RescheduleRequest_ReschedulesEntry {
 
 export interface RescheduleResponse {
   success: boolean;
+}
+
+export interface MembersRequest {
+}
+
+export interface MetaMember {
+  address: HostAddress | undefined;
+  isLeader: boolean;
+}
+
+export interface MembersResponse {
+  members: MetaMember[];
+}
+
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields.
+ * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ */
+export interface SystemParams {
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -1287,7 +1307,7 @@ export const AddWorkerNodeRequest = {
 };
 
 function createBaseAddWorkerNodeResponse(): AddWorkerNodeResponse {
-  return { status: undefined, node: undefined };
+  return { status: undefined, node: undefined, systemParams: undefined };
 }
 
 export const AddWorkerNodeResponse = {
@@ -1295,6 +1315,7 @@ export const AddWorkerNodeResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       node: isSet(object.node) ? WorkerNode.fromJSON(object.node) : undefined,
+      systemParams: isSet(object.systemParams) ? SystemParams.fromJSON(object.systemParams) : undefined,
     };
   },
 
@@ -1302,6 +1323,8 @@ export const AddWorkerNodeResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.node !== undefined && (obj.node = message.node ? WorkerNode.toJSON(message.node) : undefined);
+    message.systemParams !== undefined &&
+      (obj.systemParams = message.systemParams ? SystemParams.toJSON(message.systemParams) : undefined);
     return obj;
   },
 
@@ -1312,6 +1335,9 @@ export const AddWorkerNodeResponse = {
       : undefined;
     message.node = (object.node !== undefined && object.node !== null)
       ? WorkerNode.fromPartial(object.node)
+      : undefined;
+    message.systemParams = (object.systemParams !== undefined && object.systemParams !== null)
+      ? SystemParams.fromPartial(object.systemParams)
       : undefined;
     return message;
   },
@@ -1866,65 +1892,6 @@ export const SubscribeResponse = {
   },
 };
 
-function createBaseMetaLeaderInfo(): MetaLeaderInfo {
-  return { nodeAddress: "", leaseId: 0 };
-}
-
-export const MetaLeaderInfo = {
-  fromJSON(object: any): MetaLeaderInfo {
-    return {
-      nodeAddress: isSet(object.nodeAddress) ? String(object.nodeAddress) : "",
-      leaseId: isSet(object.leaseId) ? Number(object.leaseId) : 0,
-    };
-  },
-
-  toJSON(message: MetaLeaderInfo): unknown {
-    const obj: any = {};
-    message.nodeAddress !== undefined && (obj.nodeAddress = message.nodeAddress);
-    message.leaseId !== undefined && (obj.leaseId = Math.round(message.leaseId));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<MetaLeaderInfo>, I>>(object: I): MetaLeaderInfo {
-    const message = createBaseMetaLeaderInfo();
-    message.nodeAddress = object.nodeAddress ?? "";
-    message.leaseId = object.leaseId ?? 0;
-    return message;
-  },
-};
-
-function createBaseMetaLeaseInfo(): MetaLeaseInfo {
-  return { leader: undefined, leaseRegisterTime: 0, leaseExpireTime: 0 };
-}
-
-export const MetaLeaseInfo = {
-  fromJSON(object: any): MetaLeaseInfo {
-    return {
-      leader: isSet(object.leader) ? MetaLeaderInfo.fromJSON(object.leader) : undefined,
-      leaseRegisterTime: isSet(object.leaseRegisterTime) ? Number(object.leaseRegisterTime) : 0,
-      leaseExpireTime: isSet(object.leaseExpireTime) ? Number(object.leaseExpireTime) : 0,
-    };
-  },
-
-  toJSON(message: MetaLeaseInfo): unknown {
-    const obj: any = {};
-    message.leader !== undefined && (obj.leader = message.leader ? MetaLeaderInfo.toJSON(message.leader) : undefined);
-    message.leaseRegisterTime !== undefined && (obj.leaseRegisterTime = Math.round(message.leaseRegisterTime));
-    message.leaseExpireTime !== undefined && (obj.leaseExpireTime = Math.round(message.leaseExpireTime));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<MetaLeaseInfo>, I>>(object: I): MetaLeaseInfo {
-    const message = createBaseMetaLeaseInfo();
-    message.leader = (object.leader !== undefined && object.leader !== null)
-      ? MetaLeaderInfo.fromPartial(object.leader)
-      : undefined;
-    message.leaseRegisterTime = object.leaseRegisterTime ?? 0;
-    message.leaseExpireTime = object.leaseExpireTime ?? 0;
-    return message;
-  },
-};
-
 function createBasePauseRequest(): PauseRequest {
   return {};
 }
@@ -2299,6 +2266,139 @@ export const RescheduleResponse = {
   fromPartial<I extends Exact<DeepPartial<RescheduleResponse>, I>>(object: I): RescheduleResponse {
     const message = createBaseRescheduleResponse();
     message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseMembersRequest(): MembersRequest {
+  return {};
+}
+
+export const MembersRequest = {
+  fromJSON(_: any): MembersRequest {
+    return {};
+  },
+
+  toJSON(_: MembersRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MembersRequest>, I>>(_: I): MembersRequest {
+    const message = createBaseMembersRequest();
+    return message;
+  },
+};
+
+function createBaseMetaMember(): MetaMember {
+  return { address: undefined, isLeader: false };
+}
+
+export const MetaMember = {
+  fromJSON(object: any): MetaMember {
+    return {
+      address: isSet(object.address) ? HostAddress.fromJSON(object.address) : undefined,
+      isLeader: isSet(object.isLeader) ? Boolean(object.isLeader) : false,
+    };
+  },
+
+  toJSON(message: MetaMember): unknown {
+    const obj: any = {};
+    message.address !== undefined && (obj.address = message.address ? HostAddress.toJSON(message.address) : undefined);
+    message.isLeader !== undefined && (obj.isLeader = message.isLeader);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaMember>, I>>(object: I): MetaMember {
+    const message = createBaseMetaMember();
+    message.address = (object.address !== undefined && object.address !== null)
+      ? HostAddress.fromPartial(object.address)
+      : undefined;
+    message.isLeader = object.isLeader ?? false;
+    return message;
+  },
+};
+
+function createBaseMembersResponse(): MembersResponse {
+  return { members: [] };
+}
+
+export const MembersResponse = {
+  fromJSON(object: any): MembersResponse {
+    return { members: Array.isArray(object?.members) ? object.members.map((e: any) => MetaMember.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: MembersResponse): unknown {
+    const obj: any = {};
+    if (message.members) {
+      obj.members = message.members.map((e) => e ? MetaMember.toJSON(e) : undefined);
+    } else {
+      obj.members = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
+    const message = createBaseMembersResponse();
+    message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return {
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
+  };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
     return message;
   },
 };

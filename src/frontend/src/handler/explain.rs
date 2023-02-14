@@ -23,7 +23,8 @@ use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::{
-    check_create_table_with_source, gen_create_table_plan, ColumnIdGenerator,
+    check_create_table_with_source, gen_create_table_plan, gen_create_table_plan_with_source,
+    ColumnIdGenerator,
 };
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
@@ -34,7 +35,7 @@ use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;
 
-pub fn handle_explain(
+pub async fn handle_explain(
     handler_args: HandlerArgs,
     stmt: Statement,
     options: ExplainOptions,
@@ -48,132 +49,145 @@ pub fn handle_explain(
 
     let session = context.session_ctx().clone();
 
-    let plan = match stmt {
-        Statement::CreateView {
-            or_replace: false,
-            materialized: true,
-            query,
-            name,
-            columns,
-            ..
-        } => gen_create_mv_plan(&session, context.into(), *query, name, columns)?.0,
+    let mut plan_fragmenter = None;
+    let mut rows = {
+        let plan = match stmt {
+            Statement::CreateView {
+                or_replace: false,
+                materialized: true,
+                query,
+                name,
+                columns,
+                ..
+            } => gen_create_mv_plan(&session, context.into(), *query, name, columns)?.0,
 
-        Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
+            Statement::CreateSink { stmt } => gen_sink_plan(&session, context.into(), stmt)?.0,
 
-        Statement::CreateTable {
-            name,
-            columns,
-            constraints,
-            source_schema,
-            ..
-        } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
-            Some(_) => {
-                return Err(ErrorCode::NotImplemented(
-                    "explain create table with a connector".to_string(),
-                    None.into(),
-                )
-                .into())
-            }
-            None => {
-                gen_create_table_plan(
-                    context,
-                    name,
-                    columns,
-                    constraints,
-                    ColumnIdGenerator::new_initial(),
-                )?
-                .0
-            }
-        },
+            Statement::CreateTable {
+                name,
+                columns,
+                constraints,
+                source_schema,
+                ..
+            } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
+                Some(s) => {
+                    gen_create_table_plan_with_source(
+                        context,
+                        name,
+                        columns,
+                        constraints,
+                        s,
+                        ColumnIdGenerator::new_initial(),
+                    )
+                    .await?
+                    .0
+                }
+                None => {
+                    gen_create_table_plan(
+                        context,
+                        name,
+                        columns,
+                        constraints,
+                        ColumnIdGenerator::new_initial(),
+                    )?
+                    .0
+                }
+            },
 
-        Statement::CreateIndex {
-            name,
-            table_name,
-            columns,
-            include,
-            distributed_by,
-            ..
-        } => {
-            gen_create_index_plan(
-                &session,
-                context.into(),
+            Statement::CreateIndex {
                 name,
                 table_name,
                 columns,
                 include,
                 distributed_by,
-            )?
-            .0
-        }
+                ..
+            } => {
+                gen_create_index_plan(
+                    &session,
+                    context.into(),
+                    name,
+                    table_name,
+                    columns,
+                    include,
+                    distributed_by,
+                )?
+                .0
+            }
 
-        stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
+            stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
+        };
+
+        let ctx = plan.plan_base().ctx.clone();
+        let explain_trace = ctx.is_explain_trace();
+        let explain_verbose = ctx.is_explain_verbose();
+
+        let mut rows = if explain_trace {
+            let trace = ctx.take_trace();
+            trace
+                .iter()
+                .flat_map(|s| s.lines())
+                .map(|s| Row::new(vec![Some(s.to_string().into())]))
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
+
+        match options.explain_type {
+            ExplainType::DistSql => match plan.convention() {
+                Convention::Logical => unreachable!(),
+                Convention::Batch => {
+                    plan_fragmenter = Some(BatchPlanFragmenter::new(
+                        session.env().worker_node_manager_ref(),
+                        session.env().catalog_reader().clone(),
+                        plan,
+                    )?);
+                }
+                Convention::Stream => {
+                    let graph = build_graph(plan);
+                    rows.extend(
+                        explain_stream_graph(&graph, explain_verbose)?
+                            .lines()
+                            .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                    );
+                }
+            },
+            ExplainType::Physical => {
+                // if explain trace is open, the plan has been in the rows
+                if !explain_trace {
+                    let output = plan.explain_to_string()?;
+                    rows.extend(
+                        output
+                            .lines()
+                            .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                    );
+                }
+            }
+            ExplainType::Logical => {
+                // if explain trace is open, the plan has been in the rows
+                if !explain_trace {
+                    let output = plan.ctx().take_logical().ok_or_else(|| {
+                        ErrorCode::InternalError("Logical plan not found for query".into())
+                    })?;
+                    rows.extend(
+                        output
+                            .lines()
+                            .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                    );
+                }
+            }
+        }
+        rows
     };
 
-    let ctx = plan.plan_base().ctx.clone();
-    let explain_trace = ctx.is_explain_trace();
-    let explain_verbose = ctx.is_explain_verbose();
-
-    let mut rows = if explain_trace {
-        let trace = ctx.take_trace();
-        trace
-            .iter()
-            .flat_map(|s| s.lines())
-            .map(|s| Row::new(vec![Some(s.to_string().into())]))
-            .collect::<Vec<_>>()
-    } else {
-        vec![]
-    };
-
-    match options.explain_type {
-        ExplainType::DistSql => match plan.convention() {
-            Convention::Logical => unreachable!(),
-            Convention::Batch => {
-                let plan_fragmenter = BatchPlanFragmenter::new(
-                    session.env().worker_node_manager_ref(),
-                    session.env().catalog_reader().clone(),
-                );
-                let query = plan_fragmenter.split(plan)?;
-                let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
-                rows.extend(
-                    vec![stage_graph_json]
-                        .iter()
-                        .flat_map(|s| s.lines())
-                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
-                );
-            }
-            Convention::Stream => {
-                let graph = build_graph(plan);
-                rows.extend(
-                    explain_stream_graph(&graph, explain_verbose)?
-                        .lines()
-                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
-                );
-            }
-        },
-        ExplainType::Physical => {
-            // if explain trace is open, the plan has been in the rows
-            if !explain_trace {
-                let output = plan.explain_to_string()?;
-                rows.extend(
-                    output
-                        .lines()
-                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
-                );
-            }
-        }
-        ExplainType::Logical => {
-            // if explain trace is open, the plan has been in the rows
-            if !explain_trace {
-                let output = plan.ctx().take_logical().ok_or_else(|| {
-                    ErrorCode::InternalError("Logical plan not found for query".into())
-                })?;
-                rows.extend(
-                    output
-                        .lines()
-                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
-                );
-            }
-        }
+    if let Some(plan_fragmenter) = plan_fragmenter {
+        let query = plan_fragmenter.generate_complete_query().await?;
+        let stage_graph_json = serde_json::to_string_pretty(&query.stage_graph).unwrap();
+        rows.extend(
+            vec![stage_graph_json]
+                .iter()
+                .flat_map(|s| s.lines())
+                .map(|s| Row::new(vec![Some(s.to_string().into())])),
+        );
     }
 
     Ok(PgResponse::new_for_stream(

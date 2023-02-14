@@ -23,6 +23,7 @@ use parking_lot::{RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::types::Format;
 use rand::RngCore;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
@@ -37,6 +38,7 @@ use risingwave_common::session_config::ConfigMap;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
@@ -50,6 +52,7 @@ use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
@@ -144,28 +147,32 @@ impl FrontendEnv {
     }
 
     pub async fn init(
-        opts: &FrontendOpts,
+        opts: FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
-        let config = load_config(&opts.config_path);
-        tracing::info!(
-            "Starting frontend node with\nfrontend config {:?}",
-            config.server
+        let config = load_config(&opts.config_path, Some(opts.override_opts));
+        info!("Starting frontend node");
+        info!("> config: {:?}", config);
+        info!(
+            "> debug assertions: {}",
+            if cfg!(debug_assertions) { "on" } else { "off" }
         );
+        info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
         let batch_config = config.batch;
 
         let frontend_address: HostAddr = opts
-            .client_address
+            .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("Client address is not specified, defaulting to host address");
-                &opts.host
+                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
+                &opts.listen_addr
             })
             .parse()
             .unwrap();
-        tracing::info!("Client address is {}", frontend_address);
+        info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let meta_client = MetaClient::register_new(
+        let (meta_client, _) = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
@@ -232,7 +239,7 @@ impl FrontendEnv {
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
-        if opts.metrics_level > 0 {
+        if config.server.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
         }
 
@@ -245,7 +252,7 @@ impl FrontendEnv {
                 .await
                 .unwrap();
         });
-        tracing::info!(
+        info!(
             "Health Check RPC Listener is set up on {}",
             opts.health_check_listener_addr.clone()
         );
@@ -497,12 +504,12 @@ impl SessionImpl {
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
         if let Some(trigger) = flag_guard.take() {
-            tracing::info!("Trying to cancel query in local mode.");
+            info!("Trying to cancel query in local mode.");
             // Current running query is in local mode
             trigger.abort();
-            tracing::info!("Cancel query request sent.");
+            info!("Cancel query request sent.");
         } else {
-            tracing::info!("Trying to cancel query in distributed mode.");
+            info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
     }
@@ -614,7 +621,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_query()
         } else {
-            tracing::info!("Current session finished, ignoring cancel query request")
+            info!("Current session finished, ignoring cancel query request")
         }
     }
 
@@ -624,7 +631,7 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 }
 
 impl SessionManagerImpl {
-    pub async fn new(opts: &FrontendOpts) -> Result<Self> {
+    pub async fn new(opts: FrontendOpts) -> Result<Self> {
         let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
             FrontendEnv::init(opts).await?;
         Ok(Self {
@@ -652,11 +659,7 @@ impl Session<PgResponseStream> for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
-
-        // format: indicate the query PgResponse format (Only meaningful for SELECT queries).
-        // false: TEXT
-        // true: BINARY
-        format: bool,
+        formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql)
@@ -674,7 +677,7 @@ impl Session<PgResponseStream> for SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -701,11 +704,11 @@ impl Session<PgResponseStream> for SessionImpl {
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
-        format: bool,
+        format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         let sql_str = stmt.to_string();
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, format));
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);

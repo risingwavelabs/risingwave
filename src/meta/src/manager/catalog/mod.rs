@@ -26,9 +26,9 @@ pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    valid_table_name, TableId as StreamingJobId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
-    DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
+    valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
+    DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
+    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -1323,12 +1323,13 @@ where
 
     pub async fn finish_create_sink_procedure(
         &self,
+        internal_tables: Vec<Table>,
         sink: &Sink,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         if !sinks.contains_key(&sink.id)
             && database_core.in_progress_creation_tracker.contains(&key)
@@ -1339,8 +1340,15 @@ where
                 .remove(&sink.id);
 
             sinks.insert(sink.id, sink.clone());
+            for table in &internal_tables {
+                tables.insert(table.id, table.clone());
+            }
+            commit_meta!(self, sinks, tables)?;
 
-            commit_meta!(self, sinks)?;
+            for internal_table in internal_tables {
+                self.notify_frontend(Operation::Add, Info::Table(internal_table))
+                    .await;
+            }
 
             let version = self
                 .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
@@ -1372,11 +1380,16 @@ where
         }
     }
 
-    pub async fn drop_sink(&self, sink_id: SinkId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_sink(
+        &self,
+        sink_id: SinkId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
         let sink = sinks.remove(sink_id);
@@ -1386,11 +1399,28 @@ where
                 None => {
                     let dependent_relations = sink.dependent_relations.clone();
 
-                    let objects = &[Object::SinkId(sink.id)];
+                    let objects = &[Object::SinkId(sink.id)]
+                        .into_iter()
+                        .chain(
+                            internal_table_ids
+                                .iter()
+                                .map(|table_id| Object::TableId(*table_id))
+                                .collect_vec(),
+                        )
+                        .collect_vec();
+
+                    let internal_tables = internal_table_ids
+                        .iter()
+                        .map(|internal_table_id| {
+                            tables
+                                .remove(*internal_table_id)
+                                .expect("internal table should exist")
+                        })
+                        .collect_vec();
 
                     let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                    commit_meta!(self, sinks, users)?;
+                    commit_meta!(self, sinks, tables, users)?;
 
                     user_core.decrease_ref(sink.owner);
 
@@ -1401,6 +1431,11 @@ where
 
                     for dependent_relation_id in dependent_relations {
                         database_core.decrease_ref_count(dependent_relation_id);
+                    }
+
+                    for internal_table in internal_tables {
+                        self.notify_frontend(Operation::Delete, Info::Table(internal_table))
+                            .await;
                     }
 
                     let version = self
@@ -1421,6 +1456,10 @@ where
 
     pub async fn list_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_tables()
+    }
+
+    pub async fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
+        self.core.lock().await.database.get_table_options(table_ids)
     }
 
     pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
@@ -1577,12 +1616,6 @@ where
             return Err(MetaError::permission_denied(format!(
                 "User {} cannot be dropped because some objects depend on it",
                 user.name
-            )));
-        }
-        if !user.grant_privileges.is_empty() {
-            return Err(MetaError::permission_denied(format!(
-                "Cannot drop user {} with privileges",
-                id
             )));
         }
         if user_core
