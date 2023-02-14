@@ -214,6 +214,7 @@ message SimpleAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message HashAggNode {
@@ -224,6 +225,7 @@ message HashAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message TopNNode {
