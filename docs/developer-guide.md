@@ -67,10 +67,10 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 
 * Rust toolchain
 * CMake
-* protobuf
+* protobuf (>= 3.12.0)
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
-* Tmux
+* Tmux (>= v3.2a)
 * LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
@@ -455,15 +455,14 @@ license-eye -c .licenserc.yaml header fix
 
 ## Add new dependencies
 
-To avoid rebuild some common dependencies across different crates in workspace, use
+`./risedev check-hakari`: To avoid rebuild some common dependencies across different crates in workspace, use
 [cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
 are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
 after deps get updated.
 
-Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
-workspace.
+`./risedev check-udeps`: Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in workspace.
 
-And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+`./risedev check-dep-sort`: Use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
 ## Submit PRs
 

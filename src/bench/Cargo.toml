@@ -21,7 +21,6 @@ hdrhistogram = "7"
 isahc = { version = "1", default-features = false }
 itertools = "0.10"
 libc = "0.2"
-nix = { version = "0.25", features = ["fs", "mman"] }
 opentelemetry = { version = "0.17", optional = true, features = ["rt-tokio"] }
 opentelemetry-jaeger = { version = "0.16", optional = true, features = [
     "rt-tokio",
@@ -52,6 +51,9 @@ tracing-subscriber = "0.3.16"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.25", features = ["fs", "mman"] }
 
 [[bin]]
 name = "file-cache-bench"
