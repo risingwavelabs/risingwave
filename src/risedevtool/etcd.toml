@@ -2,7 +2,7 @@ extend = "common.toml"
 
 [env]
 ETCD_SYSTEM = "${SYSTEM}"
-ETCD_VER = "v3.6.0-alpha.0" # Only v.3.6.0-alpha.0 supported darwin-arm64.
+ETCD_VER = "v3.5.7"
 ETCD_DOWNLOAD_URL_LINUX = "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz"
 ETCD_DOWNLOAD_URL_OTHER = "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.zip"
 ETCD_DOWNLOAD_PATH_LINUX = "${PREFIX_TMP}/etcd.tar.gz"
