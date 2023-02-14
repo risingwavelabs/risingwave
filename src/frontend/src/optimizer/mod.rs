@@ -695,7 +695,11 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create index plan.
-    pub fn gen_index_plan(&mut self, index_name: String) -> Result<StreamMaterialize> {
+    pub fn gen_index_plan(
+        &mut self,
+        index_name: String,
+        definition: String,
+    ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
@@ -705,7 +709,7 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            "".into(), // TODO: fill definition here for `SHOW CREATE`
+            definition,
             TableType::Index,
         )
     }

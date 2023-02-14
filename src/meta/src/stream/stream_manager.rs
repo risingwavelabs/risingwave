@@ -59,6 +59,9 @@ pub struct CreateStreamingJobContext {
 
     /// The properties of the streaming job.
     pub table_properties: HashMap<String, String>,
+
+    /// DDL definition.
+    pub definition: String,
 }
 
 impl CreateStreamingJobContext {
@@ -148,6 +151,7 @@ where
             table_properties,
             building_locations,
             existing_locations,
+            definition,
             ..
         }: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
@@ -294,6 +298,7 @@ where
                 table_mview_map: table_mview_map.clone(),
                 dispatchers: dispatchers.clone(),
                 init_split_assignment: split_assignment,
+                definition: definition.to_string(),
             })
             .await
         {
