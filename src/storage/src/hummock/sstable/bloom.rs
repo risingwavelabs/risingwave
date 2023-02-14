@@ -184,11 +184,10 @@ mod tests {
     use xxhash_rust::xxh32;
 
     use super::*;
-    use crate::hummock::SstableBuilderOptions;
 
     #[test]
     fn test_small_bloom_filter() {
-        let mut builder = BloomFilterBuilder::new(0.01, 0);
+        let mut builder = BloomFilterBuilder::new(0.01, 2);
         builder.add_key(b"hello", 0);
         builder.add_key(b"world", 0);
         let buf = builder.finish();
@@ -210,13 +209,6 @@ mod tests {
         assert!(f.may_match(check_hash[1]));
         assert!(!f.may_match(check_hash[2]));
         assert!(!f.may_match(check_hash[3]));
-        let t = bloom_bits_per_key(10000, SstableBuilderOptions::default().bloom_false_positive);
-        println!("expected bits: {}", t);
-        let t = bloom_bits_per_key(
-            1000000,
-            SstableBuilderOptions::default().bloom_false_positive,
-        );
-        println!("expected bits: {}", t);
     }
 
     fn false_positive_rate_case(
