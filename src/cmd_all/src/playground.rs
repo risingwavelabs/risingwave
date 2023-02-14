@@ -219,13 +219,13 @@ pub async fn playground() -> Result<()> {
                     "playground" => std::env::var("PREFIX_BIN").expect("PREFIX_BIN not set"),
                     _ => "".to_string(),
                 };
-                let path = Path::new(&prefix_bin)
+                let cmd_path = Path::new(&prefix_bin)
                     .join("connector-node")
                     .join("start-service.sh");
-                if path.exists() {
+                if cmd_path.exists() {
                     tracing::info!("start connector-node with prefix_bin {}", prefix_bin);
-                    let mut cmd = Command::new("sh");
-                    cmd.arg(path).arg("-p").arg("50051");
+                    let mut cmd = Command::new(cmd_path);
+                    cmd.arg("-p").arg("50051");
                     cmd.stdout(std::process::Stdio::piped());
                     let mut child = cmd.spawn().expect("failed to start connector node");
                     let stdout = child.stdout.take().expect("failed to open stdout");
