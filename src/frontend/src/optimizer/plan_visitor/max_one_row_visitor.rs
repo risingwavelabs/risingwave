@@ -127,6 +127,10 @@ impl PlanVisitor<Option<usize>> for CountRows {
         })
     }
 
+    fn visit_logical_filter(&mut self, _plan: &LogicalFilter) -> Option<usize> {
+        None
+    }
+
     fn visit_logical_now(&mut self, _plan: &LogicalNow) -> Option<usize> {
         Some(1)
     }
