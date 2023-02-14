@@ -21,20 +21,25 @@ use crate::error::{ErrorCode, RwError};
 
 type Result<T> = core::result::Result<T, RwError>;
 
+#[allow(dead_code)]
+const MUTABLE: bool = true;
+#[allow(dead_code)]
+const IMMUTABLE: bool = false;
+
 // Only includes undeprecated params.
 // Macro input is { field identifier, mutability }
 macro_rules! for_all_undeprecated_params {
     ($macro:ident) => {
         $macro! {
-            { barrier_interval_ms, true },
-            { checkpoint_frequency, true },
-            { sstable_size_mb, false },
-            { block_size_kb, false },
-            { bloom_false_positive, false },
-            { state_store, false },
-            { data_directory, false },
-            { backup_storage_url, false },
-            { backup_storage_directory, false },
+            { barrier_interval_ms, MUTABLE },
+            { checkpoint_frequency, MUTABLE },
+            { sstable_size_mb, IMMUTABLE },
+            { block_size_kb, IMMUTABLE },
+            { bloom_false_positive, IMMUTABLE },
+            { state_store, IMMUTABLE },
+            { data_directory, IMMUTABLE },
+            { backup_storage_url, IMMUTABLE },
+            { backup_storage_directory, IMMUTABLE },
         }
     };
 }
