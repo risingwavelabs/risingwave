@@ -173,6 +173,7 @@ define_keywords!(
     DATE,
     DAY,
     DEALLOCATE,
+    DEBEZIUM_AVRO,
     DEBEZIUM_JSON,
     DEC,
     DECIMAL,
