@@ -14,12 +14,13 @@
 
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
-use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
@@ -103,21 +104,6 @@ where
             .is_ok()
 }
 
-/// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
-/// vnode set. Returns the sst ids after pruning
-pub fn prune_ssts<'a, R, B>(
-    ssts: impl Iterator<Item = &'a SstableInfo>,
-    table_id: TableId,
-    table_key_range: &R,
-) -> Vec<&'a SstableInfo>
-where
-    R: RangeBounds<TableKey<B>>,
-    B: AsRef<[u8]>,
-{
-    ssts.filter(|info| filter_single_sst(info, table_id, table_key_range))
-        .collect()
-}
-
 /// Search the SST containing the specified key within a level, using binary search.
 pub(crate) fn search_sst_idx<B>(ssts: &[SstableInfo], key: &B) -> usize
 where
@@ -127,7 +113,39 @@ where
         let ord = user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
         ord == Ordering::Less || ord == Ordering::Equal
     })
-    .saturating_sub(1) // considering the boundary of 0
+}
+
+/// Prune overlapping SSTs that does not overlap with a specific key range or does not overlap with
+/// a specific table id. Returns the sst ids after pruning.
+pub fn prune_overlapping_ssts<'a, R, B>(
+    ssts: &'a [SstableInfo],
+    table_id: TableId,
+    table_key_range: &'a R,
+) -> impl DoubleEndedIterator<Item = &'a SstableInfo>
+where
+    R: RangeBounds<TableKey<B>>,
+    B: AsRef<[u8]>,
+{
+    ssts.iter()
+        .filter(move |info| filter_single_sst(info, table_id, table_key_range))
+}
+
+/// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap
+/// with a specific table id. Returns the sst ids after pruning.
+pub fn prune_nonoverlapping_ssts<'a>(
+    ssts: &'a [SstableInfo],
+    encoded_user_key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
+    debug_assert!(can_concat(ssts));
+    let start_table_idx = match encoded_user_key_range.start_bound() {
+        Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
+        _ => 0,
+    };
+    let end_table_idx = match encoded_user_key_range.end_bound() {
+        Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
+        _ => ssts.len().saturating_sub(1),
+    };
+    ssts[start_table_idx..=end_table_idx].iter()
 }
 
 struct MemoryLimiterInner {

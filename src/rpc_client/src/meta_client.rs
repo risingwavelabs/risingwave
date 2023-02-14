@@ -70,6 +70,7 @@ use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Streaming};
+use tracing::warn;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -616,7 +617,7 @@ impl MetaClient {
     pub async fn init_metadata_for_replay(
         &self,
         tables: Vec<ProstTable>,
-        compaction_groups: Vec<CompactionGroup>,
+        compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
             tables,
@@ -703,7 +704,7 @@ impl MetaClient {
         Ok(resp.num_tasks as usize)
     }
 
-    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroupInfo>> {
         let req = RiseCtlListCompactionGroupRequest {};
         let resp = self.inner.rise_ctl_list_compaction_group(req).await?;
         Ok(resp.compaction_groups)
@@ -890,12 +891,6 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
-        let req = GetCompactionGroupsRequest {};
-        let resp = self.inner.get_compaction_groups(req).await?;
-        Ok(resp.compaction_groups)
-    }
-
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
@@ -962,16 +957,13 @@ impl SystemParamsReader {
     }
 
     // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store<'a>(&'a self, from_local_config: Option<&'a String>) -> &'a str {
+    pub fn state_store(&self, from_local: String) -> String {
         let from_prost = self.prost.state_store.as_ref().unwrap();
         if from_prost.is_empty() {
-            if let Some(s) = from_local_config {
-                s
-            } else {
-                panic!("State store url is neither specified from CLI args nor on meta node");
-            }
+            warn!("--state-store is not specified on meta node, reading from CLI instead");
+            from_local
         } else {
-            from_prost
+            from_prost.clone()
         }
     }
 
@@ -1416,7 +1408,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
-            ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
