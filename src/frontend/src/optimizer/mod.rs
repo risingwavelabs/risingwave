@@ -730,8 +730,7 @@ impl PlanRoot {
             // Note: we first plan it like a materialized view, and then rewrite it into a sink.
             TableType::MaterializedView,
         )
-        .map(|plan| plan.rewrite_into_sink(properties))
-        .flatten()
+        .and_then(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.
