@@ -223,8 +223,7 @@ message GetTableResponse {
   catalog.Table table = 1;
 }
 
-message GetDdlProgressRequest {
-}
+message GetDdlProgressRequest {}
 
 message DdlProgress {
   uint64 id = 1;
