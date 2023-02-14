@@ -63,9 +63,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, BloomFilterBuilder, CachePolicy,
-    DeleteRangeAggregator, HummockError, RangeTombstonesCollector, SstableWriterFactory,
-    StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, BloomFilterBuilder, DeleteRangeAggregator,
+    HummockError, RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
