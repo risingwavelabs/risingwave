@@ -16,10 +16,11 @@ use std::collections::HashSet;
 
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
-    LogicalNow, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
-    PlanTreeNodeUnary, LogicalProject,
+    LogicalNow, LogicalProject, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues,
+    PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
-use crate::optimizer::{PlanTreeNode, plan_visitor::PlanVisitor};
+use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::PlanTreeNode;
 
 pub struct MaxOneRowVisitor;
 
@@ -116,15 +117,15 @@ impl PlanVisitor<Option<usize>> for CountRows {
     fn visit_logical_union(&mut self, plan: &LogicalUnion) -> Option<usize> {
         if !plan.all() {
             // We cannot deal with deduplication
-            return None
+            return None;
         }
-        plan.inputs().iter().fold(Some(0), |init, i| {
-            match (init, self.visit(i.clone())) {
+        plan.inputs()
+            .iter()
+            .fold(Some(0), |init, i| match (init, self.visit(i.clone())) {
                 (None, _) => None,
                 (_, None) => None,
-                (Some(a), Some(b)) => Some(a + b)
-            }
-        })
+                (Some(a), Some(b)) => Some(a + b),
+            })
     }
 
     fn visit_logical_filter(&mut self, _plan: &LogicalFilter) -> Option<usize> {
