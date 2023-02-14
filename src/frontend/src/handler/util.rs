@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,13 +22,14 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::RowSetResult;
 use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
 
 use crate::session::SessionImpl;
@@ -47,7 +48,7 @@ pin_project! {
         #[pin]
         chunk_stream: VS,
         column_types: Vec<DataType>,
-        format: bool,
+        formats: Vec<Format>,
         session_data: StaticSessionData,
     }
 }
@@ -64,7 +65,7 @@ where
     pub fn new(
         chunk_stream: VS,
         column_types: Vec<DataType>,
-        format: bool,
+        formats: Vec<Format>,
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
@@ -73,7 +74,7 @@ where
         Self {
             chunk_stream,
             column_types,
-            format,
+            formats,
             session_data,
         }
     }
@@ -92,7 +93,7 @@ where
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
                     Ok(chunk) => Poll::Ready(Some(
-                        to_pg_rows(this.column_types, chunk, *this.format, this.session_data)
+                        to_pg_rows(this.column_types, chunk, this.formats, this.session_data)
                             .map_err(|err| err.into()),
                     )),
                     Err(err) => Poll::Ready(Some(Err(err))),
@@ -107,19 +108,20 @@ where
 fn pg_value_format(
     data_type: &DataType,
     d: ScalarRefImpl<'_>,
-    format: bool,
+    format: Format,
     session_data: &StaticSessionData,
 ) -> RwResult<Bytes> {
     // format == false means TEXT format
     // format == true means BINARY format
-    if !format {
-        if *data_type == DataType::Timestamptz {
-            Ok(timestamptz_to_string_with_session_data(d, session_data))
-        } else {
-            Ok(d.text_format(data_type).into())
+    match format {
+        Format::Text => {
+            if *data_type == DataType::Timestamptz {
+                Ok(timestamptz_to_string_with_session_data(d, session_data))
+            } else {
+                Ok(d.text_format(data_type).into())
+            }
         }
-    } else {
-        d.binary_format(data_type)
+        Format::Binary => d.binary_format(data_type),
     }
 }
 
@@ -140,16 +142,21 @@ fn timestamptz_to_string_with_session_data(
 fn to_pg_rows(
     column_types: &[DataType],
     chunk: DataChunk,
-    format: bool,
+    formats: &[Format],
     session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
+    assert_eq!(chunk.dimension(), column_types.len());
+
     chunk
         .rows()
         .map(|r| {
+            let format_iter = FormatIterator::new(formats, chunk.dimension())
+                .map_err(ErrorCode::InternalError)?;
             let row = r
                 .iter()
-                .zip_eq(column_types)
-                .map(|(data, t)| match data {
+                .zip_eq_fast(column_types)
+                .zip_eq_fast(format_iter)
+                .map(|((data, t), format)| match data {
                     Some(data) => Some(pg_value_format(t, data, format, session_data)).transpose(),
                     None => Ok(None),
                 })
@@ -190,6 +197,8 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BytesMut;
+    use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
 
     use super::*;
@@ -222,7 +231,7 @@ mod tests {
                 DataType::Varchar,
             ],
             chunk,
-            false,
+            &[],
             &static_session,
         );
         let expected: Vec<Vec<Option<Bytes>>> = vec![
@@ -251,6 +260,50 @@ mod tests {
     }
 
     #[test]
+    fn test_to_pg_rows_mix_format() {
+        let chunk = DataChunk::from_pretty(
+            "i I f    T
+             1 6 6.01 aaa
+            ",
+        );
+        let static_session = StaticSessionData {
+            timezone: "UTC".into(),
+        };
+        let rows = to_pg_rows(
+            &[
+                DataType::Int32,
+                DataType::Int64,
+                DataType::Float32,
+                DataType::Varchar,
+            ],
+            chunk,
+            &[Format::Binary, Format::Binary, Format::Binary, Format::Text],
+            &static_session,
+        );
+        let mut raw_params = vec![BytesMut::new(); 3];
+        1_i32.to_sql(&Type::ANY, &mut raw_params[0]).unwrap();
+        6_i64.to_sql(&Type::ANY, &mut raw_params[1]).unwrap();
+        6.01_f32.to_sql(&Type::ANY, &mut raw_params[2]).unwrap();
+        let raw_params = raw_params
+            .into_iter()
+            .map(|b| b.freeze())
+            .collect::<Vec<_>>();
+        let expected: Vec<Vec<Option<Bytes>>> = vec![vec![
+            Some(raw_params[0].clone()),
+            Some(raw_params[1].clone()),
+            Some(raw_params[2].clone()),
+            Some("aaa".into()),
+        ]];
+        let vec = rows
+            .unwrap()
+            .into_iter()
+            .map(|r| r.values().iter().cloned().collect_vec())
+            .collect_vec();
+
+        assert_eq!(vec, expected);
+    }
+
+    #[test]
     fn test_value_format() {
         use {DataType as T, ScalarRefImpl as S};
         let static_session = StaticSessionData {
@@ -258,29 +311,43 @@ mod tests {
         };
 
         let f = |t, d, f| pg_value_format(t, d, f, &static_session).unwrap();
-        assert_eq!(&f(&T::Float32, S::Float32(1_f32.into()), false), "1");
-        assert_eq!(&f(&T::Float32, S::Float32(f32::NAN.into()), false), "NaN");
-        assert_eq!(&f(&T::Float64, S::Float64(f64::NAN.into()), false), "NaN");
+        assert_eq!(&f(&T::Float32, S::Float32(1_f32.into()), Format::Text), "1");
         assert_eq!(
-            &f(&T::Float32, S::Float32(f32::INFINITY.into()), false),
+            &f(&T::Float32, S::Float32(f32::NAN.into()), Format::Text),
+            "NaN"
+        );
+        assert_eq!(
+            &f(&T::Float64, S::Float64(f64::NAN.into()), Format::Text),
+            "NaN"
+        );
+        assert_eq!(
+            &f(&T::Float32, S::Float32(f32::INFINITY.into()), Format::Text),
             "Infinity"
         );
         assert_eq!(
-            &f(&T::Float32, S::Float32(f32::NEG_INFINITY.into()), false),
+            &f(
+                &T::Float32,
+                S::Float32(f32::NEG_INFINITY.into()),
+                Format::Text
+            ),
             "-Infinity"
         );
         assert_eq!(
-            &f(&T::Float64, S::Float64(f64::INFINITY.into()), false),
+            &f(&T::Float64, S::Float64(f64::INFINITY.into()), Format::Text),
             "Infinity"
         );
         assert_eq!(
-            &f(&T::Float64, S::Float64(f64::NEG_INFINITY.into()), false),
+            &f(
+                &T::Float64,
+                S::Float64(f64::NEG_INFINITY.into()),
+                Format::Text
+            ),
             "-Infinity"
         );
-        assert_eq!(&f(&T::Boolean, S::Bool(true), false), "t");
-        assert_eq!(&f(&T::Boolean, S::Bool(false), false), "f");
+        assert_eq!(&f(&T::Boolean, S::Bool(true), Format::Text), "t");
+        assert_eq!(&f(&T::Boolean, S::Bool(false), Format::Text), "f");
         assert_eq!(
-            &f(&T::Timestamptz, S::Int64(-1), false),
+            &f(&T::Timestamptz, S::Int64(-1), Format::Text),
             "1969-12-31 23:59:59.999999+00:00"
         );
     }

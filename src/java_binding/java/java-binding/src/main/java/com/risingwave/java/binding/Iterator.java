@@ -1,11 +1,13 @@
 package com.risingwave.java.binding;
 
-public class Iterator implements AutoCloseable {
-    final long pointer;
-    boolean isClosed;
+import com.risingwave.proto.JavaBinding.ReadPlan;
 
-    public Iterator() {
-        this.pointer = Binding.iteratorNew();
+public class Iterator implements AutoCloseable {
+    private final long pointer;
+    private boolean isClosed;
+
+    public Iterator(ReadPlan readPlan) {
+        this.pointer = Binding.iteratorNew(readPlan.toByteArray());
         this.isClosed = false;
     }
 

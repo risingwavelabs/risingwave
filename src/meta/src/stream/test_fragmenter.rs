@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -33,10 +35,11 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::TableFragments;
-use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CreateStreamingJobContext, StreamFragmentGraph};
+use crate::stream::{
+    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
+};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -116,8 +119,8 @@ fn make_source_internal_table(id: u32) -> ProstTable {
     ];
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         pk: vec![ColumnOrder {
@@ -135,8 +138,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     }
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         pk: vec![ColumnOrder {
@@ -151,8 +154,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
 fn make_empty_table(id: u32) -> ProstTable {
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns: vec![],
         pk: vec![],
@@ -371,7 +374,6 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 r#type: DispatcherType::Simple as i32,
                 column_indices: vec![],
             }),
-            same_worker_node: false,
             link_id: 4,
             upstream_id: 1,
             downstream_id: 0,
@@ -381,7 +383,6 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
             }),
-            same_worker_node: false,
             link_id: 1,
             upstream_id: 2,
             downstream_id: 1,
@@ -401,6 +402,32 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     }
 }
 
+fn make_cluster_info() -> StreamingClusterInfo {
+    let parallel_units = (0..8)
+        .map(|id| {
+            (
+                id,
+                ParallelUnit {
+                    id,
+                    worker_node_id: 0,
+                },
+            )
+        })
+        .collect();
+    let worker_nodes = std::iter::once((
+        0,
+        WorkerNode {
+            id: 0,
+            ..Default::default()
+        },
+    ))
+    .collect();
+    StreamingClusterInfo {
+        worker_nodes,
+        parallel_units,
+    }
+}
+
 #[tokio::test]
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
@@ -409,28 +436,26 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let internal_tables = fragment_graph.internal_tables();
 
-    let mut ctx = CreateStreamingJobContext {
-        internal_tables: fragment_graph.internal_tables(),
-        ..Default::default()
-    };
-
-    let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
-
-    let graph = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &mut ctx)
+    let actor_graph_builder = ActorGraphBuilder::new(
+        CompleteStreamFragmentGraph::for_test(fragment_graph),
+        make_cluster_info(),
+        Some(NonZeroUsize::new(parallel_degree).unwrap()),
+    )?;
+    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
+        .generate_graph(env.id_gen_manager_ref(), &job)
         .await?;
 
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, StreamEnvironment::default());
+    let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
-    let internal_table_ids = ctx.internal_table_ids();
+
     assert_eq!(actors.len(), 9);
     assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
-    assert_eq!(internal_table_ids.len(), 3);
+    assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
         .fragments
@@ -465,6 +490,7 @@ async fn test_graph_builder() -> MetaResult<()> {
     expected_upstream.insert(9, vec![]);
 
     for actor in actors {
+        println!("actor_id = {}", actor.get_actor_id());
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@
 
 use std::collections::HashSet;
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::View as ProstView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
@@ -71,7 +71,7 @@ pub async fn handle_create_view(
         schema
             .fields()
             .iter()
-            .zip_eq(columns)
+            .zip_eq_fast(columns)
             .map(|(f, c)| {
                 let mut field = f.clone();
                 field.name = c.real_value();

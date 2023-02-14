@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), false).await
+        self.session_ref().run_statement(sql.as_str(), vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -103,7 +103,7 @@ impl LocalFrontend {
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), false)
+            .run_statement(sql.as_str(), vec![])
             .await
     }
 

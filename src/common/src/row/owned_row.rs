@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,19 @@
 
 use std::ops::{self, Deref};
 
-use itertools::Itertools;
-
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
     DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, ScalarImpl, ToDatumRef,
 };
+use crate::util::iter_util::ZipEqDebug;
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
 /// An owned row type with a `Vec<Datum>`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct OwnedRow(Vec<Datum>); // made private to avoid abuse
+pub struct OwnedRow(Vec<Datum>);
 
 /// Do not implement `IndexMut` to make it immutable.
 impl ops::Index<usize> for OwnedRow {
@@ -69,7 +68,7 @@ impl OwnedRow {
     pub fn from_pretty_with_tys(tys: &[DataType], s: impl AsRef<str>) -> Self {
         let datums: Vec<_> = tys
             .iter()
-            .zip_eq(s.as_ref().split_ascii_whitespace())
+            .zip_eq_debug(s.as_ref().split_ascii_whitespace())
             .map(|(ty, x)| {
                 let scalar: ScalarImpl = match ty {
                     DataType::Int16 => x.parse::<i16>().unwrap().into(),

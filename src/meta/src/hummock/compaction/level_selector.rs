@@ -1,4 +1,5 @@
-//  Copyright 2023 Singularity Data
+use std::collections::HashMap;
+//  Copyright 2023 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -16,31 +17,36 @@
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
-
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{compact_task, CompactionConfig};
 
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
+use super::picker::{
+    SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
+    TtlReclaimCompactionPicker,
+};
+use super::{
+    create_compaction_task, LevelCompactionPicker, ManualCompactionOption, ManualCompactionPicker,
+    TierCompactionPicker,
+};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionInput, CompactionPicker, CompactionTask,
-    LevelCompactionPicker, LocalPickerStatistic, LocalSelectorStatistic, TierCompactionPicker,
+    create_overlap_strategy, CompactionPicker, CompactionTask, LocalPickerStatistic,
+    LocalSelectorStatistic, MinOverlappingPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
+use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
 const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
-    fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool;
-
     fn pick_compaction(
-        &self,
+        &mut self,
         task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
@@ -49,6 +55,8 @@ pub trait LevelSelector: Sync + Send {
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
 
     fn name(&self) -> &'static str;
+
+    fn task_type(&self) -> compact_task::TaskType;
 }
 
 #[derive(Default)]
@@ -63,63 +71,39 @@ pub struct SelectContext {
     pub score_levels: Vec<(u64, usize, usize)>,
 }
 
-pub struct LevelSelectorCore {
+pub struct DynamicLevelSelectorCore {
     config: Arc<CompactionConfig>,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
-pub struct DynamicLevelSelector {
-    inner: LevelSelectorCore,
-}
+#[derive(Default)]
+pub struct DynamicLevelSelector {}
 
-impl Default for DynamicLevelSelector {
-    fn default() -> Self {
-        let config = Arc::new(CompactionConfigBuilder::new().build());
-        let overlap_strategy = create_overlap_strategy(config.compaction_mode());
-        DynamicLevelSelector::new(config, overlap_strategy)
-    }
-}
-
-impl DynamicLevelSelector {
-    pub fn new(config: Arc<CompactionConfig>, overlap_strategy: Arc<dyn OverlapStrategy>) -> Self {
-        Self {
-            inner: LevelSelectorCore::new(config, overlap_strategy),
-        }
-    }
-}
-
-impl LevelSelectorCore {
-    pub fn new(config: Arc<CompactionConfig>, overlap_strategy: Arc<dyn OverlapStrategy>) -> Self {
-        Self {
-            config,
-            overlap_strategy,
-        }
+impl DynamicLevelSelectorCore {
+    pub fn new(config: Arc<CompactionConfig>) -> Self {
+        Self { config }
     }
 
     pub fn get_config(&self) -> &CompactionConfig {
         self.config.as_ref()
     }
 
-    pub fn get_overlap_strategy(&self) -> Arc<dyn OverlapStrategy> {
-        self.overlap_strategy.clone()
-    }
-
     fn create_compaction_picker(
         &self,
         select_level: usize,
         target_level: usize,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
                 Box::new(TierCompactionPicker::new(
                     self.config.clone(),
-                    self.overlap_strategy.clone(),
+                    overlap_strategy,
                 ))
             } else {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
                     self.config.clone(),
-                    self.overlap_strategy.clone(),
+                    overlap_strategy,
                 ))
             }
         } else {
@@ -128,7 +112,7 @@ impl LevelSelectorCore {
                 select_level,
                 target_level,
                 self.config.max_bytes_for_level_base,
-                self.overlap_strategy.clone(),
+                overlap_strategy,
             ))
         }
     }
@@ -252,61 +236,40 @@ impl LevelSelectorCore {
         ctx.score_levels.sort_by(|a, b| b.0.cmp(&a.0));
         ctx
     }
-
-    pub fn create_compaction_task(
-        &self,
-        input: CompactionInput,
-        base_level: usize,
-    ) -> CompactionTask {
-        let target_file_size = if input.target_level == 0 {
-            self.config.target_file_size_base
-        } else {
-            assert!(input.target_level >= base_level);
-            let step = (input.target_level - base_level) / 2;
-            self.config.target_file_size_base << step
-        };
-        let compression_algorithm = if input.target_level == 0 {
-            self.config.compression_algorithm[0].clone()
-        } else {
-            let idx = input.target_level - base_level + 1;
-            self.config.compression_algorithm[idx].clone()
-        };
-        CompactionTask {
-            input,
-            compression_algorithm,
-            target_file_size,
-        }
-    }
 }
 
 impl LevelSelector for DynamicLevelSelector {
-    fn need_compaction(&self, levels: &Levels, level_handlers: &[LevelHandler]) -> bool {
-        let ctx = self.inner.get_priority_levels(levels, level_handlers);
-        ctx.score_levels
-            .first()
-            .map(|(score, _, _)| *score > SCORE_BASE)
-            .unwrap_or(false)
-    }
-
     fn pick_compaction(
-        &self,
+        &mut self,
         task_id: HummockCompactionTaskId,
+        compaction_group: &CompactionGroup,
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask> {
-        let ctx = self.inner.get_priority_levels(levels, level_handlers);
+        let dynamic_level_core =
+            DynamicLevelSelectorCore::new(compaction_group.compaction_config.clone());
+        let overlap_strategy =
+            create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
+        let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
             }
-            let picker = self
-                .inner
-                .create_compaction_picker(select_level, target_level);
+            let mut picker = dynamic_level_core.create_compaction_picker(
+                select_level,
+                target_level,
+                overlap_strategy.clone(),
+            );
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
-                return Some(self.inner.create_compaction_task(ret, ctx.base_level));
+                return Some(create_compaction_task(
+                    dynamic_level_core.get_config(),
+                    ret,
+                    ctx.base_level,
+                    self.task_type(),
+                ));
             }
             selector_stats
                 .skip_picker
@@ -318,6 +281,160 @@ impl LevelSelector for DynamicLevelSelector {
     fn name(&self) -> &'static str {
         "DynamicLevelSelector"
     }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Dynamic
+    }
+}
+
+pub struct ManualCompactionSelector {
+    option: ManualCompactionOption,
+}
+
+impl ManualCompactionSelector {
+    pub fn new(option: ManualCompactionOption) -> Self {
+        Self { option }
+    }
+}
+
+impl LevelSelector for ManualCompactionSelector {
+    fn pick_compaction(
+        &mut self,
+        task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        _selector_stats: &mut LocalSelectorStatistic,
+    ) -> Option<CompactionTask> {
+        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
+        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let (mut picker, base_level) = {
+            let target_level = if self.option.level == 0 {
+                ctx.base_level
+            } else if self.option.level == group.compaction_config.max_level as usize {
+                self.option.level
+            } else {
+                self.option.level + 1
+            };
+            if self.option.level > 0 && self.option.level < ctx.base_level {
+                return None;
+            }
+            (
+                ManualCompactionPicker::new(overlap_strategy, self.option.clone(), target_level),
+                ctx.base_level,
+            )
+        };
+
+        let compaction_input =
+            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
+        compaction_input.add_pending_task(task_id, level_handlers);
+
+        Some(create_compaction_task(
+            group.compaction_config.as_ref(),
+            compaction_input,
+            base_level,
+            self.task_type(),
+        ))
+    }
+
+    fn name(&self) -> &'static str {
+        "ManualCompactionSelector"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Manual
+    }
+}
+
+#[derive(Default)]
+pub struct SpaceReclaimCompactionSelector {
+    state: HashMap<u64, SpaceReclaimPickerState>,
+}
+
+impl LevelSelector for SpaceReclaimCompactionSelector {
+    fn pick_compaction(
+        &mut self,
+        task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        _selector_stats: &mut LocalSelectorStatistic,
+    ) -> Option<CompactionTask> {
+        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let mut picker = SpaceReclaimCompactionPicker::new(
+            group.compaction_config.max_space_reclaim_bytes,
+            levels.member_table_ids.iter().cloned().collect(),
+        );
+        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let state = self
+            .state
+            .entry(group.group_id)
+            .or_insert_with(SpaceReclaimPickerState::default);
+        let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
+        compaction_input.add_pending_task(task_id, level_handlers);
+
+        Some(create_compaction_task(
+            dynamic_level_core.get_config(),
+            compaction_input,
+            ctx.base_level,
+            self.task_type(),
+        ))
+    }
+
+    fn name(&self) -> &'static str {
+        "SpaceReclaimCompaction"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::SpaceReclaim
+    }
+}
+
+#[derive(Default)]
+pub struct TtlCompactionSelector {
+    state: HashMap<u64, TtlPickerState>,
+}
+
+impl LevelSelector for TtlCompactionSelector {
+    fn pick_compaction(
+        &mut self,
+        task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        _selector_stats: &mut LocalSelectorStatistic,
+    ) -> Option<CompactionTask> {
+        let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
+        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let picker =
+            TtlReclaimCompactionPicker::new(group.compaction_config.max_space_reclaim_bytes);
+        let state = self
+            .state
+            .entry(group.group_id)
+            .or_insert_with(TtlPickerState::default);
+        let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
+        compaction_input.add_pending_task(task_id, level_handlers);
+
+        Some(create_compaction_task(
+            group.compaction_config.as_ref(),
+            compaction_input,
+            ctx.base_level,
+            self.task_type(),
+        ))
+    }
+
+    fn name(&self) -> &'static str {
+        "TtlCompaction"
+    }
+
+    fn task_type(&self) -> compact_task::TaskType {
+        compact_task::TaskType::Ttl
+    }
+}
+
+pub fn default_level_selector() -> Box<dyn LevelSelector> {
+    Box::<DynamicLevelSelector>::default()
 }
 
 #[cfg(test)]
@@ -331,7 +448,6 @@ pub mod tests {
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     pub fn push_table_level0_overlapping(levels: &mut Levels, sst: SstableInfo) {
@@ -386,6 +502,30 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids: vec![],
+            meta_offset: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
+            divide_version: 0,
+        }
+    }
+
+    pub fn generate_table_with_table_ids(
+        id: u64,
+        table_prefix: u64,
+        left: usize,
+        right: usize,
+        epoch: u64,
+        table_ids: Vec<u32>,
+    ) -> SstableInfo {
+        SstableInfo {
+            id,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+                right_exclusive: false,
+            }),
+            file_size: (right - left + 1) as u64,
+            table_ids,
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
@@ -486,8 +626,7 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
-        let selector =
-            LevelSelectorCore::new(Arc::new(config), Arc::new(RangeOverlapStrategy::default()));
+        let selector = DynamicLevelSelectorCore::new(Arc::new(config));
         let levels = vec![
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
@@ -497,6 +636,7 @@ pub mod tests {
         let mut levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let ctx = selector.calculate_level_base_size(&levels);
         assert_eq!(ctx.base_level, 2);
@@ -558,6 +698,7 @@ pub mod tests {
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
             .build();
+        let group_config = CompactionGroup::new(1, config.clone());
         let levels = vec![
             generate_level(1, vec![]),
             generate_level(2, generate_tables(0..5, 0..1000, 3, 10)),
@@ -572,16 +713,20 @@ pub mod tests {
                 3,
                 10,
             ))),
+            ..Default::default()
         };
 
-        let selector = DynamicLevelSelector::new(
-            Arc::new(config.clone()),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut selector = DynamicLevelSelector::default();
         let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
         let compaction = selector
-            .pick_compaction(1, &levels, &mut levels_handlers, &mut local_stats)
+            .pick_compaction(
+                1,
+                &group_config,
+                &levels,
+                &mut levels_handlers,
+                &mut local_stats,
+            )
             .unwrap();
         // trivial move.
         assert_compaction_task(&compaction, &levels_handlers);
@@ -594,17 +739,21 @@ pub mod tests {
             .max_bytes_for_level_base(100)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
-        let selector = DynamicLevelSelector::new(
-            Arc::new(config.clone()),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let group_config = CompactionGroup::new(1, config.clone());
+        let mut selector = DynamicLevelSelector::default();
 
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.l0.as_mut().unwrap().total_file_size = 0;
         push_tables_level0_nonoverlapping(&mut levels, generate_tables(15..25, 0..600, 3, 20));
         let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let compaction = selector
-            .pick_compaction(1, &levels, &mut levels_handlers, &mut local_stats)
+            .pick_compaction(
+                1,
+                &group_config,
+                &levels,
+                &mut levels_handlers,
+                &mut local_stats,
+            )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
@@ -616,7 +765,13 @@ pub mod tests {
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.levels[1].table_infos = generate_tables(20..30, 0..1000, 3, 10);
         let compaction = selector
-            .pick_compaction(2, &levels, &mut levels_handlers, &mut local_stats)
+            .pick_compaction(
+                2,
+                &group_config,
+                &levels,
+                &mut levels_handlers,
+                &mut local_stats,
+            )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 3);
@@ -630,8 +785,13 @@ pub mod tests {
         assert_eq!(compaction.compression_algorithm.as_str(), "Lz4",);
         // no compaction need to be scheduled because we do not calculate the size of pending files
         // to score.
-        let compaction =
-            selector.pick_compaction(2, &levels, &mut levels_handlers, &mut local_stats);
+        let compaction = selector.pick_compaction(
+            2,
+            &group_config,
+            &levels,
+            &mut levels_handlers,
+            &mut local_stats,
+        );
         assert!(compaction.is_none());
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,14 @@
 // limitations under the License.
 
 mod compact_task_assignment;
+mod compaction_group_config;
 mod pinned_snapshot;
 mod pinned_version;
 mod version;
 mod version_delta;
 mod version_stats;
 
+pub use compaction_group_config::CompactionGroup;
 pub use pinned_snapshot::*;
 pub use pinned_version::*;
 pub use version::*;

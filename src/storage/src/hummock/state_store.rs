@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,6 +37,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
+use crate::monitor::StoreLocalStatistic;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type, StateStore,
@@ -268,6 +269,7 @@ impl StateStore for HummockStorage {
                 is_checkpoint,
             })
             .expect("should send success");
+        StoreLocalStatistic::flush_all();
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
@@ -297,7 +299,7 @@ impl StateStore for HummockStorage {
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {
                 return Err(HummockError::read_current_epoch(format!(
-                    "cannot read current epoch because read epoch {} > sealed epoch {}",
+                    "Cannot read when cluster is under recovery. read {} > max seal epoch {}",
                     read_current_epoch, sealed_epoch
                 ))
                 .into());
@@ -306,7 +308,7 @@ impl StateStore for HummockStorage {
             let min_current_epoch = self.min_current_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch < min_current_epoch {
                 return Err(HummockError::read_current_epoch(format!(
-                    "cannot read current epoch because read epoch {} < min current epoch {}",
+                    "Cannot read when cluster is under recovery. read {} < min current epoch {}",
                     read_current_epoch, min_current_epoch
                 ))
                 .into());

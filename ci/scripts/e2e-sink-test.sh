@@ -28,8 +28,11 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
+
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -59,13 +62,33 @@ createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
+node_port=50051
+node_timeout=10
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+echo "waiting for connector node to start"
+start_time=$(date +%s)
+while :
+do
+    if nc -z localhost $node_port; then
+        echo "Port $node_port is listened! Connector Node is up!"
+        break
+    fi
+
+    current_time=$(date +%s)
+    elapsed_time=$((current_time - start_time))
+    if [ $elapsed_time -ge $node_timeout ]; then
+        echo "Timeout waiting for port $node_port to be listened!"
+        exit 1
+    fi
+    sleep 0.1
+done
+
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
-sleep 1
 
 echo "--- testing sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sleep 1
 
 # check sink destination postgres
@@ -89,5 +112,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill

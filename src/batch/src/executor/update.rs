@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
@@ -141,7 +142,9 @@ impl UpdateExecutor {
                 yield updated_data_chunk.clone();
             }
 
-            for (row_delete, row_insert) in data_chunk.rows().zip_eq(updated_data_chunk.rows()) {
+            for (row_delete, row_insert) in
+                data_chunk.rows().zip_eq_debug(updated_data_chunk.rows())
+            {
                 let None = builder.append_one_row(row_delete) else {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };

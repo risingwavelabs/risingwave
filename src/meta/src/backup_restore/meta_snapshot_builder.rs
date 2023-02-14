@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -69,13 +69,11 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             .next()
             .ok_or_else(|| anyhow!("hummock version stats not found in meta store"))?;
         let compaction_groups =
-            crate::hummock::compaction_group::CompactionGroup::list_at_snapshot::<S>(
-                &meta_store_snapshot,
-            )
-            .await?
-            .iter()
-            .map(MetadataModel::to_protobuf)
-            .collect();
+            crate::hummock::model::CompactionGroup::list_at_snapshot::<S>(&meta_store_snapshot)
+                .await?
+                .iter()
+                .map(MetadataModel::to_protobuf)
+                .collect();
         let table_fragments =
             crate::model::TableFragments::list_at_snapshot::<S>(&meta_store_snapshot)
                 .await?

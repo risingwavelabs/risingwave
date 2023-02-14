@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,14 +18,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
-use crate::catalog::column_catalog::ColumnCatalog;
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
-use crate::catalog::{FragmentId, USER_COLUMN_ID_OFFSET};
+use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -201,6 +200,7 @@ impl StreamMaterialize {
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
+        let watermark_columns = input.watermark_columns().clone();
         // Note(congyi): avoid pk duplication
         let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
         let schema = input.schema();
@@ -265,6 +265,7 @@ impl StreamMaterialize {
             handle_pk_conflict,
             read_prefix_len_hint,
             version,
+            watermark_columns,
         })
     }
 
@@ -280,13 +281,7 @@ impl StreamMaterialize {
 
     /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
     pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        let Self {
-            base,
-            input,
-            mut table,
-        } = self;
-        table.properties = properties;
-        StreamSink::with_base(input, table, base)
+        StreamSink::new(self.input, self.table.to_sink_desc(properties))
     }
 }
 
@@ -358,3 +353,5 @@ impl StreamNode for StreamMaterialize {
         })
     }
 }
+
+impl ExprRewritable for StreamMaterialize {}

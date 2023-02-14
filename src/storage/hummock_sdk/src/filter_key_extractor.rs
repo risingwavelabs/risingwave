@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -462,6 +462,7 @@ mod tests {
             handle_pk_conflict: false,
             read_prefix_len_hint: 1,
             version: None,
+            watermark_indices: vec![],
         }
     }
 

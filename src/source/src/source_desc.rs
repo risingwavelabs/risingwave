@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,8 +98,8 @@ impl SourceDescBuilder {
             ProstRowFormatType::Avro => SourceFormat::Avro,
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
-            ProstRowFormatType::Csv => SourceFormat::Csv,
-            ProstRowFormatType::RowUnspecified => unreachable!(),
+            ProstRowFormatType::Native => SourceFormat::Native,
+            _ => unreachable!(),
         };
 
         if format == SourceFormat::Protobuf && self.source_info.row_schema_location.is_empty() {
@@ -119,17 +119,16 @@ impl SourceDescBuilder {
             "source should have at least one pk column"
         );
 
+        let psrser_config =
+            SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
+
         let source = ConnectorSource::new(
-            format.clone(),
-            &self.source_info.row_schema_location,
-            self.source_info.use_schema_registry,
-            self.source_info.proto_message_name,
             self.properties,
             columns.clone(),
             self.connector_params.connector_rpc_endpoint,
             self.connector_message_buffer_size,
-        )
-        .await?;
+            psrser_config,
+        )?;
 
         Ok(SourceDesc {
             source,
@@ -144,7 +143,7 @@ impl SourceDescBuilder {
         self.metrics.clone()
     }
 
-    pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
+    pub async fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
         let format = match self.source_info.get_row_format()? {
             ProstRowFormatType::Csv => SourceFormat::Csv,
             _ => unreachable!(),
@@ -165,10 +164,10 @@ impl SourceDescBuilder {
             "source should have at least one pk column"
         );
 
-        let parser_config = SpecificParserConfig::new(&format, &self.source_info);
+        let parser_config =
+            SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
 
         let source = FsConnectorSource::new(
-            format.clone(),
             self.properties.clone(),
             columns.clone(),
             self.connector_params.connector_rpc_endpoint.clone(),

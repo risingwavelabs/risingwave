@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,9 +52,6 @@ pub struct StreamFragment {
 pub struct StreamFragmentEdge {
     /// Dispatch strategy for the fragment.
     pub dispatch_strategy: DispatchStrategy,
-
-    /// Whether the two linked nodes should be placed on the same worker node
-    pub same_worker_node: bool,
 
     /// A unique identifier of this edge. Generally it should be exchange node's operator id. When
     /// rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
@@ -139,7 +136,6 @@ impl StreamFragmentGraph {
             upstream_id,
             downstream_id,
             dispatch_strategy: Some(edge.dispatch_strategy),
-            same_worker_node: edge.same_worker_node,
             link_id: edge.link_id,
         };
 

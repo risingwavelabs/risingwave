@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -147,7 +148,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let pk_indices = PkIndices::from([0]);
     let column_descs = all_column_ids
         .iter()
-        .zip_eq(all_schema.fields.iter().cloned())
+        .zip_eq_fast(all_schema.fields.iter().cloned())
         .map(|(column_id, field)| ColumnDesc {
             data_type: field.data_type,
             column_id: *column_id,

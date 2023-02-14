@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,9 +25,9 @@ use super::generic::{
     ProjectBuilder,
 };
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
-    ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
+    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -150,6 +150,9 @@ impl LogicalAgg {
         } else {
             let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
+            // Local phase should have reordered the group keys into their required order.
+            // we can just follow it.
+            let group_key = (0..self.group_key().len()).collect();
             let global_agg = StreamHashAgg::new(
                 LogicalAgg::new(
                     self.agg_calls()
@@ -162,7 +165,7 @@ impl LogicalAgg {
                             )
                         })
                         .collect(),
-                    self.group_key().to_vec(),
+                    group_key,
                     exchange,
                 ),
                 None,
@@ -172,10 +175,10 @@ impl LogicalAgg {
     }
 
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        // having group key, is not simple agg. we will just use shuffle agg
-        // TODO(stonepage): in some situation the 2-phase agg is better. maybe some switch or
-        // hints for it.
-        if !self.group_key().is_empty() {
+        // Shuffle agg if group key is present.
+        // If we are forced to use two phase aggregation,
+        // we should not do shuffle aggregation.
+        if !self.group_key().is_empty() && !self.two_phase_agg_forced() {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -186,7 +189,7 @@ impl LogicalAgg {
             .into());
         }
 
-        // now only simple agg
+        // now only simple agg (either single or two phase).
         let input_dist = stream_input.distribution().clone();
         let input_append_only = stream_input.append_only();
 
@@ -199,7 +202,7 @@ impl LogicalAgg {
 
         // some agg function can not rewrite to 2-phase agg
         // we can only generate stand alone plan for the simple agg
-        let all_agg_calls_can_use_two_phase = self.can_agg_two_phase();
+        let all_agg_calls_can_use_two_phase = self.can_two_phase_agg();
         if !all_agg_calls_can_use_two_phase {
             return gen_single_plan(stream_input);
         }
@@ -210,7 +213,10 @@ impl LogicalAgg {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
         });
-        if all_local_are_stateless && input_dist.satisfies(&RequiredDist::AnyShard) {
+        if all_local_are_stateless
+            && input_dist.satisfies(&RequiredDist::AnyShard)
+            && self.group_key().is_empty()
+        {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 
@@ -232,15 +238,34 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    pub(crate) fn can_agg_two_phase(&self) -> bool {
-        self.agg_calls().iter().all(|call| {
-            matches!(
-                call.agg_kind,
-                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-            ) && !call.distinct
-            // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
-            //    && call.order_by_fields.is_empty()
-        }) && !self.is_agg_result_affected_by_order()
+    pub(crate) fn two_phase_agg_forced(&self) -> bool {
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_force_two_phase_agg()
+    }
+
+    fn two_phase_agg_enabled(&self) -> bool {
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg()
+    }
+
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
+        !self.agg_calls().is_empty()
+            && self.agg_calls().iter().all(|call| {
+                matches!(
+                    call.agg_kind,
+                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+                ) && !call.distinct
+                // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
+                //    && call.order_by_fields.is_empty()
+            })
+            && !self.is_agg_result_affected_by_order()
+            && self.two_phase_agg_enabled()
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
@@ -785,6 +810,22 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_with_name(f, "LogicalAgg")
+    }
+}
+
+impl ExprRewritable for LogicalAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
     }
 }
 

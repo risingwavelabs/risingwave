@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@ use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use nix::sys::statfs::{
     statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
 };
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::Instrument;
 
@@ -200,7 +200,7 @@ where
             .instrument(tracing::trace_span!("meta_write_lock_update_slots"))
             .await;
 
-        for (key, bloc) in self.keys.iter().zip_eq(self.blocs.iter()) {
+        for (key, bloc) in self.keys.iter().zip_eq_fast(self.blocs.iter()) {
             slots.push(guard.insert(key, bloc)?);
         }
 

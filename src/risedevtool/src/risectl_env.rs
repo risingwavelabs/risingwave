@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
                 let mut cmd = Command::new("compute-node");
                 if add_storage_backend(
                     "risectl",
+                    c.provide_opendal.as_ref().unwrap(),
                     c.provide_minio.as_ref().unwrap(),
                     c.provide_aws_s3.as_ref().unwrap(),
                     HummockInMemoryStrategy::Disallowed,

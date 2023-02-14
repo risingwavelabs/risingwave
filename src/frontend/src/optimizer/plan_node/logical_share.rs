@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,8 @@ use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
+    ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -117,6 +118,8 @@ impl ColPrunable for LogicalShare {
         unimplemented!("call prune_col of the PlanRef instead of calling directly on LogicalShare")
     }
 }
+
+impl ExprRewritable for LogicalShare {}
 
 impl PredicatePushdown for LogicalShare {
     fn predicate_pushdown(

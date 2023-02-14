@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnOrder};
@@ -46,7 +47,7 @@ pub(crate) fn gen_prost_table_with_value_indices(
 ) -> ProstTable {
     let prost_pk = pk_index
         .iter()
-        .zip_eq(order_types.iter())
+        .zip_eq_fast(order_types.iter())
         .map(|(idx, order)| ColumnOrder {
             index: *idx as u32,
             order_type: order.to_prost() as i32,

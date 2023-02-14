@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -163,7 +163,7 @@ impl MetaMetrics {
         let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
             "num of compactions from each level to next level",
-            &["compactor", "group", "result"],
+            &["compactor", "group", "task_type", "result"],
             registry
         )
         .unwrap();

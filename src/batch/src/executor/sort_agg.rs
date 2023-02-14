@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
@@ -131,7 +132,7 @@ impl SortAggExecutor {
             let groups: Vec<_> = self
                 .sorted_groupers
                 .iter()
-                .zip_eq(&group_columns)
+                .zip_eq_fast(&group_columns)
                 .map(|(grouper, array)| grouper.detect_groups(array))
                 .try_collect()?;
 
@@ -222,7 +223,7 @@ impl SortAggExecutor {
     ) -> Result<()> {
         sorted_groupers
             .iter_mut()
-            .zip_eq(group_columns)
+            .zip_eq_fast(group_columns)
             .try_for_each(|(grouper, column)| grouper.update(column, start_row_idx, end_row_idx))
             .map_err(Into::into)
     }
@@ -245,7 +246,7 @@ impl SortAggExecutor {
     ) -> Result<()> {
         sorted_groupers
             .iter_mut()
-            .zip_eq(group_builders)
+            .zip_eq_fast(group_builders)
             .try_for_each(|(grouper, builder)| grouper.output(builder))
             .map_err(Into::into)
     }
@@ -256,7 +257,7 @@ impl SortAggExecutor {
     ) -> Result<()> {
         agg_states
             .iter_mut()
-            .zip_eq(agg_builders)
+            .zip_eq_fast(agg_builders)
             .try_for_each(|(state, builder)| state.output(builder))
             .map_err(Into::into)
     }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod compaction;
-pub mod compaction_group;
 mod compaction_schedule_policy;
 mod compaction_scheduler;
 pub mod compactor_manager;
@@ -25,7 +24,7 @@ mod level_handler;
 mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod mock_hummock_meta_client;
-mod model;
+pub mod model;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;

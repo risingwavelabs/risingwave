@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
-        let watermark_cols = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -87,7 +87,7 @@ impl PlanBase {
             // Logical plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
-            watermark_columns: watermark_cols,
+            watermark_columns,
         }
     }
 
@@ -123,7 +123,7 @@ impl PlanBase {
     ) -> Self {
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let watermark_cols = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -134,7 +134,7 @@ impl PlanBase {
             // Batch plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
-            watermark_columns: watermark_cols,
+            watermark_columns,
         }
     }
 
@@ -148,6 +148,12 @@ impl PlanBase {
             plan_node.append_only(),
             plan_node.watermark_columns().clone(),
         )
+    }
+
+    pub fn clone_with_new_plan_id(&self) -> Self {
+        let mut new = self.clone();
+        new.id = self.ctx.next_plan_node_id();
+        new
     }
 }
 

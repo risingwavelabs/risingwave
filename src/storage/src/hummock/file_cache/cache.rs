@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::collections::hash_map::RandomState;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::cache::LruCache;
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::Notify;
 
 use super::buffer::TwoLevelBuffer;
@@ -101,8 +101,8 @@ where
 
                 for ((key, encoded_value_len), slot) in keys
                     .into_iter()
-                    .zip_eq(encoded_value_lens.into_iter())
-                    .zip_eq(slots.into_iter())
+                    .zip_eq_fast(encoded_value_lens.into_iter())
+                    .zip_eq_fast(slots.into_iter())
                 {
                     let hash = self.hash_builder.hash_one(&key);
                     self.indices.insert(

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -36,10 +35,11 @@ use crate::hummock::{
     SstableStoreRef, SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
+use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
 
-pub fn default_config_for_test() -> StorageConfig {
-    StorageConfig {
+pub fn default_opts_for_test() -> StorageOpts {
+    StorageOpts {
         sstable_size_mb: 4,
         block_size_kb: 64,
         bloom_false_positive: 0.1,

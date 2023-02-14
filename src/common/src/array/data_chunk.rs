@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::serialize_datum_into;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
@@ -70,7 +71,7 @@ impl DataChunk {
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -241,7 +242,7 @@ impl DataChunk {
             let end_row_idx = start_row_idx + actual_acquire - 1;
             array_builders
                 .iter_mut()
-                .zip_eq(chunks[chunk_idx].columns())
+                .zip_eq_fast(chunks[chunk_idx].columns())
                 .for_each(|(builder, column)| {
                     let mut array_builder = column
                         .array_ref()
@@ -365,7 +366,7 @@ impl DataChunk {
             .map(|col| col.array_ref().create_builder(indexes.len()))
             .collect();
         for &i in indexes {
-            for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
+            for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
                 builder.append_datum(col.array_ref().value_at(i));
             }
         }
@@ -548,7 +549,7 @@ impl DataChunkTestExt for DataChunk {
                             assert!(s.starts_with('{') && s.ends_with('}'));
                             let fields = s[1..s.len() - 1]
                                 .split(',')
-                                .zip_eq(&builder.children_array)
+                                .zip_eq_debug(&builder.children_array)
                                 .map(|(s, builder)| parse_datum(s, builder))
                                 .collect_vec();
                             ScalarImpl::Struct(StructValue::new(fields))

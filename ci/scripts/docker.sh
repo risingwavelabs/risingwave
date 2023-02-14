@@ -11,7 +11,7 @@ dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
 
 echo "--- docker build and tag"
-docker build -f docker/Dockerfile -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
+docker build -f docker/Dockerfile --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
 
 echo "--- check the image can start correctly"
 container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)

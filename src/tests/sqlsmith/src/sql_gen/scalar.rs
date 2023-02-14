@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,9 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
+use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
 
-use crate::sql_gen::expr::sql_null;
-use crate::sql_gen::types::data_type_to_ast_data_type;
+use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -35,10 +34,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
             // expressions. For instance agg calls such as `max(NULL)` may be generated,
             // and coerced to VARCHAR, where we require a `NULL::int` instead.
-            return Expr::Cast {
-                expr: Box::new(sql_null()),
-                data_type: data_type_to_ast_data_type(typ),
-            };
+            return typed_null(typ);
         }
         // Scalars which may generate negative numbers are wrapped in
         // `Nested` to ambiguity while parsing.
@@ -92,8 +88,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             })),
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
-                Expr::Array(self.gen_simple_scalar_list(ty, n))
+                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
+                Expr::Array(Array {
+                    elem: self.gen_simple_scalar_list(ty, n),
+                    named: true,
+                })
             }
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934
             // T::Struct(ref inner) => Expr::Row(
@@ -103,7 +102,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             //         .map(|typ| self.gen_simple_scalar(typ))
             //         .collect(),
             // ),
-            _ => sql_null(),
+            _ => typed_null(typ),
         }
     }
 

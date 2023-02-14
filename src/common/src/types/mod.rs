@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -339,18 +339,6 @@ impl DataType {
             DataType::Timestamptz => Some(DataType::Timestamptz),
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
             _ => None,
-        }
-    }
-
-    /// Checks if memcomparable encoding of datatype is equivalent to its value encoding.
-    pub fn mem_cmp_eq_value_enc(&self) -> bool {
-        use DataType::*;
-        match self {
-            Boolean | Int16 | Int32 | Int64 => true,
-            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestamptz
-            | Interval | Bytea => false,
-            Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
-            List { datatype } => datatype.mem_cmp_eq_value_enc(),
         }
     }
 

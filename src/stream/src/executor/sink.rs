@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,9 +89,7 @@ impl SinkExecutor {
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
+                Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     if !in_transaction {
                         sink.begin_epoch(epoch).await?;
