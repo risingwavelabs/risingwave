@@ -47,9 +47,6 @@ pub struct SinkDesc {
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
-    // /// Whether the sink is append-only. Derived in the optimizer instead of being specified by
-    // the /// user.
-    // pub append_only: bool,
     /// The properties of the sink.
     pub properties: HashMap<String, String>,
 
