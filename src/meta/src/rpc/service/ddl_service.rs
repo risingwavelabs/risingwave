@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroUsize;
-
-use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tonic::{Request, Response, Status};
@@ -35,7 +31,8 @@ use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
-    CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef, StreamFragmentGraph,
+    CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
+    StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -501,8 +498,8 @@ where
         let mut stream_job = StreamingJob::Table(None, req.table.unwrap());
         let fragment_graph = req.fragment_graph.unwrap();
 
-        let _ = self
-            .replace_table_inner(&mut stream_job, fragment_graph)
+        let (_ctx, _table_fragments) = self
+            .prepare_replace_table(&mut stream_job, fragment_graph)
             .await?;
 
         Err(Status::unimplemented(
@@ -578,7 +575,7 @@ where
         }
     }
 
-    /// `prepare_stream_job` prepares a stream job and returns the context and table fragments.
+    /// Prepares a stream job and returns the context and table fragments.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
@@ -590,18 +587,12 @@ where
 
         // 2. Get the env for streaming jobs.
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
-        let default_parallelism = if let Some(Parallelism { parallelism }) =
-            fragment_graph.parallelism
-        {
-            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
-        } else {
-            None
-        };
 
         // 3. Build fragment graph.
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
+        let default_parallelism = fragment_graph.default_parallelism();
         let internal_tables = fragment_graph.internal_tables();
 
         // 4. Set the graph-related fields and freeze the `stream_job`.
@@ -823,32 +814,31 @@ where
         Ok(version)
     }
 
-    async fn replace_table_inner(
+    /// Prepares a table replacement and returns the context and table fragments.
+    async fn prepare_replace_table(
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
 
-        // 2. Get the env for streaming jobs.
+        // 1. Get the env for streaming jobs.
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
-        // 3. Build fragment graph.
+        // 2. Build fragment graph.
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
+        let default_parallelism = fragment_graph.default_parallelism();
         assert!(fragment_graph.internal_tables().is_empty());
 
-        // 4. Set the graph-related fields and freeze the `stream_job`.
+        // 3. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let stream_job = &*stream_job;
 
-        // 5. Mark current relation as "creating" and add reference count to dependent relations.
-        // self.catalog_manager
-        //     .start_create_stream_job_procedure(stream_job)
-        //     .await?;
+        // TODO: 4. Mark current relation as "updating".
 
-        // 6. Resolve the downstream fragments, extend the fragment graph to a complete graph that
+        // 5. Resolve the downstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
         let downstream_fragments = self
             .fragment_manager
@@ -858,14 +848,15 @@ where
         let complete_graph =
             CompleteStreamFragmentGraph::with_downstreams(fragment_graph, downstream_fragments)?;
 
-        // 7. Build the actor graph.
+        // 6. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
-        let actor_graph_builder = ActorGraphBuilder::new(complete_graph, cluster_info, None)?;
+        let actor_graph_builder =
+            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
         let ActorGraphBuildResult {
             graph,
             building_locations,
-            existing_locations: _,
+            existing_locations,
             dispatchers,
             merge_updates,
         } = actor_graph_builder
@@ -873,16 +864,20 @@ where
             .await?;
         assert!(dispatchers.is_empty());
 
-        // 8. Build the table fragments structure that will be persisted in the stream manager, and
+        // 7. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
         let table_fragments =
             TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
 
-        println!("table fragments: {:#?}", table_fragments);
-        println!("merge updates: {:#?}", merge_updates);
+        let ctx = ReplaceTableContext {
+            merge_updates,
+            building_locations,
+            existing_locations,
+            table_properties: stream_job.properties(),
+        };
 
-        Ok(())
+        Ok((ctx, table_fragments))
     }
 
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {

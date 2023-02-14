@@ -16,6 +16,8 @@ use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
@@ -108,13 +110,21 @@ pub async fn handle_add_column(
             ))?
         }
 
+        let graph = StreamFragmentGraph {
+            parallelism: session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism }),
+            ..build_graph(plan)
+        };
+
         // Fill the original table ID.
         let table = Table {
             id: original_catalog.id().table_id(),
             ..table
         };
 
-        (build_graph(plan), table)
+        (graph, table)
     };
 
     // TODO: for test purpose only, we drop the original table and create a new one. This is wrong
@@ -122,12 +132,13 @@ pub async fn handle_add_column(
     if cfg!(debug_assertions) {
         let catalog_writer = session.env().catalog_writer();
 
-        // catalog_writer
-        //     .drop_table(None, original_catalog.id())
-        //     .await?;
-        // catalog_writer.create_table(None, table, graph).await?;
+        // TODO: call replace_table RPC
+        // catalog_writer.replace_table(table, graph).await?;
 
-        catalog_writer.replace_table(table, graph).await?;
+        catalog_writer
+            .drop_table(None, original_catalog.id())
+            .await?;
+        catalog_writer.create_table(None, table, graph).await?;
 
         Ok(PgResponse::empty_result_with_notice(
             StatementType::ALTER_TABLE,

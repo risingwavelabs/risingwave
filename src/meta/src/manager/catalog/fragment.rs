@@ -860,17 +860,20 @@ where
             .collect();
 
         // Find the fragments based on the fragment ids.
-        let mut fragments = Vec::new();
-        for table_fragments in map.values() {
-            for fragment in table_fragments.fragments.values() {
-                if downstream_fragment_ids.contains(&fragment.fragment_id) {
-                    assert!(
-                        (fragment.fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0
-                    );
-                    fragments.push(fragment.clone());
-                }
-            }
-        }
+        let fragments = map
+            .values()
+            .flat_map(|table_fragments| {
+                table_fragments
+                    .fragments
+                    .values()
+                    .filter(|fragment| downstream_fragment_ids.contains(&fragment.fragment_id))
+                    .inspect(|f| {
+                        assert!((f.fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0)
+                    })
+            })
+            .cloned()
+            .collect_vec();
+
         assert_eq!(downstream_fragment_ids.len(), fragments.len());
 
         Ok(fragments)

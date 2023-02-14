@@ -263,6 +263,7 @@ impl ExternalChange {
             .unwrap();
     }
 
+    /// Add an upstream to the external actor.
     fn add_upstream(&mut self, upstream: ActorUpstream) {
         self.new_upstreams
             .try_insert(upstream.fragment_id, upstream)
@@ -386,7 +387,7 @@ impl ActorGraphBuildStateInner {
     /// Add the new upstream for an actor.
     ///
     /// - If the actor is to be built, the upstream will be added to the actor builder.
-    /// - Currently there is no case that an upstream is added to an external actor.
+    /// - If the actor is an external actor, the upstream will be added to the external changes.
     fn add_upstream(&mut self, actor_id: GlobalActorId, upstream: ActorUpstream) {
         if let Some(actor_builder) = self.actor_builders.get_mut(&actor_id) {
             actor_builder.add_upstream(upstream);
@@ -559,7 +560,8 @@ pub struct ActorGraphBuildResult {
     /// The new dispatchers to be added to the upstream mview actors. Used for MV on MV.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
 
-    /// The updates to be applied to the downstream chain actors. Used for schema change.
+    /// The updates to be applied to the downstream chain actors. Used for schema change (replace
+    /// table plan).
     pub merge_updates: Vec<MergeUpdate>,
 }
 
@@ -569,6 +571,7 @@ pub struct ActorGraphBuilder {
     /// The pre-scheduled distribution for each building fragment.
     distributions: HashMap<GlobalFragmentId, Distribution>,
 
+    /// The actual distribution for each existing fragment.
     existing_distributions: HashMap<GlobalFragmentId, Distribution>,
 
     /// The complete fragment graph.
@@ -708,7 +711,7 @@ impl ActorGraphBuilder {
                     .values()
                     .map(move |upstream| {
                         let EdgeId::DownstreamExternal { original_upstream_fragment_id, .. } = upstream.edge_id else {
-                            unreachable!()
+                            unreachable!("edge from internal to external must be `DownstreamExternal`")
                         };
 
                         MergeUpdate {

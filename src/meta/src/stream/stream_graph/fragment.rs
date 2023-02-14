@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -25,7 +26,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
-    StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
+    Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -167,9 +168,10 @@ pub(super) enum EdgeId {
         downstream_fragment_id: GlobalFragmentId,
     },
 
-    /// TODO
+    /// The edge between an upstream building fragment and downstream external fragment. Used for
+    /// schema change (replace table plan).
     DownstreamExternal {
-        /// TODO
+        /// The ID of the original upstream fragment (`Materialize`).
         original_upstream_fragment_id: GlobalFragmentId,
         /// The ID of the downstream fragment.
         downstream_fragment_id: GlobalFragmentId,
@@ -216,6 +218,10 @@ pub struct StreamFragmentGraph {
 
     /// Dependent relations of this job.
     dependent_relations: HashSet<TableId>,
+
+    /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
+    /// variable. If not specified, all active parallel units will be used.
+    default_parallelism: Option<NonZeroUsize>,
 }
 
 impl StreamFragmentGraph {
@@ -279,11 +285,18 @@ impl StreamFragmentGraph {
             .map(TableId::from)
             .collect();
 
+        let default_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
+            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
+        } else {
+            None
+        };
+
         Ok(Self {
             fragments,
             downstreams,
             upstreams,
             dependent_relations,
+            default_parallelism,
         })
     }
 
@@ -313,6 +326,11 @@ impl StreamFragmentGraph {
     /// Get the dependent relations of this job.
     pub fn dependent_relations(&self) -> &HashSet<TableId> {
         &self.dependent_relations
+    }
+
+    /// Get the default parallelism of the job.
+    pub fn default_parallelism(&self) -> Option<NonZeroUsize> {
+        self.default_parallelism
     }
 
     /// Get downstreams of a fragment.
@@ -349,8 +367,11 @@ pub(super) enum EitherFragment {
 /// A wrapper of [`StreamFragmentGraph`] that contains the additional information of existing
 /// fragments, which is connected to the graph's top-most or bottom-most fragments.
 ///
-/// For example, if we're going to build a mview on an existing mview, the upstream fragment
-/// containing the `Materialize` node will be included in this structure.
+/// For example,
+/// - if we're going to build a mview on an existing mview, the upstream fragment containing the
+///   `Materialize` node will be included in this structure.
+/// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
+///   containing the `Chain` nodes will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -378,8 +399,8 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV. Returns an error if the upstream
-    /// `Matererialize` is failed to resolve.
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV, with the upstream existing
+    /// `Materialize` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
@@ -435,7 +456,8 @@ impl CompleteStreamFragmentGraph {
         })
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table.
+    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
+    /// downstream existing `Chain` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
         downstream_fragments: Vec<Fragment>,
@@ -449,7 +471,9 @@ impl CompleteStreamFragmentGraph {
                 .flat_map(|f| f.upstream_fragment_ids.iter().copied())
                 .unique()
                 .exactly_one()
-                .expect("downstream fragments must have exactly one upstream fragment"),
+                .map_err(|_| {
+                    anyhow!("downstream fragments must have exactly one upstream fragment")
+                })?,
         );
 
         let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
