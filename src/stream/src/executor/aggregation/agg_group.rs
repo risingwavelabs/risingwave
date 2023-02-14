@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -25,7 +26,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::AggCall;
+use super::{AggCall, DistinctDeduplicater};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
@@ -37,6 +38,9 @@ pub struct AggGroup<S: StateStore> {
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
+
+    /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
+    distinct_dedup: DistinctDeduplicater<S>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
@@ -98,6 +102,7 @@ impl<S: StateStore> AggGroup<S> {
         Ok(Self {
             group_key,
             states,
+            distinct_dedup: DistinctDeduplicater::new(agg_calls),
             prev_outputs,
         })
     }
@@ -118,13 +123,24 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Apply input chunk to all managed agg states.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
-    pub fn apply_chunk(
+    pub async fn apply_chunk(
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
         visibilities: Vec<Option<Bitmap>>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
+        let visibilities = self
+            .distinct_dedup
+            .dedup_chunk(
+                ops,
+                columns,
+                visibilities,
+                distinct_dedup_tables,
+                self.group_key.as_ref(),
+            )
+            .await?;
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in self
             .states
@@ -143,6 +159,7 @@ impl<S: StateStore> AggGroup<S> {
     pub async fn flush_state_if_needed(
         &self,
         storages: &mut [AggStateStorage<S>],
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
             |(state, storage)| match state {
@@ -154,6 +171,7 @@ impl<S: StateStore> AggGroup<S> {
             },
         ))
         .await?;
+        self.distinct_dedup.flush(distinct_dedup_tables)?;
         Ok(())
     }
 

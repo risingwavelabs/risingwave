@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId, INVALID_VERSION
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
+use crate::hummock::metrics_utils::trigger_stale_ssts_stat;
 use crate::hummock::HummockManager;
 use crate::model::{BTreeMapTransaction, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
@@ -59,6 +60,7 @@ where
             HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
         deltas_to_delete.retain(|id| !remain_deltas.contains(id));
         versioning_guard.deltas_to_delete.extend(deltas_to_delete);
+        trigger_stale_ssts_stat(&self.metrics, versioning_guard.ssts_to_delete.len());
         Ok(())
     }
 
@@ -108,12 +110,13 @@ where
             .iter()
             .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
             .collect_vec();
-        tracing::info!("SST to delete in full GC: {:#?}", to_delete);
-        write_lock!(self, versioning).await.ssts_to_delete.extend(
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        versioning_guard.ssts_to_delete.extend(
             to_delete
                 .iter()
                 .map(|sst_id| (**sst_id, INVALID_VERSION_ID)),
         );
+        trigger_stale_ssts_stat(&self.metrics, versioning_guard.ssts_to_delete.len());
         to_delete.len()
     }
 }

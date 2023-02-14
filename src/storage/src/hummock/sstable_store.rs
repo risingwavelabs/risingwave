@@ -20,10 +20,10 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata,
-    ObjectStoreRef, ObjectStreamingUploader,
+    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
+    ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -126,6 +126,8 @@ impl SstableStore {
         meta_cache_capacity: usize,
         tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
     ) -> Self {
+        // TODO: We should validate path early. Otherwise object store won't report invalid path
+        // error until first write attempt.
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
@@ -283,13 +285,8 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let is_remote = is_remote_sst_id(sst_id);
-        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
-        let mut ret = format!("{}/{}{}.data", self.path, obj_prefix, sst_id);
-        if !is_remote {
-            ret = get_local_path(&ret);
-        }
-        ret
+        let obj_prefix = self.store.get_object_prefix(sst_id, true);
+        format!("{}/{}{}.data", self.path, obj_prefix, sst_id)
     }
 
     pub fn get_sst_id_from_path(&self, path: &str) -> HummockSstableId {
@@ -375,7 +372,7 @@ impl SstableStore {
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
         self.store
-            .list(&self.path)
+            .list(&format!("{}/", self.path))
             .await
             .map_err(HummockError::object_io_error)
     }
