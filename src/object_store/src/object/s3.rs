@@ -610,8 +610,13 @@ impl S3ObjectStore {
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let loader = aws_config::ConfigLoader::default();
-        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await)
+        #[cfg(madsim)]
+        let builder = aws_sdk_s3::config::Builder::new();
+        #[cfg(not(madsim))]
+        let builder =
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+
+        let config = builder
             .region(Region::new("custom"))
             .endpoint_resolver(Endpoint::immutable(
                 format!("http://{}", address).try_into().unwrap(),
@@ -620,8 +625,8 @@ impl S3ObjectStore {
                 access_key_id,
                 secret_access_key,
                 None,
-            ));
-        let config = builder.build();
+            ))
+            .build();
         let client = Client::from_conf(config);
 
         Self {

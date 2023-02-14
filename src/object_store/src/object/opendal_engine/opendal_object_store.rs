@@ -17,7 +17,7 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use opendal::services::memory;
+use opendal::services::Memory;
 use opendal::Operator;
 use tokio::io::AsyncRead;
 
@@ -42,9 +42,9 @@ impl OpendalObjectStore {
     /// create opendal memory engine, used for unit tests.
     pub fn new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
-        let mut builder = memory::Builder::default();
+        let builder = Memory::default();
 
-        let op: Operator = Operator::new(builder.build()?);
+        let op: Operator = Operator::create(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
@@ -283,7 +283,9 @@ mod tests {
         obj_store.delete(&path).await.unwrap();
     }
 
-    // opendal memory engine does not support delete objects.
+    // Currently OpenDAL does not support delete objects operation, but they are planning this
+    // feature. So let's not delete this unit test now. https://github.com/datafuselabs/opendal/issues/1279
+
     // #[tokio::test]
     // async fn test_memory_delete_objects() {
     //     let block1 = Bytes::from("123456");

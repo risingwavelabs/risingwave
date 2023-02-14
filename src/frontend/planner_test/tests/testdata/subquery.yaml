@@ -160,8 +160,7 @@
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
         ├─BatchSimpleAgg { aggs: [] }
         | └─BatchExchange { order: [], dist: Single }
-        |   └─BatchSimpleAgg { aggs: [] }
-        |     └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        |   └─BatchScan { table: t1, columns: [], distribution: SomeShard }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |

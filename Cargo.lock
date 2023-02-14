@@ -743,7 +743,9 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-rustls",
  "hyper-tls",
+ "lazy_static",
  "pin-project-lite",
  "tokio",
  "tower",
@@ -850,7 +852,7 @@ dependencies = [
  "aws-smithy-http",
  "aws-smithy-types",
  "http",
- "rustc_version 0.4.0",
+ "rustc_version",
  "tracing",
  "zeroize",
 ]
@@ -918,6 +920,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "backon"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f34fac4d7cdaefa2deded0eda2d5d59dbfd43370ff3f856209e72340ae84c294"
+dependencies = [
+ "futures",
+ "pin-project",
+ "rand 0.8.5",
+ "tokio",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -950,12 +964,6 @@ name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
-
-[[package]]
-name = "base64"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
 
 [[package]]
 name = "base64"
@@ -1231,7 +1239,7 @@ checksum = "4acbb09d9ee8e23699b9634375c72795d095bf268439da88562cf9b501f181fa"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.16",
+ "semver",
  "serde",
  "serde_json",
 ]
@@ -1615,7 +1623,7 @@ version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dfea2db42e9927a3845fb268a10a72faed6d416065f77873f05e411457c363e"
 dependencies = [
- "rustc_version 0.4.0",
+ "rustc_version",
 ]
 
 [[package]]
@@ -2072,7 +2080,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f94be4825ff6a563f1bfbdb786ae10c687333c7524fade954e2271170e7f7e6d"
 dependencies = [
  "chrono",
- "nom 7.1.3",
+ "nom",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -2166,7 +2174,7 @@ dependencies = [
  "num-traits",
  "proc-macro2",
  "quote",
- "rustc_version 0.4.0",
+ "rustc_version",
  "syn",
 ]
 
@@ -2751,15 +2759,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hdfs-sys"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73dcfda0dbca0569e98b8bfb87028d83d2f07705587bac1fddea7dc9ee1eca13"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "hdrhistogram"
 version = "7.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2769,23 +2768,8 @@ dependencies = [
  "byteorder",
  "crossbeam-channel",
  "flate2",
- "nom 7.1.3",
+ "nom",
  "num-traits",
-]
-
-[[package]]
-name = "hdrs"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a8d6dab41a27fd3825810f6413f16f15733c84114504e41955516e4156676c"
-dependencies = [
- "async-lock",
- "blocking",
- "errno",
- "futures",
- "hdfs-sys",
- "libc",
- "log",
 ]
 
 [[package]]
@@ -2960,7 +2944,9 @@ checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
  "hyper",
+ "log",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
 ]
@@ -3538,6 +3524,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "madsim-aws-sdk-s3"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfa6b576864ca304aa1248d800e56a906f5daa6c8a6e6132374648aea7ea86f1"
+dependencies = [
+ "aws-sdk-s3",
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "http",
+ "madsim",
+ "spin 0.9.5",
+ "tracing",
+]
+
+[[package]]
 name = "madsim-etcd-client"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3827,7 +3830,7 @@ dependencies = [
  "once_cell",
  "parking_lot 0.12.1",
  "quanta",
- "rustc_version 0.4.0",
+ "rustc_version",
  "scheduled-thread-pool",
  "skeptic",
  "smallvec",
@@ -3911,12 +3914,6 @@ dependencies = [
  "memoffset 0.6.5",
  "pin-utils",
 ]
-
-[[package]]
-name = "nom"
-version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf51a729ecf40266a2368ad335a5fdde43471f545a967109cd62146ecf8b66ff"
 
 [[package]]
 name = "nom"
@@ -4123,21 +4120,21 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.24.6"
+version = "0.26.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a657010a255640ce4b5e06b3bf275e3debe013208998cb22fa315eb40395919"
+checksum = "c40ed33cc9fed187ce8293587416e0afd6ac9fcde17f2a20ad0dca14dd685ebe"
 dependencies = [
  "anyhow",
  "async-compat",
  "async-trait",
- "backon",
+ "backon 0.2.0",
  "base64 0.21.0",
  "bincode 2.0.0-rc.2",
  "bytes",
  "flagset",
  "futures",
- "hdrs",
  "http",
+ "hyper",
  "log",
  "md-5",
  "once_cell",
@@ -4189,9 +4186,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.25.0+1.1.1t"
+version = "111.24.0+1.1.1s"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3173cd3626c43e3854b1b727422a276e568d9ec5fe8cec197822cf52cfb743d6"
+checksum = "3498f259dab01178c6228c6b00dcef0ed2a2d5e20d648c017861227773ea4abd"
 dependencies = [
  "cc",
 ]
@@ -4882,17 +4879,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "procinfo"
-version = "0.4.2"
-source = "git+https://github.com/tikv/procinfo-rs?rev=6599eb9dca74229b2c1fcc44118bef7eff127128#6599eb9dca74229b2c1fcc44118bef7eff127128"
-dependencies = [
- "byteorder",
- "libc",
- "nom 2.2.1",
- "rustc_version 0.2.3",
-]
-
-[[package]]
 name = "prometheus"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5098,7 +5084,7 @@ dependencies = [
  "futures-timer",
  "log",
  "native-tls",
- "nom 7.1.3",
+ "nom",
  "pem",
  "prost 0.11.6",
  "prost-build",
@@ -5367,13 +5353,13 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.7.6"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "642e28b7bf97b5112610ee78c7128f67d8e73fb17c88ce6f5f67dc9816957d52"
+checksum = "7e0154ced5e44389686689a3c96c49ca5a70ad9c708e0989982adae2e0378bbf"
 dependencies = [
  "anyhow",
- "backon",
- "base64 0.20.0",
+ "backon 0.4.0",
+ "base64 0.21.0",
  "bytes",
  "dirs",
  "form_urlencoded",
@@ -5687,7 +5673,6 @@ dependencies = [
  "paste",
  "postgres-types",
  "procfs 0.12.0",
- "procinfo",
  "prometheus",
  "prost 0.11.6",
  "rand 0.8.5",
@@ -5976,6 +5961,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
+ "petgraph",
  "pgwire",
  "pin-project-lite",
  "postgres-types",
@@ -6138,7 +6124,6 @@ dependencies = [
  "async-trait",
  "async_stack_trace",
  "aws-config",
- "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-types",
  "bytes",
@@ -6147,6 +6132,7 @@ dependencies = [
  "futures",
  "hyper",
  "itertools",
+ "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
  "prometheus",
@@ -6156,7 +6142,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
- "workspace-hack",
 ]
 
 [[package]]
@@ -6260,6 +6245,7 @@ dependencies = [
  "glob",
  "itertools",
  "madsim",
+ "madsim-aws-sdk-s3",
  "madsim-etcd-client",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -6450,7 +6436,6 @@ dependencies = [
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
- "tikv-jemalloc-ctl",
  "tokio-metrics",
  "tokio-stream",
  "tracing",
@@ -6562,20 +6547,11 @@ checksum = "7ef03e0a2b150c7a90d01faf6254c9c48a41e95fb2a8c2ac1c6f0d2b9aefc342"
 
 [[package]]
 name = "rustc_version"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "138e3e0acb6c9fb258b19b67cb8abd63c00679d2851805ea151465464fe9030a"
-dependencies = [
- "semver 0.9.0",
-]
-
-[[package]]
-name = "rustc_version"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
- "semver 1.0.16",
+ "semver",
 ]
 
 [[package]]
@@ -6736,27 +6712,12 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7eb9ef2c18661902cc47e535f9bc51b78acd254da71d375c2f6720d9a40403"
-dependencies = [
- "semver-parser",
-]
-
-[[package]]
-name = "semver"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58bc9567378fc7690d6b2addae4e60ac2eeea07becb2c64b9f218b53865cba2a"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "semver-parser"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
@@ -7379,11 +7340,10 @@ dependencies = [
 
 [[package]]
 name = "thread_local"
-version = "1.1.6"
+version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50f297120ff9d4efe680df143d5631bba9c75fa371992b7fcb33eb3453cb0a07"
+checksum = "5516c27b78311c50bf42c071425c560ac799b11c30b31f87e3081965fe5e0180"
 dependencies = [
- "cfg-if",
  "once_cell",
 ]
 
@@ -7656,9 +7616,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.5"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e267c18a719545b481171952a79f8c25c80361463ba44bc7fa9eba7c742ef4f"
+checksum = "bc6a3b08b64e6dfad376fa2432c7b1f01522e37a623c3050bc95db2d3ff21583"
 dependencies = [
  "bytes",
  "futures-core",
@@ -8541,9 +8501,8 @@ dependencies = [
  "arrayvec",
  "auto_enums",
  "auto_enums_derive",
- "aws-smithy-async",
+ "aws-sdk-s3",
  "aws-smithy-client",
- "aws-smithy-http",
  "aws-types",
  "base64 0.21.0",
  "bytes",
@@ -8556,6 +8515,7 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "digest",
  "either",
  "fail",
  "fixedbitset",
@@ -8584,7 +8544,6 @@ dependencies = [
  "log",
  "madsim-tokio",
  "memchr",
- "mime_guess",
  "miniz_oxide",
  "multimap",
  "num-bigint",
@@ -8604,7 +8563,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "reqwest",
- "rustls",
+ "ring",
  "scopeguard",
  "serde",
  "smallvec",
@@ -8613,7 +8572,6 @@ dependencies = [
  "strum",
  "syn",
  "time 0.3.17",
- "time-macros",
  "tokio",
  "tokio-stream",
  "tokio-util",
