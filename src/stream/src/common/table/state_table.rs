@@ -270,8 +270,8 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         .await
     }
 
-    /// Create a state table without distribution, used for unit tests.
-    pub async fn new_with_value_indices_without_distribution(
+    /// Create a state table without distribution, with given `value_indices`, used for unit tests.
+    pub async fn new_without_distribution_with_value_indices(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
@@ -308,27 +308,6 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             Distribution::fallback(),
             None,
             true,
-        )
-        .await
-    }
-
-    /// Create a state table with given `value_indices`, used for unit tests.
-    pub async fn new_without_distribution_partial(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        value_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-            Some(value_indices),
         )
         .await
     }
@@ -1128,6 +1107,55 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
 
     pub fn get_vnodes(&self) -> Arc<Bitmap> {
         self.vnodes.clone()
+    }
+
+    /// Returns:
+    /// false: the provided pk prefix is absent in state store.
+    /// true: the provided pk prefix may or may not be present in state store.
+    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
+        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+        let encoded_key_range = range_of_prefix(&encoded_prefix);
+
+        // We assume that all usages of iterating the state table only access a single vnode.
+        // If this assertion fails, then something must be wrong with the operator implementation or
+        // the distribution derivation from the optimizer.
+        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
+        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
+        let (l, r) = encoded_key_range_with_vnode.clone();
+        let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
+        if self.mem_table.iter(bytes_key_range).next().is_some() {
+            return Ok(true);
+        }
+
+        // Construct prefix hint for prefix bloom filter.
+        if self.prefix_hint_len != 0 {
+            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
+        }
+        let prefix_hint = {
+            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
+                panic!();
+            } else {
+                let encoded_prefix_len = self
+                    .pk_serde
+                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
+
+                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+            }
+        };
+
+        let read_options = ReadOptions {
+            prefix_hint,
+            ignore_range_tombstone: false,
+            retention_seconds: None,
+            table_id: self.table_id,
+            read_version_from_backup: false,
+        };
+
+        self.local_store
+            .may_exist(encoded_key_range_with_vnode, read_options)
+            .await
+            .map_err(Into::into)
     }
 }
 
