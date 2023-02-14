@@ -52,6 +52,8 @@ impl DmlManager {
         }
     }
 
+    /// Register a new DML reader for a table. If the reader for this version of the table already
+    /// exists, returns a reference to the existing reader.
     pub fn register_reader(
         &self,
         table_id: TableId,

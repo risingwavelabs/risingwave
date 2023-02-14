@@ -51,6 +51,7 @@ pub struct DmlExecutor {
 }
 
 impl DmlExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         upstream: BoxedExecutor,
         schema: Schema,
