@@ -260,11 +260,6 @@ where
     fn post_resolve(&mut self, command: &Command) {
         match command.changes() {
             CommandChanges::DropTables(tables) => {
-                // FIXME: avoid panic here!!!
-                // assert!(
-                //     self.creating_tables.is_disjoint(&tables),
-                //     "conflict table in concurrent checkpoint"
-                // );
                 assert!(
                     self.dropping_tables.is_disjoint(&tables),
                     "duplicated table in concurrent checkpoint"
