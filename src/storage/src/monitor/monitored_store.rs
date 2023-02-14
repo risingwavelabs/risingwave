@@ -28,7 +28,10 @@ use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::store::*;
-use crate::{define_state_store_associated_type, define_state_store_read_associated_type};
+use crate::{
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type,
+};
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -171,6 +174,27 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type GetFuture<'a> = impl GetFutureTrait<'a>;
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+
+    // TODO: include the rest future to macro
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move {
+            let table_id_label = read_options.table_id.to_string();
+            let timer = self
+                .storage_metrics
+                .may_exist_duration
+                .with_label_values(&[table_id_label.as_str()])
+                .start_timer();
+            let res = self.inner.may_exist(key_range, read_options).await;
+            timer.observe_duration();
+            res
+        }
+    }
 
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         let table_id = read_options.table_id;

@@ -397,6 +397,19 @@ pub mod verify {
         type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
         type IterStream<'a> = impl StateStoreIterItemStream + 'a;
 
+        define_local_state_store_associated_type!();
+
+        // We don't verify `may_exist` across different state stores because
+        // the return value of `may_exist` is implementation specific and may not
+        // be consistent across different state store backends.
+        fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> Self::MayExistFuture<'_> {
+            self.actual.may_exist(key_range, read_options)
+        }
+
         fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
                 let actual = self.actual.get(key, read_options.clone()).await;
@@ -809,6 +822,12 @@ pub mod boxed_state_store {
     pub type BoxLocalStateStoreIterStream<'a> = BoxStream<'a, StorageResult<StateStoreIterItem>>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
+        async fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<bool>;
+
         async fn get<'a>(
             &'a self,
             key: &'a [u8],
@@ -843,6 +862,14 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
+        async fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<bool> {
+            self.may_exist(key_range, read_options).await
+        }
+
         async fn get<'a>(
             &'a self,
             key: &'a [u8],
@@ -901,6 +928,16 @@ pub mod boxed_state_store {
         type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+
+        define_local_state_store_associated_type!();
+
+        fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> Self::MayExistFuture<'_> {
+            self.deref().may_exist(key_range, read_options)
+        }
 
         fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, read_options)

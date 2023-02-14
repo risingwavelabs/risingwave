@@ -346,6 +346,16 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
 
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async { Ok(true) }
+    }
+
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             match self.mem_table.buffer.get(key) {

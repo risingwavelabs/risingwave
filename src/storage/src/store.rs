@@ -245,12 +245,22 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
+pub trait MayExistTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
+
+#[macro_export]
+macro_rules! define_local_state_store_associated_type {
+    () => {
+        type MayExistFuture<'a> = impl MayExistTrait<'a>;
+    };
+}
+
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StaticSendSync {
     type IterStream<'a>: StateStoreIterItemStream + 'a;
 
+    type MayExistFuture<'a>: MayExistTrait<'a>;
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type FlushFuture<'a>: Future<Output = StorageResult<usize>> + Send + 'a;
@@ -289,6 +299,21 @@ pub trait LocalStateStore: StaticSendSync {
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
     fn seal_current_epoch(&mut self, next_epoch: u64);
+
+    /// Check existence of a given `key_range`.
+    /// It is better to provide `prefix_hint` in `read_options`, which will be used
+    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
+    /// the false positive rate can be significantly higher because bloom filter cannot
+    /// be used.
+    ///
+    /// Returns:
+    /// - false: `key_range` is guaranteed to be absent in storage.
+    /// - true: `key_range` may or may not exist in storage.
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_>;
 }
 
 #[derive(Default, Clone)]

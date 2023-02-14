@@ -889,6 +889,50 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     pub fn get_vnodes(&self) -> Arc<Bitmap> {
         self.vnodes.clone()
     }
+
+    /// Returns:
+    /// false: the provided pk prefix is absent in state store.
+    /// true: the provided pk prefix may or may not be present in state store.
+    pub async fn may_exist(&self, pk_prefix: impl Row) -> StreamExecutorResult<bool> {
+        let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
+        let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
+        let encoded_key_range = range_of_prefix(&encoded_prefix);
+
+        // We assume that all usages of iterating the state table only access a single vnode.
+        // If this assertion fails, then something must be wrong with the operator implementation or
+        // the distribution derivation from the optimizer.
+        let vnode = self.compute_prefix_vnode(&pk_prefix).to_be_bytes();
+        let encoded_key_range_with_vnode = prefixed_range(encoded_key_range, &vnode);
+
+        // Construct prefix hint for prefix bloom filter.
+        if self.prefix_hint_len != 0 {
+            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
+        }
+        let prefix_hint = {
+            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
+                panic!();
+            } else {
+                let encoded_prefix_len = self
+                    .pk_serde
+                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
+
+                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
+            }
+        };
+
+        let read_options = ReadOptions {
+            prefix_hint,
+            ignore_range_tombstone: false,
+            retention_seconds: None,
+            table_id: self.table_id,
+            read_version_from_backup: false,
+        };
+
+        self.local_store
+            .may_exist(encoded_key_range_with_vnode, read_options)
+            .await
+            .map_err(Into::into)
+    }
 }
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;

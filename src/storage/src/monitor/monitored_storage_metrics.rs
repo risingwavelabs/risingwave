@@ -30,6 +30,8 @@ pub struct MonitoredStorageMetrics {
     pub iter_item: HistogramVec,
     pub iter_duration: HistogramVec,
     pub iter_scan_duration: HistogramVec,
+    pub may_exist_duration: HistogramVec,
+
     pub iter_in_process_counts: GenericCounterVec<AtomicU64>,
 
     pub sync_duration: Histogram,
@@ -97,7 +99,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
             "Histogram of iterator scan time that have been issued to state store",
-            buckets,
+            buckets.clone(),
         );
         let iter_scan_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
@@ -109,6 +111,14 @@ impl MonitoredStorageMetrics {
             registry
         )
         .unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_may_exist_duration",
+            "Histogram of may exist time that have been issued to state store",
+            buckets,
+        );
+        let may_exist_duration =
+            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_sync_duration",
@@ -132,6 +142,7 @@ impl MonitoredStorageMetrics {
             iter_item,
             iter_duration,
             iter_scan_duration,
+            may_exist_duration,
             iter_in_process_counts,
             sync_duration,
             sync_size,
