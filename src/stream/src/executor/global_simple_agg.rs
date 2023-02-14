@@ -65,6 +65,10 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// table when `flush_data` is called.
     result_table: StateTable<S>,
 
+    /// State tables for deduplicating rows on distinct key for distinct agg calls.
+    /// One table per distinct column (may be shared by multiple agg calls).
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
+
     /// Extreme state cache size
     extreme_cache_size: usize,
 
@@ -98,6 +102,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
+        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         extreme_cache_size: usize,
@@ -118,6 +123,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             agg_calls,
             storages,
             result_table,
+            distinct_dedup_tables,
             extreme_cache_size,
             state_changed: false,
         })
@@ -130,6 +136,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: &[AggCall],
         storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
         input_pk_indices: &PkIndices,
         input_schema: &Schema,
         agg_group: &mut Option<AggGroup<S>>,
@@ -197,7 +204,15 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             });
 
         // Apply chunk to each of the state (per agg_call)
-        agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
+        agg_group
+            .apply_chunk(
+                storages,
+                &ops,
+                &columns,
+                visibilities,
+                distinct_dedup_tables,
+            )
+            .await?;
 
         Ok(())
     }
@@ -208,15 +223,20 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         epoch: EpochPair,
         storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         if *state_changed {
             let agg_group = agg_group.as_mut().unwrap();
-            agg_group.flush_state_if_needed(storages).await?;
+            agg_group
+                .flush_state_if_needed(storages, distinct_dedup_tables)
+                .await?;
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
+                iter_table_storage(storages)
+                    .chain(distinct_dedup_tables.values_mut())
+                    .map(|state_table| state_table.commit(epoch)),
             )
             .await?;
 
@@ -260,9 +280,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(storages).for_each(|state_table| {
-                state_table.commit_no_data_expected(epoch);
-            });
+            iter_table_storage(storages)
+                .chain(distinct_dedup_tables.values_mut())
+                .for_each(|state_table| {
+                    state_table.commit_no_data_expected(epoch);
+                });
             result_table.commit_no_data_expected(epoch);
             Ok(None)
         }
@@ -280,6 +302,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             extreme_cache_size,
             mut storages,
             mut result_table,
+            mut distinct_dedup_tables,
             mut state_changed,
         } = self;
 
@@ -287,9 +310,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut storages).for_each(|state_table| {
-            state_table.init_epoch(barrier.epoch);
-        });
+        iter_table_storage(&mut storages)
+            .chain(distinct_dedup_tables.values_mut())
+            .for_each(|state_table| {
+                state_table.init_epoch(barrier.epoch);
+            });
         result_table.init_epoch(barrier.epoch);
 
         yield Message::Barrier(barrier);
@@ -306,6 +331,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         &agg_calls,
                         &mut storages,
                         &mut result_table,
+                        &mut distinct_dedup_tables,
                         &input_pk_indices,
                         &input_schema,
                         &mut agg_group,
@@ -322,6 +348,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         barrier.epoch,
                         &mut storages,
                         &mut result_table,
+                        &mut distinct_dedup_tables,
                         &mut state_changed,
                     )
                     .await?
@@ -392,6 +419,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -400,6 +428,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -408,6 +437,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -416,6 +446,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 

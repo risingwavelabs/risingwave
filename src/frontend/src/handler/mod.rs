@@ -344,7 +344,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
             table_name,
@@ -375,6 +375,7 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::AddColumn { column_def },
         } => alter_table::handle_add_column(handler_args, name, column_def).await,
+        Statement::AlterSystem { param: _, value: _ } => todo!(),
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

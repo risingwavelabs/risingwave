@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -76,6 +77,7 @@ pub fn build_agg_call_from_prost(
         order_pairs,
         append_only,
         filter,
+        distinct: agg_call_proto.distinct,
     })
 }
 
@@ -130,4 +132,21 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
     }
 
     result
+}
+
+pub async fn build_distinct_dedup_table_from_proto<S: StateStore>(
+    dedup_tables: &HashMap<u32, risingwave_pb::catalog::Table>,
+    store: S,
+    vnodes: Option<Arc<Bitmap>>,
+) -> HashMap<usize, StateTable<S>> {
+    if dedup_tables.is_empty() {
+        return HashMap::new();
+    }
+    futures::future::join_all(dedup_tables.iter().map(|(distinct_col, table_pb)| async {
+        let table = StateTable::from_table_catalog(table_pb, store.clone(), vnodes.clone()).await;
+        (*distinct_col as usize, table)
+    }))
+    .await
+    .into_iter()
+    .collect()
 }

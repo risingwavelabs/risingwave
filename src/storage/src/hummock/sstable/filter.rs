@@ -12,8 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod parser;
-pub mod schema_resolver;
-pub mod util;
+// Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
-pub use parser::*;
+pub trait FilterBuilder: Send {
+    /// add key which need to be filter for construct filter data.
+    fn add_key(&mut self, dist_key: &[u8], table_id: u32);
+    /// Builds Bloom filter from key hashes
+    fn finish(&mut self) -> Vec<u8>;
+    /// approximate memory of filter builder
+    fn approximate_len(&self) -> usize;
+
+    fn create(fpr: f64, capacity: usize) -> Self;
+}
