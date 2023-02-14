@@ -1093,3 +1093,49 @@
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
             └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: correlated two phase agg https://github.com/risingwavelabs/risingwave/issues/7928
+  sql: |
+    set QUERY_MODE to DISTRIBUTED;
+    set RW_FORCE_TWO_PHASE_AGG to TRUE;
+    CREATE TABLE lineitem (
+        l_orderkey BIGINT,
+        l_tax NUMERIC,
+        l_commitdate DATE,
+        l_shipinstruct VARCHAR,
+        PRIMARY KEY (l_orderkey)
+    );
+    SELECT
+        1 as col_0
+    FROM
+        (
+            SELECT
+                t_0.l_commitdate AS col_2
+            FROM
+                lineitem AS t_0
+            GROUP BY
+                t_0.l_tax,
+                t_0.l_shipinstruct,
+                t_0.l_orderkey,
+                t_0.l_commitdate
+        ) AS sq_1
+    GROUP BY
+        sq_1.col_2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [] }
+        └─BatchExchange { order: [], dist: HashShard(lineitem.l_commitdate) }
+          └─BatchHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [] }
+            └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], distribution: UpstreamHashShard(lineitem.l_orderkey) }
+  stream_plan: |
+    StreamMaterialize { columns: [col_0, lineitem.l_commitdate(hidden)], pk_columns: [lineitem.l_commitdate] }
+    └─StreamProject { exprs: [1:Int32, lineitem.l_commitdate] }
+      └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [count] }
+        └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
+          └─StreamHashAgg { group_key: [lineitem.l_commitdate, $expr2], aggs: [count] }
+            └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate, Vnode(lineitem.l_orderkey) as $expr2] }
+              └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
+                └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
+                  └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate, $expr1], aggs: [count] }
+                    └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct, Vnode(lineitem.l_orderkey) as $expr1] }
+                      └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
