@@ -160,9 +160,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         for msg in input {
             let msg = msg?;
             yield match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
+                Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     match self.handle_pk_conflict {
                         true => {

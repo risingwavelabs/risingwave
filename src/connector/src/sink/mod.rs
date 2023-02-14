@@ -106,8 +106,10 @@ impl SinkConfig {
 #[derive(Debug)]
 pub enum SinkImpl {
     Redis(Box<RedisSink>),
-    Kafka(Box<KafkaSink>),
-    Remote(Box<RemoteSink>),
+    Kafka(Box<KafkaSink<true>>),
+    UpsertKafka(Box<KafkaSink<false>>),
+    Remote(Box<RemoteSink<true>>),
+    UpsertRemote(Box<RemoteSink<false>>),
     Console(Box<ConsoleSink>),
     Blackhole,
 }
@@ -134,47 +136,48 @@ impl SinkImpl {
     }
 }
 
-#[async_trait]
-impl Sink for SinkImpl {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Remote(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Console(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+macro_rules! impl_sink {
+    ($($variant_name:ident),*) => {
+        #[async_trait]
+        impl Sink for SinkImpl {
+            async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.write_batch(chunk).await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Remote(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Console(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+            async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.begin_epoch(epoch).await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn commit(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.commit().await,
-            SinkImpl::Kafka(sink) => sink.commit().await,
-            SinkImpl::Remote(sink) => sink.commit().await,
-            SinkImpl::Console(sink) => sink.commit().await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+            async fn commit(&mut self) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.commit().await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn abort(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.abort().await,
-            SinkImpl::Kafka(sink) => sink.abort().await,
-            SinkImpl::Remote(sink) => sink.abort().await,
-            SinkImpl::Console(sink) => sink.abort().await,
-            SinkImpl::Blackhole => Ok(()),
+            async fn abort(&mut self) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.abort().await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
         }
     }
+}
+
+impl_sink! {
+    Redis,
+    Kafka,
+    UpsertKafka,
+    Remote,
+    UpsertRemote,
+    Console
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;

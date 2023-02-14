@@ -32,4 +32,6 @@ pub enum ValueEncodingError {
     InvalidStructEncoding(crate::array::ArrayError),
     #[error("Invalid list encoding: {0}")]
     InvalidListEncoding(crate::array::ArrayError),
+    #[error("Invalid flag: {0}")]
+    InvalidFlag(u8),
 }
