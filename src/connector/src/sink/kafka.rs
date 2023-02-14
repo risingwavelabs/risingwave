@@ -120,7 +120,6 @@ pub struct KafkaSink<const APPEND_ONLY: bool> {
 
 impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
-        dbg!(APPEND_ONLY);
         Ok(KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config).await?,
