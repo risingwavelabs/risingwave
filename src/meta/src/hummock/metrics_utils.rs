@@ -40,6 +40,7 @@ pub fn trigger_version_stat(
         .set(current_version.encoded_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
+    metrics.version_stats.reset();
     for (table_id, stats) in &version_stats.table_stats {
         let table_id = format!("{}", table_id);
         metrics
