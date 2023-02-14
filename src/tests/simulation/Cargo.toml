@@ -5,11 +5,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-config", "workspace-hack", "task_stats_alloc", "serde"]
+ignored = ["serde"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["serde"]
 
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
+aws-sdk-s3 = { version = "0.2.15", package = "madsim-aws-sdk-s3" }
 clap = "3"
 console = "0.15"
 etcd-client = { version = "0.2.15", package = "madsim-etcd-client" }

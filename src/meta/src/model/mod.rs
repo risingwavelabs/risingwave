@@ -84,8 +84,8 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         let bytes_vec = store.list_cf(&Self::cf_name()).await?;
         bytes_vec
             .iter()
-            .map(|bytes| {
-                Self::ProstType::decode(bytes.as_slice())
+            .map(|(_k, v)| {
+                Self::ProstType::decode(v.as_slice())
                     .map(Self::from_protobuf)
                     .map_err(Into::into)
             })
