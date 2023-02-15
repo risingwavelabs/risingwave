@@ -19,7 +19,11 @@ use std::mem::swap;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::util::value_encoding::ValueRowSerde;
+use futures::{pin_mut, StreamExt};
+use futures_async_stream::try_stream;
+use risingwave_common::catalog::TableId;
+use risingwave_common::row::RowDeserializer;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
 use crate::error::StorageError;
@@ -197,19 +201,19 @@ impl KeyOp {
     /// # Panics
     ///
     /// The function will panic if it failed to decode the bytes with provided data types.
-    pub fn debug_fmt(&self, row_deserializer: &impl ValueRowSerde) -> String {
+    pub fn debug_fmt(&self, row_deserializer: &RowDeserializer) -> String {
         match self {
             Self::Insert(after) => {
-                let after = row_deserializer.deserialize(after);
+                let after = row_deserializer.deserialize(after.as_ref());
                 format!("Insert({:?})", &after)
             }
             Self::Delete(before) => {
-                let before = row_deserializer.deserialize(before);
+                let before = row_deserializer.deserialize(before.as_ref());
                 format!("Delete({:?})", &before)
             }
             Self::Update((before, after)) => {
-                let after = row_deserializer.deserialize(after);
-                let before = row_deserializer.deserialize(before);
+                let after = row_deserializer.deserialize(after.as_ref());
+                let before = row_deserializer.deserialize(before.as_ref());
                 format!("Update({:?}, {:?})", &before, &after)
             }
         }
