@@ -85,6 +85,26 @@ impl CreatingStreamingJobInfo {
     }
 }
 
+pub struct StreamingJobGuard<'a> {
+    task_id: TaskId,
+    tracker: &'a StreamingJobTrackerRef,
+}
+
+impl<'a> StreamingJobGuard<'a> {
+    pub fn new(task_info: CreatingStreamingJobInfo, tracker: &'a StreamingJobTrackerRef) -> Self {
+        let task_id = TaskId::default();
+        tracker.add_job(task_id.clone(), task_info);
+
+        Self { task_id, tracker }
+    }
+}
+
+impl<'a> Drop for StreamingJobGuard<'a> {
+    fn drop(&mut self) {
+        self.tracker.delete_job(&self.task_id);
+    }
+}
+
 impl StreamingJobTracker {
     pub fn add_job(&self, task_id: TaskId, info: CreatingStreamingJobInfo) {
         self.creating_streaming_job.write().insert(task_id, info);

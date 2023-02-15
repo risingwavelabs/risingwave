@@ -35,7 +35,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, TaskId};
+use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, StreamingJobGuard};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -418,23 +418,20 @@ pub async fn handle_create_index(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let task_id = TaskId::default();
-    session.env().creating_streaming_job_tracker().add_job(
-        task_id.clone(),
+    let _job_guard = StreamingJobGuard::new(
         CreatingStreamingJobInfo::new(
             session.session_id(),
             index.database_id,
             index.schema_id,
             index.name.clone(),
         ),
+        session.env().creating_streaming_job_tracker(),
     );
+
     let catalog_writer = session.env().catalog_writer();
-    let res = catalog_writer.create_index(index, index_table, graph).await;
-    session
-        .env()
-        .creating_streaming_job_tracker()
-        .delete_job(&task_id);
-    res?;
+    catalog_writer
+        .create_index(index, index_table, graph)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))
 }

@@ -27,7 +27,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
-use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, TaskId};
+use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, StreamingJobGuard};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Planner;
@@ -133,24 +133,18 @@ pub async fn handle_create_sink(
         (sink, graph)
     };
 
-    let task_id = TaskId::default();
-    session.env().creating_streaming_job_tracker().add_job(
-        task_id.clone(),
+    let _job_guard = StreamingJobGuard::new(
         CreatingStreamingJobInfo::new(
             session.session_id(),
             sink.database_id.database_id,
             sink.schema_id.schema_id,
             sink.name.clone(),
         ),
+        session.env().creating_streaming_job_tracker(),
     );
 
     let catalog_writer = session.env().catalog_writer();
-    let res = catalog_writer.create_sink(sink.to_proto(), graph).await;
-    session
-        .env()
-        .creating_streaming_job_tracker()
-        .delete_job(&task_id);
-    res?;
+    catalog_writer.create_sink(sink.to_proto(), graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }

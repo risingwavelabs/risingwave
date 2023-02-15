@@ -281,7 +281,8 @@ where
 
     /// Barrier can be sent to and collected from an actor if:
     /// 1. The actor is Running and not being dropped or removed in rescheduling.
-    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling.
+    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling and not
+    /// belongs to a canceling command.
     fn can_actor_send_or_collect(
         &self,
         s: ActorState,
@@ -407,9 +408,6 @@ where
             CommandChanges::DropTables(table_ids) => {
                 assert!(self.dropping_tables.is_superset(&table_ids));
                 self.dropping_tables.retain(|a| !table_ids.contains(a));
-                // We should also clean the record in creating tables, because this changes could be
-                // issued by cancel command.
-                self.creating_tables.retain(|a| !table_ids.contains(a));
             }
             CommandChanges::Actor { to_add, to_remove } => {
                 assert!(self.adding_actors.is_superset(&to_add));
@@ -903,7 +901,12 @@ where
                 });
 
                 // Save `cancelled_command` for Create MVs.
-                let cancelled_command = tracker.cancel(&node.command_ctx);
+                let actors_to_cancel = node.command_ctx.actors_to_cancel();
+                let cancelled_command = if !actors_to_cancel.is_empty() {
+                    tracker.find_cancelled_command(actors_to_cancel)
+                } else {
+                    None
+                };
 
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {

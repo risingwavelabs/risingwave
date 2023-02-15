@@ -25,7 +25,7 @@ use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::planner::Planner;
-use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, TaskId};
+use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, StreamingJobGuard};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -146,24 +146,20 @@ pub async fn handle_create_mv(
         (table, graph)
     };
 
-    let task_id = TaskId::default();
-    session.env().creating_streaming_job_tracker().add_job(
-        task_id.clone(),
+    let _job_guard = StreamingJobGuard::new(
         CreatingStreamingJobInfo::new(
             session.session_id(),
             table.database_id,
             table.schema_id,
             table.name.clone(),
         ),
+        session.env().creating_streaming_job_tracker(),
     );
 
     let catalog_writer = session.env().catalog_writer();
-    let res = catalog_writer.create_materialized_view(table, graph).await;
-    session
-        .env()
-        .creating_streaming_job_tracker()
-        .delete_job(&task_id);
-    res?;
+    catalog_writer
+        .create_materialized_view(table, graph)
+        .await?;
 
     if has_order_by {
         notice.push_str(r#"

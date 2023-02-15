@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -108,24 +108,25 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         }
     }
 
-    /// Try to cancel a target create-mview command from track.
+    /// Try to find the target create-streaming-job command from track.
     ///
-    /// If the actors to cancel is not empty, return the target command as it should be cancelled.
-    pub fn cancel(&mut self, context: &Arc<CommandContext<S>>) -> Option<TrackingCommand<S>> {
-        let actors_to_cancel = context.actors_to_cancel();
-        if !actors_to_cancel.is_empty() {
-            let epochs = actors_to_cancel
-                .into_iter()
-                .map(|actor_id| self.actor_map.get(&actor_id))
-                .collect_vec();
-            assert!(epochs.iter().all_equal());
-            // If the target command found in progress map, remove and return it, the command has
-            // been finished if not found.
-            if let Some(Some(epoch)) = epochs.first() {
-                return Some(self.progress_map.remove(epoch).unwrap().1);
-            }
+    /// Return the target command as it should be cancelled based on the input actors.
+    pub fn find_cancelled_command(
+        &mut self,
+        actors_to_cancel: HashSet<ActorId>,
+    ) -> Option<TrackingCommand<S>> {
+        let epochs = actors_to_cancel
+            .into_iter()
+            .map(|actor_id| self.actor_map.get(&actor_id))
+            .collect_vec();
+        assert!(epochs.iter().all_equal());
+        // If the target command found in progress map, return and remove it. Note that the command
+        // should have finished if not found.
+        if let Some(Some(epoch)) = epochs.first() {
+            Some(self.progress_map.remove(epoch).unwrap().1)
+        } else {
+            None
         }
-        None
     }
 
     /// Add a new create-mview DDL command to track.
