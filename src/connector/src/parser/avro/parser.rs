@@ -248,6 +248,14 @@ pub fn from_avro_value(value: Value) -> Result<Datum> {
             ScalarImpl::List(ListValue::new(rw_values))
         }
         Value::Union(_, value) => return from_avro_value(*value),
+        Value::Decimal(decimal) => {
+            // TODO
+            let err_msg = format!(
+                "avro parse error. decimal type is not supported yest {:?}",
+                decimal
+            );
+            return Err(RwError::from(InternalError(err_msg)));
+        }
         _ => {
             let err_msg = format!("avro parse error.unsupported value {:?}", value);
             return Err(RwError::from(InternalError(err_msg)));
