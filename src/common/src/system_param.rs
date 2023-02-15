@@ -40,7 +40,7 @@ macro_rules! for_all_undeprecated_params {
 }
 
 // Only includes deprecated params. Used to define key constants.
-// Macro input is { field identifier, mutability, default value }
+// Macro input is { field identifier, default value }
 macro_rules! for_all_deprecated_params {
     ($macro:ident) => {
         $macro! {}
@@ -264,15 +264,16 @@ mod tests {
     #[test]
     fn test_set() {
         let mut p = SystemParams::default();
-
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
         assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("-1".to_string())).is_err());
         // Set immutable.
         assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_string())).is_err());
+        // Parse error.
+        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("?".to_string())).is_err());
         // Normal set.
         assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("500".to_string())).is_ok());
-        assert_eq!(p.sstable_size_mb, Some(500));
+        assert_eq!(p.barrier_interval_ms, Some(500));
     }
 }
