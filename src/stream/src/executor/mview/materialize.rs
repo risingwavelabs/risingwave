@@ -160,9 +160,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         for msg in input {
             let msg = msg?;
             yield match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
+                Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     match self.handle_pk_conflict {
                         true => {
@@ -295,7 +293,7 @@ impl MaterializeBuffer {
         let key_chunk = data_chunk.reorder_columns(pk_indices);
         key_chunk
             .rows_with_holes()
-            .zip_eq_debug(pks.iter_mut())
+            .zip_eq_fast(pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
                     pk_serde.serialize(r, vnode_and_pk);

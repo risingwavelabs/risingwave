@@ -14,13 +14,17 @@
 
 //! Global Streaming Hash Aggregators
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::HashAggNode;
 
-use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
+use super::agg_common::{
+    build_agg_call_from_prost, build_agg_state_storages_from_proto,
+    build_distinct_dedup_table_from_proto,
+};
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
@@ -34,6 +38,7 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     agg_calls: Vec<AggCall>,
     storages: Vec<AggStateStorage<S>>,
     result_table: StateTable<S>,
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     group_key_indices: Vec<usize>,
     group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
@@ -54,6 +59,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.agg_calls,
             self.storages,
             self.result_table,
+            self.distinct_dedup_tables,
             self.pk_indices,
             self.extreme_cache_size,
             self.executor_id,
@@ -108,9 +114,15 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             vnodes.clone(),
         )
         .await;
-
-        let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, vnodes).await;
+        let result_table = StateTable::from_table_catalog(
+            node.get_result_table().unwrap(),
+            store.clone(),
+            vnodes.clone(),
+        )
+        .await;
+        let distinct_dedup_tables =
+            build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
+                .await;
 
         let args = HashAggExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -118,6 +130,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             agg_calls,
             storages,
             result_table,
+            distinct_dedup_tables,
             group_key_indices,
             group_key_types,
             pk_indices: params.pk_indices,

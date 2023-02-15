@@ -37,8 +37,9 @@ use risingwave_pb::stream_plan::{
 
 use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::TableFragments;
-use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{ActorGraphBuildResult, CompleteStreamFragmentGraph, StreamFragmentGraph};
+use crate::stream::{
+    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
+};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -118,8 +119,8 @@ fn make_source_internal_table(id: u32) -> ProstTable {
     ];
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         pk: vec![ColumnOrder {
@@ -137,8 +138,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     }
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         pk: vec![ColumnOrder {
@@ -153,8 +154,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
 fn make_empty_table(id: u32) -> ProstTable {
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns: vec![],
         pk: vec![],
@@ -258,6 +259,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             result_table: Some(make_empty_table(1)),
+            ..Default::default()
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -300,6 +302,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             result_table: Some(make_empty_table(2)),
+            ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],

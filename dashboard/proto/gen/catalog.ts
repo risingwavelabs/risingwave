@@ -12,6 +12,53 @@ import {
 
 export const protobufPackage = "catalog";
 
+export const SinkType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  APPEND_ONLY: "APPEND_ONLY",
+  FORCE_APPEND_ONLY: "FORCE_APPEND_ONLY",
+  UPSERT: "UPSERT",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SinkType = typeof SinkType[keyof typeof SinkType];
+
+export function sinkTypeFromJSON(object: any): SinkType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return SinkType.UNSPECIFIED;
+    case 1:
+    case "APPEND_ONLY":
+      return SinkType.APPEND_ONLY;
+    case 2:
+    case "FORCE_APPEND_ONLY":
+      return SinkType.FORCE_APPEND_ONLY;
+    case 3:
+    case "UPSERT":
+      return SinkType.UPSERT;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SinkType.UNRECOGNIZED;
+  }
+}
+
+export function sinkTypeToJSON(object: SinkType): string {
+  switch (object) {
+    case SinkType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case SinkType.APPEND_ONLY:
+      return "APPEND_ONLY";
+    case SinkType.FORCE_APPEND_ONLY:
+      return "FORCE_APPEND_ONLY";
+    case SinkType.UPSERT:
+      return "UPSERT";
+    case SinkType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /**
  * The rust prost library always treats uint64 as required and message as
  * optional. In order to allow `row_id_index` as an optional field, we wrap
@@ -19,6 +66,13 @@ export const protobufPackage = "catalog";
  */
 export interface ColumnIndex {
   index: number;
+}
+
+export interface WatermarkDesc {
+  /** The column idx the watermark is on */
+  watermarkIdx: number;
+  /** The expression to calculate the watermark value. */
+  expr: ExprNode | undefined;
 }
 
 export interface StreamSourceInfo {
@@ -52,7 +106,14 @@ export interface Source {
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
   owner: number;
-  info: StreamSourceInfo | undefined;
+  info:
+    | StreamSourceInfo
+    | undefined;
+  /**
+   * Define watermarks on the source. The `repeated` is just for forward
+   * compatibility, currently, only one watermark on the source
+   */
+  watermarkDescs: WatermarkDesc[];
 }
 
 export interface Source_PropertiesEntry {
@@ -71,7 +132,7 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendOnly: boolean;
+  sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
@@ -283,6 +344,33 @@ export const ColumnIndex = {
   },
 };
 
+function createBaseWatermarkDesc(): WatermarkDesc {
+  return { watermarkIdx: 0, expr: undefined };
+}
+
+export const WatermarkDesc = {
+  fromJSON(object: any): WatermarkDesc {
+    return {
+      watermarkIdx: isSet(object.watermarkIdx) ? Number(object.watermarkIdx) : 0,
+      expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined,
+    };
+  },
+
+  toJSON(message: WatermarkDesc): unknown {
+    const obj: any = {};
+    message.watermarkIdx !== undefined && (obj.watermarkIdx = Math.round(message.watermarkIdx));
+    message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WatermarkDesc>, I>>(object: I): WatermarkDesc {
+    const message = createBaseWatermarkDesc();
+    message.watermarkIdx = object.watermarkIdx ?? 0;
+    message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
+    return message;
+  },
+};
+
 function createBaseStreamSourceInfo(): StreamSourceInfo {
   return {
     rowFormat: RowFormatType.ROW_UNSPECIFIED,
@@ -341,6 +429,7 @@ function createBaseSource(): Source {
     properties: {},
     owner: 0,
     info: undefined,
+    watermarkDescs: [],
   };
 }
 
@@ -362,6 +451,9 @@ export const Source = {
         : {},
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
     };
   },
 
@@ -391,6 +483,11 @@ export const Source = {
     }
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
     return obj;
   },
 
@@ -418,6 +515,7 @@ export const Source = {
     message.info = (object.info !== undefined && object.info !== null)
       ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
     return message;
   },
 };
@@ -457,7 +555,7 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
-    appendOnly: false,
+    sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
     definition: "",
@@ -480,7 +578,7 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
-      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -523,7 +621,7 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
-    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -546,7 +644,7 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendOnly = object.appendOnly ?? false;
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {

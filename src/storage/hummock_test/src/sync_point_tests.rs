@@ -24,11 +24,11 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use risingwave_meta::hummock::compaction::ManualCompactionOption;
+use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
-use risingwave_meta::hummock::{CompactionPickParma, HummockManagerRef, MockHummockMetaClient};
+use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::common::WorkerNode;
@@ -161,7 +161,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
     let mut task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
-            CompactionPickParma::new_base_parma(),
+            &mut default_level_selector(),
         )
         .await
         .unwrap()
@@ -249,15 +249,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = Arc::new(
-        prepare_compactor_and_filter(
-            &storage,
-            &hummock_meta_client,
-            hummock_manager_ref.clone(),
-            existing_table_id,
-        )
-        .await,
-    );
+    let compact_ctx = Arc::new(prepare_compactor_and_filter(
+        &storage,
+        &hummock_meta_client,
+        existing_table_id,
+    ));
 
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);

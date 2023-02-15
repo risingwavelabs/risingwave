@@ -64,7 +64,7 @@ pub use vis::{Vis, VisRef};
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
 use crate::types::*;
-use crate::util::iter_util::ZipEqDebug;
+use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -310,7 +310,7 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq_debug(visibility.iter()) {
+        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 builder.append(elem);
             }
@@ -646,7 +646,7 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
     }
 
@@ -742,7 +742,7 @@ mod tests {
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
-        for (a, b) in a.iter().zip_eq_debug(b.iter()) {
+        for (a, b) in a.iter().zip_eq_fast(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
                 _ => None,

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -32,27 +33,30 @@ use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
 };
 use crate::hummock::multi_builder::TableBuilderFactory;
+use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
-    CachePolicy, HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions,
-    SstableIdManagerRef, SstableWriterFactory, SstableWriterOptions,
+    CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableIdManagerRef, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
-pub struct RemoteBuilderFactory<F: SstableWriterFactory> {
+pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub sstable_id_manager: SstableIdManagerRef,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,
     pub remote_rpc_cost: Arc<AtomicU64>,
     pub filter_key_extractor: Arc<FilterKeyExtractorImpl>,
-    pub sstable_writer_factory: F,
+    pub sstable_writer_factory: W,
+    pub _phantom: PhantomData<F>,
 }
 
 #[async_trait::async_trait]
-impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
-    type Writer = F::Writer;
+impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBuilderFactory<W, F> {
+    type Filter = F;
+    type Writer = W::Writer;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>> {
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
@@ -73,6 +77,10 @@ impl<F: SstableWriterFactory> TableBuilderFactory for RemoteBuilderFactory<F> {
         let builder = SstableBuilder::new(
             table_id,
             writer,
+            Self::Filter::create(
+                self.options.bloom_false_positive,
+                self.options.capacity / DEFAULT_ENTRY_SIZE + 1,
+            ),
             self.options.clone(),
             self.filter_key_extractor.clone(),
         );
@@ -179,7 +187,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
         .map(|table_info| table_info.file_size)
         .sum::<u64>();
 
-    let sstable_size = (context.storage_config.sstable_size_mb as u64) << 20;
+    let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
     if compaction_size > sstable_size * 2 {
         let mut indexes = vec![];
         // preload the meta and get the smallest key to split sub_compaction
@@ -212,7 +220,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(
             indexes.len() as u64,
-            context.storage_config.max_sub_compaction as u64,
+            context.storage_opts.max_sub_compaction as u64,
         );
         let sub_compaction_data_size = std::cmp::max(compaction_size / parallelism, sstable_size);
         let parallelism = compaction_size / sub_compaction_data_size;

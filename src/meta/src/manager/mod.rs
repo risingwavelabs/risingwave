@@ -19,6 +19,7 @@ mod id;
 mod idle;
 mod notification;
 mod streaming_job;
+mod system_param;
 
 pub(crate) use catalog::*;
 pub use cluster::WorkerKey;
@@ -30,3 +31,4 @@ pub(crate) use idle::*;
 pub(crate) use notification::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef};
 pub(crate) use streaming_job::*;
+pub(crate) use system_param::*;

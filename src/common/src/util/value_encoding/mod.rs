@@ -28,6 +28,7 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 

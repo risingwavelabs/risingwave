@@ -17,6 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
@@ -345,7 +346,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core
 #[derive(Debug, Clone)]
 pub struct Sink {
     pub input: PlanRef,
-    pub sink_desc: TableCatalog,
+    pub sink_desc: SinkDesc,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
@@ -537,6 +538,7 @@ pub fn to_stream_prost_body(
             let me = &me.core;
             let result_table = me.infer_result_table(base, None);
             let agg_states = me.infer_stream_agg_state(base, None);
+            let distinct_dedup_tables = me.infer_distinct_dedup_tables(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
                 agg_calls: me
@@ -560,6 +562,10 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
+                distinct_dedup_tables: distinct_dedup_tables
+                    .into_iter()
+                    .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
+                    .collect(),
             })
         }
         Node::GroupTopN(me) => {
@@ -581,6 +587,7 @@ pub fn to_stream_prost_body(
         Node::HashAgg(me) => {
             let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
             let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
+            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
 
             ProstNode::HashAgg(HashAggNode {
                 group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
@@ -601,6 +608,10 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
+                distinct_dedup_tables: distinct_dedup_tables
+                    .into_iter()
+                    .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
+                    .collect(),
             })
         }
         Node::HashJoin(me) => {
@@ -687,6 +698,7 @@ pub fn to_stream_prost_body(
                 agg_call_states: vec![],
                 result_table: None,
                 is_append_only: me.input.0.append_only,
+                distinct_dedup_tables: Default::default(),
             })
         }
         Node::Materialize(me) => {
@@ -731,15 +743,7 @@ pub fn to_stream_prost_body(
                 .collect(),
         }),
         Node::Sink(me) => ProstNode::Sink(SinkNode {
-            table_id: me.sink_desc.id().into(),
-            properties: me.sink_desc.properties.inner().clone(),
-            fields: me
-                .sink_desc
-                .columns()
-                .iter()
-                .map(|c| Field::from(c.column_desc.clone()).to_prost())
-                .collect(),
-            sink_pk: me.sink_desc.pk().iter().map(|c| c.index as u32).collect(),
+            sink_desc: Some(me.sink_desc.to_proto()),
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;

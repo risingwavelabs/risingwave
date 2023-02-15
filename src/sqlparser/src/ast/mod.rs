@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -906,6 +906,7 @@ pub enum Statement {
         name: ObjectName,
         columns: Vec<Ident>,
         query: Box<Query>,
+        emit_mode: Option<EmitMode>,
         with_options: Vec<SqlOption>,
     },
     /// CREATE TABLE
@@ -1075,6 +1076,11 @@ pub enum Statement {
     CreateUser(CreateUserStatement),
     /// ALTER USER
     AlterUser(AlterUserStatement),
+    /// ALTER SYSTEM SET configuration_parameter { TO | = } { value | 'value' | DEFAULT }
+    AlterSystem {
+        param: Ident,
+        value: SetVariableValue,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1236,6 +1242,7 @@ impl fmt::Display for Statement {
                 query,
                 materialized,
                 with_options,
+                emit_mode,
             } => {
                 write!(
                     f,
@@ -1244,6 +1251,9 @@ impl fmt::Display for Statement {
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
                     name = name
                 )?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
@@ -1506,6 +1516,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
+            }
+            Statement::AlterSystem{param, value} => {
+                f.write_str("ALTER SYSTEM SET ")?;
+                write!(
+                    f,
+                    "{param} = {value}",
+                )
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -1910,6 +1927,22 @@ impl fmt::Display for SqlOption {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum EmitMode {
+    Immediately,
+    OnWindowClose,
+}
+
+impl fmt::Display for EmitMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            EmitMode::Immediately => "IMMEDIATELY",
+            EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionMode {
     AccessMode(TransactionAccessMode),
     IsolationLevel(TransactionIsolationLevel),
@@ -2163,6 +2196,7 @@ impl fmt::Display for CreateFunctionBody {
 pub enum SetVariableValue {
     Ident(Ident),
     Literal(Value),
+    Default,
 }
 
 impl fmt::Display for SetVariableValue {
@@ -2171,6 +2205,7 @@ impl fmt::Display for SetVariableValue {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Default => write!(f, "DEFAULT"),
         }
     }
 }
