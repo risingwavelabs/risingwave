@@ -250,7 +250,10 @@ pub fn from_avro_value(value: Value) -> Result<Datum> {
         Value::Union(_, value) => return from_avro_value(*value),
         Value::Decimal(decimal) => {
             // TODO
-            let err_msg = format!("avro parse error. decimal type is not supported yest {:?}", decimal);
+            let err_msg = format!(
+                "avro parse error. decimal type is not supported yest {:?}",
+                decimal
+            );
             return Err(RwError::from(InternalError(err_msg)));
         }
         _ => {
