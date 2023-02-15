@@ -27,7 +27,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{
@@ -665,7 +665,7 @@ impl<S: StateStore> StateTable<S> {
         let key_chunk = chunk.reorder_columns(self.pk_indices());
         let vnode_and_pks = key_chunk
             .rows_with_holes()
-            .zip_eq_debug(vnodes.iter())
+            .zip_eq_fast(vnodes.iter())
             .map(|(r, vnode)| {
                 let mut buffer = BytesMut::new();
                 buffer.put_slice(&vnode.to_be_bytes()[..]);

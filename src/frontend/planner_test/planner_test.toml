@@ -55,6 +55,10 @@ echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
 '''
 category = "RiseDev - Test"
 
+[tasks.dapt]
+alias = "do-apply-planner-test"
+
+
 [tasks.run-planner-test]
 description = "Run planner test"
 category = "RiseDev - Test"

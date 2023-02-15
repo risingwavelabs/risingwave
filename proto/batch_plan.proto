@@ -77,6 +77,8 @@ message FilterNode {
 message InsertNode {
   // Id of the table to perform inserting.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 5;
   repeated uint32 column_indices = 2;
   // An optional field and will be `None` for tables without user-defined pk.
   // The `BatchInsertExecutor` should add a column with NULL value which will
@@ -88,12 +90,16 @@ message InsertNode {
 message DeleteNode {
   // Id of the table to perform deleting.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
   bool returning = 2;
 }
 
 message UpdateNode {
   // Id of the table to perform updating.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 4;
   repeated expr.ExprNode exprs = 2;
   bool returning = 3;
 }
