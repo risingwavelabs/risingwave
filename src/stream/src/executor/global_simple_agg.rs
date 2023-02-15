@@ -312,7 +312,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 .map(|f| f.data_type())
                 .collect::<Vec<_>>();
             let chunk = StreamChunk::from_rows(&[], &data_types[..]);
-            print!("STREAM CHUNK {:?}, {:?}", chunk.columns(), input_schema);
             // Apply empty chunk
             Self::apply_chunk(
                 &ctx,

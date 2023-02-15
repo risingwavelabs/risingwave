@@ -145,7 +145,6 @@ impl<S: StateStore> AggGroup<S> {
                 self.group_key.as_ref(),
             )
             .await?;
-        println!("COLUMNS, {:?}", columns);
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in self
             .states
