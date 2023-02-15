@@ -98,8 +98,7 @@
     └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: select 1
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select a from t as t2(a);

@@ -1076,6 +1076,11 @@ pub enum Statement {
     CreateUser(CreateUserStatement),
     /// ALTER USER
     AlterUser(AlterUserStatement),
+    /// ALTER SYSTEM SET configuration_parameter { TO | = } { value | 'value' | DEFAULT }
+    AlterSystem {
+        param: Ident,
+        value: SetVariableValue,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1511,6 +1516,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
+            }
+            Statement::AlterSystem{param, value} => {
+                f.write_str("ALTER SYSTEM SET ")?;
+                write!(
+                    f,
+                    "{param} = {value}",
+                )
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -2184,6 +2196,7 @@ impl fmt::Display for CreateFunctionBody {
 pub enum SetVariableValue {
     Ident(Ident),
     Literal(Value),
+    Default,
 }
 
 impl fmt::Display for SetVariableValue {
@@ -2192,6 +2205,7 @@ impl fmt::Display for SetVariableValue {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Default => write!(f, "DEFAULT"),
         }
     }
 }
