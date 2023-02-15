@@ -16,12 +16,13 @@ use std::iter::once;
 
 use auto_enums::auto_enum;
 
+use super::data_chunk_iter::DataChunkRefIter;
 use super::RowRef;
 use crate::array::{Op, StreamChunk};
 
 impl StreamChunk {
     /// Return an iterator on stream records of this stream chunk.
-    pub fn records(&self) -> impl Iterator<Item = RecordRef<'_>> {
+    pub fn records(&self) -> StreamChunkRefIter<'_> {
         StreamChunkRefIter {
             chunk: self,
             inner: self.data.rows(),
@@ -42,12 +43,10 @@ impl StreamChunk {
     }
 }
 
-type RowRefIter<'a> = impl Iterator<Item = RowRef<'a>>;
-
-struct StreamChunkRefIter<'a> {
+pub struct StreamChunkRefIter<'a> {
     chunk: &'a StreamChunk,
 
-    inner: RowRefIter<'a>,
+    inner: DataChunkRefIter<'a>,
 }
 
 impl<'a> Iterator for StreamChunkRefIter<'a> {
@@ -74,6 +73,11 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
             }
             Op::UpdateInsert => panic!("expect a U- before U+"),
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lower, upper) = self.inner.size_hint();
+        (lower / 2, upper)
     }
 }
 

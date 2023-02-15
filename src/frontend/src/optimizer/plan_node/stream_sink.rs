@@ -14,40 +14,34 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Field;
+use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
-    // TODO(yuhao): Maybe use a real `SinkCatalog` here. @st1page
-    sink_catalog: TableCatalog,
+    sink_desc: SinkDesc,
 }
 
 impl StreamSink {
     #[must_use]
-    pub fn new(input: PlanRef, sink_catalog: TableCatalog) -> Self {
+    pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
         let base = PlanBase::derive_stream_plan_base(&input);
-        Self::with_base(input, sink_catalog, base)
-    }
-
-    pub fn with_base(input: PlanRef, sink_catalog: TableCatalog, base: PlanBase) -> Self {
         Self {
             base,
             input,
-            sink_catalog,
+            sink_desc,
         }
     }
 
-    pub fn sink_catalog(&self) -> &TableCatalog {
-        &self.sink_catalog
+    pub fn sink_desc(&self) -> &SinkDesc {
+        &self.sink_desc
     }
 }
 
@@ -57,7 +51,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.sink_catalog.clone())
+        Self::new(input, self.sink_desc.clone())
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -76,20 +70,7 @@ impl StreamNode for StreamSink {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Sink(SinkNode {
-            table_id: self.sink_catalog.id().into(),
-            fields: self
-                .sink_catalog
-                .columns()
-                .iter()
-                .map(|c| Field::from(c.column_desc.clone()).to_prost())
-                .collect(),
-            sink_pk: self
-                .sink_catalog
-                .pk()
-                .iter()
-                .map(|c| c.index as u32)
-                .collect(),
-            properties: self.sink_catalog.properties.inner().clone(),
+            sink_desc: Some(self.sink_desc.to_proto()),
         })
     }
 }

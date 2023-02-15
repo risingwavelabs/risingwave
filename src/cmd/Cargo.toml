@@ -12,7 +12,10 @@ static-link = ["workspace-config/enable-static-link"]
 static-log-level = ["workspace-config/enable-static-log-level"]
 
 [package.metadata.cargo-machete]
-ignored = ["workspace-config", "workspace-hack", "task_stats_alloc"]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 
 [dependencies]
 anyhow = "1"
@@ -61,4 +64,3 @@ path = "src/bin/compactor.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
-

@@ -14,10 +14,14 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::executor::block_on;
+use petgraph::dot::{Config, Dot};
+use petgraph::Graph;
 use pgwire::pg_server::SessionId;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
@@ -151,6 +155,8 @@ impl QueryExecution {
                     query_execution_info,
                 };
 
+                tracing::trace!("Starting query: {:?}", self.query.query_id);
+
                 // Not trace the error here, it will be processed in scheduler.
                 tokio::spawn(async move { runner.run(pinned_snapshot).await });
 
@@ -164,6 +170,7 @@ impl QueryExecution {
                     self.query.query_id
                 );
 
+                tracing::trace!("Query {:?} started.", self.query.query_id);
                 Ok(root_stage)
             }
             _ => {
@@ -219,6 +226,33 @@ impl QueryExecution {
             stage_executions.insert(stage_id, stage_exec);
         }
         stage_executions
+    }
+}
+
+impl Debug for QueryRunner {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut graph = Graph::<String, String>::new();
+        let mut stage_id_to_node_id = HashMap::new();
+        for stage in &self.stage_executions {
+            let node_id = graph.add_node(format!("{} {}", stage.0, block_on(stage.1.state())));
+            stage_id_to_node_id.insert(stage.0, node_id);
+        }
+
+        for stage in &self.stage_executions {
+            let stage_id = stage.0;
+            if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id) {
+                for child_stage in child_stages {
+                    graph.add_edge(
+                        *stage_id_to_node_id.get(stage_id).unwrap(),
+                        *stage_id_to_node_id.get(child_stage).unwrap(),
+                        "".to_string(),
+                    );
+                }
+            }
+        }
+
+        // Visit https://dreampuf.github.io/GraphvizOnline/ to display the result
+        writeln!(f, "{}", Dot::with_config(&graph, &[Config::EdgeNoLabel]))
     }
 }
 
@@ -290,6 +324,10 @@ impl QueryRunner {
                     finished_stage_cnt += 1;
                     assert!(finished_stage_cnt <= self.stage_executions.len());
                     if finished_stage_cnt == self.stage_executions.len() {
+                        tracing::trace!(
+                            "Query {:?} completed, starting to clean stage tasks.",
+                            &self.query.query_id
+                        );
                         // Now all stages completed, we should remove all
                         self.clean_all_stages(None).await;
                         break;
@@ -302,30 +340,6 @@ impl QueryRunner {
                     break;
                 }
             }
-
-            // {
-            //     let mut graph = Graph::<String, String>::new();
-            //     let mut stage_id_to_node_id = HashMap::new();
-            //     for stage in &self.stage_executions {
-            //         let node_id = graph.add_node(format!("{} {}", stage.0,
-            // stage.1.state().await));         stage_id_to_node_id.insert(stage.0,
-            // node_id);     }
-            //
-            //     for stage in &self.stage_executions {
-            //         let stage_id = stage.0;
-            //         if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id)
-            // {             for child_stage in child_stages {
-            //                 graph.add_edge(
-            //                     stage_id_to_node_id.get(stage_id).unwrap().clone(),
-            //                     stage_id_to_node_id.get(child_stage).unwrap().clone(),
-            //                     "".to_string(),
-            //                 );
-            //             }
-            //         }
-            //     }
-            //     println!("Printing query execution {} states:", self.query.query_id());
-            //     println!("{}", Dot::with_config(&graph, &[Config::EdgeNoLabel]));
-            // }
         }
     }
 
@@ -378,7 +392,7 @@ impl QueryRunner {
 
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
-    async fn clean_all_stages(mut self, error: Option<SchedulerError>) {
+    async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
         let error_msg = error.as_ref().map(|e| e.to_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.
@@ -400,6 +414,7 @@ impl QueryRunner {
             // Query Result Fetcher.
         }
 
+        tracing::trace!("Cleaning stages in query [{:?}]", self.query.query_id);
         // Stop all running stages.
         for stage_execution in self.stage_executions.values() {
             // The stop is return immediately so no need to spawn tasks.

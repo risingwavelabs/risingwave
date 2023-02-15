@@ -239,8 +239,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // Generate CROSS JOIN
         let mut lateral_contexts = vec![];
-        for _ in 0..self.tables.len() {
-            if self.rng.gen_bool(0.3) {
+        for _ in 0..usize::min(self.tables.len(), 5) {
+            if self.flip_coin() {
                 let (table_with_join, mut table) = self.gen_from_relation();
                 from.push(table_with_join);
                 lateral_contexts.append(&mut table);

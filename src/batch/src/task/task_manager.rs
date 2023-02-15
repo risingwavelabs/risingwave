@@ -152,6 +152,7 @@ impl BatchManager {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
+                tracing::trace!("Removed task: {:?}", task.get_task_id());
                 task.abort_task();
                 self.metrics.task_num.dec()
             }
@@ -255,7 +256,7 @@ impl BatchManager {
 mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::make_i32_literal;
+    use risingwave_expr::expr::test_utils::make_i32_literal;
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;

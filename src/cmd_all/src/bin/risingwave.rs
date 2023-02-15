@@ -85,7 +85,7 @@ fn main() -> Result<()> {
         );
     }
 
-    // frontend node configuration
+    // compactor node configuration
     for fn_name in ["compactor", "compactor-node", "compactor_node"] {
         fns.insert(
             fn_name,

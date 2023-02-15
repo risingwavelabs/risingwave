@@ -22,9 +22,8 @@ ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 auto_enums = { version = "0.7", features = ["futures"] }
-aws-smithy-async = { version = "0.51", default-features = false, features = ["rt-tokio"] }
-aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls"] }
-aws-smithy-http = { version = "0.51", default-features = false, features = ["event-stream", "rt-tokio"] }
+aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
+aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
@@ -36,6 +35,7 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
+digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -51,7 +51,6 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hdrhistogram = { version = "7" }
 hyper = { version = "0.14", features = ["full"] }
-indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -67,7 +66,7 @@ madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "i
 memchr = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
-num-bigint = { version = "0.4", default-features = false, features = ["std"] }
+num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
@@ -114,9 +113,8 @@ anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 auto_enums = { version = "0.7", features = ["futures"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "std"] }
-aws-smithy-async = { version = "0.51", default-features = false, features = ["rt-tokio"] }
-aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls"] }
-aws-smithy-http = { version = "0.51", default-features = false, features = ["event-stream", "rt-tokio"] }
+aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
+aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
@@ -129,6 +127,7 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
+digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -144,7 +143,6 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hdrhistogram = { version = "7" }
 hyper = { version = "0.14", features = ["full"] }
-indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = { version = "0.10" }
 lexical-core = { version = "0.8", features = ["format"] }
@@ -160,7 +158,7 @@ madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "i
 memchr = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
 multimap = { version = "0.8" }
-num-bigint = { version = "0.4", default-features = false, features = ["std"] }
+num-bigint = { version = "0.4" }
 num-integer = { version = "0.1", features = ["i128"] }
 num-traits = { version = "0.2", features = ["i128", "libm"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }

@@ -20,6 +20,7 @@
 
 use risingwave_common::catalog::{is_row_id_column_name, PG_CATALOG_SCHEMA_NAME, ROWID_PREFIX};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
 pub(crate) mod catalog_service;
 
@@ -28,7 +29,6 @@ pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
-pub(crate) mod sink_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
@@ -97,4 +97,10 @@ impl From<CatalogError> for RwError {
 pub trait RelationCatalog {
     /// Returns the owner of the relation.
     fn owner(&self) -> UserId;
+}
+
+impl RelationCatalog for SinkCatalog {
+    fn owner(&self) -> UserId {
+        self.owner.user_id
+    }
 }

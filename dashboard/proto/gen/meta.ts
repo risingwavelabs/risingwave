@@ -536,6 +536,31 @@ export interface MembersResponse {
   members: MetaMember[];
 }
 
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields.
+ * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ */
+export interface SystemParams {
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
+}
+
+export interface GetSystemParamsRequest {
+}
+
+export interface GetSystemParamsResponse {
+  params: SystemParams | undefined;
+}
+
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
 }
@@ -2316,6 +2341,108 @@ export const MembersResponse = {
   fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
     const message = createBaseMembersResponse();
     message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return {
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
+  };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsRequest(): GetSystemParamsRequest {
+  return {};
+}
+
+export const GetSystemParamsRequest = {
+  fromJSON(_: any): GetSystemParamsRequest {
+    return {};
+  },
+
+  toJSON(_: GetSystemParamsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsRequest>, I>>(_: I): GetSystemParamsRequest {
+    const message = createBaseGetSystemParamsRequest();
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsResponse(): GetSystemParamsResponse {
+  return { params: undefined };
+}
+
+export const GetSystemParamsResponse = {
+  fromJSON(object: any): GetSystemParamsResponse {
+    return { params: isSet(object.params) ? SystemParams.fromJSON(object.params) : undefined };
+  },
+
+  toJSON(message: GetSystemParamsResponse): unknown {
+    const obj: any = {};
+    message.params !== undefined && (obj.params = message.params ? SystemParams.toJSON(message.params) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsResponse>, I>>(object: I): GetSystemParamsResponse {
+    const message = createBaseGetSystemParamsResponse();
+    message.params = (object.params !== undefined && object.params !== null)
+      ? SystemParams.fromPartial(object.params)
+      : undefined;
     return message;
   },
 };
