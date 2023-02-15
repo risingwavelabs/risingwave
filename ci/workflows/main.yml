@@ -332,6 +332,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
     timeout_in_minutes: 60
     retry: *auto-retry
 
@@ -347,6 +348,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
     timeout_in_minutes: 60
     retry: *auto-retry
     agents:
