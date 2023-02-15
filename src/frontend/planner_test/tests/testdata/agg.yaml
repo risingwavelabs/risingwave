@@ -1073,3 +1073,33 @@
       └─LogicalAgg { group_key: [t.v2], aggs: [min(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+- name: stddev_samp
+  sql: |
+    create table t (v1 int);
+    select stddev_samp(v1), stddev_pop(v1) from t;
+  logical_plan: |
+    LogicalProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal::Float64, Pow(((sum((t.v1 * t.v1))::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64))::Float64, 0.5:Float64)), Pow(((sum((t.v1 * t.v1))::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))::Float64, 0.5:Float64)] }
+    └─LogicalAgg { aggs: [sum((t.v1 * t.v1)), sum(t.v1), count(t.v1), sum((t.v1 * t.v1)), sum(t.v1), count(t.v1)] }
+      └─LogicalProject { exprs: [t.v1, (t.v1 * t.v1)] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+  batch_plan: |
+    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal::Float64, Pow(((sum(sum((t.v1 * t.v1)))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64))::Float64, 0.5:Float64)), Pow(((sum(sum((t.v1 * t.v1)))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))::Float64, 0.5:Float64)] }
+    └─BatchSimpleAgg { aggs: [sum(sum((t.v1 * t.v1))), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum((t.v1 * t.v1))), sum(sum(t.v1)), sum0(count(t.v1))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [sum((t.v1 * t.v1)), sum(t.v1), count(t.v1), sum((t.v1 * t.v1)), sum(t.v1), count(t.v1)] }
+          └─BatchProject { exprs: [t.v1, (t.v1 * t.v1)] }
+            └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  batch_local_plan: |
+    BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal::Float64, Pow(((sum((t.v1 * t.v1))::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64))::Float64, 0.5:Float64)), Pow(((sum((t.v1 * t.v1))::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))::Float64, 0.5:Float64)] }
+    └─BatchSimpleAgg { aggs: [sum((t.v1 * t.v1)), sum(t.v1), count(t.v1), sum((t.v1 * t.v1)), sum(t.v1), count(t.v1)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [t.v1, (t.v1 * t.v1)] }
+          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [stddev_samp, stddev_pop], pk_columns: [] }
+    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal::Float64, Pow(((sum(sum((t.v1 * t.v1)))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64))::Float64, 0.5:Float64)), Pow(((sum(sum((t.v1 * t.v1)))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))::Float64, 0.5:Float64)] }
+      └─StreamGlobalSimpleAgg { aggs: [count, sum(sum((t.v1 * t.v1))), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum((t.v1 * t.v1))), sum(sum(t.v1)), sum0(count(t.v1))] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum((t.v1 * t.v1)), sum(t.v1), count(t.v1), sum((t.v1 * t.v1)), sum(t.v1), count(t.v1)] }
+            └─StreamProject { exprs: [t.v1, (t.v1 * t.v1), t._row_id] }
+              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
