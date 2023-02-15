@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -39,6 +40,7 @@ use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
@@ -124,11 +126,11 @@ pub async fn rpc_serve(
             .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
-            let pod_name = match std::env::var("POD_NAME") {
+            let pod_name = match env::var("POD_NAME") {
                 Ok(pn) => pn,
                 Err(_) => {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    std::env::set_var("POD_NAME", id.clone());
+                    let id = Uuid::new_v4().to_string();
+                    env::set_var("POD_NAME", id.clone());
                     id
                 }
             };
@@ -136,7 +138,7 @@ pub async fn rpc_serve(
             let election_client = Arc::new(EtcdElectionClient::new(
                 endpoints,
                 Some(options),
-                [pod_name, address_info.advertise_addr.clone()].join("/"),
+                [pod_name, address_info.advertise_addr.clone()].join(""),
             ));
 
             rpc_serve_with_store(
