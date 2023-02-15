@@ -27,6 +27,13 @@ class UserDefinedFunction:
         """
         pass
 
+    def full_name(self) -> str:
+        """
+        A unique name for the function. Composed by function name and input types.
+        Example: "gcd/int32,int32"
+        """
+        return self._name + '/' + ','.join([str(t) for t in self._input_types])
+
     def result_schema(self) -> pa.Schema:
         """
         Returns the schema of the result table.
@@ -49,10 +56,11 @@ class ScalarFunction(UserDefinedFunction):
         """
         pass
 
-    def eval_batch(self, batch: pa.RecordBatch) -> pa.Table:
-        data = pa.array([self.eval(*[col[i].as_py() for col in batch])
-                         for i in range(len(batch[0]))])
-        return pa.Table.from_arrays([data], names=[''])
+    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        result = pa.array([self.eval(*[col[i].as_py() for col in batch])
+                           for i in range(batch.num_rows)],
+                          type=self._result_type)
+        return pa.RecordBatch.from_arrays([result], schema=self.result_schema())
 
 
 class UserDefinedFunctionWrapper(ScalarFunction):
@@ -67,6 +75,9 @@ class UserDefinedFunctionWrapper(ScalarFunction):
         self._result_type = result_type
         self._name = name or (
             func.__name__ if hasattr(func, '__name__') else func.__class__.__name__)
+
+    def __call__(self, *args):
+        return self._func(*args)
 
     def eval(self, *args):
         return self._func(*args)
@@ -93,6 +104,7 @@ def udf(f: Union[Callable, ScalarFunction, Type] = None,
 
 class UdfServer(pa.flight.FlightServerBase):
     """
+    UDF server based on Apache Arrow Flight protocol.
     Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
     """
     _functions: Dict[str, UserDefinedFunction]
@@ -108,7 +120,9 @@ class UdfServer(pa.flight.FlightServerBase):
 
     def add_function(self, udf: UserDefinedFunction):
         """Add a function to the server."""
-        self._functions[udf._name] = udf
+        name = udf.full_name()
+        print('added function:', name)
+        self._functions[name] = udf
 
     def do_exchange(self, context, descriptor, reader, writer):
         """Run a simple echo server."""
@@ -117,7 +131,7 @@ class UdfServer(pa.flight.FlightServerBase):
         for chunk in reader:
             print(pa.Table.from_batches([chunk.data]))
             result = udf.eval_batch(chunk.data)
-            writer.write_table(result)
+            writer.write_batch(result)
 
     def serve(self):
         """Start the server."""
