@@ -87,10 +87,9 @@ impl TableDmlHandle {
             // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
             // error instead of asserting here.
             // TODO: may reject DML when streaming executors are not recovered.
-            let (index, tx) = core
+            let tx = core
                 .changes_txs
                 .iter()
-                .enumerate()
                 .choose(&mut rand::thread_rng())
                 .context("no available table reader in streaming source executors")?;
 
@@ -109,12 +108,13 @@ impl TableDmlHandle {
                 // It's possible that the source executor is scaled in or migrated, so the channel
                 // is closed. In this case, we should remove the closed channel and retry.
                 Err(SendError((chunk_, _))) => {
-                    tracing::info!("find one closed table source channel, remove it and retry");
-
+                    tracing::info!("find one closed table source channel, retry");
                     chunk = chunk_;
+
+                    // Remove all closed channels.
                     RwLockUpgradableReadGuard::upgrade(core)
                         .changes_txs
-                        .swap_remove(index);
+                        .retain(|tx| !tx.is_closed());
                 }
             }
         }
