@@ -69,6 +69,7 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::TimestampMicros => DataType::Timestamp,
         Schema::Duration => DataType::Interval,
         Schema::Enum { .. } => DataType::Varchar,
+        Schema::Decimal { .. } => DataType::Decimal,
         Schema::Record { fields, .. } => {
             let struct_fields = fields
                 .iter()
@@ -83,7 +84,7 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
                 datatype: Box::new(item_type),
             }
         }
-        Schema::Union(union_schema) if union_schema.is_nullable() => {
+        Schema::Union(union_schema) => {
             let nested_schema = union_schema
                 .variants()
                 .iter()
