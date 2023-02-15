@@ -392,7 +392,20 @@ pub mod verify {
         }
     }
 
-    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {}
+    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
+        define_local_state_store_associated_type!();
+
+        // We don't verify `may_exist` across different state stores because
+        // the return value of `may_exist` is implementation specific and may not
+        // be consistent across different state store backends.
+        fn may_exist(
+            &self,
+            _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            _read_options: ReadOptions,
+        ) -> Self::MayExistFuture<'_> {
+            async move { Ok(true) }
+        }
+    }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
@@ -784,14 +797,26 @@ pub mod boxed_state_store {
 
     // For LocalStateStore
 
+    #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore:
         DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite
     {
+        async fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<bool>;
     }
 
-    impl<S: DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite>
-        DynamicDispatchedLocalStateStore for S
-    {
+    #[async_trait::async_trait]
+    impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
+        async fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<bool> {
+            self.may_exist(key_range, read_options).await
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
@@ -799,7 +824,17 @@ pub mod boxed_state_store {
     impl_state_store_read_for_box!(BoxDynamicDispatchedLocalStateStore);
     impl_state_store_write_for_box!(BoxDynamicDispatchedLocalStateStore);
 
-    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {}
+    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
+        define_local_state_store_associated_type!();
+
+        fn may_exist(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> Self::MayExistFuture<'_> {
+            self.deref().may_exist(key_range, read_options)
+        }
+    }
 
     // For global StateStore
 

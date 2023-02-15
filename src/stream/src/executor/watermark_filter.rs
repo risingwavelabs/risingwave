@@ -22,8 +22,9 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{
+    new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::StateStore;
@@ -311,8 +312,8 @@ mod tests {
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
 
-        // TODO: may enable sanity check for watermark filter after we have upsert.
-        StateTable::new_with_distribution_no_sanity_check(
+        // TODO: use consistent operations for watermark filter after we have upsert.
+        StateTable::new_with_distribution_inconsistent_op(
             mem_state,
             TableId::new(table_id),
             column_descs,

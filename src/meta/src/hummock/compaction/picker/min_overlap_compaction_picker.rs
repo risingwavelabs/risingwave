@@ -173,6 +173,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let mut level_handlers = vec![
             LevelHandler::new(0),
@@ -246,6 +247,7 @@ pub mod tests {
         let levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let levels_handler = vec![
             LevelHandler::new(0),

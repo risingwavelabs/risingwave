@@ -33,6 +33,7 @@ use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
@@ -49,6 +50,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    SystemParamManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::MetaMetrics;
@@ -58,6 +60,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
@@ -304,6 +307,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
+    let init_system_params = opts.init_system_params();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -323,11 +327,13 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .unwrap(),
     );
 
+    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
         meta_metrics.clone(),
         compactor_manager.clone(),
+        catalog_manager.clone(),
     )
     .await
     .unwrap();
@@ -353,8 +359,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
-
-    let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
@@ -401,7 +405,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     hummock_manager
-        .purge_stale(
+        .purge(
             &fragment_manager
                 .list_table_fragments()
                 .await
@@ -438,6 +442,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
+    let system_params_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -482,6 +488,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
+    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -561,6 +568,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(ScaleServiceServer::new(scale_srv))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(SystemParamsServiceServer::new(system_params_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {

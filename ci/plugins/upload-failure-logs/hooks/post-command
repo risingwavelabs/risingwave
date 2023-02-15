@@ -14,7 +14,7 @@ if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
     buildkite-agent artifact upload "regress-test-logs/*"
     buildkite-agent artifact upload regress-test-logs.zip
   fi
-  if [ -e "$PWD/connector-service.log" ]; then
-    buildkite-agent artifact upload "$PWD/connector-service.log"
+  if [ -e "$PWD/connector-node.log" ]; then
+    buildkite-agent artifact upload "$PWD/connector-node.log"
   fi
 fi
