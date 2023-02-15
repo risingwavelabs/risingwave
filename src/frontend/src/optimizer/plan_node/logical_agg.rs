@@ -638,7 +638,7 @@ impl LogicalAggBuilder {
                     self.group_key.len() + self.agg_calls.len() - 1,
                     sum_return_type,
                 ))
-                .cast_implicit(return_type)
+                .cast_implicit(return_type.clone())
                 .unwrap();
 
                 // then, we compute count
@@ -751,7 +751,7 @@ impl LogicalAggBuilder {
                                         )
                                         .unwrap(),
                                     ),
-                                    ExprImpl::from(Literal::new(None, DataType::Float64)),
+                                    ExprImpl::from(Literal::new(None, return_type)),
                                     target_expr,
                                 ],
                             )
