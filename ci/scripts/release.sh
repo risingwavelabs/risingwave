@@ -3,6 +3,8 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+connector_node_version=$(cat ci/connector-node-version)
+
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
   exit 0
@@ -28,7 +30,7 @@ echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
-echo "--- Build release binary"
+echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
 cd target/release && chmod +x risingwave
 
@@ -54,6 +56,12 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   echo "--- Release upload asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+
+  echo "--- Release build and upload risingwave connector node jar asset"
+  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
+  cd risingwave-connector-node && git checkout ${connector_node_version} && mvn -B package -Dmaven.test.skip=true
+  cd assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
 
 
