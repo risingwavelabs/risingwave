@@ -31,7 +31,7 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{from_avro_value, SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{ErrorReportingContext, SourceColumnDesc};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -46,6 +46,7 @@ pub struct DebeziumAvroParser {
     schema: Arc<Schema>,
     schema_resolver: Arc<ConfluentSchemaResolver>,
     rw_columns: Vec<SourceColumnDesc>,
+    error_ctx: ErrorReportingContext,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +153,7 @@ impl DebeziumAvroParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         config: DebeziumAvroParserConfig,
+        error_ctx: ErrorReportingContext,
     ) -> Result<Self> {
         let DebeziumAvroParserConfig {
             schema,
@@ -161,6 +163,7 @@ impl DebeziumAvroParser {
             schema,
             schema_resolver,
             rw_columns,
+            error_ctx,
         })
     }
 
