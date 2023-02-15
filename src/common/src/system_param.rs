@@ -138,7 +138,7 @@ macro_rules! impl_set_system_param {
                 $(
                     key_of!($field) => {
                         let v = if let Some(v) = value {
-                            v.parse().map_err(|_| RwError::from(ErrorCode::SystemParamsError(format!("cannot parse parameter value"))))?
+                            v.parse().map_err(|_| format!("cannot parse parameter value"))?
                         } else {
                             $default
                         };
@@ -147,11 +147,10 @@ macro_rules! impl_set_system_param {
                     },
                 )*
                 _ => {
-                    return Err(ErrorCode::SystemParamsError(format!(
+                    return Err(format!(
                         "unrecognized system param {:?}",
                         key
-                    ))
-                    .into());
+                    ));
                 }
             };
             Ok(())
@@ -209,7 +208,7 @@ mod sanity_check {
     }
 
     fn expect_immutable(field: &str) -> Result<()> {
-        Err(ErrorCode::SystemParamsError(format!("{:?} is immutable", field)).into())
+        Err(format!("{:?} is immutable", field))
     }
 
     fn expect_range<T, R>(v: T, range: R) -> Result<()>
@@ -218,11 +217,7 @@ mod sanity_check {
         R: RangeBounds<T> + Debug,
     {
         if !range.contains::<T>(&v) {
-            Err(ErrorCode::SystemParamsError(format!(
-                "value {:?} out of range, expect {:?}",
-                v, range
-            ))
-            .into())
+            Err(format!("value {:?} out of range, expect {:?}", v, range))
         } else {
             Ok(())
         }
