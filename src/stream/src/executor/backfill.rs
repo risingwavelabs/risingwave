@@ -153,6 +153,9 @@ where
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
 
+        // Keep track of rows from the upstream and snapshot.
+        let mut processed_rows: u64 = 0;
+
         // Backfill Algorithm:
         //
         //   backfill_stream
@@ -177,7 +180,6 @@ where
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         'backfill_loop: loop {
-            let mut processed_rows: u64 = 0;
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
             let left_upstream = upstream.by_ref().map(Either::Left);
