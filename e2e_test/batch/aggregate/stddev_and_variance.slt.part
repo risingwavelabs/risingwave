@@ -34,4 +34,12 @@ select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
 1.8547236990991407 2.073644135332772 3.44 4.30
 
 statement ok
+update t set v = 7 where v = 4
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+2.3151673805580453 2.588435821108957 5.36 6.70
+
+statement ok
 drop table t
