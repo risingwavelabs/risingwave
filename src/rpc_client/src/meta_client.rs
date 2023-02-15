@@ -1326,7 +1326,7 @@ impl GrpcMetaClient {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to connect to meta server {}, trying next address: {}",
+                            "Failed to connect to meta server {}, trying again: {}",
                             addr,
                             e
                         )
@@ -1335,7 +1335,7 @@ impl GrpcMetaClient {
             }
 
             Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
+                "Failed to connect to meta server"
             )))
         })
         .await?;
