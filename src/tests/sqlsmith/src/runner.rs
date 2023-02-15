@@ -245,7 +245,6 @@ async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &s
     s
 }
 
-#[allow(dead_code)]
 async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
     let session_sql = session_sql_gen(rng);
     tracing::info!("[EXECUTING TEST SESSION_VAR]: {}", session_sql);
@@ -286,8 +285,7 @@ async fn test_batch_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
-        // test_session_variable(client, rng).await;
+        test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
@@ -306,8 +304,7 @@ async fn test_stream_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
-        // test_session_variable(client, rng).await;
+        test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
