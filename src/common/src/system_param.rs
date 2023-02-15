@@ -17,9 +17,9 @@ use std::collections::HashSet;
 use paste::paste;
 use risingwave_pb::meta::SystemParams;
 
-use crate::error::{ErrorCode, RwError};
+pub type SystemParamsError = String;
 
-type Result<T> = core::result::Result<T, RwError>;
+type Result<T> = core::result::Result<T, SystemParamsError>;
 
 #[allow(dead_code)]
 const MUTABLE: bool = true;
@@ -84,10 +84,10 @@ macro_rules! impl_system_params_to_kv {
                 key_of!($field).to_string(),
                 params
                     .$field.as_ref()
-                    .ok_or::<RwError>(ErrorCode::SystemParamsError(format!(
+                    .ok_or_else(||format!(
                         "missing system param {:?}",
                         key_of!($field)
-                    )).into())?
+                    ))?
                     .to_string(),
             ));)*
             Ok(ret)
@@ -118,21 +118,19 @@ macro_rules! impl_system_params_from_kv {
                         key_of!($field) => ret.$field = Some(v.parse().unwrap()),
                     )*
                     _ => {
-                        return Err(ErrorCode::SystemParamsError(format!(
+                        return Err(format!(
                             "unrecognized system param {:?}",
                             k
-                        ))
-                        .into());
+                        ));
                     }
                 }
                 expected_keys.remove(k);
             }
             if !expected_keys.is_empty() {
-                return Err(ErrorCode::SystemParamsError(format!(
+                return Err(format!(
                     "missing system param {:?}",
                     expected_keys
-                ))
-                .into());
+                ));
             }
             Ok(ret)
         }
