@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -23,7 +24,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
@@ -192,6 +193,33 @@ impl SharedBufferBatch {
                 .table_key
                 .as_ref()
                 .le(table_key.as_ref())
+    }
+
+    pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
+        self.inner
+            .binary_search_by(|m| {
+                let key = &m.0;
+                let too_left = match &table_key_range.0 {
+                    std::ops::Bound::Included(range_start) => range_start.as_ref() > key.as_ref(),
+                    std::ops::Bound::Excluded(range_start) => range_start.as_ref() >= key.as_ref(),
+                    std::ops::Bound::Unbounded => false,
+                };
+                if too_left {
+                    return Ordering::Less;
+                }
+
+                let too_right = match &table_key_range.1 {
+                    std::ops::Bound::Included(range_end) => range_end.as_ref() < key.as_ref(),
+                    std::ops::Bound::Excluded(range_end) => range_end.as_ref() <= key.as_ref(),
+                    std::ops::Bound::Unbounded => false,
+                };
+                if too_right {
+                    return Ordering::Greater;
+                }
+
+                Ordering::Equal
+            })
+            .is_ok()
     }
 
     pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
@@ -498,7 +526,10 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound::{Excluded, Included};
+
     use itertools::Itertools;
+    use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -763,5 +794,49 @@ mod tests {
         iter.seek(FullKey::for_test(TableId::new(1), vec![], epoch).to_ref())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_batch_range_existx() {
+        let epoch = 1;
+        let shared_buffer_items = vec![
+            (Vec::from("a_1"), HummockValue::put(Bytes::from("value1"))),
+            (Vec::from("a_3"), HummockValue::put(Bytes::from("value2"))),
+            (Vec::from("a_5"), HummockValue::put(Bytes::from("value3"))),
+            (Vec::from("b_2"), HummockValue::put(Bytes::from("value3"))),
+        ];
+        let shared_buffer_batch = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items),
+            epoch,
+            Default::default(),
+        );
+
+        let range = (Included(Vec::from("a")), Excluded(Vec::from("b")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("a_")), Excluded(Vec::from("b_")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("a_1")), Included(Vec::from("a_1")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("a_1")), Included(Vec::from("a_2")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("a_0x")), Included(Vec::from("a_2x")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("a_")), Excluded(Vec::from("c_")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("b_0x")), Included(Vec::from("b_2x")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("b_2")), Excluded(Vec::from("c_1x")));
+        assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
+
+        let range = (Included(Vec::from("a_0")), Excluded(Vec::from("a_1")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("a__0")), Excluded(Vec::from("a__5")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("b_1")), Excluded(Vec::from("b_2")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("b_3")), Excluded(Vec::from("c_1")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+        let range = (Included(Vec::from("b__x")), Excluded(Vec::from("c__x")));
+        assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
     }
 }

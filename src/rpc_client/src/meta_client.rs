@@ -25,6 +25,7 @@ use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::system_param::system_params_to_kv;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -55,6 +56,7 @@ use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
+use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::{SystemParams as ProstSystemParams, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -68,6 +70,7 @@ use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Streaming};
+use tracing::warn;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -166,19 +169,30 @@ impl MetaClient {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
 
         let grpc_meta_client = GrpcMetaClient::new(addr_strategy).await?;
-        let request = AddWorkerNodeRequest {
+
+        let add_worker_request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
-        let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            grpc_meta_client.add_worker_node(request).await
-        })
-        .await?;
-        let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        let system_params = resp.system_params.unwrap();
+        let add_worker_resp =
+            tokio_retry::Retry::spawn(GrpcMetaClient::retry_strategy_for_request(), || async {
+                let request = add_worker_request.clone();
+                grpc_meta_client.add_worker_node(request).await
+            })
+            .await?;
+        let worker_node = add_worker_resp
+            .node
+            .expect("AddWorkerNodeResponse::node is empty");
+
+        let system_params_request = GetSystemParamsRequest {};
+        let system_params_resp =
+            tokio_retry::Retry::spawn(GrpcMetaClient::retry_strategy_for_request(), || async {
+                let request = system_params_request.clone();
+                grpc_meta_client.get_system_params(request).await
+            })
+            .await?;
+
         Ok((
             Self {
                 worker_id: worker_node.id,
@@ -186,7 +200,7 @@ impl MetaClient {
                 host_addr: addr.clone(),
                 inner: grpc_meta_client,
             },
-            system_params.into(),
+            system_params_resp.params.unwrap().into(),
         ))
     }
 
@@ -741,6 +755,12 @@ impl MetaClient {
         let resp = self.inner.get_meta_snapshot_manifest(req).await?;
         Ok(resp.manifest.expect("should exist"))
     }
+
+    pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
+        let req = GetSystemParamsRequest {};
+        let resp = self.inner.get_system_params(req).await?;
+        Ok(resp.params.unwrap().into())
+    }
 }
 
 #[async_trait]
@@ -937,16 +957,13 @@ impl SystemParamsReader {
     }
 
     // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store<'a>(&'a self, from_local_config: Option<&'a String>) -> &'a str {
+    pub fn state_store(&self, from_local: String) -> String {
         let from_prost = self.prost.state_store.as_ref().unwrap();
         if from_prost.is_empty() {
-            if let Some(s) = from_local_config {
-                s
-            } else {
-                panic!("State store url is neither specified from CLI args nor on meta node");
-            }
+            warn!("--state-store is not specified on meta node, reading from CLI instead");
+            from_local
         } else {
-            from_prost
+            from_prost.clone()
         }
     }
 
@@ -960,6 +977,10 @@ impl SystemParamsReader {
 
     pub fn backup_storage_directory(&self) -> &str {
         self.prost.backup_storage_directory.as_ref().unwrap()
+    }
+
+    pub fn to_kv(&self) -> Vec<(String, String)> {
+        system_params_to_kv(&self.prost).unwrap()
     }
 }
 
@@ -975,6 +996,7 @@ struct GrpcMetaClientCore {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    system_params_client: SystemParamsServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -988,7 +1010,8 @@ impl GrpcMetaClientCore {
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
-        let backup_client = BackupServiceClient::new(channel);
+        let backup_client = BackupServiceClient::new(channel.clone());
+        let system_params_client = SystemParamsServiceClient::new(channel);
         GrpcMetaClientCore {
             cluster_client,
             meta_member_client,
@@ -1000,6 +1023,7 @@ impl GrpcMetaClientCore {
             user_client,
             scale_client,
             backup_client,
+            system_params_client,
         }
     }
 }
@@ -1407,6 +1431,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
         }
     };
 }

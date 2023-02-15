@@ -317,6 +317,7 @@ pub enum ByteStreamSourceParserImpl {
     Avro(AvroParser),
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
+    DebeziumAvro(DebeziumAvroParser),
 }
 
 impl ByteStreamSourceParserImpl {
@@ -329,6 +330,7 @@ impl ByteStreamSourceParserImpl {
             Self::Avro(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
+            Self::DebeziumAvro(parser) => parser.into_stream(msg_stream),
         }
     }
 
@@ -350,6 +352,9 @@ impl ByteStreamSourceParserImpl {
                 DebeziumJsonParser::new(rw_columns).map(Self::DebeziumJson)
             }
             SpecificParserConfig::Maxwell => MaxwellParser::new(rw_columns).map(Self::Maxwell),
+            SpecificParserConfig::DebeziumAvro(config) => {
+                DebeziumAvroParser::new(rw_columns, config).map(Self::DebeziumAvro)
+            }
             SpecificParserConfig::Native => {
                 unreachable!("Native parser should not be created")
             }
@@ -379,6 +384,7 @@ pub enum SpecificParserConfig {
     CanalJson,
     #[default]
     Native,
+    DebeziumAvro(DebeziumAvroParserConfig),
 }
 
 impl SpecificParserConfig {
@@ -392,6 +398,7 @@ impl SpecificParserConfig {
             SpecificParserConfig::Maxwell => SourceFormat::Maxwell,
             SpecificParserConfig::CanalJson => SourceFormat::CanalJson,
             SpecificParserConfig::Native => SourceFormat::Native,
+            SpecificParserConfig::DebeziumAvro(_) => SourceFormat::DebeziumAvro,
         }
     }
 
@@ -423,6 +430,9 @@ impl SpecificParserConfig {
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,
+            SourceFormat::DebeziumAvro => SpecificParserConfig::DebeziumAvro(
+                DebeziumAvroParserConfig::new(props, &info.row_schema_location).await?,
+            ),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "invalid source format".to_string(),

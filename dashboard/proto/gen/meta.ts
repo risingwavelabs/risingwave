@@ -338,7 +338,6 @@ export interface AddWorkerNodeRequest {
 export interface AddWorkerNodeResponse {
   status: Status | undefined;
   node: WorkerNode | undefined;
-  systemParams: SystemParams | undefined;
 }
 
 export interface ActivateWorkerNodeRequest {
@@ -553,6 +552,13 @@ export interface SystemParams {
   dataDirectory?: string | undefined;
   backupStorageUrl?: string | undefined;
   backupStorageDirectory?: string | undefined;
+}
+
+export interface GetSystemParamsRequest {
+}
+
+export interface GetSystemParamsResponse {
+  params: SystemParams | undefined;
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -1307,7 +1313,7 @@ export const AddWorkerNodeRequest = {
 };
 
 function createBaseAddWorkerNodeResponse(): AddWorkerNodeResponse {
-  return { status: undefined, node: undefined, systemParams: undefined };
+  return { status: undefined, node: undefined };
 }
 
 export const AddWorkerNodeResponse = {
@@ -1315,7 +1321,6 @@ export const AddWorkerNodeResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       node: isSet(object.node) ? WorkerNode.fromJSON(object.node) : undefined,
-      systemParams: isSet(object.systemParams) ? SystemParams.fromJSON(object.systemParams) : undefined,
     };
   },
 
@@ -1323,8 +1328,6 @@ export const AddWorkerNodeResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.node !== undefined && (obj.node = message.node ? WorkerNode.toJSON(message.node) : undefined);
-    message.systemParams !== undefined &&
-      (obj.systemParams = message.systemParams ? SystemParams.toJSON(message.systemParams) : undefined);
     return obj;
   },
 
@@ -1335,9 +1338,6 @@ export const AddWorkerNodeResponse = {
       : undefined;
     message.node = (object.node !== undefined && object.node !== null)
       ? WorkerNode.fromPartial(object.node)
-      : undefined;
-    message.systemParams = (object.systemParams !== undefined && object.systemParams !== null)
-      ? SystemParams.fromPartial(object.systemParams)
       : undefined;
     return message;
   },
@@ -2399,6 +2399,50 @@ export const SystemParams = {
     message.dataDirectory = object.dataDirectory ?? undefined;
     message.backupStorageUrl = object.backupStorageUrl ?? undefined;
     message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsRequest(): GetSystemParamsRequest {
+  return {};
+}
+
+export const GetSystemParamsRequest = {
+  fromJSON(_: any): GetSystemParamsRequest {
+    return {};
+  },
+
+  toJSON(_: GetSystemParamsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsRequest>, I>>(_: I): GetSystemParamsRequest {
+    const message = createBaseGetSystemParamsRequest();
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsResponse(): GetSystemParamsResponse {
+  return { params: undefined };
+}
+
+export const GetSystemParamsResponse = {
+  fromJSON(object: any): GetSystemParamsResponse {
+    return { params: isSet(object.params) ? SystemParams.fromJSON(object.params) : undefined };
+  },
+
+  toJSON(message: GetSystemParamsResponse): unknown {
+    const obj: any = {};
+    message.params !== undefined && (obj.params = message.params ? SystemParams.toJSON(message.params) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsResponse>, I>>(object: I): GetSystemParamsResponse {
+    const message = createBaseGetSystemParamsResponse();
+    message.params = (object.params !== undefined && object.params !== null)
+      ? SystemParams.fromPartial(object.params)
+      : undefined;
     return message;
   },
 };

@@ -102,6 +102,7 @@ pub enum SourceFormat {
     CanalJson,
     Csv,
     Native,
+    DebeziumAvro,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
