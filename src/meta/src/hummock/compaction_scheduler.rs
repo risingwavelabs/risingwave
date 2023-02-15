@@ -525,7 +525,7 @@ impl<S> CompactionScheduler<S>
 where
     S: MetaStore,
 {
-    async fn scheduler_event_stream(
+    fn scheduler_event_stream(
         sched_rx: UnboundedReceiver<(CompactionGroupId, compact_task::TaskType)>,
         shutdown_rx: Receiver<()>,
         periodic_space_reclaim_compaction_interval_sec: u64,
