@@ -119,8 +119,6 @@ fn value_encoding_to_literal(
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
             let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
-            // remove unwrap
-            // https://github.com/risingwavelabs/risingwave/issues/7862
             Ok(datum)
         } else {
             unreachable!()
