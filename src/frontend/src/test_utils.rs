@@ -37,10 +37,12 @@ use risingwave_pb::catalog::{
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::CreatingJobInfo;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
+use risingwave_rpc_client::SystemParamsReader;
 use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
@@ -683,6 +685,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
+    }
+
+    async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
+        Ok(SystemParams::default().into())
     }
 }
 

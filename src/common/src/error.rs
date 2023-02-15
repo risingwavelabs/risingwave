@@ -128,16 +128,12 @@ pub enum ErrorCode {
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
-
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-}
-
-pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
-    ErrorCode::InternalError(msg.into().to_string()).into()
+    #[error("SystemParams error: {0}")]
+    SystemParamsError(String),
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {

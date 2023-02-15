@@ -160,9 +160,10 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
+  reserved 3;
+  reserved "system_params";
   common.Status status = 1;
   common.WorkerNode node = 2;
-  SystemParams system_params = 3;
 }
 
 message ActivateWorkerNodeRequest {
@@ -338,4 +339,14 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
+}
+
+message GetSystemParamsRequest {}
+
+message GetSystemParamsResponse {
+  SystemParams params = 1;
+}
+
+service SystemParamsService {
+  rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
 }
