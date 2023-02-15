@@ -15,6 +15,7 @@
 use std::iter;
 
 use auto_enums::auto_enum;
+use itertools::repeat_n;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -53,7 +54,7 @@ impl Vis {
         self.as_ref().is_set(idx)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = bool> + '_ {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = bool> + '_ {
         self.as_ref().iter()
     }
 
@@ -160,11 +161,11 @@ impl<'a> VisRef<'a> {
         }
     }
 
-    #[auto_enum(Iterator)]
-    pub fn iter(self) -> impl Iterator<Item = bool> + 'a {
+    #[auto_enum(ExactSizeIterator)]
+    pub fn iter(self) -> impl ExactSizeIterator<Item = bool> + 'a {
         match self {
             VisRef::Bitmap(b) => b.iter(),
-            VisRef::Compact(c) => iter::repeat(true).take(c),
+            VisRef::Compact(c) => repeat_n(true, c),
         }
     }
 

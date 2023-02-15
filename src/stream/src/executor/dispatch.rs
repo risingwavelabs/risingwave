@@ -641,7 +641,7 @@ impl Dispatcher for HashDataDispatcher {
                         .iter()
                         .copied()
                         .zip_eq_fast(ops)
-                        .zip_eq_debug(visibility.iter())
+                        .zip_eq_fast(visibility.iter())
                         .for_each(|((vnode, op), visible)| {
                             build_op_vis(vnode, op, visible);
                         });

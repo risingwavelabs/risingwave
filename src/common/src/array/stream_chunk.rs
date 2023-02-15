@@ -166,7 +166,7 @@ impl StreamChunk {
             })
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
-        for (op, visible) in ops.into_iter().zip_eq_debug(visibility.iter()) {
+        for (op, visible) in ops.into_iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 new_ops.push(op);
             }

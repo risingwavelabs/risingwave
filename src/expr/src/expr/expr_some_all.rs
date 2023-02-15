@@ -121,8 +121,10 @@ impl Expression for SomeAllExpression {
 
         match bitmap {
             Some(bitmap) => {
-                for ((left, right), visible) in
-                    multizip((arr_left.iter(), arr_right.iter())).zip_eq_debug(bitmap.iter())
+                for ((left, right), visible) in arr_left
+                    .iter()
+                    .zip_eq_fast(arr_right.iter())
+                    .zip_eq_fast(bitmap.iter())
                 {
                     if !visible {
                         num_array.push(None);

@@ -133,7 +133,7 @@ pub fn compute_chunk_vnode(
         chunk
             .get_hash_values(indices, Crc32FastBuilder)
             .into_iter()
-            .zip_eq_debug(chunk.vis().iter())
+            .zip_eq_fast(chunk.vis().iter())
             .map(|(h, vis)| {
                 let vnode = h.to_vnode();
                 // Ignore the invisible rows.

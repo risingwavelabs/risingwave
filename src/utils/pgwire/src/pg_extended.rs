@@ -394,7 +394,7 @@ impl PreparedStatement {
         for ((type_oid, raw_param), param_format) in type_description
             .iter()
             .zip_eq_fast(raw_params.iter())
-            .zip_eq_debug(format_iter)
+            .zip_eq_fast(format_iter)
         {
             let str = match type_oid {
                 DataType::Varchar | DataType::Bytea => {

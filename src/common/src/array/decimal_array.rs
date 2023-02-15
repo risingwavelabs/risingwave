@@ -38,7 +38,7 @@ mod tests {
             builder.append(*i);
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_debug(a.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
