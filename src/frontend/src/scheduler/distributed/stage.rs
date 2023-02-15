@@ -553,7 +553,7 @@ impl StageRunner {
         }
 
         if let Some(err) = terminated_chunk_stream.take_result() {
-            let stage_message = err.expect("Sender should always exists!");
+            let stage_message = err.expect("The sender should always exist!");
 
             // Terminated by other tasks execution error, so no need to return error here.
             match stage_message {
@@ -760,21 +760,23 @@ impl StageRunner {
             let query_id = self.stage.query_id.id.clone();
             let stage_id = self.stage.id;
             let task_id = *task;
-            if let Err(e) = client
-                .abort(AbortTaskRequest {
-                    task_id: Some(risingwave_pb::batch_plan::TaskId {
-                        query_id: query_id.clone(),
-                        stage_id,
-                        task_id,
-                    }),
-                })
-                .await
-            {
-                error!(
-                    "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
-                    task_id, stage_id, query_id, e
-                );
-            };
+            spawn(async move {
+                if let Err(e) = client
+                    .abort(AbortTaskRequest {
+                        task_id: Some(risingwave_pb::batch_plan::TaskId {
+                            query_id: query_id.clone(),
+                            stage_id,
+                            task_id,
+                        }),
+                    })
+                    .await
+                {
+                    error!(
+                        "Abort task failed, task_id: {}, stage_id: {}, query_id: {}, reason: {}",
+                        task_id, stage_id, query_id, e
+                    );
+                };
+            });
         }
         Ok(())
     }
