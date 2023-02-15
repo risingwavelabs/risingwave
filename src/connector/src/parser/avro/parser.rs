@@ -18,30 +18,20 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
-use chrono::Datelike;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{
-    Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
-};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
+use super::util::{extract_inner_field_schema, from_avro_value};
 use crate::impl_common_parser_logic;
 use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::SourceColumnDesc;
-
-fn unix_epoch_days() -> i32 {
-    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
-        .0
-        .num_days_from_ce()
-}
 
 impl_common_parser_logic!(AvroParser);
 
@@ -152,11 +142,21 @@ impl AvroParser {
                 }
             }
         };
-        // parse the valur to rw value
+
+        // parse the value to rw value
         if let Value::Record(fields) = avro_value {
             writer.insert(|column| {
-                let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
-                from_avro_value(tuple.1.clone()).map_err(|e| {
+                let tuple = fields
+                    .iter()
+                    .find(|val| column.name.eq(&val.0))
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "no field named {} in avro msg",
+                            column.name
+                        )))
+                    })?;
+                let field_schema = extract_inner_field_schema(&self.schema, Some(&column.name))?;
+                from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
                     tracing::error!(
                         "failed to process value ({}): {}",
                         String::from_utf8_lossy(payload),
@@ -171,98 +171,6 @@ impl AvroParser {
             )))
         }
     }
-}
-
-/// Convert Avro value to datum.For now, support the following [Avro type](https://avro.apache.org/docs/current/spec.html).
-///  - boolean
-///  - int : i32
-///  - long: i64
-///  - float: f32
-///  - double: f64
-///  - string: String
-///  - Date (the number of days from the unix epoch, 1970-1-1 UTC)
-///  - Timestamp (the number of milliseconds from the unix epoch,  1970-1-1 00:00:00.000 UTC)
-#[inline]
-pub fn from_avro_value(value: Value) -> Result<Datum> {
-    let v = match value {
-        Value::Null => {
-            return Ok(None);
-        }
-        Value::Boolean(b) => ScalarImpl::Bool(b),
-        Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
-        Value::Int(i) => ScalarImpl::Int32(i),
-        Value::Long(i) => ScalarImpl::Int64(i),
-        Value::Float(f) => ScalarImpl::Float32(OrderedF32::from(f)),
-        Value::Double(f) => ScalarImpl::Float64(OrderedF64::from(f)),
-        Value::Date(days) => ScalarImpl::NaiveDate(
-            NaiveDateWrapper::with_days(days + unix_epoch_days()).map_err(|e| {
-                let err_msg = format!("avro parse error.wrong date value {}, err {:?}", days, e);
-                RwError::from(InternalError(err_msg))
-            })?,
-        ),
-        Value::TimestampMillis(millis) => ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
-                millis / 1_000,
-                (millis % 1_000) as u32 * 1_000_000,
-            )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp millis value {}, err {:?}",
-                    millis, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
-        ),
-        Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
-                micros / 1_000_000,
-                (micros % 1_000_000) as u32 * 1_000,
-            )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp micros value {}, err {:?}",
-                    micros, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
-        ),
-        Value::Duration(duration) => {
-            let months = u32::from(duration.months()) as i32;
-            let days = u32::from(duration.days()) as i32;
-            let millis = u32::from(duration.millis()) as i64;
-            ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
-        }
-        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
-        Value::Record(descs) => {
-            let rw_values = descs
-                .into_iter()
-                .map(|(_, value)| from_avro_value(value))
-                .collect::<Result<Vec<Datum>>>()?;
-            ScalarImpl::Struct(StructValue::new(rw_values))
-        }
-        Value::Array(values) => {
-            let rw_values = values
-                .into_iter()
-                .map(from_avro_value)
-                .collect::<Result<Vec<Datum>>>()?;
-            ScalarImpl::List(ListValue::new(rw_values))
-        }
-        Value::Union(_, value) => return from_avro_value(*value),
-        Value::Decimal(decimal) => {
-            // TODO
-            let err_msg = format!(
-                "avro parse error. decimal type is not supported yest {:?}",
-                decimal
-            );
-            return Err(RwError::from(InternalError(err_msg)));
-        }
-        _ => {
-            let err_msg = format!("avro parse error.unsupported value {:?}", value);
-            return Err(RwError::from(InternalError(err_msg)));
-        }
-    };
-
-    Ok(Some(v))
 }
 
 #[cfg(test)]
@@ -284,9 +192,10 @@ mod test {
     use url::Url;
 
     use super::{
-        read_schema_from_http, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
-        AvroParser, AvroParserConfig,
+        read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroParser,
+        AvroParserConfig,
     };
+    use crate::parser::avro::util::unix_epoch_days;
     use crate::parser::SourceStreamChunkBuilder;
     use crate::source::SourceColumnDesc;
 
