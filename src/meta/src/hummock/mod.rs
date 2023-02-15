@@ -45,40 +45,34 @@ pub use crate::hummock::compaction_scheduler::{
     CompactionRequestChannelRef, CompactionSchedulerRef,
 };
 use crate::storage::MetaStore;
-use crate::MetaOpts;
 use crate::util::GlobalEventManager;
+use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers<S>(
     vacuum_manager: VacuumManagerRef<S>,
     compaction_scheduler: CompactionSchedulerRef<S>,
-    timer_manager: &GlobalEventManager,
+    timer_manager: &mut GlobalEventManager,
     meta_opts: &MetaOpts,
-) -> Vec<(JoinHandle<()>, Sender<()>)>
-where
+) where
     S: MetaStore,
 {
-    let mut workers = vec![start_compaction_scheduler(compaction_scheduler, timer_manager)];
-    // Start vacuum in non-deterministic compaction test
+    compaction_scheduler.start(timer_manager);
     if !meta_opts.compaction_deterministic_test {
-        workers.push(start_vacuum_scheduler(
-            vacuum_manager,
-            Duration::from_secs(meta_opts.vacuum_interval_sec),
-        ));
+        timer_manager.register_interval_task(meta_opts.vacuum_interval_sec, move || {
+            let vacuum = vacuum_manager.clone();
+            async move {
+                // May metadata vacuum and SST vacuum split into two tasks.
+                if let Err(err) = vacuum.vacuum_metadata().await {
+                    tracing::warn!("Vacuum metadata error {:#?}", err);
+                }
+                if let Err(err) = vacuum.vacuum_sst_data().await {
+                    tracing::warn!("Vacuum SST error {:#?}", err);
+                }
+                sync_point!("AFTER_SCHEDULE_VACUUM");
+            }
+        });
     }
-    workers
-}
-
-/// Starts a task to accept compaction request.
-fn start_compaction_scheduler<S>(
-    compaction_scheduler: CompactionSchedulerRef<S>,
-    timer_manager: &GlobalEventManager,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
-    // Start compaction scheduler
-    compaction_scheduler.start(timer_manager)
 }
 
 /// Starts a task to periodically vacuum hummock.

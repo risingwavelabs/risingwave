@@ -33,7 +33,7 @@ use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
 use crate::storage::MetaStore;
-use crate::util::{GlobalEventManager, WorkerHandle};
+use crate::util::GlobalEventManager;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
@@ -117,7 +117,7 @@ where
         }
     }
 
-    pub fn start(self: Arc<Self>, global_event_manager: &GlobalEventManager) -> WorkerHandle  {
+    pub fn start(self: Arc<Self>, global_event_manager: &mut GlobalEventManager) {
         let (sched_tx, mut sched_rx) =
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
@@ -128,8 +128,18 @@ where
         );
 
         tracing::info!("Start compaction scheduler.");
-        self.register_interval_task(&sched_channel, global_event_manager, self.env.opts.periodic_compaction_interval_sec, compact_task::TaskType::Dynamic);
-        self.register_interval_task(&sched_channel, global_event_manager, self.env.opts.periodic_compaction_interval_sec, compact_task::TaskType::SpaceReclaim);
+        self.register_interval_task(
+            &sched_channel,
+            global_event_manager,
+            self.env.opts.periodic_compaction_interval_sec,
+            compact_task::TaskType::Dynamic,
+        );
+        self.register_interval_task(
+            &sched_channel,
+            global_event_manager,
+            self.env.opts.periodic_compaction_interval_sec,
+            compact_task::TaskType::SpaceReclaim,
+        );
         let mut compaction_selectors = Self::init_selectors();
         let sched_channel_closed = sched_channel.clone();
         let compaction_resume_notifier = self.compaction_resume_notifier.clone();
@@ -151,19 +161,22 @@ where
                     .await;
             }
         });
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        tokio::spawn(async move {
-            let _ = shutdown_rx.await;
-            compaction_resume_notifier.notify_waiters();
-            sched_channel_closed.request_tx.closed().await;
-        });
-        (handle, shutdown_tx)
+        global_event_manager.register_shutdown_task(
+            async move {
+                compaction_resume_notifier.notify_waiters();
+                sched_channel_closed.request_tx.closed().await;
+            },
+            handle,
+        );
     }
 
-    fn register_interval_task(&self, sched_channel: &Arc<CompactionRequestChannel>,
-                              global_event_manager: &GlobalEventManager,
-                              event_interval: u64,
-                              task: compact_task::TaskType) {
+    fn register_interval_task(
+        &self,
+        sched_channel: &Arc<CompactionRequestChannel>,
+        global_event_manager: &GlobalEventManager,
+        event_interval: u64,
+        task: compact_task::TaskType,
+    ) {
         let sched_channel_tick = sched_channel.clone();
         let hummock_manager = self.hummock_manager.clone();
         global_event_manager.register_interval_task(event_interval, move || {
@@ -172,7 +185,12 @@ where
             async move {
                 for cg_id in manager.compaction_group_ids().await {
                     if let Err(e) = sched_channel_0.try_sched_compaction(cg_id, task) {
-                        tracing::warn!("Failed to schedule {:?} for compaction group {}. {}", task, cg_id, e);
+                        tracing::warn!(
+                            "Failed to schedule {:?} for compaction group {}. {}",
+                            task,
+                            cg_id,
+                            e
+                        );
                     }
                 }
             }

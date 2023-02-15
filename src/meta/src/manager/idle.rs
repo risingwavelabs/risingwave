@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tokio::sync::oneshot::Sender;
-use tokio::task::JoinHandle;
+use crate::util::GlobalEventManager;
 
 /// `IdleManager` keeps track of latest activity and report whether the meta service has been
 /// idle for long time.
@@ -74,39 +73,34 @@ impl IdleManager {
     }
 
     /// Idle checker send signal when the meta does not receive requests for long time.
-    pub async fn start_idle_checker(
-        idle_manager: IdleManagerRef,
-        check_interval: Duration,
+    pub fn start_idle_checker(
+        idle_manager_ref: IdleManagerRef,
+        event_manager: &mut GlobalEventManager,
         idle_send: tokio::sync::oneshot::Sender<()>,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let dur = idle_manager.get_config_max_idle();
+        check_interval: u64,
+    ) {
+        let dur = idle_manager_ref.get_config_max_idle();
         if !dur.is_zero() {
             tracing::warn!("--dangerous-max-idle-secs is set. The meta server will be automatically stopped after idle for {:?}.", dur)
         }
 
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(check_interval);
-            loop {
-                tokio::select! {
-                    _ = min_interval.tick() => {},
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Idle checker is stopped");
-                        return;
-                    }
-                }
+        let idle_send_holder = Arc::new(Mutex::new(Some(idle_send)));
+        event_manager.register_interval_task(check_interval, move || {
+            let idle_send = idle_send_holder.clone();
+            let idle_manager = idle_manager_ref.clone();
+            async move {
                 if idle_manager.is_exceeding_max_idle() {
-                    break;
-                }
+                    tracing::warn!(
+                        "Idle checker found the server is already idle for {:?}",
+                        idle_manager.get_config_max_idle()
+                    );
+                    if let Some(sender) = idle_send.lock().unwrap().take() {
+                        tracing::warn!("Idle checker is shutting down the server");
+                        let _ = sender.send(());
+                    }
+                };
             }
-            tracing::warn!(
-                "Idle checker found the server is already idle for {:?}",
-                idle_manager.get_config_max_idle()
-            );
-            tracing::warn!("Idle checker is shutting down the server");
-            let _ = idle_send.send(());
         });
-        (join_handle, shutdown_tx)
     }
 }
 

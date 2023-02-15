@@ -38,10 +38,11 @@ use risingwave_pb::hummock::{
 use crate::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{start_compaction_scheduler, CompactionScheduler, HummockManagerRef};
+use crate::hummock::{CompactionScheduler, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::storage::MemStore;
+use crate::util::GlobalEventManager;
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
@@ -874,9 +875,10 @@ async fn test_trigger_compaction_deterministic() {
         hummock_manager.clone(),
         compactor_manager_ref.clone(),
     ));
+    let mut event_manager = GlobalEventManager::default();
 
     let _ = compactor_manager_ref.add_compactor(context_id, u64::MAX);
-    let (_handle, shutdown_tx) = start_compaction_scheduler(compaction_scheduler);
+    compaction_scheduler.start(&mut event_manager);
 
     // Generate data for compaction task
     let _ = add_test_tables(&hummock_manager, context_id).await;
@@ -888,9 +890,7 @@ async fn test_trigger_compaction_deterministic() {
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
         .await;
     assert!(ret.is_ok());
-    shutdown_tx
-        .send(())
-        .expect("shutdown compaction scheduler error");
+    event_manager.shutdown().await;
 }
 
 // This is a non-deterministic test
@@ -907,8 +907,8 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id, 100);
-    let (join_handle, shutdown_tx) =
-        HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
+    let mut event_manager = GlobalEventManager::default();
+    HummockManager::start_compaction_heartbeat(hummock_manager.clone(), &event_manager);
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1016,8 +1016,7 @@ async fn test_hummock_compaction_task_heartbeat() {
         .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap());
-    shutdown_tx.send(()).unwrap();
-    join_handle.await.unwrap();
+    event_manager.shutdown().await;
 }
 
 // This is a non-deterministic test
@@ -1034,8 +1033,8 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
     let _tx = compactor_manager.add_compactor(context_id, 100);
-    let (join_handle, shutdown_tx) =
-        HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
+    let event_manager = GlobalEventManager::default();
+    HummockManager::start_compaction_heartbeat(hummock_manager.clone(), &event_manager);
 
     // No compaction task available.
     assert!(hummock_manager
@@ -1113,9 +1112,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     // Check that no heartbeats exist for the relevant context.
     assert!(!compactor_manager.purge_heartbeats_for_context(worker_node.id));
-
-    shutdown_tx.send(()).unwrap();
-    join_handle.await.unwrap();
+    event_manager.shutdown().await;
 }
 
 #[tokio::test]

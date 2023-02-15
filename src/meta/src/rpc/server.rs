@@ -64,8 +64,8 @@ use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::{hummock, MetaResult};
 use crate::util::GlobalEventManager;
+use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -504,58 +504,34 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
-    let timer_manager = GlobalEventManager::default();
+    let mut timer_manager = GlobalEventManager::default();
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &timer_manager, &env.opts);
-    sub_tasks.push(
-        ClusterManager::start_worker_num_monitor(
-            cluster_manager.clone(),
-            Duration::from_secs(env.opts.node_num_monitor_interval_sec),
-            meta_metrics.clone(),
-        )
-        .await,
+    hummock::start_hummock_workers(
+        vacuum_manager,
+        compaction_scheduler,
+        &mut timer_manager,
+        &env.opts,
     );
-    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
+    ClusterManager::start_worker_num_monitor(
+        cluster_manager.clone(),
+        &mut timer_manager,
+        env.opts.node_num_monitor_interval_sec,
+        meta_metrics.clone(),
+    );
+    HummockManager::start_compaction_heartbeat(hummock_manager, &timer_manager);
 
     if cfg!(not(test)) {
-        sub_tasks.push(
-            ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
-        );
-        sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
+        // TODO: check heartbeat in an independent runtime to avoid blocked by other task.
+        ClusterManager::start_heartbeat_checker(cluster_manager, &mut timer_manager, 1);
+        GlobalBarrierManager::start(barrier_manager, &mut timer_manager);
     }
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
-    sub_tasks.push(
-        IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
-            .await,
-    );
+    IdleManager::start_idle_checker(env.idle_manager_ref(), &mut timer_manager, idle_send, 30);
 
-    let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();
-    let abort_notification_handler = tokio::spawn(async move {
-        abort_recv.await.unwrap();
+    timer_manager.register_shutdown_callback(async move {
         notification_mgr.abort_all().await;
     });
-    sub_tasks.push((abort_notification_handler, abort_sender));
-
-    let shutdown_all = async move {
-        for (join_handle, shutdown_sender) in sub_tasks {
-            if let Err(_err) = shutdown_sender.send(()) {
-                continue;
-            }
-            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
-            // abort it using timeout.
-            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
-                Ok(Err(err)) => {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                }
-                Err(e) => {
-                    tracing::warn!("Join shutdown timeout: {:?}", e);
-                }
-                _ => {}
-            }
-        }
-    };
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
@@ -578,10 +554,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown receiver dropped")
                     }
-                    shutdown_all.await;
+                    timer_manager.shutdown().await;
                 },
                 _ = idle_recv => {
-                    shutdown_all.await;
+                    timer_manager.shutdown().await;
                 },
             }
         })

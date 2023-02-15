@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::panic;
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
@@ -46,9 +45,7 @@ use risingwave_pb::hummock::{
     HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockWriteGuard};
-use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{
     CompactStatus, LevelSelector, LocalSelectorStatistic, ManualCompactionOption,
@@ -198,6 +195,7 @@ use super::Compactor;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
+use crate::util::GlobalEventManager;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
@@ -311,28 +309,18 @@ where
         Ok(instance)
     }
 
-    pub async fn start_compaction_heartbeat(
+    pub fn start_compaction_heartbeat(
         hummock_manager: Arc<Self>,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let compactor_manager = hummock_manager.compactor_manager.clone();
-        let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(std::time::Duration::from_millis(1000));
-            loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = min_interval.tick() => {
-                    },
-                    // Shutdown
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Compaction heartbeat checker is stopped");
-                        return;
-                    }
-                }
-                let mut split_cancel = {
-                    let mut manager_cancel = hummock_manager.compaction_tasks_to_cancel.lock();
-                    manager_cancel.drain(..).collect_vec()
-                };
+        event_manager: &GlobalEventManager,
+    ) {
+        event_manager.register_interval_task(1, move || {
+            let mut split_cancel = {
+                let mut manager_cancel = hummock_manager.compaction_tasks_to_cancel.lock();
+                manager_cancel.drain(..).collect_vec()
+            };
+            let compactor_manager = hummock_manager.compactor_manager.clone();
+            let manager = hummock_manager.clone();
+            async move {
                 split_cancel.sort();
                 split_cancel.dedup();
                 // TODO: add metrics to track expired tasks
@@ -345,7 +333,7 @@ where
                         tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
                     }
 
-                    if let Err(e) = hummock_manager
+                    if let Err(e) = manager
                         .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
                         .await
                     {
@@ -355,7 +343,6 @@ where
                 }
             }
         });
-        (join_handle, shutdown_tx)
     }
 
     /// Load state from meta store.

@@ -374,10 +374,8 @@ mod tests {
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
         DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
     };
-    use tokio::sync::oneshot::Sender;
     #[cfg(feature = "failpoints")]
     use tokio::sync::Notify;
-    use tokio::task::JoinHandle;
     use tokio::time::sleep;
     use tonic::{Request, Response, Status};
 
@@ -392,6 +390,7 @@ mod tests {
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::SourceManager;
+    use crate::util::GlobalEventManager;
     use crate::MetaOpts;
 
     struct FakeFragmentState {
@@ -493,7 +492,7 @@ mod tests {
         catalog_manager: CatalogManagerRef<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
-        join_handle_shutdown_txs: Vec<(JoinHandle<()>, Sender<()>)>,
+        event_manager: GlobalEventManager,
     }
 
     impl MockServices {
@@ -511,6 +510,7 @@ mod tests {
 
             let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
             let stream_srv = StreamServiceServer::new(fake_service);
+            let mut event_manager = GlobalEventManager::default();
             let join_handle = tokio::spawn(async move {
                 tonic::transport::Server::builder()
                     .add_service(stream_srv)
@@ -518,6 +518,12 @@ mod tests {
                     .await
                     .unwrap();
             });
+            event_manager.register_shutdown_task(
+                async move {
+                    let _ = shutdown_tx.send(());
+                },
+                join_handle,
+            );
 
             sleep(Duration::from_secs(1)).await;
 
@@ -585,17 +591,14 @@ mod tests {
                 hummock_manager,
             )?;
 
-            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
+            GlobalBarrierManager::start(barrier_manager, &mut event_manager);
 
             Ok(Self {
                 global_stream_manager: stream_manager,
                 catalog_manager,
                 fragment_manager,
                 state,
-                join_handle_shutdown_txs: vec![
-                    (join_handle_2, shutdown_tx_2),
-                    (join_handle, shutdown_tx),
-                ],
+                event_manager,
             })
         }
 
@@ -667,10 +670,7 @@ mod tests {
         }
 
         async fn stop(self) {
-            for (join_handle, shutdown_tx) in self.join_handle_shutdown_txs {
-                shutdown_tx.send(()).unwrap();
-                join_handle.await.unwrap();
-            }
+            self.event_manager.shutdown().await;
         }
     }
 

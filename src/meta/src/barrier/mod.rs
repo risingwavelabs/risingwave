@@ -36,9 +36,8 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::StreamClientPoolRef;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::sync::oneshot::Receiver;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use self::command::CommandContext;
@@ -57,6 +56,7 @@ use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::meta_store::MetaStore;
 use crate::stream::SourceManagerRef;
+use crate::util::GlobalEventManager;
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -502,13 +502,17 @@ where
         }
     }
 
-    pub async fn start(barrier_manager: BarrierManagerRef<S>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start(barrier_manager: BarrierManagerRef<S>, event_manager: &mut GlobalEventManager) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             barrier_manager.run(shutdown_rx).await;
         });
-
-        (join_handle, shutdown_tx)
+        event_manager.register_shutdown_task(
+            async move {
+                let _ = shutdown_tx.send(());
+            },
+            join_handle,
+        );
     }
 
     /// Return whether the barrier manager is running.

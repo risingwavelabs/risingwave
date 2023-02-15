@@ -23,14 +23,13 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
-use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
+use crate::util::GlobalEventManager;
 use crate::{MetaError, MetaResult};
 
 pub type WorkerId = u32;
@@ -87,26 +86,16 @@ where
         self.core.read().await
     }
 
-    pub async fn start_worker_num_monitor(
-        cluster_manager: ClusterManagerRef<S>,
-        interval: Duration,
-        meta_metrics: Arc<MetaMetrics>,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            let mut monitor_interval = tokio::time::interval(interval);
-            monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = monitor_interval.tick() => {},
-                    // Shutdown monitor
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Worker number monitor is stopped");
-                        return;
-                    }
-                }
-
+    pub fn start_worker_num_monitor(
+        cluster_manager_ref: ClusterManagerRef<S>,
+        timer_manager: &mut GlobalEventManager,
+        interval: u64,
+        metrics: Arc<MetaMetrics>,
+    ) {
+        timer_manager.register_interval_task(interval, move || {
+            let meta_metrics = metrics.clone();
+            let cluster_manager = cluster_manager_ref.clone();
+            async move {
                 for (worker_type, worker_num) in
                     cluster_manager.core.read().await.count_worker_node()
                 {
@@ -117,8 +106,6 @@ where
                 }
             }
         });
-
-        (join_handle, shutdown_tx)
     }
 
     /// A worker node will immediately register itself to meta when it bootstraps.
@@ -240,24 +227,14 @@ where
         Err(MetaError::invalid_worker(worker_id))
     }
 
-    pub async fn start_heartbeat_checker(
-        cluster_manager: ClusterManagerRef<S>,
-        check_interval: Duration,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(check_interval);
-            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = min_interval.tick() => {},
-                    // Shutdown
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat checker is stopped");
-                        return;
-                    }
-                }
+    pub fn start_heartbeat_checker(
+        cluster_manager_ref: ClusterManagerRef<S>,
+        event_manager: &mut GlobalEventManager,
+        check_interval: u64,
+    ) {
+        event_manager.register_interval_task(check_interval, move || {
+            let cluster_manager = cluster_manager_ref.clone();
+            async move {
                 let (workers_to_delete, now) = {
                     let mut core = cluster_manager.core.write().await;
                     let workers = &mut core.workers;
@@ -319,7 +296,6 @@ where
                 }
             }
         });
-        (join_handle, shutdown_tx)
     }
 
     /// Get live nodes with the specified type and state.
