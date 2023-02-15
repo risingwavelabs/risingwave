@@ -412,13 +412,9 @@ impl StageRunner {
                     // All tasks in this stage have been scheduled. Notify query runner to schedule
                     // next stage.
                     if running_task_cnt == self.tasks.keys().len() {
-                        self.notify_stage_state_changed(
-                            |old_state| {
-                                assert_matches!(old_state, StageState::Started);
-                                StageState::Running
-                            },
-                            QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)),
-                        )
+                        self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::Scheduled(
+                            self.stage.id,
+                        )))
                         .await;
                         sent_signal_to_next = true;
                     }
@@ -431,14 +427,7 @@ impl StageRunner {
                     if finished_task_cnt == self.tasks.keys().len() {
                         // All tasks finished without failure, we should not break
                         // this loop
-                        self.notify_stage_state_changed(
-                            |old_state| {
-                                assert_matches!(old_state, StageState::Running);
-                                StageState::Completed
-                            },
-                            QueryMessage::Stage(StageEvent::Completed(self.stage.id)),
-                        )
-                        .await;
+                        self.notify_stage_completed().await;
                         sent_signal_to_next = true;
                         break;
                     }
@@ -678,44 +667,26 @@ impl StageRunner {
 
     /// Write message into channel to notify query runner current stage have been scheduled.
     async fn notify_stage_scheduled(&self, msg: QueryMessage) {
-        // If all tasks of this stage is scheduled, tell the query manager to schedule next.
-        {
-            // Changing state
-            let mut s = self.state.write().await;
-            let state = mem::replace(&mut *s, StageState::Failed);
-            match state {
-                StageState::Started => {
-                    *s = StageState::Running;
-                }
-                _ => unreachable!(
-                    "The state can not be {:?} for query-{:?}-{:?} to do notify ",
-                    state, self.stage.query_id.id, self.stage.id
-                ),
-            }
-        }
-
-        self.send_event(msg).await;
+        self.notify_stage_state_changed(
+            |old_state| {
+                assert_matches!(old_state, StageState::Started);
+                StageState::Running
+            },
+            msg,
+        )
+        .await
     }
 
     /// Notify query execution that this stage completed.
     async fn notify_stage_completed(&self) {
-        // If all tasks of this stage finished, tell query manager.
-        {
-            // Changing state
-            let mut s = self.state.write().await;
-            let state = mem::replace(&mut *s, StageState::Failed);
-            match state {
-                StageState::Running => {
-                    *s = StageState::Completed;
-                }
-                _ => unreachable!(
-                    "The state can not be {:?} for query-{:?}-{:?} to do notify ",
-                    state, self.stage.query_id.id, self.stage.id
-                ),
-            }
-        }
-        self.send_event(QueryMessage::Stage(StageEvent::Completed(self.stage.id)))
-            .await;
+        self.notify_stage_state_changed(
+            |old_state| {
+                assert_matches!(old_state, StageState::Running);
+                StageState::Completed
+            },
+            QueryMessage::Stage(StageEvent::Completed(self.stage.id)),
+        )
+        .await
     }
 
     async fn notify_stage_state_changed<F>(&self, new_state: F, msg: QueryMessage)
