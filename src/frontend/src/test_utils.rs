@@ -36,8 +36,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::CreatingJobInfo;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
