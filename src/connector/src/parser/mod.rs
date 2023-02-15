@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 pub use avro::*;
 pub use canal::*;
@@ -32,7 +31,6 @@ use risingwave_pb::catalog::StreamSourceInfo;
 
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
     BoxSourceStream, BoxSourceWithStateStream, ErrorReportingContext, SourceColumnDesc,
     SourceFormat, StreamChunkWithState,

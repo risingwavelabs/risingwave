@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+
 
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;

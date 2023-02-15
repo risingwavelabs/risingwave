@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
+
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
@@ -29,7 +29,7 @@ use crate::parser::{
     BoxSourceWithStateStream, ByteStreamSourceParser, SourceColumnDesc, SourceStreamChunkBuilder,
     SourceStreamChunkRowWriter, StreamChunkWithState, WriteGuard,
 };
-use crate::source::monitor::SourceMetrics;
+
 use crate::source::{BoxSourceStream, ErrorReportingContext, SplitId};
 
 macro_rules! to_rust_type {
