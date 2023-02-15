@@ -23,7 +23,7 @@ insert into t values (2), (3), (4), (5), (6)
 query RRRR
 select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
 ----
-1.707825127659933 1.8708286933869707 2.9166666666666666666666666667 3.5
+1.707825127659933 1.8708286933869707 2.9166666666666666666666666667 3.50
 
 statement ok
 delete from t where v = 3
