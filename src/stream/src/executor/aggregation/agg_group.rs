@@ -145,6 +145,7 @@ impl<S: StateStore> AggGroup<S> {
                 self.group_key.as_ref(),
             )
             .await?;
+        println!("COLUMNS, {:?}", columns);
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
         for ((state, storage), visibility) in self
             .states
@@ -242,7 +243,7 @@ impl<S: StateStore> AggGroup<S> {
             self.prev_outputs.is_some(),
         ) {
             (0, 0, true, _) => {
-                // Previous state is empty, current state is also empty.
+                // We never output any rows for row_count = 0 when group_key is_some
 
                 0
             }
