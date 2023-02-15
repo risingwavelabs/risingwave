@@ -124,10 +124,19 @@ pub async fn rpc_serve(
             .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
+            let pod_name = match std::env::var("POD_NAME") {
+                Ok(pn) => pn,
+                Err(_) => {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    std::env::set_var("POD_NAME", id.clone());
+                    id
+                }
+            };
+
             let election_client = Arc::new(EtcdElectionClient::new(
                 endpoints,
                 Some(options),
-                address_info.advertise_addr.clone(),
+                [pod_name, address_info.advertise_addr.clone()].join("/"),
             ));
 
             rpc_serve_with_store(
