@@ -23,6 +23,9 @@ cmake-build-debug/
 *.app
 build/
 
+# Python
+*.pyc
+
 # Golang
 go/bin/
 
