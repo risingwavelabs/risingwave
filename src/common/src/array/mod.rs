@@ -64,7 +64,7 @@ pub use vis::{Vis, VisRef};
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
 use crate::types::*;
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;

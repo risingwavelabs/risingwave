@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::iter_util::{ZipEqDebug, ZipEqFast};
+use super::iter_util::ZipEqFast;
 
 /// This function compresses sequential repeated data in a vector. The compression result contains
 /// two vectors, one for the last indices of sequential repeated elements, and another for the

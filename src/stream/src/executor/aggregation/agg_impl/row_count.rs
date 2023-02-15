@@ -18,7 +18,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;

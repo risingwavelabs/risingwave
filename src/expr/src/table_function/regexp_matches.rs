@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
 use risingwave_common::types::ScalarImpl;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::RexNode;

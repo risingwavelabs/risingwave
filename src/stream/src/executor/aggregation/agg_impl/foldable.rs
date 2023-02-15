@@ -21,7 +21,6 @@ use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
-use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
 

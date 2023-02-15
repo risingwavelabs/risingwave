@@ -18,7 +18,7 @@ use risingwave_common::array::{
 use risingwave_common::bail;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 

@@ -25,7 +25,7 @@ use itertools::Itertools;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};

@@ -28,7 +28,7 @@ mod tests {
 
     use super::*;
     use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
-    use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+    use crate::util::iter_util::ZipEqFast;
 
     #[test]
     fn test_decimal_builder() {

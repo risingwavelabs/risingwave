@@ -29,7 +29,7 @@ mod tests {
 
     use super::*;
     use crate::array::{Array, ArrayBuilder};
-    use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+    use crate::util::iter_util::ZipEqFast;
 
     #[test]
     fn test_naivedate_builder() {

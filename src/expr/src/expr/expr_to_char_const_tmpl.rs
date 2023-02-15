@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArray, Utf8ArrayBuilder};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::Expression;
 use crate::vector_op::to_char::ChronoPattern;

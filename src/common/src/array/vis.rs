@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter;
-
 use auto_enums::auto_enum;
 use itertools::repeat_n;
 

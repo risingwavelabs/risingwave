@@ -21,7 +21,7 @@ use lru::{DefaultHasher, LruCache};
 mod managed_lru;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 pub struct ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     /// An managed cache. Eviction depends on the node memory usage.

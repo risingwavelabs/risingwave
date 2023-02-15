@@ -22,7 +22,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType};
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
 #[derive(Debug, Clone, PartialEq, Eq)]

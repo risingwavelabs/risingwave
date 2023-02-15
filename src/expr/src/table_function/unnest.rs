@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListArray, ListRef};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::*;
 

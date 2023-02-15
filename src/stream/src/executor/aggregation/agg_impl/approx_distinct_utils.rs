@@ -21,7 +21,7 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::must_match;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::executor::aggregation::agg_impl::StreamingAggImpl;
 use crate::executor::StreamExecutorResult;
