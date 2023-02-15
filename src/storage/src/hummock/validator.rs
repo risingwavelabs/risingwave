@@ -20,7 +20,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::ValidationTask;
 
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::{HummockIterator, HummockIteratorSeekable};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::SstableIterator;

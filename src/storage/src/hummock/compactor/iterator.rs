@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorSeekable};
 use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{Block, BlockHolder, BlockIterator, HummockResult};
@@ -279,8 +279,6 @@ impl HummockIterator for ConcatSstableIterator {
     type Direction = Forward;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
@@ -309,6 +307,15 @@ impl HummockIterator for ConcatSstableIterator {
     fn is_valid(&self) -> bool {
         self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats)
+    }
+}
+
+impl HummockIteratorSeekable for ConcatSstableIterator {
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async { self.seek_idx(0, None).await }
@@ -341,10 +348,6 @@ impl HummockIterator for ConcatSstableIterator {
             self.seek_idx(table_idx, Some(key_slice)).await
         }
     }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats)
-    }
 }
 
 #[cfg(test)]
@@ -357,7 +360,7 @@ mod tests {
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::{HummockIterator, HummockIteratorSeekable};
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };

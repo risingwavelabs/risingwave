@@ -19,7 +19,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 
-use crate::hummock::iterator::{Backward, HummockIterator};
+use crate::hummock::iterator::{Backward, HummockIterator, HummockIteratorSeekable};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
@@ -87,8 +87,6 @@ impl HummockIterator for BackwardSstableIterator {
     type Direction = Backward;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         self.stats.total_key_count += 1;
@@ -116,6 +114,15 @@ impl HummockIterator for BackwardSstableIterator {
     fn is_valid(&self) -> bool {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats)
+    }
+}
+
+impl HummockIteratorSeekable for BackwardSstableIterator {
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
@@ -156,10 +163,6 @@ impl HummockIterator for BackwardSstableIterator {
 
             Ok(())
         }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats)
     }
 }
 

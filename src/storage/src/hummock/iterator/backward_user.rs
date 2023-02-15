@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
     Backward, BackwardUserIteratorType, DirectedUserIterator, DirectedUserIteratorBuilder,
-    ForwardMergeRangeIterator, HummockIterator, UserIteratorPayloadType,
+    ForwardMergeRangeIterator, HummockIterator, HummockIteratorSeekable, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
@@ -212,6 +212,23 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         &self.last_val
     }
 
+    /// Indicates whether the iterator can be used.
+    pub fn is_valid(&self) -> bool {
+        // Handle range scan
+        // key <= end_key is guaranteed by seek/rewind function
+        // We remark that there are only three cases out of four combinations:
+        // (iterator valid && last_delete false) is impossible
+        let has_enough_input = self.iterator.is_valid() || !self.last_delete;
+        has_enough_input && (!self.out_of_range)
+    }
+
+    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+        self.iterator.collect_local_statistic(stats);
+    }
+}
+
+impl<I: HummockIterator<Direction = Backward> + HummockIteratorSeekable> BackwardUserIterator<I> {
     /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
         // Handle range scan
@@ -255,21 +272,6 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         self.reset();
         // Handle range scan when key < begin_key
         self.next().await
-    }
-
-    /// Indicates whether the iterator can be used.
-    pub fn is_valid(&self) -> bool {
-        // Handle range scan
-        // key <= end_key is guaranteed by seek/rewind function
-        // We remark that there are only three cases out of four combinations:
-        // (iterator valid && last_delete false) is impossible
-        let has_enough_input = self.iterator.is_valid() || !self.last_delete;
-        has_enough_input && (!self.out_of_range)
-    }
-
-    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats);
-        self.iterator.collect_local_statistic(stats);
     }
 }
 

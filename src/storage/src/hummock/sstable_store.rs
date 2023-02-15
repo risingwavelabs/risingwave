@@ -848,7 +848,7 @@ mod tests {
 
     use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
-    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::iterator::{HummockIterator, HummockIteratorSeekable};
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,

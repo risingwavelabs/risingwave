@@ -21,7 +21,7 @@ use crate::hummock::iterator::test_utils::{
 };
 use crate::hummock::iterator::{
     BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
-    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
+    HummockIteratorSeekable, HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::default_builder_opt_for_test;

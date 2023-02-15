@@ -64,12 +64,7 @@ pub trait HummockIterator: Send + Sync + 'static {
     type NextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
     where
         Self: 'a;
-    type RewindFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
-    type SeekFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
-    where
-        Self: 'a;
+
     /// Moves a valid iterator to the next key.
     ///
     /// Note:
@@ -113,6 +108,18 @@ pub trait HummockIterator: Send + Sync + 'static {
     /// - This function should be straightforward and return immediately.
     fn is_valid(&self) -> bool;
 
+    /// take local statistic info from iterator to report metrics.
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
+}
+
+pub trait HummockIteratorSeekable {
+    type RewindFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
+    where
+        Self: 'a;
+    type SeekFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
+    where
+        Self: 'a;
+
     /// Resets the position of the iterator.
     ///
     /// Note:
@@ -129,9 +136,6 @@ pub trait HummockIterator: Send + Sync + 'static {
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a>;
-
-    /// take local statistic info from iterator to report metrics.
-    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic);
 }
 
 /// This is a placeholder trait used in `HummockIteratorUnion`
@@ -143,8 +147,6 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     type Direction = D;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async { unreachable!() }
@@ -162,6 +164,13 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         unreachable!()
     }
 
+    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+}
+
+impl<D: HummockIteratorDirection> HummockIteratorSeekable for PhantomHummockIterator<D> {
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async { unreachable!() }
     }
@@ -169,8 +178,6 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async { unreachable!() }
     }
-
-    fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 }
 
 /// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
@@ -209,8 +216,6 @@ impl<
     type Direction = D;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -250,6 +255,27 @@ impl<
         }
     }
 
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        match self {
+            First(iter) => iter.collect_local_statistic(stats),
+            Second(iter) => iter.collect_local_statistic(stats),
+            Third(iter) => iter.collect_local_statistic(stats),
+            Fourth(iter) => iter.collect_local_statistic(stats),
+        }
+    }
+}
+
+impl<
+        D: HummockIteratorDirection,
+        I1: HummockIteratorSeekable + HummockIterator<Direction = D>,
+        I2: HummockIteratorSeekable + HummockIterator<Direction = D>,
+        I3: HummockIteratorSeekable + HummockIterator<Direction = D>,
+        I4: HummockIteratorSeekable + HummockIterator<Direction = D>,
+    > HummockIteratorSeekable for HummockIteratorUnion<D, I1, I2, I3, I4>
+{
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
             match self {
@@ -271,23 +297,12 @@ impl<
             }
         }
     }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        match self {
-            First(iter) => iter.collect_local_statistic(stats),
-            Second(iter) => iter.collect_local_statistic(stats),
-            Third(iter) => iter.collect_local_statistic(stats),
-            Fourth(iter) => iter.collect_local_statistic(stats),
-        }
-    }
 }
 
 impl<I: HummockIterator> HummockIterator for Box<I> {
     type Direction = I::Direction;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         (*self).deref_mut().next()
@@ -303,14 +318,6 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
 
     fn is_valid(&self) -> bool {
         (*self).deref().is_valid()
-    }
-
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        (*self).deref_mut().rewind()
-    }
-
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        (*self).deref_mut().seek(key)
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

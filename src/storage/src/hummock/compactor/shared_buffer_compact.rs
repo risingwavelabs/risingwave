@@ -30,7 +30,7 @@ use risingwave_pb::hummock::compact_task;
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
 use crate::hummock::compactor::context::CompactorContext;
 use crate::hummock::compactor::{CompactOutput, Compactor};
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorSeekable};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable::{DeleteRangeAggregatorBuilder, SstableIteratorReadOptions};
@@ -319,7 +319,7 @@ impl SharedBufferCompactRunner {
 
     pub async fn run(
         self,
-        iter: impl HummockIterator<Direction = Forward>,
+        iter: impl HummockIterator<Direction = Forward> + HummockIteratorSeekable,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         del_agg: Arc<RangeTombstonesCollector>,
     ) -> HummockResult<CompactOutput> {

@@ -59,7 +59,7 @@ use crate::hummock::compactor::compaction_utils::{
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorSeekable};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
@@ -483,7 +483,7 @@ impl Compactor {
         sst_builder: &mut CapacitySplitTableBuilder<F>,
         task_config: &TaskConfig,
         compactor_metrics: Arc<CompactorMetrics>,
-        mut iter: impl HummockIterator<Direction = Forward>,
+        mut iter: impl HummockIterator<Direction = Forward> + HummockIteratorSeekable,
         mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactionStatistics>
     where
@@ -627,7 +627,7 @@ impl Compactor {
     /// `task_progress` is only used for tasks on the compactor.
     async fn compact_key_range(
         &self,
-        iter: impl HummockIterator<Direction = Forward>,
+        iter: impl HummockIterator<Direction = Forward> + HummockIteratorSeekable,
         compaction_filter: impl CompactionFilter,
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
@@ -723,7 +723,7 @@ impl Compactor {
     async fn compact_key_range_impl<F: SstableWriterFactory>(
         &self,
         writer_factory: F,
-        iter: impl HummockIterator<Direction = Forward>,
+        iter: impl HummockIterator<Direction = Forward> + HummockIteratorSeekable,
         compaction_filter: impl CompactionFilter,
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,

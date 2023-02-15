@@ -28,8 +28,8 @@ mod test {
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{
-        Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-        UnorderedMergeIteratorInner,
+        Forward, HummockIterator, HummockIteratorSeekable, HummockIteratorUnion,
+        OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
     };
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
@@ -332,8 +332,6 @@ mod test {
         type Direction = Forward;
 
         type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-        type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-        type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
         fn next(&mut self) -> Self::NextFuture<'_> {
             async { pending::<HummockResult<()>>().await }
@@ -357,6 +355,13 @@ mod test {
             true
         }
 
+        fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+    }
+
+    impl HummockIteratorSeekable for CancellationTestIterator {
+        type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+        type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
         fn rewind(&mut self) -> Self::RewindFuture<'_> {
             async { Ok(()) }
         }
@@ -364,8 +369,6 @@ mod test {
         fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
             async { Ok(()) }
         }
-
-        fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
     }
 
     #[tokio::test]

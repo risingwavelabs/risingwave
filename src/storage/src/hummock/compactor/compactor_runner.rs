@@ -26,7 +26,9 @@ use super::task_progress::TaskProgress;
 use super::TaskConfig;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
-use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
+use crate::hummock::iterator::{
+    Forward, HummockIterator, HummockIteratorSeekable, UnorderedMergeIteratorInner,
+};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
     CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
@@ -156,7 +158,9 @@ impl CompactorRunner {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    fn build_sst_iter(&self) -> HummockResult<impl HummockIterator<Direction = Forward>> {
+    fn build_sst_iter(
+        &self,
+    ) -> HummockResult<impl HummockIterator<Direction = Forward> + HummockIteratorSeekable> {
         let mut table_iters = Vec::new();
 
         for level in &self.compact_task.input_ssts {

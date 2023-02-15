@@ -32,6 +32,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::watch;
 use tracing::log::error;
 
+use crate::hummock::iterator::HummockIteratorSeekable;
+
 mod block_cache;
 pub use block_cache::*;
 

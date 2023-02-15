@@ -19,7 +19,7 @@ use risingwave_hummock_sdk::key::FullKey;
 
 use crate::assert_bytes_eq;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::{HummockIterator, HummockIteratorSeekable};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
     default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable,

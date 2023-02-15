@@ -20,12 +20,12 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 
 use super::super::{HummockResult, HummockValue};
-use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::iterator::{Forward, HummockIterator, HummockIteratorSeekable};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
-pub trait SstableIteratorType: HummockIterator + 'static {
+pub trait SstableIteratorType: HummockIterator + HummockIteratorSeekable + 'static {
     fn create(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
@@ -108,8 +108,6 @@ impl HummockIterator for SstableIterator {
     type Direction = Forward;
 
     type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         self.stats.total_key_count += 1;
@@ -137,6 +135,15 @@ impl HummockIterator for SstableIterator {
     fn is_valid(&self) -> bool {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
+
+    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
+        stats.add(&self.stats);
+    }
+}
+
+impl HummockIteratorSeekable for SstableIterator {
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move { self.seek_idx(0, None).await }
@@ -171,10 +178,6 @@ impl HummockIterator for SstableIterator {
 
             Ok(())
         }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        stats.add(&self.stats);
     }
 }
 

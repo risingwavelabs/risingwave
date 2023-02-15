@@ -18,8 +18,8 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
 use risingwave_storage::hummock::iterator::{
-    Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner,
+    Forward, HummockIterator, HummockIteratorSeekable, HummockIteratorUnion,
+    OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -79,7 +79,10 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
     iterators
 }
 
-fn run_iter<I: HummockIterator<Direction = Forward>>(iter_ref: &RefCell<I>, total_count: usize) {
+fn run_iter<I: HummockIterator<Direction = Forward> + HummockIteratorSeekable>(
+    iter_ref: &RefCell<I>,
+    total_count: usize,
+) {
     let mut iter = iter_ref.borrow_mut();
     block_on(iter.rewind()).unwrap();
     let mut count = 0;
