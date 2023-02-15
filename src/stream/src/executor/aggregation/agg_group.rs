@@ -241,9 +241,8 @@ impl<S: StateStore> AggGroup<S> {
             self.group_key().is_some(),
             self.prev_outputs.is_some(),
         ) {
-            (0, 0, _, true) => {
-                // Previous state is empty, current state is also empty, and previously output the
-                // state.
+            (0, 0, true, _) => {
+                // Previous state is empty, current state is also empty.
 
                 0
             }
