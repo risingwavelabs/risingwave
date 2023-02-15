@@ -583,7 +583,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
             if sender.send(0).is_err() {
-                warn!("The task has already died before this request, so the abort did no-op")
+                debug!("The task has already died before this request, so the abort did no-op")
             } else {
                 info!("Abort task {:?} done", self.task_id);
             }
