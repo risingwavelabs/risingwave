@@ -15,7 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -84,6 +84,7 @@ impl StreamNode for StreamDml {
         ProstStreamNode::Dml(DmlNode {
             // Meta will fill this table id.
             table_id: 0,
+            table_version_id: INITIAL_TABLE_VERSION_ID, // TODO: use correct table version id
             column_descs: self.column_descs.iter().map(Into::into).collect(),
         })
     }

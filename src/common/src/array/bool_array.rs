@@ -170,7 +170,7 @@ mod tests {
 
     use super::*;
     use crate::array::{read_bool_array, NULL_VAL_FOR_HASH};
-    use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+    use crate::util::iter_util::ZipEqFast;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
@@ -194,7 +194,7 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
-        let res = v.iter().zip_eq_debug(array.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -220,7 +220,7 @@ mod tests {
 
             let equal = array
                 .iter()
-                .zip_eq_debug(decoded.iter())
+                .zip_eq_fast(decoded.iter())
                 .all(|(a, b)| a == b);
             assert!(equal);
         }

@@ -42,7 +42,7 @@ use crate::types::{
     OrderedF32, OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 /// A wrapper for u64 hash result.
@@ -618,7 +618,7 @@ where
     A::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeySerializer,
 {
-    for (item, serializer) in array.iter().zip_eq_debug(serializers.iter_mut()) {
+    for (item, serializer) in array.iter().zip_eq_fast(serializers.iter_mut()) {
         serializer.append(item);
     }
 }

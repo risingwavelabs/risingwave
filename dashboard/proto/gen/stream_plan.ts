@@ -461,6 +461,12 @@ export interface SimpleAggNode {
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
+  distinctDedupTables: { [key: number]: Table };
+}
+
+export interface SimpleAggNode_DistinctDedupTablesEntry {
+  key: number;
+  value: Table | undefined;
 }
 
 export interface HashAggNode {
@@ -475,6 +481,12 @@ export interface HashAggNode {
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
+  distinctDedupTables: { [key: number]: Table };
+}
+
+export interface HashAggNode_DistinctDedupTablesEntry {
+  key: number;
+  value: Table | undefined;
 }
 
 export interface TopNNode {
@@ -745,6 +757,8 @@ export interface SortNode {
 export interface DmlNode {
   /** Id of the table on which DML performs. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   /** Column descriptions of the table. */
   columnDescs: ColumnDesc[];
 }
@@ -2240,7 +2254,14 @@ export const AggCallState_MaterializedInputState = {
 };
 
 function createBaseSimpleAggNode(): SimpleAggNode {
-  return { aggCalls: [], distributionKey: [], aggCallStates: [], resultTable: undefined, isAppendOnly: false };
+  return {
+    aggCalls: [],
+    distributionKey: [],
+    aggCallStates: [],
+    resultTable: undefined,
+    isAppendOnly: false,
+    distinctDedupTables: {},
+  };
 }
 
 export const SimpleAggNode = {
@@ -2253,6 +2274,12 @@ export const SimpleAggNode = {
         : [],
       resultTable: isSet(object.resultTable) ? Table.fromJSON(object.resultTable) : undefined,
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      distinctDedupTables: isObject(object.distinctDedupTables)
+        ? Object.entries(object.distinctDedupTables).reduce<{ [key: number]: Table }>((acc, [key, value]) => {
+          acc[Number(key)] = Table.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2276,6 +2303,12 @@ export const SimpleAggNode = {
     message.resultTable !== undefined &&
       (obj.resultTable = message.resultTable ? Table.toJSON(message.resultTable) : undefined);
     message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    obj.distinctDedupTables = {};
+    if (message.distinctDedupTables) {
+      Object.entries(message.distinctDedupTables).forEach(([k, v]) => {
+        obj.distinctDedupTables[k] = Table.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -2288,12 +2321,57 @@ export const SimpleAggNode = {
       ? Table.fromPartial(object.resultTable)
       : undefined;
     message.isAppendOnly = object.isAppendOnly ?? false;
+    message.distinctDedupTables = Object.entries(object.distinctDedupTables ?? {}).reduce<{ [key: number]: Table }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Table.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseSimpleAggNode_DistinctDedupTablesEntry(): SimpleAggNode_DistinctDedupTablesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const SimpleAggNode_DistinctDedupTablesEntry = {
+  fromJSON(object: any): SimpleAggNode_DistinctDedupTablesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? Table.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SimpleAggNode_DistinctDedupTablesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? Table.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SimpleAggNode_DistinctDedupTablesEntry>, I>>(
+    object: I,
+  ): SimpleAggNode_DistinctDedupTablesEntry {
+    const message = createBaseSimpleAggNode_DistinctDedupTablesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null) ? Table.fromPartial(object.value) : undefined;
     return message;
   },
 };
 
 function createBaseHashAggNode(): HashAggNode {
-  return { groupKey: [], aggCalls: [], aggCallStates: [], resultTable: undefined, isAppendOnly: false };
+  return {
+    groupKey: [],
+    aggCalls: [],
+    aggCallStates: [],
+    resultTable: undefined,
+    isAppendOnly: false,
+    distinctDedupTables: {},
+  };
 }
 
 export const HashAggNode = {
@@ -2306,6 +2384,12 @@ export const HashAggNode = {
         : [],
       resultTable: isSet(object.resultTable) ? Table.fromJSON(object.resultTable) : undefined,
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      distinctDedupTables: isObject(object.distinctDedupTables)
+        ? Object.entries(object.distinctDedupTables).reduce<{ [key: number]: Table }>((acc, [key, value]) => {
+          acc[Number(key)] = Table.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2329,6 +2413,12 @@ export const HashAggNode = {
     message.resultTable !== undefined &&
       (obj.resultTable = message.resultTable ? Table.toJSON(message.resultTable) : undefined);
     message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    obj.distinctDedupTables = {};
+    if (message.distinctDedupTables) {
+      Object.entries(message.distinctDedupTables).forEach(([k, v]) => {
+        obj.distinctDedupTables[k] = Table.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -2341,6 +2431,44 @@ export const HashAggNode = {
       ? Table.fromPartial(object.resultTable)
       : undefined;
     message.isAppendOnly = object.isAppendOnly ?? false;
+    message.distinctDedupTables = Object.entries(object.distinctDedupTables ?? {}).reduce<{ [key: number]: Table }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Table.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseHashAggNode_DistinctDedupTablesEntry(): HashAggNode_DistinctDedupTablesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const HashAggNode_DistinctDedupTablesEntry = {
+  fromJSON(object: any): HashAggNode_DistinctDedupTablesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? Table.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: HashAggNode_DistinctDedupTablesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? Table.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HashAggNode_DistinctDedupTablesEntry>, I>>(
+    object: I,
+  ): HashAggNode_DistinctDedupTablesEntry {
+    const message = createBaseHashAggNode_DistinctDedupTablesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null) ? Table.fromPartial(object.value) : undefined;
     return message;
   },
 };
@@ -3250,13 +3378,14 @@ export const SortNode = {
 };
 
 function createBaseDmlNode(): DmlNode {
-  return { tableId: 0, columnDescs: [] };
+  return { tableId: 0, tableVersionId: 0, columnDescs: [] };
 }
 
 export const DmlNode = {
   fromJSON(object: any): DmlNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
     };
   },
@@ -3264,6 +3393,7 @@ export const DmlNode = {
   toJSON(message: DmlNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.columnDescs) {
       obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
     } else {
@@ -3275,6 +3405,7 @@ export const DmlNode = {
   fromPartial<I extends Exact<DeepPartial<DmlNode>, I>>(object: I): DmlNode {
     const message = createBaseDmlNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     return message;
   },

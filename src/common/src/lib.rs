@@ -53,6 +53,7 @@ pub mod hash;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
+pub mod system_param;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;

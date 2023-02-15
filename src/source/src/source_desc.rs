@@ -99,6 +99,7 @@ impl SourceDescBuilder {
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
             ProstRowFormatType::Native => SourceFormat::Native,
+            ProstRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
             _ => unreachable!(),
         };
 

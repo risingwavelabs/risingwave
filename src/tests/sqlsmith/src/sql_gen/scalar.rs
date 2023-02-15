@@ -114,13 +114,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_int(&mut self, min: isize, max: isize) -> String {
         // NOTE: Reduced chance for extreme values,
         // since these tend to generate invalid expressions.
-        let n = match self.rng.gen_range(0..=10) {
-            0 => 0,
-            1 => 1,
-            2 => max,
-            3 => min,
-            4 => self.rng.gen_range(min + 1..0),
-            5..=10 => self.rng.gen_range(2..max),
+        let n = match self.rng.gen_range(1..=100) {
+            1..=5 => 0,
+            6..=10 => 1,
+            11..=15 => max,
+            16..=20 => min,
+            21..=25 => self.rng.gen_range(min + 1..0),
+            26..=30 => self.rng.gen_range(1000..max),
+            31..=100 => self.rng.gen_range(2..1000),
             _ => unreachable!(),
         };
         n.to_string()
@@ -129,13 +130,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_float(&mut self) -> String {
         // NOTE: Reduced chance for extreme values,
         // since these tend to generate invalid expressions.
-        let n = match self.rng.gen_range(0..=10) {
-            0 => 0.0,
-            1 => 1.0,
-            2 => i32::MAX as f64,
-            3 => i32::MIN as f64,
-            4 => self.rng.gen_range(i32::MIN + 1..0) as f64,
-            5..=10 => self.rng.gen_range(2..i32::MAX) as f64,
+        let n = match self.rng.gen_range(1..=100) {
+            1..=5 => 0.0,
+            6..=10 => 1.0,
+            11..=15 => i32::MAX as f64,
+            16..=20 => i32::MIN as f64,
+            21..=25 => self.rng.gen_range(i32::MIN + 1..0) as f64,
+            26..=30 => self.rng.gen_range(1000..i32::MAX) as f64,
+            31..=100 => self.rng.gen_range(2..1000) as f64,
             _ => unreachable!(),
         };
         n.to_string()
