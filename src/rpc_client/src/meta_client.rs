@@ -1170,8 +1170,7 @@ impl ElectionMemberManagement {
             if discovered_leader != self.current_leader {
                 tracing::info!("new meta leader {} discovered", discovered_leader);
                 let (channel, _) =
-                    GrpcMetaClient::try_build_rpc_channel_servers(vec![discovered_leader.clone()])
-                        .await?;
+                    GrpcMetaClient::try_build_rpc_channel(vec![discovered_leader.clone()]).await?;
 
                 self.recreate_core(channel).await;
                 self.current_leader = discovered_leader;
@@ -1262,11 +1261,9 @@ impl GrpcMetaClient {
     pub async fn new(strategy: MetaAddressStrategy) -> Result<Self> {
         let (channel, addr) = match &strategy {
             MetaAddressStrategy::LoadBalance(addr) => {
-                Self::try_build_rpc_channel_service(addr.clone()).await
+                Self::try_build_rpc_channel(vec![addr.clone()]).await
             }
-            MetaAddressStrategy::List(addrs) => {
-                Self::try_build_rpc_channel_servers(addrs.clone()).await
-            }
+            MetaAddressStrategy::List(addrs) => Self::try_build_rpc_channel(addrs.clone()).await,
         }?;
         let (force_refresh_sender, force_refresh_receiver) = mpsc::channel(1);
         let client = GrpcMetaClient {
@@ -1308,57 +1305,17 @@ impl GrpcMetaClient {
             .map_err(RpcError::TransportError)
     }
 
-    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
-            .map(jitter)
-    }
-
-    /// Connect against one of multiple meta nodes using a K8s service
-    pub(crate) async fn try_build_rpc_channel_service(addr: String) -> Result<(Channel, String)> {
-        let endpoint = Self::addr_to_endpoint(addr.clone())?;
-
-        let res = tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
-            let endpoint = endpoint.clone();
-            let addr = addr.clone();
-            match Self::connect_to_endpoint(endpoint).await {
-                Ok(channel) => {
-                    tracing::info!(
-                        "Connect to meta server via service at {} successfully",
-                        addr
-                    );
-                    Ok((channel, addr))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "Failed to connect to meta server using service at {}, trying again: {}",
-                        addr,
-                        e
-                    );
-                    Err(())
-                }
-            }
-        })
-        .await;
-
-        match res {
-            Ok(chan_addr) => Ok(chan_addr),
-            Err(_) => Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
-            ))),
-        }
-    }
-
-    /// Connect against one of multiple meta nodes using a list of addresses
-    pub(crate) async fn try_build_rpc_channel_servers(
-        addrs: Vec<String>,
-    ) -> Result<(Channel, String)> {
+    pub(crate) async fn try_build_rpc_channel(addrs: Vec<String>) -> Result<(Channel, String)> {
         let endpoints: Vec<_> = addrs
             .into_iter()
             .map(|addr| Self::addr_to_endpoint(addr.clone()).map(|endpoint| (endpoint, addr)))
             .try_collect()?;
 
-        let channel = tokio_retry::Retry::spawn(Self::get_retry_strategy(), || async {
+        let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
+            .map(jitter);
+
+        let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
             let endpoints = endpoints.clone();
 
             for (endpoint, addr) in endpoints {
@@ -1369,7 +1326,7 @@ impl GrpcMetaClient {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to connect to meta server {}, trying next address: {}",
+                            "Failed to connect to meta server {}, trying again: {}",
                             addr,
                             e
                         )
@@ -1378,7 +1335,7 @@ impl GrpcMetaClient {
             }
 
             Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
+                "Failed to connect to meta server"
             )))
         })
         .await?;
