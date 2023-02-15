@@ -485,7 +485,14 @@ impl LogicalAggBuilder {
                 distinct = false;
                 order_by = OrderBy::any();
             }
-            AggKind::Sum | AggKind::Count | AggKind::Avg | AggKind::ApproxCountDistinct => {
+            AggKind::Sum
+            | AggKind::Count
+            | AggKind::Avg
+            | AggKind::ApproxCountDistinct
+            | AggKind::StddevSamp
+            | AggKind::StddevPop
+            | AggKind::VarPop
+            | AggKind::VarSamp => {
                 order_by = OrderBy::any();
             }
             _ => {
