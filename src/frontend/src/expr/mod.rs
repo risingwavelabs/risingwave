@@ -495,13 +495,6 @@ impl ExprImpl {
         !visitor.has
     }
 
-    pub fn is_input_ref(&self) -> bool {
-        match self {
-            ExprImpl::InputRef(_) => true,
-            _ => false,
-        }
-    }
-
     /// Returns the `InputRefs` of an Equality predicate if it matches
     /// ordered by the canonical ordering (lower, higher), else returns None
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {

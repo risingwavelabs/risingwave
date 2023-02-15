@@ -173,10 +173,9 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                         input_schema: self.input.schema(),
                     },
                     alias: {
-                        if expr.is_input_ref() {
-                            None
-                        } else {
-                            Some(format!("$expr{i}"))
+                        match expr {
+                            ExprImpl::InputRef(_) => None,
+                            _ => Some(format!("$expr{i}")),
                         }
                     },
                 })
