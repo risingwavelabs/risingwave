@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -98,6 +99,7 @@ where
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
     compaction_resume_notifier: Arc<Notify>,
+    stopped: AtomicBool,
 }
 
 impl<S> CompactionScheduler<S>
@@ -114,6 +116,7 @@ where
             hummock_manager,
             compactor_manager,
             compaction_resume_notifier: Arc::new(Notify::new()),
+            stopped: AtomicBool::new(false),
         }
     }
 
@@ -142,7 +145,7 @@ where
         );
         let mut compaction_selectors = Self::init_selectors();
         let sched_channel_closed = sched_channel.clone();
-        let compaction_resume_notifier = self.compaction_resume_notifier.clone();
+        let scheduler = self.clone();
         let handle = tokio::spawn(async move {
             while let Some((compaction_group, task_type)) = sched_rx.recv().await {
                 sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
@@ -154,6 +157,9 @@ where
                         break compactor;
                     } else {
                         self.compaction_resume_notifier.notified().await;
+                        if self.stopped.load(Ordering::SeqCst) {
+                            return;
+                        }
                     }
                 };
                 let selector = compaction_selectors.get_mut(&task_type).unwrap();
@@ -163,7 +169,8 @@ where
         });
         global_event_manager.register_shutdown_task(
             async move {
-                compaction_resume_notifier.notify_waiters();
+                scheduler.stopped.store(true, Ordering::Release);
+                scheduler.compaction_resume_notifier.notify_waiters();
                 sched_channel_closed.request_tx.closed().await;
             },
             handle,

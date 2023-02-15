@@ -587,7 +587,7 @@ mod tests {
                 fragment_manager.clone(),
                 barrier_scheduler.clone(),
                 cluster_manager.clone(),
-                source_manager.clone(),
+                source_manager,
                 hummock_manager,
             )?;
 
