@@ -30,7 +30,7 @@ use crate::{MetaError, MetaResult};
 pub type SystemParamManagerRef<S> = Arc<SystemParamManager<S>>;
 
 pub struct SystemParamManager<S: MetaStore> {
-    _env: MetaSrvEnv<S>,
+    env: MetaSrvEnv<S>,
     params: RwLock<SystemParams>,
 }
 
@@ -49,7 +49,7 @@ impl<S: MetaStore> SystemParamManager<S> {
         };
 
         Ok(Self {
-            _env: env,
+            env,
             params: RwLock::new(params),
         })
     }
@@ -67,7 +67,7 @@ impl<S: MetaStore> SystemParamManager<S> {
 
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn)?;
-        self._env.meta_store().txn(store_txn).await?;
+        self.env.meta_store().txn(store_txn).await?;
 
         mem_txn.commit();
 
