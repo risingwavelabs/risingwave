@@ -52,24 +52,21 @@
     LogicalProject { exprs: [ArrayCat(Array(66:Int32), Array(123:Int32))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [ArrayCat(Array(66:Int32), Array(123:Int32))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ArrayCat(Array(66:Int32), Array(123:Int32))]] }
 - sql: |
     select array_cat(array[array[66]], array[233]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(Array(66:Int32)), Array(233:Int32))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [ArrayCat(Array(Array(66:Int32)), Array(233:Int32))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ArrayCat(Array(Array(66:Int32)), Array(233:Int32))]] }
 - sql: |
     select array_cat(array[233], array[array[66]]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(233:Int32), Array(Array(66:Int32)))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [ArrayCat(Array(233:Int32), Array(Array(66:Int32)))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ArrayCat(Array(233:Int32), Array(Array(66:Int32)))]] }
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
   binder_error: 'Bind error: unable to find least restrictive type between integer[] and integer[][][]'
@@ -85,8 +82,7 @@
     LogicalProject { exprs: [ArrayAppend(Array(66:Int32), 123:Int32)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [ArrayAppend(Array(66:Int32), 123:Int32)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ArrayAppend(Array(66:Int32), 123:Int32)]] }
 - sql: |
     select array_append(123, 234);
   binder_error: 'Bind error: Cannot append integer to integer'
@@ -102,8 +98,7 @@
     LogicalProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ArrayPrepend(123:Int32, Array(66:Int32))]] }
 - sql: |
     select array_prepend(123, 234);
   binder_error: 'Bind error: Cannot prepend integer to integer'
