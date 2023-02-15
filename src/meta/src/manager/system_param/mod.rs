@@ -14,20 +14,24 @@
 
 mod model;
 
+use std::ops::DerefMut;
 use std::sync::Arc;
 
+use risingwave_common::system_param::set_system_param;
 use risingwave_pb::meta::SystemParams;
+use tokio::sync::RwLock;
 
 use self::model::SystemParamsModel;
 use super::MetaSrvEnv;
-use crate::storage::MetaStore;
-use crate::MetaResult;
+use crate::model::{ValTransaction, VarTransaction};
+use crate::storage::{MetaStore, Transaction};
+use crate::{MetaError, MetaResult};
 
 pub type SystemParamManagerRef<S> = Arc<SystemParamManager<S>>;
 
 pub struct SystemParamManager<S: MetaStore> {
     _env: MetaSrvEnv<S>,
-    params: SystemParams,
+    params: RwLock<SystemParams>,
 }
 
 impl<S: MetaStore> SystemParamManager<S> {
@@ -44,15 +48,30 @@ impl<S: MetaStore> SystemParamManager<S> {
             init_params
         };
 
-        Ok(Self { _env: env, params })
+        Ok(Self {
+            _env: env,
+            params: RwLock::new(params),
+        })
     }
 
-    pub fn get_params(&self) -> &SystemParams {
-        &self.params
+    pub async fn get_params(&self) -> SystemParams {
+        self.params.read().await.clone()
     }
 
-    pub fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
-        todo!()
+    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
+        let mut params_guard = self.params.write().await;
+        let params = params_guard.deref_mut();
+        let mut mem_txn = VarTransaction::new(params);
+
+        set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_param)?;
+
+        let mut store_txn = Transaction::default();
+        mem_txn.apply_to_txn(&mut store_txn)?;
+        self._env.meta_store().txn(store_txn).await?;
+
+        mem_txn.commit();
+
+        Ok(())
     }
 
     fn validate_init_params(persisted: &SystemParams, init: &SystemParams) {

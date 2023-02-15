@@ -46,7 +46,7 @@ where
         &self,
         _request: Request<GetSystemParamsRequest>,
     ) -> Result<Response<GetSystemParamsResponse>, Status> {
-        let params = Some(self.system_params_manager.get_params().clone());
+        let params = Some(self.system_params_manager.get_params().await);
         Ok(Response::new(GetSystemParamsResponse { params }))
     }
 
@@ -56,7 +56,8 @@ where
     ) -> Result<Response<SetSystemParamResponse>, Status> {
         let req = request.into_inner();
         self.system_params_manager
-            .set_param(&req.param, req.value)?;
+            .set_param(&req.param, req.value)
+            .await?;
         Ok(Response::new(SetSystemParamResponse {}))
     }
 }
