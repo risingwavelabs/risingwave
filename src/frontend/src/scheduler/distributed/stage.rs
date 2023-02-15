@@ -571,7 +571,7 @@ impl StageRunner {
             self.notify_stage_completed().await;
         }
 
-        tracing::info!(
+        tracing::trace!(
             "Stage runner [{:?}-{:?}] existed. ",
             self.stage.query_id,
             self.stage.id
