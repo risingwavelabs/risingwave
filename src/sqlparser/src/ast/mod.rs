@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -191,6 +191,28 @@ impl From<Vec<Ident>> for ObjectName {
     }
 }
 
+/// For array type `ARRAY[..]` or `[..]`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Array {
+    /// The list of expressions between brackets
+    pub elem: Vec<Expr>,
+
+    /// `true` for  `ARRAY[..]`, `false` for `[..]`
+    pub named: bool,
+}
+
+impl fmt::Display for Array {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}[{}]",
+            if self.named { "ARRAY" } else { "" },
+            display_comma_separated(&self.elem)
+        )
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -344,12 +366,13 @@ pub enum Expr {
     Row(Vec<Expr>),
     /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
     /// e.g. {1, 2, 3},
-    Array(Vec<Expr>),
+    Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
+    #[expect(clippy::disallowed_methods, reason = "use zip_eq")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
@@ -396,20 +419,14 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(
-                f,
-                "{} {} {}",
-                fmt_expr_with_paren(left),
-                op,
-                fmt_expr_with_paren(right)
-            ),
+            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
+                    write!(f, "{} {}", op, expr)
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -543,36 +560,9 @@ impl fmt::Display for Expr {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
-            Expr::Array(exprs) => write!(
-                f,
-                "ARRAY[{}]",
-                exprs
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice()
-                    .join(", ")
-            ),
+            Expr::Array(exprs) => write!(f, "{}", exprs),
         }
     }
-}
-
-/// Wrap complex expressions with necessary parentheses.
-/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
-fn fmt_expr_with_paren(e: &Expr) -> String {
-    use Expr as E;
-    match e {
-        E::BinaryOp { .. }
-        | E::UnaryOp { .. }
-        | E::IsNull(_)
-        | E::IsNotNull(_)
-        | E::IsFalse(_)
-        | E::IsTrue(_)
-        | E::IsNotTrue(_)
-        | E::IsNotFalse(_) => return format!("({})", e),
-        _ => {}
-    };
-    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
@@ -723,7 +713,6 @@ pub enum ShowObject {
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
-    MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
 
@@ -753,9 +742,6 @@ impl fmt::Display for ShowObject {
                 write!(f, "MATERIALIZED VIEWS{}", fmt_schema(schema))
             }
             ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
-            ShowObject::MaterializedSource { schema } => {
-                write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
-            }
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
@@ -881,6 +867,8 @@ pub enum Statement {
         columns: Vec<Ident>,
         /// A SQL query that specifies what to insert
         source: Box<Query>,
+        /// Define output of this insert statement
+        returning: Vec<SelectItem>,
     },
     Copy {
         /// TABLE
@@ -898,6 +886,8 @@ pub enum Statement {
         assignments: Vec<Assignment>,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// DELETE
     Delete {
@@ -905,6 +895,8 @@ pub enum Statement {
         table_name: ObjectName,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// CREATE VIEW
     CreateView {
@@ -914,6 +906,7 @@ pub enum Statement {
         name: ObjectName,
         columns: Vec<Ident>,
         query: Box<Query>,
+        emit_mode: Option<EmitMode>,
         with_options: Vec<SqlOption>,
     },
     /// CREATE TABLE
@@ -944,10 +937,7 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource {
-        is_materialized: bool,
-        stmt: CreateSourceStatement,
-    },
+    CreateSource { stmt: CreateSourceStatement },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
     /// CREATE FUNCTION
@@ -1086,6 +1076,11 @@ pub enum Statement {
     CreateUser(CreateUserStatement),
     /// ALTER USER
     AlterUser(AlterUserStatement),
+    /// ALTER SYSTEM SET configuration_parameter { TO | = } { value | 'value' | DEFAULT }
+    AlterSystem {
+        param: Ident,
+        value: SetVariableValue,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1137,14 +1132,18 @@ impl fmt::Display for Statement {
                 table_name,
                 columns,
                 source,
+                returning,
             } => {
                 write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
-                write!(f, "{}", source)
+                write!(f, "{}", source)?;
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
+                Ok(())
             }
-
             Statement::Copy {
                 table_name,
                 columns,
@@ -1174,6 +1173,7 @@ impl fmt::Display for Statement {
                 table_name,
                 assignments,
                 selection,
+                returning,
             } => {
                 write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
@@ -1182,15 +1182,22 @@ impl fmt::Display for Statement {
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
                 }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
                 Ok(())
             }
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => {
                 write!(f, "DELETE FROM {}", table_name)?;
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
+                }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
                 Ok(())
             }
@@ -1235,6 +1242,7 @@ impl fmt::Display for Statement {
                 query,
                 materialized,
                 with_options,
+                emit_mode,
             } => {
                 write!(
                     f,
@@ -1243,6 +1251,9 @@ impl fmt::Display for Statement {
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
                     name = name
                 )?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
@@ -1326,17 +1337,11 @@ impl fmt::Display for Statement {
                 }
             ),
             Statement::CreateSource {
-                is_materialized,
                 stmt,
             } => write!(
                 f,
-                "CREATE {materialized}SOURCE {}",
+                "CREATE SOURCE {}",
                 stmt,
-                materialized = if *is_materialized {
-                    "MATERIALIZED "
-                } else {
-                    ""
-                }
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
@@ -1511,6 +1516,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
+            }
+            Statement::AlterSystem{param, value} => {
+                f.write_str("ALTER SYSTEM SET ")?;
+                write!(
+                    f,
+                    "{param} = {value}",
+                )
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -1849,7 +1861,6 @@ pub enum ObjectType {
     Index,
     Schema,
     Source,
-    MaterializedSource,
     Sink,
     Database,
     User,
@@ -1864,7 +1875,6 @@ impl fmt::Display for ObjectType {
             ObjectType::Index => "INDEX",
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
-            ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
@@ -1880,8 +1890,6 @@ impl ParseTo for ObjectType {
             ObjectType::View
         } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             ObjectType::MaterializedView
-        } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
-            ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
         } else if parser.parse_keyword(Keyword::SINK) {
@@ -1896,7 +1904,7 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };
@@ -1914,6 +1922,22 @@ pub struct SqlOption {
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} = {}", self.name, self.value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum EmitMode {
+    Immediately,
+    OnWindowClose,
+}
+
+impl fmt::Display for EmitMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            EmitMode::Immediately => "IMMEDIATELY",
+            EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
     }
 }
 
@@ -2172,6 +2196,7 @@ impl fmt::Display for CreateFunctionBody {
 pub enum SetVariableValue {
     Ident(Ident),
     Literal(Value),
+    Default,
 }
 
 impl fmt::Display for SetVariableValue {
@@ -2180,6 +2205,7 @@ impl fmt::Display for SetVariableValue {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Default => write!(f, "DEFAULT"),
         }
     }
 }
@@ -2296,5 +2322,26 @@ mod tests {
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1][1]", format!("{}", array_index2));
+    }
+
+    #[test]
+    /// issue: https://github.com/risingwavelabs/risingwave/issues/7635
+    fn test_nested_op_display() {
+        let binary_op = Expr::BinaryOp {
+            left: Box::new(Expr::Value(Value::Boolean(true))),
+            op: BinaryOperator::Or,
+            right: Box::new(Expr::IsNotFalse(Box::new(Expr::Value(Value::Boolean(
+                true,
+            ))))),
+        };
+        assert_eq!("true OR true IS NOT FALSE", format!("{}", binary_op));
+
+        let unary_op = Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: Box::new(Expr::IsNotFalse(Box::new(Expr::Value(Value::Boolean(
+                true,
+            ))))),
+        };
+        assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
     }
 }

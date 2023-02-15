@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use risingwave_common::hash::HashKey;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::StateStore;
 
@@ -140,15 +141,15 @@ fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
 pub struct JoinParams {
     /// Indices of the join keys
     pub join_key_indices: Vec<usize>,
-    /// Indices of the distribution keys
-    pub dist_keys: Vec<usize>,
+    /// Indices of the input pk after dedup
+    pub deduped_pk_indices: Vec<usize>,
 }
 
 impl JoinParams {
-    pub fn new(join_key_indices: Vec<usize>, dist_keys: Vec<usize>) -> Self {
+    pub fn new(join_key_indices: Vec<usize>, deduped_pk_indices: Vec<usize>) -> Self {
         Self {
             join_key_indices,
-            dist_keys,
+            deduped_pk_indices,
         }
     }
 }
@@ -158,8 +159,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     ht: JoinHashMap<K, S>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
-    /// The primary key indices of state table on this side
-    pk_indices: Vec<usize>,
+    /// The primary key indices of state table on this side after dedup
+    deduped_pk_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
@@ -175,7 +176,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
-            .field("pk_indices", &self.pk_indices)
+            .field("deduped_pk_indices", &self.deduped_pk_indices)
             .field("col_types", &self.all_data_types)
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
@@ -475,11 +476,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_l = is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
-        let pk_contained_r = is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
+        let pk_contained_in_jk_l =
+            is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
+        let pk_contained_in_jk_r =
+            is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
-        let append_only_optimize = is_append_only && pk_contained_l && pk_contained_r;
+        let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
 
         let join_key_data_types_r = join_key_indices_l
             .iter()
@@ -518,8 +521,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             null_matched
         };
 
-        let need_degree_table_l = need_left_degree(T) && !pk_contained_r;
-        let need_degree_table_r = need_right_degree(T) && !pk_contained_l;
+        let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
+        let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
@@ -555,15 +558,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     degree_pk_indices_l,
                     null_matched.clone(),
                     need_degree_table_l,
+                    pk_contained_in_jk_l,
                     metrics.clone(),
                     ctx.id,
                     "left",
-                ), // TODO: decide the target cap
+                ),
                 join_key_indices: join_key_indices_l,
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
-                pk_indices: state_pk_indices_l,
+                deduped_pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
             },
@@ -579,13 +583,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     degree_pk_indices_r,
                     null_matched,
                     need_degree_table_r,
+                    pk_contained_in_jk_r,
                     metrics.clone(),
                     ctx.id,
                     "right",
-                ), // TODO: decide the target cap
+                ),
                 join_key_indices: join_key_indices_r,
                 all_data_types: state_all_data_types_r,
-                pk_indices: state_pk_indices_r,
+                deduped_pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
@@ -879,7 +884,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         };
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
-        for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
+        for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
             let matched_rows: Option<HashValueType> =
                 Self::hash_eq_match(key, &mut side_match.ht).await?;
             match op {
@@ -936,9 +941,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     if append_only_optimize && let Some(row) = append_only_matched_row {
                         side_match.ht.delete(key, row);
                     } else if side_update.need_degree_table {
-                        side_update.ht.insert(key, JoinRow::new(row, degree));
+                        side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
                     } else {
-                        side_update.ht.insert_row(key, row);
+                        side_update.ht.insert_row(key, row).await?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -1006,8 +1011,7 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -1084,8 +1088,8 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
-        let params_l = JoinParams::new(vec![0], vec![]);
-        let params_r = JoinParams::new(vec![0], vec![]);
+        let params_l = JoinParams::new(vec![0], vec![1]);
+        let params_r = JoinParams::new(vec![0], vec![1]);
         let cond = with_condition.then(create_cond);
 
         let mem_state = MemoryStateStore::new();
@@ -1122,7 +1126,7 @@ mod tests {
             params_r,
             vec![null_safe],
             vec![1],
-            (0..schema_len).into_iter().collect_vec(),
+            (0..schema_len).collect_vec(),
             1,
             cond,
             "HashJoinExecutor".to_string(),
@@ -1195,7 +1199,7 @@ mod tests {
             params_r,
             vec![false],
             vec![1],
-            (0..schema_len).into_iter().collect_vec(),
+            (0..schema_len).collect_vec(),
             1,
             cond,
             "HashJoinExecutor".to_string(),

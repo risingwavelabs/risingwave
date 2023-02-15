@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use super::select::LogicalFilter;
 use super::Planner;
 use crate::binder::BoundUpdate;
-use crate::optimizer::plan_node::LogicalUpdate;
+use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
@@ -30,19 +30,29 @@ impl Planner {
         } else {
             scan
         };
-        let plan: PlanRef = LogicalUpdate::create(
+        let returning = !update.returning_list.is_empty();
+        let mut plan: PlanRef = LogicalUpdate::create(
             input,
             update.table_name.clone(),
             update.table_id,
             update.exprs,
+            returning,
         )?
         .into();
+
+        if returning {
+            plan = LogicalProject::create(plan, update.returning_list);
+        }
 
         // For update, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
-        let out_names = plan.schema().names();
+        let out_names = if returning {
+            update.returning_schema.expect("If returning list is not empty, should provide returning schema in BoundDelete.").names()
+        } else {
+            plan.schema().names()
+        };
 
         let root = PlanRoot::new(plan, dist, Order::any(), out_fields, out_names);
         Ok(root)

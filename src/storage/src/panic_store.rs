@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,11 +19,12 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
+use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
@@ -74,7 +75,19 @@ impl StateStoreWrite for PanicStateStore {
     }
 }
 
-impl LocalStateStore for PanicStateStore {}
+impl LocalStateStore for PanicStateStore {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move {
+            panic!("should not call may_exist from the state store!");
+        }
+    }
+}
 
 impl StateStore for PanicStateStore {
     type Local = Self;
@@ -109,6 +122,10 @@ impl StateStore for PanicStateStore {
         async {
             panic!("should not call new local from the panic state store");
         }
+    }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        panic!("should not call validate_read_epoch from the panic state store");
     }
 }
 

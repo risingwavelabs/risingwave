@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
@@ -94,6 +95,10 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// table when `flush_data` is called.
     result_table: StateTable<S>,
 
+    /// State tables for deduplicating rows on distinct key for distinct agg calls.
+    /// One table per distinct column (may be shared by multiple agg calls).
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
+
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
@@ -156,6 +161,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         agg_calls: Vec<AggCall>,
         storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
+        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
         executor_id: u64,
@@ -185,6 +191,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size,
                 storages,
                 result_table,
+                distinct_dedup_tables,
                 group_key_indices,
                 watermark_epoch,
                 group_change_set: HashSet::new(),
@@ -224,7 +231,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // the order is the same as how we get distinct final columns from original columns.
         let mut unique_key_and_hash_codes = Vec::new();
 
-        for (row_idx, (key, hash_code)) in keys.iter().zip_eq(key_hash_codes.iter()).enumerate() {
+        for (row_idx, (key, hash_code)) in
+            keys.iter().zip_eq_fast(key_hash_codes.iter()).enumerate()
+        {
             // if the visibility map has already shadowed this row,
             // then we pass
             if let Some(vis_map) = visibility && !vis_map.is_set(row_idx) {
@@ -259,6 +268,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref agg_calls,
             ref mut storages,
             ref result_table,
+            ref mut distinct_dedup_tables,
             ref input_schema,
             ref input_pk_indices,
             ref extreme_cache_size,
@@ -349,7 +359,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Materialize input chunk if needed.
         storages
             .iter_mut()
-            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
             .for_each(|(storage, visibility)| {
                 if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
@@ -376,7 +386,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
                 .map(Some)
                 .collect();
-            agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
+            agg_group
+                .apply_chunk(
+                    storages,
+                    &ops,
+                    &columns,
+                    visibilities,
+                    distinct_dedup_tables,
+                )
+                .await?;
         }
 
         Ok(())
@@ -390,6 +408,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref schema,
             ref mut storages,
             ref mut result_table,
+            ref mut distinct_dedup_tables,
             ref mut group_change_set,
             ref lookup_miss_count,
             ref total_lookup_count,
@@ -446,7 +465,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .get_mut(key)
                         .expect("changed group must have corresponding AggGroup")
                         .as_mut();
-                    agg_group.flush_state_if_needed(storages).await?;
+                    agg_group
+                        .flush_state_if_needed(storages, distinct_dedup_tables)
+                        .await?;
                 }
 
                 // Create array builders.
@@ -514,12 +535,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             }
 
             // Commit all state tables.
-            futures::future::try_join_all(iter_table_storage(storages).map(|state_table| async {
-                if let Some(watermark) = state_clean_watermark.as_ref() {
-                    state_table.update_watermark(watermark.clone())
-                };
-                state_table.commit(epoch).await
-            }))
+            futures::future::try_join_all(
+                iter_table_storage(storages)
+                    .chain(distinct_dedup_tables.values_mut())
+                    .map(|state_table| async {
+                        if let Some(watermark) = state_clean_watermark.as_ref() {
+                            state_table.update_watermark(watermark.clone())
+                        };
+                        state_table.commit(epoch).await
+                    }),
+            )
             .await?;
             if let Some(watermark) = state_clean_watermark.as_ref() {
                 result_table.update_watermark(watermark.clone());
@@ -531,12 +556,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(storages).for_each(|state_table| {
-                if let Some(watermark) = state_clean_watermark.as_ref() {
-                    state_table.update_watermark(watermark.clone())
-                };
-                state_table.commit_no_data_expected(epoch);
-            });
+            iter_table_storage(storages)
+                .chain(distinct_dedup_tables.values_mut())
+                .for_each(|state_table| {
+                    if let Some(watermark) = state_clean_watermark.as_ref() {
+                        state_table.update_watermark(watermark.clone())
+                    };
+                    state_table.commit_no_data_expected(epoch);
+                });
             if let Some(watermark) = state_clean_watermark.as_ref() {
                 result_table.update_watermark(watermark.clone());
             };
@@ -560,9 +587,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut extra.storages).for_each(|state_table| {
-            state_table.init_epoch(barrier.epoch);
-        });
+        iter_table_storage(&mut extra.storages)
+            .chain(extra.distinct_dedup_tables.values_mut())
+            .for_each(|state_table| {
+                state_table.init_epoch(barrier.epoch);
+            });
         extra.result_table.init_epoch(barrier.epoch);
         agg_group_cache.update_epoch(barrier.epoch.curr);
 
@@ -635,6 +664,7 @@ mod tests {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::row::{AscentOwnedRow, OwnedRow, Row};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -685,6 +715,7 @@ mod tests {
             agg_calls,
             agg_state_tables,
             result_table,
+            Default::default(),
             pk_indices,
             extreme_cache_size,
             executor_id,
@@ -751,6 +782,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Count,
@@ -759,6 +791,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Count,
@@ -767,6 +800,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -852,6 +886,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -860,6 +895,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             // This is local hash aggregation, so we add another sum state
             AggCall {
@@ -869,6 +905,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -955,6 +992,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -963,6 +1001,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -1054,6 +1093,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -1062,6 +1102,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -1118,7 +1159,7 @@ mod tests {
         fn sorted_rows(self) -> Vec<(Op, OwnedRow)> {
             let (chunk, ops) = self.into_parts();
             ops.into_iter()
-                .zip_eq(
+                .zip_eq_debug(
                     chunk
                         .rows()
                         .map(Row::into_owned_row)

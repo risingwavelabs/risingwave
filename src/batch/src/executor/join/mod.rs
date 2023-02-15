@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,12 +30,14 @@ use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 
 use crate::error::BatchError;
-use crate::executor::join::JoinType::Inner;
-#[derive(Copy, Clone, Debug, PartialEq)]
+
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum JoinType {
+    #[default]
     Inner,
     LeftOuter,
     /// Semi join when probe side should output when matched
@@ -103,12 +105,6 @@ impl JoinType {
     }
 }
 
-impl Default for JoinType {
-    fn default() -> Self {
-        Inner
-    }
-}
-
 /// The layout be like:
 ///
 /// [ `left` chunk     |  `right` chunk     ]
@@ -153,7 +149,7 @@ fn convert_datum_refs_to_chunk(
         .map(|data_type| data_type.create_array_builder(num_tuples))
         .collect();
     for _i in 0..num_tuples {
-        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
+        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq_fast(datum_refs) {
             builder.append_datum(*datum_ref);
         }
     }

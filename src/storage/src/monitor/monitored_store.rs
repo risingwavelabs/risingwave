@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,8 +30,8 @@ use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 /// A state store wrapper for monitoring metrics.
@@ -68,6 +68,10 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
+        self.storage_metrics
+            .iter_duration
+            .with_label_values(&[table_id_label.as_str()])
+            .observe(start_time.elapsed().as_secs_f64());
         // statistics of iter in process count to estimate the read ops in the same time
         self.storage_metrics
             .iter_in_process_counts
@@ -80,7 +84,6 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
             stats: MonitoredStateStoreIterStats {
                 total_items: 0,
                 total_size: 0,
-                start_time,
                 scan_time: minstant::Instant::now(),
                 storage_metrics: self.storage_metrics.clone(),
                 table_id,
@@ -185,7 +188,27 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     }
 }
 
-impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
+impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move {
+            let table_id_label = read_options.table_id.to_string();
+            let timer = self
+                .storage_metrics
+                .may_exist_duration
+                .with_label_values(&[table_id_label.as_str()])
+                .start_timer();
+            let res = self.inner.may_exist(key_range, read_options).await;
+            timer.observe_duration();
+            res
+        }
+    }
+}
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;
@@ -254,6 +277,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             )
         }
     }
+
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        self.inner.validate_read_epoch(epoch)
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {
@@ -275,7 +302,6 @@ pub struct MonitoredStateStoreIter<S> {
 struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
-    start_time: minstant::Instant,
     scan_time: minstant::Instant,
     storage_metrics: Arc<MonitoredStorageMetrics>,
 
@@ -307,10 +333,6 @@ impl Drop for MonitoredStateStoreIterStats {
     fn drop(&mut self) {
         let table_id_label = self.table_id.to_string();
 
-        self.storage_metrics
-            .iter_duration
-            .with_label_values(&[table_id_label.as_str()])
-            .observe(self.start_time.elapsed().as_secs_f64());
         self.storage_metrics
             .iter_scan_duration
             .with_label_values(&[table_id_label.as_str()])

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use console::style;
 use indicatif::ProgressBar;
 use risedev::util::{complete_spin, fail_spin};
@@ -27,8 +27,8 @@ use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, ZooKeeperService,
-    RISEDEV_SESSION_NAME,
+    OpendalConfig, PrometheusService, PubsubService, RedisService, ServiceConfig, Task,
+    ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -112,6 +112,7 @@ fn task_main(
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
+            ServiceConfig::OpenDal(_) => None,
             ServiceConfig::RedPanda(_) => None,
             ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
@@ -276,6 +277,29 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
+            ServiceConfig::OpenDal(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct OpendalService(OpendalConfig);
+                impl Task for OpendalService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                ctx.service(&OpendalService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using Opendal, namenode =  {}", c.namenode));
+            }
             ServiceConfig::ZooKeeper(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
@@ -352,7 +376,7 @@ fn main() -> Result<()> {
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
-        std::fs::copy(config_path, target)?;
+        std::fs::copy(config_path, target).context("config file not found")?;
     }
 
     {

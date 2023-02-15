@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchDelete, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::{
@@ -38,14 +38,18 @@ pub struct LogicalDelete {
     table_name: String, // explain-only
     table_id: TableId,
     input: PlanRef,
+    returning: bool,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table_name: String, table_id: TableId) -> Self {
+    pub fn new(input: PlanRef, table_name: String, table_id: TableId, returning: bool) -> Self {
         let ctx = input.ctx();
-        // TODO: support `RETURNING`.
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let fd_set = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
@@ -53,21 +57,41 @@ impl LogicalDelete {
             table_name,
             table_id,
             input,
+            returning,
         }
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(input: PlanRef, table_name: String, table_id: TableId) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id))
+    pub fn create(
+        input: PlanRef,
+        table_name: String,
+        table_id: TableId,
+        returning: bool,
+    ) -> Result<Self> {
+        Ok(Self::new(input, table_name, table_id, returning))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ table: {} }}", name, self.table_name)
+        write!(
+            f,
+            "{} {{ table: {}{} }}",
+            name,
+            self.table_name,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
+        )
     }
 
     #[must_use]
     pub fn table_id(&self) -> TableId {
         self.table_id
+    }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
     }
 }
 
@@ -77,7 +101,12 @@ impl PlanTreeNodeUnary for LogicalDelete {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table_name.clone(), self.table_id)
+        Self::new(
+            input,
+            self.table_name.clone(),
+            self.table_id,
+            self.returning,
+        )
     }
 }
 
@@ -96,6 +125,8 @@ impl ColPrunable for LogicalDelete {
             .into()
     }
 }
+
+impl ExprRewritable for LogicalDelete {}
 
 impl PredicatePushdown for LogicalDelete {
     fn predicate_pushdown(

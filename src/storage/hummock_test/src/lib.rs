@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,4 +41,4 @@ mod hummock_storage_tests;
 mod mock_notification_client;
 #[cfg(all(test, feature = "sync_point"))]
 mod sync_point_tests;
-pub use mock_notification_client::get_test_notification_client;
+pub use mock_notification_client::get_notification_client_for_test;

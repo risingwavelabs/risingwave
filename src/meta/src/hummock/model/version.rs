@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,11 +16,8 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersion;
 
+use crate::hummock::model::HUMMOCK_VERSION_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// Column family name for hummock version.
-/// `cf(hummock_version)`: `HummockVersionId` -> `HummockVersion`
-const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
 
 /// `HummockVersion` tracks `Sstables` in given version.
 impl MetadataModel for HummockVersion {

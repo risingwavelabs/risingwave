@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -35,15 +36,15 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
-use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_read_associated_type, define_state_store_write_associated_type,
-    StateStoreIter,
+    define_local_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type, StateStoreIter,
 };
 
-pub struct HummockStorageCore {
+pub struct LocalHummockStorage {
     /// Mutable memtable.
     // memtable: Memtable,
     instance_guard: LocalInstanceGuard,
@@ -57,41 +58,11 @@ pub struct HummockStorageCore {
     memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
-}
 
-pub struct LocalHummockStorage {
-    core: Arc<HummockStorageCore>,
     tracing: Arc<risingwave_tracing::RwTracingService>,
 }
 
-// Clone is only used for unit test
-#[cfg(any(test, feature = "test"))]
-impl Clone for LocalHummockStorage {
-    fn clone(&self) -> Self {
-        Self {
-            core: self.core.clone(),
-            tracing: self.tracing.clone(),
-        }
-    }
-}
-
-impl HummockStorageCore {
-    pub fn new(
-        instance_guard: LocalInstanceGuard,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        hummock_version_reader: HummockVersionReader,
-        event_sender: mpsc::UnboundedSender<HummockEvent>,
-        memory_limiter: Arc<MemoryLimiter>,
-    ) -> Self {
-        Self {
-            instance_guard,
-            read_version,
-            event_sender,
-            memory_limiter,
-            hummock_version_reader,
-        }
-    }
-
+impl LocalHummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.read_version.write().update(info)
@@ -137,6 +108,25 @@ impl HummockStorageCore {
             .iter(table_key_range, epoch, read_options, read_snapshot)
             .await
     }
+
+    pub async fn may_exist_inner(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> StorageResult<bool> {
+        let table_key_range = map_table_key_range(key_range);
+
+        let read_snapshot = read_filter_for_local(
+            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
+            read_options.table_id,
+            &table_key_range,
+            self.read_version.clone(),
+        )?;
+
+        self.hummock_version_reader
+            .may_exist(table_key_range, read_options, read_snapshot)
+            .await
+    }
 }
 
 impl StateStoreRead for LocalHummockStorage {
@@ -150,7 +140,7 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        self.core.get_inner(TableKey(key), epoch, read_options)
+        self.get_inner(TableKey(key), epoch, read_options)
     }
 
     fn iter(
@@ -159,8 +149,7 @@ impl StateStoreRead for LocalHummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        self.core
-            .iter_inner(map_table_key_range(key_range), epoch, read_options)
+        self.iter_inner(map_table_key_range(key_range), epoch, read_options)
             .in_span(self.tracing.new_tracer("hummock_iter"))
     }
 }
@@ -184,7 +173,7 @@ impl StateStoreWrite for LocalHummockStorage {
 
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-            let limiter = self.core.memory_limiter.as_ref();
+            let limiter = self.memory_limiter.as_ref();
             let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
                 tracker
             } else {
@@ -193,8 +182,7 @@ impl StateStoreWrite for LocalHummockStorage {
                     size,
                     limiter.get_memory_usage()
                 );
-                self.core
-                    .event_sender
+                self.event_sender
                     .send(HummockEvent::BufferMayFlush)
                     .expect("should be able to send");
                 let tracker = limiter.require_memory(size as u64).await;
@@ -215,12 +203,10 @@ impl StateStoreWrite for LocalHummockStorage {
                 Some(tracker),
             );
             let imm_size = imm.size();
-            self.core
-                .update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
+            self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
             // insert imm to uploader
-            self.core
-                .event_sender
+            self.event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
 
@@ -229,7 +215,17 @@ impl StateStoreWrite for LocalHummockStorage {
     }
 }
 
-impl LocalStateStore for LocalHummockStorage {}
+impl LocalStateStore for LocalHummockStorage {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        self.may_exist_inner(key_range, read_options)
+    }
+}
 
 impl LocalHummockStorage {
     pub fn new(
@@ -240,35 +236,28 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
-        let storage_core = HummockStorageCore::new(
+        Self {
             instance_guard,
             read_version,
-            hummock_version_reader,
             event_sender,
             memory_limiter,
-        );
-
-        Self {
-            core: Arc::new(storage_core),
+            hummock_version_reader,
             tracing,
         }
     }
 
     /// See `HummockReadVersion::update` for more details.
-    pub fn update(&self, info: VersionUpdate) {
-        self.core.update(info)
-    }
 
     pub fn read_version(&self) -> Arc<RwLock<HummockReadVersion>> {
-        self.core.read_version.clone()
+        self.read_version.clone()
     }
 
     pub fn table_id(&self) -> TableId {
-        self.core.instance_guard.table_id
+        self.instance_guard.table_id
     }
 
     pub fn instance_id(&self) -> u64 {
-        self.core.instance_guard.instance_id
+        self.instance_guard.instance_id
     }
 }
 
@@ -286,8 +275,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
-    metrics: Arc<HummockStateStoreMetrics>,
-    table_id: TableId,
+    stats_guard: IterLocalMetricsGuard,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -315,23 +303,18 @@ impl HummockStorageIterator {
         inner: UserIterator<HummockStorageIteratorPayload>,
         metrics: Arc<HummockStateStoreMetrics>,
         table_id: TableId,
+        local_stats: StoreLocalStatistic,
     ) -> Self {
         Self {
             inner,
-            metrics,
-            table_id,
+            stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        self.inner.collect_local_statistic(stats);
     }
 }
 
 impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
-        let mut stats = StoreLocalStatistic::default();
-        self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics, self.table_id.to_string().as_str());
+        self.inner
+            .collect_local_statistic(&mut self.stats_guard.local_stats);
     }
 }

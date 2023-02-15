@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,3 +200,9 @@ impl<'a> Iterator for RowRefIter<'a> {
 }
 
 unsafe impl TrustedLen for RowRefIter<'_> {}
+
+impl ExactSizeIterator for RowRefIter<'_> {
+    fn len(&self) -> usize {
+        self.columns.len()
+    }
+}

@@ -65,14 +65,12 @@
   sql: |
     SELECT 1::real in (3, 1.0, 2);
   batch_plan: |
-    BatchProject { exprs: [In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32)]] }
 - name: not in-list with aligned types
   sql: |
     SELECT 1::real not in (3, 1.0, 2);
   batch_plan: |
-    BatchProject { exprs: [Not(In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[Not(In(1:Int32::Float32, 3:Int32::Float32, 1.0:Decimal::Float32, 2:Int32::Float32))]] }
 - name: in-list with misaligned types
   sql: |
     SELECT true in (3, 1.0, 2);
@@ -117,8 +115,7 @@
 - sql: |
     select +1.0, -2.0;
   batch_plan: |
-    BatchProject { exprs: [1.0:Decimal, -2.0:Decimal] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1.0:Decimal, -2.0:Decimal]] }
 - sql: |
     values(round(42.4382, 2));
   batch_plan: |
@@ -148,8 +145,6 @@
 - sql: |
     -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now. #4235
     values(round('abc'));
-  batch_plan: |
-    BatchValues { rows: [[Round('abc':Varchar::Float64)]] }
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
@@ -166,8 +161,7 @@
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |
-    BatchProject { exprs: [((Length(Rtrim('12':Varchar, '1':Varchar)) + Length(Ltrim('23':Varchar, '2':Varchar))) + Length(Trim('34':Varchar, '3':Varchar)))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[((Length(Rtrim('12':Varchar, '1':Varchar)) + Length(Ltrim('23':Varchar, '2':Varchar))) + Length(Trim('34':Varchar, '3':Varchar)))]] }
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
@@ -312,48 +306,39 @@
 - sql: |
     select concat(':', true);
   batch_plan: |
-    BatchProject { exprs: [ConcatWs('':Varchar, ':':Varchar, BoolOut(true:Boolean))] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ConcatWs('':Varchar, ':':Varchar, BoolOut(true:Boolean))]] }
 - sql: |
     select ':' || true;
   batch_plan: |
-    BatchProject { exprs: [ConcatOp(':':Varchar, true:Boolean::Varchar)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ConcatOp(':':Varchar, true:Boolean::Varchar)]] }
 - sql: |
     select substr('hello', NULL);
   batch_plan: |
-    BatchProject { exprs: [Substr('hello':Varchar, null:Int32)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[Substr('hello':Varchar, null:Int32)]] }
 - sql: |
     select substr(NULL, 1);
   batch_plan: |
-    BatchProject { exprs: [Substr(null:Varchar, 1:Int32)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[Substr(null:Varchar, 1:Int32)]] }
 - sql: |
     select pg_typeof('123');
   batch_plan: |
-    BatchProject { exprs: ['unknown':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['unknown':Varchar]] }
 - sql: |
     select pg_typeof(round(null));
   batch_plan: |
-    BatchProject { exprs: ['double precision':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['double precision':Varchar]] }
 - sql: |
     select pg_typeof(row(true, 1, 'hello'));
   batch_plan: |
-    BatchProject { exprs: ['record':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['record':Varchar]] }
 - sql: |
     select pg_typeof(array[1, 2]);
   batch_plan: |
-    BatchProject { exprs: ['integer[]':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['integer[]':Varchar]] }
 - sql: |
     select pg_typeof(array[array[1, 2], array[3, 4]]);
   batch_plan: |
-    BatchProject { exprs: ['integer[][]':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['integer[][]':Varchar]] }
 - sql: |
     select 1 = SOME(1);
   binder_error: 'Bind error: op ANY/ALL (array) requires array on right side'
@@ -424,8 +409,7 @@
     BatchProject { exprs: [Some((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
-      └─BatchProject { exprs: [Array(1:Int32)] }
-        └─BatchValues { rows: [[]] }
+      └─BatchValues { rows: [[Array(1:Int32)]] }
 - sql: |
     select 1 < ALL(array[null]::integer[]);
   logical_plan: |
@@ -448,8 +432,7 @@
     BatchProject { exprs: [All((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
-      └─BatchProject { exprs: [Array(1:Int32)] }
-        └─BatchValues { rows: [[]] }
+      └─BatchValues { rows: [[Array(1:Int32)]] }
 - name: now expression
   sql: |
     create table t (v1 timestamp with time zone);
@@ -462,7 +445,8 @@
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamNow { output: [now] }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamNow { output: [now] }
 - name: now expression with proj
   sql: |
     create table t (v1 timestamp with time zone);
@@ -475,8 +459,9 @@
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
     └─StreamDynamicFilter { predicate: (t.v1 >= (now - '00:00:02':Interval)), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamProject { exprs: [(now - '00:00:02':Interval)], watermark_columns: [(now - '00:00:02':Interval)] }
-        └─StreamNow { output: [now] }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [(now - '00:00:02':Interval)], watermark_columns: [(now - '00:00:02':Interval)] }
+          └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
@@ -486,13 +471,15 @@
     └─StreamDynamicFilter { predicate: (t.v2 >= now), output: [t.v1, t.v2, t._row_id] }
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t.v2, t._row_id] }
       | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      | └─StreamNow { output: [now] }
-      └─StreamNow { output: [now] }
+      | └─StreamExchange { dist: Broadcast }
+      |   └─StreamNow { output: [now] }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamNow { output: [now] }
 - name: or of two now expression condition
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() or v2 >= now();
-  stream_error: 'Expr error: Invalid parameter now: now expression must be placed in a comparison'
+  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now inside HAVING clause
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -500,12 +487,13 @@
   stream_plan: |
     StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2] }
     └─StreamProject { exprs: [max(t.v1), t.v2] }
-      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [t.v2, max(t.v1), max(t.v1)] }
-        ├─StreamProject { exprs: [t.v2, max(t.v1), max(t.v1)] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [max(t.v1), max(t.v1), t.v2] }
+        ├─StreamProject { exprs: [max(t.v1), max(t.v1), t.v2] }
         | └─StreamHashAgg { group_key: [t.v2], aggs: [count, max(t.v1), max(t.v1)] }
         |   └─StreamExchange { dist: HashShard(t.v2) }
         |     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamNow { output: [now] }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamNow { output: [now] }
 - name: forbid now in group by for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -521,3 +509,30 @@
     create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
   stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)'
+- name: typo pg_teminate_backend
+  sql: |
+    select pg_teminate_backend(1);
+  binder_error: |-
+    Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
+    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+- name: regression (#7571) - literal debug display for array with NULL values
+  sql: |
+    select ARRAY[1, null] t;
+  logical_plan: |
+    LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: regression (#7641) -fuzzing test failed at Bind error,types Boolean and Varchar cannot be matched
+  sql: |
+    select false >= 'LN1O0QP1yi' NOT IN (md5('4SeUPZhUbH'))
+  batch_plan: |
+    BatchValues { rows: [[(false:Boolean >= Not(In('LN1O0QP1yi':Varchar, Md5('4SeUPZhUbH':Varchar))))]] }
+- name: const_eval of const expr
+  sql: |
+    create table t(v1 int);
+    select 1 + 2 + v1 from t;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [((1:Int32 + 2:Int32) + t.v1)] }
+      └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+- name: const_eval of division by 0 error
+  sql: select 1 / 0 t1;

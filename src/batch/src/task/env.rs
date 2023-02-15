@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::BatchTaskMetrics;
@@ -91,8 +91,13 @@ impl BatchEnvironment {
         use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
 
+        use crate::executor::monitor::BatchManagerMetrics;
+
         BatchEnvironment {
-            task_manager: Arc::new(BatchManager::new(BatchConfig::default())),
+            task_manager: Arc::new(BatchManager::new(
+                BatchConfig::default(),
+                BatchManagerMetrics::for_test(),
+            )),
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),

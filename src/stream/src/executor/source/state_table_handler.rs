@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
-use risingwave_connector::source::filesystem::FsSplit;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
@@ -38,9 +37,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
-// TODO: A randomly generated complex prefix that can reduce the probability of occurrence in the
-// split id
-const COMPLETE_SPLIT_PREFIX: &str = "completed_";
+const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
 pub struct SourceStateTableHandler<S: StateStore> {
     pub state_store: StateTable<S>,
@@ -94,8 +91,11 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         while let Some(row) = iter.next().await {
             let row = row?;
             if let Some(ScalarRefImpl::Bytea(bytes)) = row.datum_at(1) {
-                let split = FsSplit::restore_from_bytes(bytes)?;
-                if split.offset == split.size {
+                let split = SplitImpl::restore_from_bytes(bytes)?;
+                let fs = split
+                    .as_fs()
+                    .unwrap_or_else(|| panic!("split {:?} is not fs", split));
+                if fs.offset == fs.size {
                     let split_id = split.id();
                     set.insert(split_id);
                 }
@@ -212,8 +212,8 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
     ];
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         table_type: TableType::Internal as i32,

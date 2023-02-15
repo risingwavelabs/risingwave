@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -222,9 +222,6 @@ impl TestCase {
                 vec![
                     "SET RW_IMPLICIT_FLUSH TO true;\n",
                     "SET CREATE_COMPACTION_GROUP_FOR_MV TO true;\n",
-                    // TODO: There is some problem in failure propagate for local mode, so we
-                    // temporarily use distributed now.
-                    "SET QUERY_MODE TO distributed;\n",
                 ]
             }
             DatabaseMode::Postgres => vec![],

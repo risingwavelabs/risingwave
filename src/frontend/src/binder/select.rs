@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,9 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -158,7 +159,7 @@ impl Binder {
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
             .iter()
-            .zip_eq(aliases.iter())
+            .zip_eq_fast(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
                 Ok(Field::with_name(s.return_type(), name))
@@ -254,6 +255,31 @@ impl Binder {
             }
         }
         Ok((select_list, aliases))
+    }
+
+    pub fn bind_returning_list(
+        &mut self,
+        returning_items: Vec<SelectItem>,
+    ) -> Result<(Vec<ExprImpl>, Vec<Field>)> {
+        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
+        if returning_list
+            .iter()
+            .any(|expr| expr.has_agg_call() || expr.has_window_function())
+        {
+            return Err(RwError::from(ErrorCode::BindError(
+                "should not have agg/window in the `RETURNING` list".to_string(),
+            )));
+        }
+
+        let fields = returning_list
+            .iter()
+            .zip_eq_fast(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                Ok::<Field, RwError>(Field::with_name(s.return_type(), name))
+            })
+            .try_collect()?;
+        Ok((returning_list, fields))
     }
 
     /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,15 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
+use risingwave_common::catalog::ColumnCatalog;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
 
-use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, RelationCatalog, SourceId};
 use crate::user::UserId;
 use crate::WithOptions;
 
-/// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
-/// information which will be used during optimization.
-///
-/// It can be either a table source or a stream source. Use `self.kind()` to distinguish them.
+/// This struct `SourceCatalog` is used in frontend.
+/// Compared with `ProstSource`, it only maintains information used during optimization.
 #[derive(Clone, Debug)]
 pub struct SourceCatalog {
     pub id: SourceId,
@@ -36,6 +34,7 @@ pub struct SourceCatalog {
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
+    pub watermark_descs: Vec<WatermarkDesc>,
 }
 
 impl From<&ProstSource> for SourceCatalog {
@@ -58,6 +57,7 @@ impl From<&ProstSource> for SourceCatalog {
 
         let append_only = row_id_index.is_some();
         let owner = prost.owner;
+        let watermark_descs = prost.get_watermark_descs().clone();
 
         Self {
             id,
@@ -69,6 +69,7 @@ impl From<&ProstSource> for SourceCatalog {
             info: prost.info.clone().unwrap(),
             row_id_index,
             properties: with_options.into_inner(),
+            watermark_descs,
         }
     }
 }

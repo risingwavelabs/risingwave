@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@ impl Rule for AggDedupGroupKeyRule {
             new_agg.into(),
             group_key_mapping
                 .into_iter()
-                .chain((deduped_group_key_num..deduped_group_key_num + agg_call_num).into_iter()),
+                .chain(deduped_group_key_num..deduped_group_key_num + agg_call_num),
         );
         Some(proj.into())
     }

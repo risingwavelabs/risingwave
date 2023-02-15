@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ use std::future::Future;
 use std::ops::{Deref, DerefMut};
 
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use tracing::warn;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
@@ -261,7 +260,9 @@ impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
     /// call `PeekMut::pop` on the `PeekMut` and recycle the node to the unused list.
     fn drop(&mut self) {
         if let Some(peek) = self.peek.take() {
-            warn!("PeekMut are dropped without used. May be caused by future cancellation");
+            tracing::debug!(
+                "PeekMut are dropped without used. May be caused by future cancellation"
+            );
             let top = PeekMut::pop(peek);
             self.unused.push_back(top);
         }

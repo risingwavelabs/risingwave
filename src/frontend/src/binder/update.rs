@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,10 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName, SelectItem};
 
 use super::{Binder, Relation};
 use crate::catalog::TableId;
@@ -43,6 +45,13 @@ pub struct BoundUpdate {
     /// Expression used to project to the updated row. The assigned columns will use the new
     /// expression, and the other columns will be simply `InputRef`.
     pub exprs: Vec<ExprImpl>,
+
+    // used for the 'RETURNING" keyword to indicate the returning items and schema
+    // if the list is empty and the schema is None, the output schema will be a INT64 as the
+    // affected row cnt
+    pub returning_list: Vec<ExprImpl>,
+
+    pub returning_schema: Option<Schema>,
 }
 
 impl Binder {
@@ -51,6 +60,7 @@ impl Binder {
         name: ObjectName,
         assignments: Vec<Assignment>,
         selection: Option<Expr>,
+        returning_items: Vec<SelectItem>,
     ) -> Result<BoundUpdate> {
         let (schema_name, table_name) =
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
@@ -82,7 +92,7 @@ impl Binder {
                 }
                 // (col1, col2) = (expr1, expr2)
                 (ids, Expr::Row(values)) if ids.len() == values.len() => {
-                    id.into_iter().zip_eq(values.into_iter()).collect()
+                    id.into_iter().zip_eq_fast(values.into_iter()).collect()
                 }
                 // (col1, col2) = <other expr>
                 _ => {
@@ -117,6 +127,9 @@ impl Binder {
             .map(|c| assignment_exprs.remove(&c).unwrap_or(c))
             .collect_vec();
 
+        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let returning = !returning_list.is_empty();
+
         Ok(BoundUpdate {
             table_id,
             table_name,
@@ -124,6 +137,12 @@ impl Binder {
             table,
             selection,
             exprs,
+            returning_list,
+            returning_schema: if returning {
+                Some(Schema { fields })
+            } else {
+                None
+            },
         })
     }
 }

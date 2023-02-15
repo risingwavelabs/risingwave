@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,9 +37,8 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     async fn delete_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<()>;
     async fn txn(&self, trx: Transaction) -> MetaStoreResult<()>;
 
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
-        let kvs = self.snapshot().await.list_cf(cf).await?;
-        Ok(kvs.into_iter().map(|(_k, v)| v).collect())
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.snapshot().await.list_cf(cf).await
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {

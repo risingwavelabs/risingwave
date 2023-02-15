@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,12 +27,14 @@ pub mod env_var;
 pub mod epoch;
 mod future_utils;
 pub mod hash_util;
+pub mod iter_util;
 pub mod ordered;
 pub mod prost;
 pub mod resource_util;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
+pub mod stream_cancel;
 pub mod value_encoding;
 pub mod worker_util;
 

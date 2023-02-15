@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::ops::Sub;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Pow, Signed, Zero};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF64,
@@ -110,6 +109,21 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
 }
 
 #[inline(always)]
+pub fn general_pow<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+where
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
+    T3: Pow<T3> + num_traits::Float,
+{
+    let res = l.into().powf(r.into());
+    if res.is_infinite() {
+        Err(ExprError::NumericOutOfRange)
+    } else {
+        Ok(res)
+    }
+}
+
+#[inline(always)]
 pub fn general_atm<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -124,15 +138,15 @@ pub fn timestamp_timestamp_sub<T1, T2, T3>(
     l: NaiveDateTimeWrapper,
     r: NaiveDateTimeWrapper,
 ) -> Result<IntervalUnit> {
-    let tmp = l.0 - r.0;
+    let tmp = l.0 - r.0; // this does not overflow or underflow
     let days = tmp.num_days();
-    let ms = tmp.sub(Duration::days(tmp.num_days())).num_milliseconds();
+    let ms = (tmp - Duration::days(tmp.num_days())).num_milliseconds();
     Ok(IntervalUnit::new(0, days as i32, ms))
 }
 
 #[inline(always)]
 pub fn date_date_sub<T1, T2, T3>(l: NaiveDateWrapper, r: NaiveDateWrapper) -> Result<i32> {
-    Ok((l.0 - r.0).num_days() as i32)
+    Ok((l.0 - r.0).num_days() as i32) // this does not overflow or underflow
 }
 
 #[inline(always)]
@@ -172,7 +186,9 @@ pub fn date_interval_sub<T2, T1, T3>(
     l: NaiveDateWrapper,
     r: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    interval_date_add::<T1, T2, T3>(r.negative(), l)
+    // TODO: implement `checked_sub` for `NaiveDateTimeWrapper` to handle the edge case of negation
+    // overflowing.
+    interval_date_add::<T1, T2, T3>(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
 
 #[inline(always)]
@@ -192,7 +208,12 @@ pub fn int_date_add<T1, T2, T3>(l: i32, r: NaiveDateWrapper) -> Result<NaiveDate
 
 #[inline(always)]
 pub fn date_int_sub<T1, T2, T3>(l: NaiveDateWrapper, r: i32) -> Result<NaiveDateWrapper> {
-    date_int_add::<T1, T2, T3>(l, -r)
+    let date = l.0;
+    let date_wrapper = date
+        .checked_sub_signed(chrono::Duration::days(r as i64))
+        .map(NaiveDateWrapper::new);
+
+    date_wrapper.ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -208,34 +229,43 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
     l: NaiveDateTimeWrapper,
     r: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    interval_timestamp_add::<T1, T2, T3>(r.negative(), l)
+    interval_timestamp_add::<T1, T2, T3>(r.checked_neg().ok_or(ExprError::NumericOutOfRange)?, l)
 }
 
 #[inline(always)]
 pub fn timestamptz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
-    interval_timestamptz_add::<T1, T2, T3>(r, l)
+    timestamptz_interval_inner(l, r, i64::checked_add)
 }
 
 #[inline(always)]
 pub fn timestamptz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
-    interval_timestamptz_add::<T1, T2, T3>(r.negative(), l)
+    timestamptz_interval_inner(l, r, i64::checked_sub)
 }
 
 #[inline(always)]
 pub fn interval_timestamptz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
+    timestamptz_interval_add::<T1, T2, T3>(r, l)
+}
+
+#[inline(always)]
+fn timestamptz_interval_inner(
+    l: i64,
+    r: IntervalUnit,
+    f: fn(i64, i64) -> Option<i64>,
+) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
-    // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
-    // Daylight Saving.
-    // This is to keep consistent with `tumble_start` of RisingWave / `date_bin` of PostgreSQL.
-    if l.get_months() != 0 {
+    if r.get_months() != 0 || r.get_days() != 0 {
         return Err(ExprError::UnsupportedFunction(
-            "timestamp with time zone +/- interval of months".into(),
+            "timestamp with time zone +/- interval of days".into(),
         ));
     }
-    let delta_usecs = l.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + l.get_ms() * 1000;
 
-    r.checked_add(delta_usecs)
-        .ok_or(ExprError::NumericOutOfRange)
+    let result: Option<i64> = try {
+        let delta_usecs = r.get_ms().checked_mul(1000)?;
+        f(l, delta_usecs)?
+    };
+
+    result.ok_or(ExprError::NumericOutOfRange)
 }
 
 #[inline(always)]
@@ -273,7 +303,7 @@ pub fn time_date_add<T1, T2, T3>(
 
 #[inline(always)]
 pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Result<IntervalUnit> {
-    let tmp = l.0 - r.0;
+    let tmp = l.0 - r.0; // this does not overflow or underflow
     let ms = tmp.num_milliseconds();
     Ok(IntervalUnit::new(0, 0, ms))
 }
@@ -283,7 +313,13 @@ pub fn time_interval_sub<T1, T2, T3>(
     l: NaiveTimeWrapper,
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
-    time_interval_add::<T1, T2, T3>(l, r.negative())
+    let time = l.0;
+    let (new_time, ignored) = time.overflowing_sub_signed(Duration::milliseconds(r.get_ms()));
+    if ignored == 0 {
+        Ok(NaiveTimeWrapper::new(new_time))
+    } else {
+        Err(ExprError::NumericOutOfRange)
+    }
 }
 
 #[inline(always)]
@@ -292,8 +328,12 @@ pub fn time_interval_add<T1, T2, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
     let time = l.0;
-    let new_time = time + Duration::milliseconds(r.get_ms());
-    Ok(NaiveTimeWrapper::new(new_time))
+    let (new_time, ignored) = time.overflowing_add_signed(Duration::milliseconds(r.get_ms()));
+    if ignored == 0 {
+        Ok(NaiveTimeWrapper::new(new_time))
+    } else {
+        Err(ExprError::NumericOutOfRange)
+    }
 }
 
 #[inline(always)]

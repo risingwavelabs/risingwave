@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
+use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::FrontendConfig;
@@ -42,9 +43,9 @@ impl FrontendService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &FrontendConfig) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
-            .arg("--client-address")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
@@ -65,14 +66,12 @@ impl FrontendService {
                 "Cannot configure node: no meta node found in this configuration."
             ));
         } else {
-            let meta_node = provide_meta_node.last().unwrap();
-            cmd.arg("--meta-addr")
-                .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            if provide_meta_node.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
-                // According to some heruistics, the last etcd node seems always to be elected as
-                // leader. Therefore we ensure compute node can start by using the last one.
-            }
+            cmd.arg("--meta-addr").arg(
+                provide_meta_node
+                    .iter()
+                    .map(|meta_node| format!("http://{}:{}", meta_node.address, meta_node.port))
+                    .join(","),
+            );
         }
 
         Ok(())

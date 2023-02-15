@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,9 +23,10 @@ use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
-    generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
+    PlanRef, PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
@@ -160,6 +161,8 @@ impl ColPrunable for LogicalSource {
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
+
+impl ExprRewritable for LogicalSource {}
 
 /// A util function to extract kafka offset timestamp range.
 ///
@@ -354,7 +357,10 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef = StreamSource::new(self.clone()).into();
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id{
+        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty(){
+            plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
+        }
+        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
             plan = StreamRowIdGen::new(plan, row_id_index).into();
         }
         Ok(plan)

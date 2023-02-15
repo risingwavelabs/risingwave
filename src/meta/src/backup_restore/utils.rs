@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,13 @@ use std::time::Duration;
 use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
+use risingwave_common::config::MetaBackend;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::backup_restore::RestoreOpts;
 use crate::storage::{EtcdMetaStore, MemStore, WrappedEtcdClient as EtcdClient};
-use crate::{Backend, MetaStoreBackend};
+use crate::MetaStoreBackend;
 
 #[derive(Clone)]
 pub enum MetaStoreBackendImpl {
@@ -44,7 +45,7 @@ macro_rules! dispatch_meta_store {
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendImpl> {
     let meta_store_backend = match opts.meta_store_type {
-        Backend::Etcd => MetaStoreBackend::Etcd {
+        MetaBackend::Etcd => MetaStoreBackend::Etcd {
             endpoints: opts
                 .etcd_endpoints
                 .split(',')
@@ -55,7 +56,7 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
                 false => None,
             },
         },
-        Backend::Mem => MetaStoreBackend::Mem,
+        MetaBackend::Mem => MetaStoreBackend::Mem,
     };
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -80,7 +81,6 @@ pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotSto
     let object_store = parse_remote_object_store(
         &opts.storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
-        true,
         "Meta Backup",
     )
     .await;

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,6 +71,7 @@ impl UserManager {
         self.user_info.values().any(|x| x.name.eq(user))
     }
 
+    #[allow(dead_code)]
     pub fn ensure_user_id(&self, user_id: UserId) -> MetaResult<()> {
         if self.user_info.contains_key(&user_id) {
             Ok(())

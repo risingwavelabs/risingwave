@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
@@ -38,22 +39,27 @@ use crate::task::BatchTaskContext;
 pub struct UpdateExecutor {
     /// Target table id.
     table_id: TableId,
+    table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
     chunk_size: usize,
     schema: Schema,
     identity: String,
+    returning: bool,
 }
 
 impl UpdateExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
+        table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
         chunk_size: usize,
         identity: String,
+        returning: bool,
     ) -> Self {
         assert_eq!(
             child.schema().data_types(),
@@ -62,18 +68,24 @@ impl UpdateExecutor {
         );
 
         let chunk_size = chunk_size.next_multiple_of(2);
+        let table_schema = child.schema().clone();
 
         Self {
             table_id,
+            table_version_id,
             dml_manager,
             child,
             exprs,
             chunk_size,
-            // TODO: support `RETURNING`
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
+            returning,
         }
     }
 }
@@ -96,7 +108,7 @@ impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
+        let mut builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
 
         let mut notifiers = Vec::new();
 
@@ -110,7 +122,9 @@ impl UpdateExecutor {
                 .collect_vec();
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
-            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
+            let notifier =
+                self.dml_manager
+                    .write_chunk(self.table_id, self.table_version_id, stream_chunk)?;
             notifiers.push(notifier);
 
             Ok(())
@@ -130,7 +144,13 @@ impl UpdateExecutor {
                 DataChunk::new(columns, data_chunk.vis().clone())
             };
 
-            for (row_delete, row_insert) in data_chunk.rows().zip_eq(updated_data_chunk.rows()) {
+            if self.returning {
+                yield updated_data_chunk.clone();
+            }
+
+            for (row_delete, row_insert) in
+                data_chunk.rows().zip_eq_debug(updated_data_chunk.rows())
+            {
                 let None = builder.append_one_row(row_delete) else {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
@@ -153,7 +173,7 @@ impl UpdateExecutor {
             / 2;
 
         // Create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_updated as i64));
 
@@ -188,11 +208,13 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
+            update_node.table_version_id,
             source.context().dml_manager(),
             child,
             exprs,
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
+            update_node.returning,
         )))
     }
 }
@@ -203,7 +225,9 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::Array;
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{
+        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+    };
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;
@@ -248,21 +272,23 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
-        // to the `Weak` reference in `DmlManager`.
+        // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
+        // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
-            .register_reader(table_id, &column_descs)
+            .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader_v2().into_stream_v2();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(
             table_id,
+            INITIAL_TABLE_VERSION_ID,
             dml_manager,
             Box::new(mock_executor),
             exprs,
             5,
             "UpdateExecutor".to_string(),
+            false,
         ));
 
         let handle = tokio::spawn(async move {
@@ -290,12 +316,12 @@ mod tests {
             let chunk = reader.next().await.unwrap()?;
 
             assert_eq!(
-                chunk.ops().chunks(2).collect_vec(),
+                chunk.chunk.ops().chunks(2).collect_vec(),
                 vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
             );
 
             assert_eq!(
-                chunk.columns()[0]
+                chunk.chunk.columns()[0]
                     .array()
                     .as_int32()
                     .iter()
@@ -308,7 +334,7 @@ mod tests {
             );
 
             assert_eq!(
-                chunk.columns()[1]
+                chunk.chunk.columns()[1]
                     .array()
                     .as_int32()
                     .iter()

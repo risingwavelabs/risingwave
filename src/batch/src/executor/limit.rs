@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -150,6 +150,7 @@ mod tests {
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -166,7 +167,6 @@ mod tests {
     ) {
         let col = create_column(
             (0..row_num)
-                .into_iter()
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
@@ -281,7 +281,6 @@ mod tests {
         assert_eq!(visible.len(), row_num);
         let col0 = create_column(
             (0..row_num)
-                .into_iter()
                 .map(|x| Some(x as i32))
                 .collect_vec()
                 .as_slice(),
@@ -340,7 +339,7 @@ mod tests {
             result.cardinality()
         );
         MockLimitIter::new(row_num, limit, offset, visible)
-            .zip_eq(0..result.cardinality())
+            .zip_eq_debug(0..result.cardinality())
             .for_each(|(expect, chunk_idx)| {
                 assert_eq!(col1.array().as_bool().value_at(chunk_idx), Some(true));
                 assert_eq!(

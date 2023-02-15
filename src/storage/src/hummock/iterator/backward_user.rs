@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1017,7 +1017,7 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Unbounded,
                 Unbounded,
                 &truth,
@@ -1038,7 +1038,7 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Unbounded,
                 Included(end_key_bytes.clone()),
                 &truth,
@@ -1059,7 +1059,7 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Included(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
@@ -1080,7 +1080,7 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Excluded(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
@@ -1101,7 +1101,7 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Included(begin_key_bytes.clone()),
                 Included(end_key_bytes.clone()),
                 &truth,
@@ -1122,20 +1122,13 @@ mod tests {
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
-                clone_sst(&sst),
+                sst.clone(),
                 Excluded(begin_key_bytes),
                 Included(end_key_bytes),
                 &truth,
                 sstable_store.clone(),
             )
             .await;
-        }
-    }
-
-    fn clone_sst(sst: &Sstable) -> Sstable {
-        Sstable {
-            id: sst.id,
-            meta: sst.meta.clone(),
         }
     }
 

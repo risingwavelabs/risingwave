@@ -1,0 +1,74 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v1 int, v2 int, v3 int);
+
+statement ok
+create materialized view mv1 as select count(distinct v1) as c_d_v1 from t;
+
+statement ok
+create materialized view mv2 as select v2, count(distinct v1) as c_d_v1 from t group by v2;
+
+statement ok
+create materialized view mv3 as select v2, count(distinct v1) as c_d_v1, max(v3) as max_v3 from t group by v2;
+
+statement ok
+create materialized view mv4 as select v1, count(distinct v2) as c_d_v2, count(distinct v3) as c_d_v3, max(v2) as max_v2 from t group by v1;
+
+statement ok
+create materialized view mv5 as select v1, count(distinct v2) as c_d_v2, min(distinct v2) as min_d_v2, count(distinct v3) as c_d_v3, max(v3) as max_v3 from t group by v1;
+
+statement ok
+insert into t values (1,2,3), (1,2,4), (5,3,8), (2,4,4);
+
+query I
+select * from mv1;
+----
+3
+
+query II rowsort
+select * from mv2;
+----
+2 1
+3 1
+4 1
+
+query III rowsort
+select * from mv3;
+----
+2 1 4
+3 1 8
+4 1 4
+
+query IIII rowsort
+select * from mv4;
+----
+1 1 2 2
+2 1 1 4
+5 1 1 3
+
+query IIIII rowsort
+select * from mv5;
+----
+1 1 2 2 4
+2 1 4 1 4
+5 1 3 1 8
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop materialized view mv4;
+
+statement ok
+drop materialized view mv5;
+
+statement ok
+drop table t;

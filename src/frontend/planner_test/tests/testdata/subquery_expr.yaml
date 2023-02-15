@@ -10,8 +10,7 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-    └─LogicalProject { exprs: [1:Int32] }
-      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
     select (select x from t), 1 from t;

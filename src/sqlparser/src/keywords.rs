@@ -173,6 +173,7 @@ define_keywords!(
     DATE,
     DAY,
     DEALLOCATE,
+    DEBEZIUM_AVRO,
     DEBEZIUM_JSON,
     DEC,
     DECIMAL,
@@ -198,6 +199,7 @@ define_keywords!(
     EACH,
     ELEMENT,
     ELSE,
+    EMIT,
     ENCRYPTED,
     END,
     END_EXEC = "END-EXEC",
@@ -250,6 +252,7 @@ define_keywords!(
     IF,
     IGNORE,
     ILIKE,
+    IMMEDIATELY,
     IMMUTABLE,
     IN,
     INCLUDE,
@@ -306,6 +309,7 @@ define_keywords!(
     MONTH,
     MULTISET,
     NATIONAL,
+    NATIVE,
     NATURAL,
     NCHAR,
     NCLOB,
@@ -526,6 +530,7 @@ define_keywords!(
     VIEWS,
     VIRTUAL,
     VOLATILE,
+    WATERMARK,
     WHEN,
     WHENEVER,
     WHERE,
@@ -577,6 +582,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)
     Keyword::OUTER,
     Keyword::SET,
+    Keyword::RETURNING,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`

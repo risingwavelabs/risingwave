@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
 #![feature(generators)]
+#![feature(iterator_try_collect)]
+#![feature(hash_drain_filter)]
 
 #[cfg(madsim)]
 use std::collections::HashMap;
@@ -52,7 +54,7 @@ mod stream_client;
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-pub use meta_client::MetaClient;
+pub use meta_client::{MetaClient, SystemParamsReader};
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
 #[async_trait]
@@ -155,6 +157,24 @@ macro_rules! rpc_client_method_impl {
                     .$fn_name(request)
                     .await?
                     .into_inner())
+            }
+        )*
+    }
+}
+
+#[macro_export]
+macro_rules! meta_rpc_client_method_impl {
+    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                let mut client = self.core.read().await.$client.to_owned();
+                match client.$fn_name(request).await {
+                    Ok(resp) => Ok(resp.into_inner()),
+                    Err(e) => {
+                        self.refresh_client_if_needed(e.code()).await;
+                        Err(RpcError::GrpcStatus(e))
+                    }
+                }
             }
         )*
     }

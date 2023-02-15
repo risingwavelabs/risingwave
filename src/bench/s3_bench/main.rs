@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -225,7 +225,6 @@ async fn multi_part_upload(
     };
     let chunks = obj
         .chunks(part_size.as_u64() as usize)
-        .into_iter()
         .map(|chunk| chunk.to_owned())
         .collect_vec();
 

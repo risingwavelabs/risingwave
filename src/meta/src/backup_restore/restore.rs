@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,13 @@ use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::MetaSnapshotStorageRef;
+use risingwave_common::config::MetaBackend;
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
-use crate::hummock::compaction_group::CompactionGroup;
+use crate::dispatch_meta_store;
+use crate::hummock::model::CompactionGroup;
 use crate::model::{MetadataModel, TableFragments};
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
-use crate::{dispatch_meta_store, Backend};
 
 /// Command-line arguments for restore.
 #[derive(Parser, Debug, Clone)]
@@ -32,8 +33,8 @@ pub struct RestoreOpts {
     #[clap(long)]
     pub meta_snapshot_id: u64,
     /// Type of meta store to restore.
-    #[clap(long, arg_enum, default_value_t = Backend::Etcd)]
-    pub meta_store_type: Backend,
+    #[clap(long, arg_enum, default_value_t = MetaBackend::Etcd)]
+    pub meta_store_type: MetaBackend,
     /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]
     pub etcd_endpoints: String,
@@ -195,6 +196,7 @@ mod tests {
     use std::collections::HashMap;
 
     use clap::Parser;
+    use itertools::Itertools;
     use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
     use risingwave_pb::hummock::HummockVersion;
 
@@ -302,7 +304,13 @@ mod tests {
         .await
         .unwrap();
         dispatch_meta_store!(empty_meta_store, store, {
-            let mut kvs = store.list_cf(DEFAULT_COLUMN_FAMILY).await.unwrap();
+            let mut kvs = store
+                .list_cf(DEFAULT_COLUMN_FAMILY)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect_vec();
             kvs.sort();
             assert_eq!(
                 kvs,

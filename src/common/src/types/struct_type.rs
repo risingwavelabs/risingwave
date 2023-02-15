@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use itertools::Itertools;
 
 use super::DataType;
 use crate::array::ArrayMeta;
+use crate::util::iter_util::ZipEqFast;
 
 /// Details about a struct type. There are 2 cases for a struct:
 /// 1. `field_names.len() == fields.len()`: it represents a struct with named fields, e.g.
@@ -61,7 +62,7 @@ impl Display for StructType {
                 f,
                 "struct<{}>",
                 (self.fields.iter())
-                    .zip_eq(self.field_names.iter())
+                    .zip_eq_fast(self.field_names.iter())
                     .map(|(d, s)| format!("{} {}", s, d))
                     .join(",")
             )

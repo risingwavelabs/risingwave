@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
 };
+use risingwave_common::util::iter_util::ZipEqFast;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
 use crate::{ExprError, Result};
@@ -620,8 +621,8 @@ pub fn struct_cast(
         input
             .fields_ref()
             .into_iter()
-            .zip_eq(source_elem_type.fields.iter())
-            .zip_eq(target_elem_type.fields.iter())
+            .zip_eq_fast(source_elem_type.fields.iter())
+            .zip_eq_fast(target_elem_type.fields.iter())
             .map(|((datum_ref, source_elem_type), target_elem_type)| {
                 if source_elem_type == target_elem_type {
                     return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));

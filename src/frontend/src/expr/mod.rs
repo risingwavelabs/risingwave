@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
@@ -526,17 +527,17 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
-        fn reverse_comparison(comparison: ExprType) -> ExprType {
-            match comparison {
-                ExprType::LessThan => ExprType::GreaterThan,
-                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
-                ExprType::GreaterThan => ExprType::LessThan,
-                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
-                _ => unreachable!(),
-            }
+    fn reverse_comparison(comparison: ExprType) -> ExprType {
+        match comparison {
+            ExprType::LessThan => ExprType::GreaterThan,
+            ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+            ExprType::GreaterThan => ExprType::LessThan,
+            ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            _ => unreachable!(),
         }
+    }
 
+    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self {
             match function_call.get_expr_type() {
                 ty @ (ExprType::LessThan
@@ -548,7 +549,7 @@ impl ExprImpl {
                         if x.index < y.index {
                             Some((*x, ty, *y))
                         } else {
-                            Some((*y, reverse_comparison(ty), *x))
+                            Some((*y, Self::reverse_comparison(ty), *x))
                         }
                     } else {
                         None
@@ -558,6 +559,61 @@ impl ExprImpl {
             }
         } else {
             None
+        }
+    }
+
+    // Accepts expressions of the form `input_expr cmp now() [+- const_expr]` or
+    // `now() [+- const_expr] cmp input_expr`, where `input_expr` contains an
+    // `InputRef` and contains no `now()`.
+    //
+    // Canonicalizes to the first ordering and returns (input_expr, cmp, now_expr)
+    pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if op1.count_nows() == 0
+                        && op1.has_input_ref()
+                        && op2.count_nows() > 0
+                        && op2.is_now_offset()
+                    {
+                        Some((op1, ty, op2))
+                    } else if op2.count_nows() == 0
+                        && op2.has_input_ref()
+                        && op1.count_nows() > 0
+                        && op1.is_now_offset()
+                    {
+                        Some((op2, Self::reverse_comparison(ty), op1))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    // Checks if expr is of the form `now() [+- const_expr]`
+    fn is_now_offset(&self) -> bool {
+        if let ExprImpl::FunctionCall(f) = self {
+            match f.get_expr_type() {
+                ExprType::Now => true,
+                ExprType::Add | ExprType::Subtract => {
+                    let (_, lhs, rhs) = f.clone().decompose_as_binary();
+                    lhs.as_function_call()
+                        .map(|f| f.get_expr_type() == ExprType::Now)
+                        .unwrap_or(false)
+                        && rhs.is_const()
+                }
+                _ => false,
+            }
+        } else {
+            false
         }
     }
 
@@ -670,6 +726,24 @@ impl ExprImpl {
                 expr => Expr(expr.to_expr_proto()),
             }),
         }
+    }
+
+    pub fn from_expr_proto(proto: &ExprNode) -> Result<Self> {
+        let rex_node = proto.get_rex_node()?;
+        let ret_type = proto.get_return_type()?.into();
+        let expr_type = proto.get_expr_type()?;
+        Ok(match rex_node {
+            RexNode::InputRef(input_ref) => {
+                Self::InputRef(Box::new(InputRef::from_expr_proto(input_ref, ret_type)?))
+            }
+            RexNode::Constant(_) => Self::Literal(Box::new(Literal::from_expr_proto(proto)?)),
+            RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
+                UserDefinedFunction::from_expr_proto(udf, ret_type)?,
+            )),
+            RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
+                FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
+            )),
+        })
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
     Function as ProstFunction, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
@@ -27,7 +28,6 @@ use super::source_catalog::SourceCatalog;
 use super::ViewId;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
-use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
@@ -218,7 +218,7 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_table() && v.associated_source_id().is_none())
+            .filter(|(_, v)| v.is_table())
             .map(|(_, v)| v)
     }
 
@@ -248,18 +248,9 @@ impl SchemaCatalog {
         self.index_by_name.values()
     }
 
-    /// Iterate all sources, including the materialized sources.
+    /// Iterate all sources
     pub fn iter_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
         self.source_by_name.values()
-    }
-
-    /// Iterate the materialized sources.
-    /// TODO(Yuanxin): Remove this method.
-    pub fn iter_materialized_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
-        self.source_by_name
-            .iter()
-            .filter(|(name, _)| self.table_by_name.get(*name).is_some())
-            .map(|(_, v)| v)
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
