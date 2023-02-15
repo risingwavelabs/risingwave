@@ -30,7 +30,9 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common::util::value_encoding::column_aware_row_encoding::{
+    BasicSerde, ValueRowSerde,
+};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
@@ -54,11 +56,14 @@ const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTableInner<S, SD = BasicSerde, W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>
-where
+pub struct StateTableInner<
+    S,
+    SD = BasicSerde,
+    W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+> where
     S: StateStore,
     SD: ValueRowSerde,
-    W: WatermarkBufferStrategy
+    W: WatermarkBufferStrategy,
 {
     /// Id for this table.
     table_id: TableId,
@@ -969,7 +974,8 @@ where
     S: StateStore,
     SD: ValueRowSerde,
     W: WatermarkBufferStrategy,
-{    /// This function scans rows from the relational table.
+{
+    /// This function scans rows from the relational table.
     pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S, SD>> {
         self.iter_with_pk_prefix(row::empty()).await
     }
@@ -1009,7 +1015,7 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
-    ) -> StreamExecutorResult<RowStream<'_, S>> {
+    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
         Ok(self
             .iter_key_and_val_with_pk_range(pk_range, vnode)
             .await?
@@ -1023,10 +1029,10 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
             self.iter_with_pk_range_inner(pk_range, vnode).await?,
-            self.row_deserializer.clone(),
+            self.row_serde.clone(),
         ))
     }
 
@@ -1035,10 +1041,10 @@ where
     pub async fn iter_key_and_val(
         &self,
         pk_prefix: impl Row,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
             self.iter_with_pk_prefix_inner(pk_prefix).await?,
-            self.row_deserializer.clone(),
+            self.row_serde.clone(),
         ))
     }
 
@@ -1168,21 +1174,23 @@ where
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub type RowStreamWithPk<'a, S: StateStore> =
+pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
+    impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
+pub type RowStreamWithPk<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a;
 pub type IterItemStream<'a, S: StateStore> = impl StateStoreIterItemStream + 'a;
 
 fn deserialize_row_stream(
     stream: impl StateStoreIterItemStream,
-    deserializer: RowDeserializer,
+    deserializer: impl ValueRowSerde,
 ) -> impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> {
     stream.map(move |result| {
         result
             .map_err(StreamExecutorError::from)
             .and_then(|(key, value)| {
                 Ok(deserializer
-                    .deserialize(value)
+                    .deserialize(&value)
+                    .map(move |row| OwnedRow::new(row))
                     .map(move |row| (key.user_key.table_key.0, row))?)
             })
     })
