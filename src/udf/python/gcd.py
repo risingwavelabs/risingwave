@@ -1,4 +1,4 @@
-from risingwave.udf import udf, UdfServer
+from risingwave.udf import udf, UdfServer, ScalarFunction
 import pyarrow as pa
 
 
@@ -9,7 +9,19 @@ def gcd(x: int, y: int) -> int:
     return x
 
 
+class GCD(ScalarFunction):
+    _name = 'gcd'
+    _input_types = ['BIGINT', 'BIGINT']
+    _result_type = 'BIGINT'
+
+    def eval(self, x: int, y: int) -> int:
+        while y != 0:
+            (x, y) = (y, x % y)
+        return x
+
+
 if __name__ == '__main__':
     server = UdfServer()
     server.add_function(gcd)
+    server.add_function(GCD())
     server.serve()
