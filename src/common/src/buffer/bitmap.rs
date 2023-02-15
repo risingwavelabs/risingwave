@@ -581,6 +581,7 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
     }
 }
 
+impl ExactSizeIterator for BitmapIter<'_> {}
 unsafe impl TrustedLen for BitmapIter<'_> {}
 
 #[cfg(test)]
