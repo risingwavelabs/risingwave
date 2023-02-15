@@ -2251,6 +2251,8 @@ impl Parser {
             self.parse_alter_table()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
+        } else if self.parse_keyword(Keyword::SYSTEM) {
+            self.parse_alter_system()
         } else {
             self.expected("TABLE or USER after ALTER", self.peek_token())
         }
@@ -2347,6 +2349,16 @@ impl Parser {
         })
     }
 
+    pub fn parse_alter_system(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::SET)?;
+        let param = self.parse_identifier()?;
+        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
+            return self.expected("TO or = after ALTER SYSTEM SET", self.peek_token());
+        }
+        let value = self.parse_set_variable()?;
+        Ok(Statement::AlterSystem { param, value })
+    }
+
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> Result<Statement, ParserError> {
         let table_name = self.parse_object_name()?;
@@ -2418,6 +2430,21 @@ impl Parser {
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected),
+        }
+    }
+
+    fn parse_set_variable(&mut self) -> Result<SetVariableValue, ParserError> {
+        let token = self.peek_token();
+        match (self.parse_value(), token) {
+            (Ok(value), _) => Ok(SetVariableValue::Literal(value)),
+            (Err(_), Token::Word(ident)) => {
+                if ident.keyword == Keyword::DEFAULT {
+                    Ok(SetVariableValue::Default)
+                } else {
+                    Ok(SetVariableValue::Ident(ident.to_ident()))
+                }
+            }
+            (Err(_), unexpected) => self.expected("variable value", unexpected),
         }
     }
 
@@ -3147,12 +3174,7 @@ impl Parser {
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
             let mut values = vec![];
             loop {
-                let token = self.peek_token();
-                let value = match (self.parse_value(), token) {
-                    (Ok(value), _) => SetVariableValue::Literal(value),
-                    (Err(_), Token::Word(ident)) => SetVariableValue::Ident(ident.to_ident()),
-                    (Err(_), unexpected) => self.expected("variable value", unexpected)?,
-                };
+                let value = self.parse_set_variable()?;
                 values.push(value);
                 if self.consume_token(&Token::Comma) {
                     continue;
