@@ -24,10 +24,16 @@ use sysinfo::{System, SystemExt};
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
 
+/// Url of telemetry backend
+pub const TELEMETRY_REPORT_URL: &str = "http://localhost:8080/v1/report";
+
+/// Telemetry reporting interval in seconds, 24h
+pub const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
+
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TelemetryNodeType {
     Meta,
     Compute,
@@ -121,10 +127,6 @@ impl Default for SystemData {
 
 /// post a telemetry reporting request
 pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
-    if !telemetry_enabled() {
-        tracing::info!("Telemetry is not enabled");
-        return Ok(());
-    }
     let http_client = hyper::Client::new();
     let req = hyper::Request::post(url)
         .header("Content-Type", "application/json")
@@ -164,10 +166,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_system_data() {
-        let sys = SystemData::new();
-        println!("{:?}", sys);
+    fn test_system_data_new() {
+        let system_data = SystemData::new();
+
+        assert!(system_data.memory.available > 0);
+        assert!(system_data.memory.used > 0);
+        assert!(system_data.memory.total > 0);
+        assert!(!system_data.os.name.is_empty());
+        assert!(!system_data.os.kernel_version.is_empty());
+        assert!(!system_data.os.version.is_empty());
+        assert!(system_data.cpu.available > 0.0);
     }
+
     #[tokio::test]
     async fn test_post_telemetry_report_success() {
         let mock_server = MockServer::start();

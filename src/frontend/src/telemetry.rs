@@ -26,6 +26,10 @@ impl TelemetryReportCreator for FrontendTelemetryCreator {
             up_time,
         ))
     }
+
+    fn report_type(&self) -> &str {
+        "frontend"
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -53,5 +57,21 @@ impl FrontendTelemetryReport {
                 node_type: TelemetryNodeType::Frontend,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new() {
+        let report =
+            FrontendTelemetryReport::new("tracking_id".to_owned(), "session_id".to_owned(), 0);
+
+        assert_eq!(report.base.tracking_id, "tracking_id");
+        assert_eq!(report.base.session_id, "session_id");
+        assert_eq!(report.base.up_time, 0);
+        assert_eq!(report.base.node_type, TelemetryNodeType::Frontend);
     }
 }

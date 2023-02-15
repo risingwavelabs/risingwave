@@ -26,6 +26,10 @@ impl TelemetryReportCreator for CompactorTelemetryCreator {
             up_time,
         ))
     }
+
+    fn report_type(&self) -> &str {
+        "compactor"
+    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -18,6 +18,7 @@ use std::time::SystemTime;
 use anyhow::anyhow;
 use risingwave_common::telemetry::{
     post_telemetry_report, telemetry_enabled, SystemData, TelemetryNodeType, TelemetryReportBase,
+    TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
@@ -27,10 +28,6 @@ use uuid::Uuid;
 
 use crate::storage::MetaStore;
 
-/// Url of telemetry backend
-const TELEMETRY_REPORT_URL: &str = "http://localhost:8000/report";
-/// Telemetry reporting interval in seconds, 24h
-const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
 pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
@@ -100,8 +97,8 @@ pub async fn start_meta_telemetry_reporting(
                     continue;
                 }
             };
-
-            match post_telemetry_report(TELEMETRY_REPORT_URL, report_json).await {
+            let url = TELEMETRY_REPORT_URL.to_owned() + "/meta";
+            match post_telemetry_report(&url, report_json).await {
                 Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
                 Err(e) => tracing::error!("Telemetry post error, {}", e),
             }

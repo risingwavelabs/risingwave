@@ -5,13 +5,9 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
-use super::{post_telemetry_report, TelemetryReport};
-
-/// Url of telemetry backend
-const TELEMETRY_REPORT_URL: &str = "http://localhost:8000/report";
-
-/// Telemetry reporting interval in seconds, 24h
-const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
+use super::{
+    post_telemetry_report, TelemetryReport, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
+};
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
@@ -26,6 +22,8 @@ pub trait TelemetryReportCreator {
         session_id: String,
         up_time: u64,
     ) -> Result<impl TelemetryReport>;
+
+    fn report_type(&self) -> &str;
 }
 
 pub fn start_telemetry_reporting<F, I>(
@@ -90,7 +88,10 @@ where
                 }
             };
 
-            match post_telemetry_report(TELEMETRY_REPORT_URL, report_json).await {
+            let url =
+                (TELEMETRY_REPORT_URL.to_owned() + "/" + report_creator.report_type()).to_owned();
+
+            match post_telemetry_report(&url, report_json).await {
                 Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
                 Err(e) => tracing::error!("Telemetry post error, {}", e),
             }

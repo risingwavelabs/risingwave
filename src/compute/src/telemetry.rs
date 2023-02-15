@@ -41,6 +41,10 @@ impl TelemetryReportCreator for ComputeTelemetryCreator {
             up_time,
         ))
     }
+
+    fn report_type(&self) -> &str {
+        "compute"
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
