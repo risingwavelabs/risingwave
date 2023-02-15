@@ -260,4 +260,19 @@ mod tests {
             system_params_from_kv(system_params_to_kv(&p).unwrap()).unwrap()
         );
     }
+
+    #[test]
+    fn test_set() {
+        let mut p = SystemParams::default();
+
+        // Unrecognized param.
+        assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
+        // Value out of range.
+        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("-1".to_string())).is_err());
+        // Set immutable.
+        assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_string())).is_err());
+        // Normal set.
+        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("500".to_string())).is_ok());
+        assert_eq!(p.sstable_size_mb, Some(500));
+    }
 }
