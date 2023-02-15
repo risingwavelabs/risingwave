@@ -333,6 +333,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_list: self.range_tombstones,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
+
+        // Expand the epoch of the whole sst by tombstone epoch
+        let (tombstone_min_epoch, tombstone_max_epoch) = {
+            let mut tombstone_min_epoch = u64::MAX;
+            let mut tombstone_max_epoch = u64::MIN;
+
+            for tombstone in &meta.range_tombstone_list {
+                tombstone_min_epoch = cmp::min(tombstone_min_epoch, tombstone.sequence);
+                tombstone_max_epoch = cmp::max(tombstone_max_epoch, tombstone.sequence);
+            }
+
+            (tombstone_min_epoch, tombstone_max_epoch)
+        };
+
         let sst_info = SstableInfo {
             id: self.sstable_id,
             key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -346,8 +360,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
             divide_version: 0,
-            min_epoch: self.min_epoch,
-            max_epoch: self.max_epoch,
+            min_epoch: cmp::min(self.min_epoch, tombstone_min_epoch),
+            max_epoch: cmp::max(self.max_epoch, tombstone_max_epoch),
         };
         tracing::info!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {}",
