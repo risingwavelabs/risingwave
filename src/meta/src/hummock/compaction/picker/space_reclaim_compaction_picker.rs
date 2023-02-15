@@ -28,7 +28,28 @@ pub struct SpaceReclaimCompactionPicker {
 
 #[derive(Default)]
 pub struct SpaceReclaimPickerState {
-    pub last_select_index: usize,
+    pub last_select_end_key: Vec<u8>,
+
+    pub start_key_in_round: Vec<u8>,
+    pub end_key_in_round: Vec<u8>,
+}
+
+impl SpaceReclaimPickerState {
+    pub fn valid(&self) -> bool {
+        !self.start_key_in_round.is_empty() && !self.end_key_in_round.is_empty()
+    }
+
+    pub fn init(&mut self, start_key: Vec<u8>, end_key: Vec<u8>) {
+        self.start_key_in_round = start_key;
+        self.end_key_in_round = end_key;
+        self.last_select_end_key = self.start_key_in_round.clone();
+    }
+
+    pub fn clear(&mut self) {
+        self.last_select_end_key.clear();
+        self.start_key_in_round.clear();
+        self.end_key_in_round.clear();
+    }
 }
 
 impl SpaceReclaimCompactionPicker {
@@ -60,15 +81,48 @@ impl SpaceReclaimCompactionPicker {
         let mut select_input_ssts = vec![];
         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
-        if state.last_select_index >= reclaimed_level.table_infos.len() {
-            state.last_select_index = 0;
+        if reclaimed_level.table_infos.is_empty() {
+            // 1. not file to be picked
+            state.clear();
+            return None;
         }
 
-        let start_indedx = state.last_select_index;
+        let (start_key, end_key) = {
+            let first_sst = reclaimed_level.table_infos.first().unwrap();
+            let last_sst = reclaimed_level.table_infos.last().unwrap();
+
+            (
+                first_sst.key_range.as_ref().unwrap().left.clone(),
+                last_sst.key_range.as_ref().unwrap().right.clone(),
+            )
+        };
+
+        if state.valid() && end_key > state.end_key_in_round {
+            // in round but end_key overflow
+            // turn to next_round
+            state.clear();
+            return None;
+        }
+
+        if !state.valid() {
+            state.init(start_key, end_key)
+        }
+
+        let start_key = state.last_select_end_key.clone();
         let mut select_file_size = 0;
 
-        for sst in &reclaimed_level.table_infos[start_indedx..] {
-            state.last_select_index += 1;
+        let matched_sst = reclaimed_level
+            .table_infos
+            .iter()
+            .filter(|sst| match &sst.key_range {
+                Some(key_range) => key_range.left >= start_key,
+
+                None => false,
+            });
+
+        for sst in matched_sst {
+            state.last_select_end_key = sst.key_range.as_ref().unwrap().right.to_vec();
+
             if level_handler.is_pending_compact(&sst.id) || self.filter(sst) {
                 continue;
             }
@@ -80,7 +134,9 @@ impl SpaceReclaimCompactionPicker {
             }
         }
 
+        // turn to next_round
         if select_input_ssts.is_empty() {
+            state.clear();
             return None;
         }
 
@@ -172,6 +228,8 @@ mod test {
 
         let mut selector = SpaceReclaimCompactionSelector::default();
         {
+            // test max_pick_files limit
+
             // pick space reclaim
             let task = selector
                 .pick_compaction(
@@ -212,6 +270,7 @@ mod test {
         }
 
         {
+            // test state
             for level_handler in &mut levels_handler {
                 for pending_task_id in &level_handler.pending_tasks_ids() {
                     level_handler.remove_task(*pending_task_id);
@@ -233,7 +292,7 @@ mod test {
             assert_eq!(task.input.input_levels.len(), 2);
             assert_eq!(task.input.input_levels[0].level_idx, 4);
 
-            // test select index, picker will select file from last_select_index
+            // test select index, picker will select file from state
             let all_file_count = levels.get_levels().last().unwrap().get_table_infos().len();
             assert_eq!(
                 task.input.input_levels[0].table_infos.len(),
@@ -256,6 +315,8 @@ mod test {
         }
 
         {
+            // test state, after above 2
+
             for level_handler in &mut levels_handler {
                 for pending_task_id in &level_handler.pending_tasks_ids() {
                     level_handler.remove_task(*pending_task_id);
