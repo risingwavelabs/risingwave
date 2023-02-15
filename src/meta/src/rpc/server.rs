@@ -130,9 +130,7 @@ pub async fn rpc_serve(
                 Ok(pn) => pn,
                 Err(_) => {
                     tracing::warn!("Unable to retrieve environment variable 'POD_NAME'. Required if in K8s environment. Using UUID instead");
-                    let id = Uuid::new_v4().to_string();
-                    env::set_var("POD_NAME", id.clone());
-                    id
+                    Uuid::new_v4().to_string()
                 }
             };
 
