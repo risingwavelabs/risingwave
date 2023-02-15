@@ -45,6 +45,7 @@ mod model;
 mod rpc;
 pub mod storage;
 mod stream;
+mod util;
 
 use std::time::Duration;
 

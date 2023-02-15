@@ -21,6 +21,7 @@ async-trait = "0.1"
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive", "env"] }
 crepe = "0.1"
+delay_timer = "*"
 easy-ext = "1"
 either = "1"
 enum-as-inner = "0.5"

@@ -65,6 +65,7 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
+use crate::util::GlobalEventManager;
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -503,9 +504,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
+    let timer_manager = GlobalEventManager::default();
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
+        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &timer_manager, &env.opts);
     sub_tasks.push(
         ClusterManager::start_worker_num_monitor(
             cluster_manager.clone(),

@@ -46,17 +46,19 @@ pub use crate::hummock::compaction_scheduler::{
 };
 use crate::storage::MetaStore;
 use crate::MetaOpts;
+use crate::util::GlobalEventManager;
 
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers<S>(
     vacuum_manager: VacuumManagerRef<S>,
     compaction_scheduler: CompactionSchedulerRef<S>,
+    timer_manager: &GlobalEventManager,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)>
 where
     S: MetaStore,
 {
-    let mut workers = vec![start_compaction_scheduler(compaction_scheduler)];
+    let mut workers = vec![start_compaction_scheduler(compaction_scheduler, timer_manager)];
     // Start vacuum in non-deterministic compaction test
     if !meta_opts.compaction_deterministic_test {
         workers.push(start_vacuum_scheduler(
@@ -70,18 +72,13 @@ where
 /// Starts a task to accept compaction request.
 fn start_compaction_scheduler<S>(
     compaction_scheduler: CompactionSchedulerRef<S>,
+    timer_manager: &GlobalEventManager,
 ) -> (JoinHandle<()>, Sender<()>)
 where
     S: MetaStore,
 {
     // Start compaction scheduler
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let join_handle = tokio::spawn(async move {
-        compaction_scheduler.start(shutdown_rx).await;
-        tracing::info!("Compaction scheduler is stopped");
-    });
-
-    (join_handle, shutdown_tx)
+    compaction_scheduler.start(timer_manager)
 }
 
 /// Starts a task to periodically vacuum hummock.
