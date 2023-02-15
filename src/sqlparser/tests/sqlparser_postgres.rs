@@ -422,7 +422,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Ident("DEFAULT".into())],
+            value: vec![SetVariableValue::Default],
         }
     );
 

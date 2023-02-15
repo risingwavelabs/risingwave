@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod compaction;
-pub mod compaction_group;
 mod compaction_schedule_policy;
 mod compaction_scheduler;
 pub mod compactor_manager;
@@ -25,7 +24,7 @@ mod level_handler;
 mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod mock_hummock_meta_client;
-mod model;
+pub mod model;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;

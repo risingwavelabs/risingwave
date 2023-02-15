@@ -255,6 +255,7 @@ pub mod tests {
         let mut levels = Levels {
             l0: Some(l0),
             levels: vec![],
+            ..Default::default()
         };
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         let mut local_stats = LocalPickerStatistic::default();
@@ -274,6 +275,7 @@ pub mod tests {
         let mut levels = Levels {
             l0: Some(l0),
             levels: vec![],
+            ..Default::default()
         };
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -322,6 +324,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![],
+            ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0)];
         let config = Arc::new(
@@ -347,6 +350,7 @@ pub mod tests {
         let empty_level = Levels {
             l0: Some(generate_l0_overlapping_sublevels(vec![])),
             levels: vec![],
+            ..Default::default()
         };
         assert!(picker
             .pick_compaction(&empty_level, &levels_handler, &mut local_stats)
@@ -366,6 +370,7 @@ pub mod tests {
         let mut levels = Levels {
             l0: Some(l0),
             levels: vec![],
+            ..Default::default()
         };
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
