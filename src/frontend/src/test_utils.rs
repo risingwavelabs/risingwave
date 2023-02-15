@@ -681,6 +681,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
         Ok(SystemParams::default().into())
     }
+
+    async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

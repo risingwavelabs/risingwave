@@ -332,6 +332,15 @@ message GetSystemParamsResponse {
   SystemParams params = 1;
 }
 
+message SetSystemParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSystemParamResponse {}
+
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
+  rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
 }

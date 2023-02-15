@@ -51,6 +51,10 @@ impl<S: MetaStore> SystemParamManager<S> {
         &self.params
     }
 
+    pub fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
+        todo!()
+    }
+
     fn validate_init_params(persisted: &SystemParams, init: &SystemParams) {
         // Only compare params from CLI and config file.
         // TODO: Currently all fields are from CLI/config, but after CLI becomes the only source of
@@ -59,6 +63,4 @@ impl<S: MetaStore> SystemParamManager<S> {
             tracing::warn!("System parameters from CLI and config file differ from the persisted")
         }
     }
-
-    // TODO(zhidong): Support modifying fields
 }
