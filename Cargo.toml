@@ -122,3 +122,4 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "06a7af8" }
