@@ -20,7 +20,7 @@ use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_source::row_id::RowIdGenerator;
 
 use super::{
@@ -79,7 +79,7 @@ impl RowIdGenExecutor {
         let len = column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len);
 
-        for (datum, op) in column.array_ref().iter().zip_eq_debug(ops) {
+        for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().await)),
