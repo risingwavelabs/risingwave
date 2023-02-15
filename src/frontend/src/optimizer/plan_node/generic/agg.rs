@@ -646,7 +646,7 @@ impl PlanAggCall {
                 panic!("2-phase ArrayAgg is not supported yet")
             }
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
-                todo!("stddev placeholder")
+                panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
         };
         PlanAggCall {

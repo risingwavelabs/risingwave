@@ -146,7 +146,7 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
 
         (AggKind::Sum, _) => return None,
 
-        // StdDev, stddev_pop and stddev_samp
+        // StdDev/Var, stddev_pop, stddev_samp, var_pop, var_samp
         (
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
             [input],

@@ -452,6 +452,26 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             A::Avg => Some(Expr::Function(make_agg_func(
                 "avg", exprs, distinct, filter, order_by,
             ))),
+            A::VarSamp => Some(Expr::Function(make_agg_func(
+                "var_samp", exprs, distinct, filter, order_by,
+            ))),
+            A::VarPop => Some(Expr::Function(make_agg_func(
+                "var_pop", exprs, distinct, filter, order_by,
+            ))),
+            A::StddevSamp => Some(Expr::Function(make_agg_func(
+                "stddev_samp",
+                exprs,
+                distinct,
+                filter,
+                order_by,
+            ))),
+            A::StddevPop => Some(Expr::Function(make_agg_func(
+                "stddev_pop",
+                exprs,
+                distinct,
+                filter,
+                order_by,
+            ))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
                 // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
@@ -490,9 +510,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 filter,
                 order_by,
             ))),
-            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
-                todo!("stddev placeholder")
-            }
         }
     }
 }

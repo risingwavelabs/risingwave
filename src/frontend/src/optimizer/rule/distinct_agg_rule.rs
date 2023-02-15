@@ -272,7 +272,11 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
-                    | AggKind::FirstValue => (),
+                    | AggKind::FirstValue
+                    | AggKind::StddevPop
+                    | AggKind::StddevSamp
+                    | AggKind::VarPop
+                    | AggKind::VarSamp => (),
                     AggKind::Count => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }
@@ -280,10 +284,6 @@ impl DistinctAggRule {
                     AggKind::ApproxCountDistinct => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }
-                    AggKind::StddevPop
-                    | AggKind::StddevSamp
-                    | AggKind::VarPop
-                    | AggKind::VarSamp => todo!("stddev placeholder"),
                 }
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
