@@ -269,6 +269,23 @@ impl FunctionCall {
     pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
         self.inputs.as_mut()
     }
+
+    pub(super) fn from_expr_proto(
+        function_call: &risingwave_pb::expr::FunctionCall,
+        expr_type: ExprType,
+        ret_type: DataType,
+    ) -> Result<Self> {
+        let inputs: Vec<_> = function_call
+            .get_children()
+            .iter()
+            .map(ExprImpl::from_expr_proto)
+            .try_collect()?;
+        Ok(Self {
+            func_type: expr_type,
+            return_type: ret_type,
+            inputs,
+        })
+    }
 }
 
 impl Expr for FunctionCall {
