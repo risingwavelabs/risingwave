@@ -760,6 +760,7 @@ mod tests {
             delete_ranges,
             table_id,
             None,
+            None,
         );
 
         let epoch = 2;
@@ -797,6 +798,7 @@ mod tests {
             size,
             delete_ranges,
             table_id,
+            None,
             None,
         );
 

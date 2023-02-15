@@ -97,6 +97,7 @@ impl HummockStorageCore {
     pub fn update(&self, info: VersionUpdate) {
         let mut write_guard = self.read_version.write();
         write_guard.update(info);
+
         // TODO(siyuan): move the merge logic into Uploader
         // check whether we need to merge some immutable memtables
         // if let Some(imms) = write_guard.get_imms_to_merge() {
@@ -233,6 +234,7 @@ impl StateStoreWrite for LocalHummockStorage {
                 size,
                 delete_ranges,
                 table_id,
+                None,
                 Some(tracker),
             );
             let imm_size = imm.size();

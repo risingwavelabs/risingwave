@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::binary_heap::PeekMut;
+use std::collections::BinaryHeap;
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -22,21 +24,25 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
 
+use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
 use crate::hummock::shared_buffer::SHARED_BUFFER_BATCH_ID_GENERATOR;
+use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult};
+use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult, MemoryLimiter};
 use crate::storage_value::StorageValue;
 
 /// The key is `table_key`, which does not contain table id or epoch.
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
+// key is table_key, value is different versions of the key
+pub type SharedBufferEntry = (Bytes, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
@@ -50,7 +56,8 @@ pub(crate) struct SharedBufferBatchInner {
 
 impl SharedBufferBatchInner {
     pub(crate) fn new(
-        payload: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        items: Vec<SharedBufferItem>,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
@@ -80,14 +87,18 @@ impl SharedBufferBatchInner {
             range_tombstone_list = range_tombstones;
         }
 
-        if let Some(item) = payload.last() {
+        if let Some(item) = items.last() {
             if item.0.gt(&largest_table_key) {
                 largest_table_key.clear();
                 largest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
         SharedBufferBatchInner {
-            payload,
+            // payload: items
+            //     .into_iter()
+            //     .map(|(k, v)| (k, vec![(epoch, v)]))
+            //     .collect_vec(),
+            payload: items,
             range_tombstone_list,
             size,
             largest_table_key,
@@ -117,6 +128,10 @@ pub struct SharedBufferBatch {
     pub(crate) inner: Arc<SharedBufferBatchInner>,
     pub(crate) epoch: HummockEpoch,
     pub table_id: TableId,
+    pub shard_id: LocalInstanceId,
+
+    // imms that have merged into this batch
+    pub imm_ids: Vec<SharedBufferBatchId>,
 }
 
 impl SharedBufferBatch {
@@ -129,6 +144,7 @@ impl SharedBufferBatch {
 
         Self {
             inner: Arc::new(SharedBufferBatchInner::new(
+                epoch,
                 sorted_items,
                 vec![],
                 size,
@@ -136,6 +152,8 @@ impl SharedBufferBatch {
             )),
             epoch,
             table_id,
+            shard_id: ImmId::default(),
+            imm_ids: Vec::default(),
         }
     }
 
@@ -287,12 +305,14 @@ impl SharedBufferBatch {
             .collect()
     }
 
+    // FIXME: provide a builder for SharedBufferBatch
     pub fn build_shared_buffer_batch(
         epoch: HummockEpoch,
         sorted_items: Vec<SharedBufferItem>,
         size: usize,
         delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
+        shard_id: Option<ImmId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         let delete_range_tombstones = delete_ranges
@@ -310,12 +330,106 @@ impl SharedBufferBatch {
         {
             Self::check_tombstone_prefix(table_id, &delete_range_tombstones);
         }
-        let inner =
-            SharedBufferBatchInner::new(sorted_items, delete_range_tombstones, size, tracker);
+        let inner = SharedBufferBatchInner::new(
+            epoch,
+            sorted_items,
+            delete_range_tombstones,
+            size,
+            tracker,
+        );
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
             epoch,
+            shard_id: shard_id.unwrap_or(ImmId::default()),
+            imm_ids: vec![],
+        }
+    }
+
+    fn build_merged_imm_private(
+        table_id: TableId,
+        shard_id: ImmId,
+        imms: Vec<ImmutableMemtable>,
+        _memory_limiter: Option<Arc<MemoryLimiter>>,
+    ) -> Self {
+        // use a binary heap to merge imms
+        let mut heap = BinaryHeap::new();
+        let mut range_tombstone_list = Vec::new();
+        let mut num_keys = 0;
+        let mut min_epoch = HummockEpoch::MAX;
+        let mut epochs = vec![];
+        let mut size = 0;
+        let mut merged_imm_ids = Vec::with_capacity(imms.len());
+
+        for imm in imms {
+            assert!(imm.count() > 0, "imm should not be empty");
+            assert_eq!(
+                table_id,
+                imm.table_id(),
+                "should only merge data belonging to the same table"
+            );
+            merged_imm_ids.push(imm.batch_id());
+            epochs.push(imm.epoch());
+            num_keys += imm.count();
+            size += imm.size();
+            min_epoch = std::cmp::min(min_epoch, imm.epoch());
+            range_tombstone_list.extend(imm.get_delete_range_tombstones());
+            heap.push(Node {
+                iter: imm.into_forward_iter(),
+            });
+        }
+
+        range_tombstone_list.sort();
+
+        let mut items = Vec::with_capacity(num_keys);
+        while !heap.is_empty() {
+            let mut node = heap.peek_mut().expect("heap is not empty");
+            items.push((node.iter.current_item().clone(), node.iter.epoch()));
+            node.iter.blocking_next();
+            if !node.iter.is_valid() {
+                // remove the invalid iter from heap
+                PeekMut::pop(node);
+            } else {
+                // This will update the heap
+                drop(node);
+            }
+        }
+
+        size += items.len() * EPOCH_LEN;
+        // different versions of a key will be put to a vector
+        let mut merged_payload = Vec::new();
+        let mut pivot = items
+            .first()
+            .map(|((k, _), _)| TableKey(k.to_vec()))
+            .unwrap();
+        let mut versions = Vec::new();
+        for ((k, v), epoch) in items {
+            let key = TableKey(k.to_vec());
+            if key == pivot {
+                versions.push((epoch, v));
+            } else {
+                merged_payload.push((pivot, versions));
+                pivot = key;
+                versions = vec![(epoch, v)];
+            }
+        }
+        // process the last key
+        if !versions.is_empty() {
+            merged_payload.push((pivot, versions));
+        }
+
+        SharedBufferBatch {
+            inner: Arc::new(SharedBufferBatchInner::new(
+                min_epoch,
+                vec![],
+                range_tombstone_list,
+                size,
+                None,
+            )),
+            epoch: min_epoch,
+            table_id,
+            shard_id,
+            imm_ids: vec![],
         }
     }
 
@@ -337,6 +451,35 @@ impl SharedBufferBatch {
         }
     }
 }
+
+struct Node {
+    iter: SharedBufferBatchIterator<Forward>,
+}
+
+impl Ord for Node
+where
+    Self: PartialOrd,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // compares the full key
+        self.iter.key().cmp(&other.iter.key())
+    }
+}
+
+impl PartialOrd<Node> for Node {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Note: to implement min-heap by using max-heap internally, the comparing
+        Some(other.cmp(self))
+    }
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter.key() == other.iter.key()
+    }
+}
+
+impl Eq for Node where Self: PartialEq {}
 
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
     inner: Arc<SharedBufferBatchInner>,
@@ -750,6 +893,7 @@ mod tests {
             delete_ranges,
             Default::default(),
             None,
+            None,
         );
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
         assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
@@ -771,6 +915,7 @@ mod tests {
             0,
             delete_ranges,
             Default::default(),
+            None,
             None,
         );
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));

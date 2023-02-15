@@ -61,6 +61,7 @@ async fn test_read_version_basic() {
             vec![],
             TableId::from(table_id),
             None,
+            None,
         );
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -95,6 +96,7 @@ async fn test_read_version_basic() {
                 size,
                 vec![],
                 TableId::from(table_id),
+                None,
                 None,
             );
 
@@ -273,6 +275,7 @@ async fn test_read_version_merge_imms() {
                 vec![],
                 TableId::from(table_id),
                 None,
+                None,
             );
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
@@ -351,6 +354,7 @@ async fn test_read_version_merge_imms() {
                 size,
                 vec![],
                 TableId::from(table_id),
+                None,
                 None,
             );
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -481,6 +485,7 @@ async fn test_read_filter_basic() {
             size,
             vec![],
             TableId::from(table_id),
+            None,
             None,
         );
 

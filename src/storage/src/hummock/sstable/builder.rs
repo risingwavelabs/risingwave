@@ -264,6 +264,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
         self.build_block().await?;
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
+        // SST生成key range的代码
         for tombstone in &self.range_tombstones {
             assert!(!tombstone.end_user_key.is_empty());
             if largest_key.is_empty()

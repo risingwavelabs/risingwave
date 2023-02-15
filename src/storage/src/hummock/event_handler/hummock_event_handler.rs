@@ -427,6 +427,23 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
+
+                    UploaderEvent::ImmMerged(merge_output) => {
+                        // clear the imms have been merged in the sealed data
+                        self.uploader.update_sealed_data(&merge_output.merged_imm);
+
+                        // update read version for corresponding table shard
+                        let read_guard = self.read_version_mapping.read();
+                        read_guard.get(&merge_output.table_id).map_or((), |shards| {
+                            shards
+                                .get(&merge_output.shard_id)
+                                .map_or((), |read_version| {
+                                    read_version.write().update(VersionUpdate::Staging(
+                                        StagingData::MergedImmMem(merge_output.merged_imm),
+                                    ));
+                                })
+                        });
+                    }
                 },
                 Either::Right(event) => {
                     match event {
@@ -451,8 +468,8 @@ impl HummockEventHandler {
                             self.handle_version_update(version_payload);
                         }
 
-                        HummockEvent::ImmToUploader(imm, instance_id) => {
-                            self.uploader.add_imm(imm, Some(instance_id));
+                        HummockEvent::ImmToUploader(imm, ..) => {
+                            self.uploader.add_imm(imm);
                             self.uploader.may_flush();
                         }
 
@@ -460,25 +477,10 @@ impl HummockEventHandler {
                             epoch,
                             is_checkpoint,
                         } => {
-                            // merge sealed imms and then update each read version
                             self.uploader.seal_epoch(epoch);
-                            let merge_output = self
-                                .uploader
-                                .try_merge_imms(epoch, is_checkpoint)
-                                .await
-                                .unwrap();
-                            let read_guard = self.read_version_mapping.read();
-                            merge_output.into_iter().for_each(
-                                |(table_id, instance_id, merged_imm)| {
-                                    read_guard.get(&table_id).map_or((), |shards| {
-                                        shards.get(&instance_id).map_or((), |read_version| {
-                                            read_version.write().update(VersionUpdate::Staging(
-                                                StagingData::MergedImmMem(merged_imm),
-                                            ));
-                                        })
-                                    })
-                                },
-                            );
+
+                            // start merging task if necessary
+                            self.uploader.start_merge_imms(epoch);
 
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);

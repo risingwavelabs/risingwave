@@ -374,6 +374,7 @@ impl HummockReadVersion {
                             }
                         }
 
+                        // put the flushed sst to staging
                         self.staging.sst.push_front(staging_sst);
                     }
                 }
