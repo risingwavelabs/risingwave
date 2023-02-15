@@ -21,8 +21,8 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, row_encoding::Serde, ValueRowSerde
+use risingwave_common::util::value_encoding::column_aware_row_encoding::{
+    BasicSerde, ValueRowSerde, ColumnAwareSerde
 };
 
 struct Case {
@@ -78,7 +78,7 @@ fn basic_encode(c: &Case) -> Vec<Vec<u8>> {
 }
 
 fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
-    let seralizer = Serde::new(&c.column_ids, &c.schema);
+    let seralizer = ColumnAwareSerde::new(&c.column_ids, &c.schema);
     let mut array = vec![];
     for row in &c.rows {
         let row_bytes = seralizer.serialize(row);
@@ -168,7 +168,7 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer = Serde::new(&c.needed_ids, &c.needed_schema);
+    let deserializer = ColumnAwareSerde::new(&c.needed_ids, &c.needed_schema);
     let mut res = vec![];
     for byte in bytes {
         let row = deserializer.deserialize(byte)?;

@@ -105,8 +105,77 @@ impl RowEncoding {
     }
 }
 
+trait ValueRowSerializer: Clone {
+    fn new(column_ids: &[ColumnId]) -> impl ValueRowSerializer;
+    fn serialize(&self, row: impl Row) -> Vec<u8>;
+}
+
+trait ValueRowDeserializer: Clone {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowDeserializer;
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
+}
+
+pub trait ValueRowSerde: Clone {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self;
+    fn serialize(&self, row: impl Row) -> Vec<u8>;
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
+}
+
+#[derive(Clone)]
+pub struct BasicSerializer {}
+
+impl ValueRowSerializer for BasicSerializer {
+    fn new(_column_ids: &[ColumnId]) -> BasicSerializer {
+        BasicSerializer {}
+    }
+
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        let mut buf = vec![];
+        for datum in row.iter() {
+            serialize_datum_into(datum, &mut buf);
+        }
+        buf
+    }
+}
+
+impl ValueRowDeserializer for RowDeserializer {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> RowDeserializer {
+        RowDeserializer::new(schema.to_vec())
+    }
+
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
+#[derive(Clone)]
+pub struct BasicSerde {
+    deserializer: RowDeserializer,
+}
+
+impl ValueRowSerde for BasicSerde {
+    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> BasicSerde {
+        BasicSerde {
+            deserializer: RowDeserializer::new(schema.to_vec()),
+        }
+    }
+
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        let mut buf = vec![];
+        for datum in row.iter() {
+            serialize_datum_into(datum, &mut buf);
+        }
+        buf
+    }
+
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
 /// Column-Aware `Serializer` holds schema related information, and shall be
 /// created again once the schema changes
+#[derive(Clone)]
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
     datum_num: u32,
@@ -151,13 +220,14 @@ impl Serializer {
 
 /// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
 /// Should non-null default values be specified, a new field could be added to Deserializer
-pub struct Deserializer<'a> {
+#[derive(Clone)]
+pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
-    schema: &'a [DataType],
+    schema: Vec<DataType>,
 }
 
-impl<'a> Deserializer<'a> {
-    pub fn new(column_ids: &'a [ColumnId], schema: &'a [DataType]) -> Self {
+impl Deserializer {
+    pub fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self {
         assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids
@@ -165,7 +235,7 @@ impl<'a> Deserializer<'a> {
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<BTreeMap<_, _>>(),
-            schema,
+            schema: schema.to_vec(),
         }
     }
 
@@ -227,6 +297,32 @@ fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
         _ => unreachable!("Width's len should be either 1, 2, or 4"),
     }
 }
+
+#[derive(Clone)]
+pub struct ColumnAwareSerde {
+    serializer: Serializer,
+    deserializer: Deserializer,
+}
+
+impl ValueRowSerde for ColumnAwareSerde {
+    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> ColumnAwareSerde {
+        let serializer = Serializer::new(column_ids);
+        let deserializer = Deserializer::new(column_ids, schema);
+        ColumnAwareSerde {
+            serializer,
+            deserializer,
+        }
+    }
+
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        self.serializer.serialize_row_column_aware(row)
+    }
+
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        self.deserializer.decode(encoded_bytes)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
