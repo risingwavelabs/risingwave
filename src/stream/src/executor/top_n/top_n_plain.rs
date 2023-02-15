@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -163,7 +163,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: format!("TopNExecutorNew {:X}", executor_id),
+                identity: format!("TopNExecutor {:X}", executor_id),
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),

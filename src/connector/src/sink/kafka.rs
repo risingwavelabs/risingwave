@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use itertools::Itertools;
+use anyhow::anyhow;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
@@ -28,71 +28,78 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
-use serde::Deserialize;
+use risingwave_common::util::iter_util::ZipEqFast;
+use serde_derive::Deserialize;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{Sink, SinkError};
+use crate::common::KafkaCommon;
 use crate::sink::Result;
+use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
 
 pub const KAFKA_SINK: &str = "kafka";
 
+const fn _default_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+
+const fn _default_max_retries() -> u32 {
+    3
+}
+
+const fn _default_retry_backoff() -> Duration {
+    Duration::from_millis(100)
+}
+
+const fn _default_use_transaction() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct KafkaConfig {
-    #[serde(rename = "kafka.brokers")]
-    pub brokers: String,
-
-    #[serde(rename = "kafka.topic")]
-    pub topic: String,
-
-    pub use_transaction: bool,
-
-    // Optional. If not specified, the default value is None and messages are sent to random
-    // partition. if we want to guarantee exactly once delivery, we need to specify the
-    // partition number. The partition number should set by meta.
-    pub partition: Option<i32>,
+    #[serde(flatten)]
+    pub common: KafkaCommon,
 
     pub format: String, // accept "append_only" or "debezium"
 
     pub identifier: String,
 
+    #[serde(
+        rename = "properties.timeout",
+        default = "_default_timeout",
+        deserialize_with = "deserialize_duration_from_string"
+    )]
     pub timeout: Duration,
+
+    #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
     pub max_retry_num: u32,
+
+    #[serde(
+        rename = "properties.retry.interval",
+        default = "_default_retry_backoff",
+        deserialize_with = "deserialize_duration_from_string"
+    )]
     pub retry_interval: Duration,
+
+    #[serde(
+        deserialize_with = "deserialize_bool_from_string",
+        default = "_default_use_transaction"
+    )]
+    pub use_transaction: bool,
 }
 
 impl KafkaConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let brokers = values
-            .get("kafka.brokers")
-            .expect("kafka.brokers must be set");
-        let identifier = values
-            .get("identifier")
-            .expect("kafka.identifier must be set");
-        let format = values.get("format").expect("format must be set");
-        if format != "append_only" && format != "debezium" {
-            return Err(SinkError::Config(
-                "format must be set to \"append_only\" or \"debezium\"".to_string(),
-            ));
+        let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        if config.format != "append_only" && config.format != "debezium" {
+            return Err(SinkError::Config(anyhow!(
+                "format must be either append_only or debezium"
+            )));
         }
-        let use_txn = values
-            .get("use_transaction")
-            .map(|v| v == "true")
-            .unwrap_or(true);
-
-        let topic = values.get("kafka.topic").expect("kafka.topic must be set");
-
-        Ok(KafkaConfig {
-            brokers: brokers.to_string(),
-            topic: topic.to_string(),
-            use_transaction: use_txn,
-            identifier: identifier.to_owned(),
-            partition: None,
-            timeout: Duration::from_secs(5), // default timeout is 5 seconds
-            max_retry_num: 3,                // default max retry num is 3
-            retry_interval: Duration::from_millis(100), // default retry interval is 100ms
-            format: format.to_string(),
-        })
+        Ok(config)
     }
 }
 
@@ -103,7 +110,7 @@ enum KafkaSinkState {
     Running(u64),
 }
 
-pub struct KafkaSink {
+pub struct KafkaSink<const APPEND_ONLY: bool> {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
@@ -111,7 +118,7 @@ pub struct KafkaSink {
     in_transaction_epoch: Option<u64>,
 }
 
-impl KafkaSink {
+impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
@@ -222,7 +229,7 @@ impl KafkaSink {
             };
             if let Some(obj) = event_object {
                 self.send(
-                    BaseRecord::to(self.config.topic.as_str())
+                    BaseRecord::to(self.config.common.topic.as_str())
                         .key(self.gen_message_key().as_bytes())
                         .payload(obj.to_string().as_bytes()),
                 )
@@ -237,7 +244,7 @@ impl KafkaSink {
             if op == Op::Insert {
                 let record = Value::Object(record_to_json(row, schema.fields.clone())?).to_string();
                 self.send(
-                    BaseRecord::to(self.config.topic.as_str())
+                    BaseRecord::to(self.config.common.topic.as_str())
                         .key(self.gen_message_key().as_bytes())
                         .payload(record.as_bytes()),
                 )
@@ -249,31 +256,25 @@ impl KafkaSink {
 }
 
 #[async_trait::async_trait]
-impl Sink for KafkaSink {
+impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
-        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
-        // }
-
-        match self.config.format.as_str() {
-            "append_only" => self.append_only(chunk, &self.schema).await,
-            "debezium" => {
-                self.debezium_update(
-                    chunk,
-                    &self.schema,
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64,
-                )
-                .await
-            }
-            _ => unreachable!(),
+        if APPEND_ONLY {
+            self.append_only(chunk, &self.schema).await
+        } else {
+            // TODO: Distinguish "upsert" from "debezium" later.
+            self.debezium_update(
+                chunk,
+                &self.schema,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            )
+            .await
         }
     }
 
-    //  Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
+    // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
@@ -311,7 +312,7 @@ impl Sink for KafkaSink {
     }
 }
 
-impl Debug for KafkaSink {
+impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
     fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         unimplemented!();
     }
@@ -375,10 +376,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
                 st.fields
                     .iter()
-                    .zip_eq(st.field_names.iter())
+                    .zip_eq_fast(st.field_names.iter())
                     .map(|(dt, name)| Field::with_name(dt.clone(), name)),
             ) {
                 let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
@@ -398,7 +399,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
 fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq(row.iter()) {
+    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
@@ -461,7 +462,8 @@ impl KafkaTransactionConductor {
     async fn new(config: KafkaConfig) -> Result<Self> {
         let inner: ThreadedProducer<DefaultProducerContext> = {
             let mut c = ClientConfig::new();
-            c.set("bootstrap.servers", &config.brokers)
+            config.common.set_security_properties(&mut c);
+            c.set("bootstrap.servers", &config.common.brokers)
                 .set("message.timeout.ms", "5000");
             if config.use_transaction {
                 c.set("transactional.id", &config.identifier); // required by kafka transaction
@@ -528,6 +530,25 @@ mod test {
 
     use super::*;
 
+    #[test]
+    fn parse_kafka_config() {
+        let properties: HashMap<String, String> = hashmap! {
+            "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
+            "topic".to_string() => "test".to_string(),
+            "format".to_string() => "append_only".to_string(),
+            "use_transaction".to_string() => "False".to_string(),
+            "security_protocol".to_string() => "SASL".to_string(),
+            "sasl_mechanism".to_string() => "SASL".to_string(),
+            "sasl_username".to_string() => "test".to_string(),
+            "sasl_password".to_string() => "test".to_string(),
+            "identifier".to_string() => "test_sink_1".to_string(),
+            "properties.timeout".to_string() => "5s".to_string(),
+        };
+
+        let config = KafkaConfig::from_hashmap(properties).unwrap();
+        println!("{:?}", config);
+    }
+
     #[ignore]
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
@@ -552,7 +573,9 @@ mod test {
             },
         ]);
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
+        let mut sink = KafkaSink::<true>::new(kafka_config.clone(), schema)
+            .await
+            .unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;
@@ -560,7 +583,7 @@ mod test {
             for i in 0..100 {
                 match sink
                     .send(
-                        BaseRecord::to(kafka_config.topic.as_str())
+                        BaseRecord::to(kafka_config.common.topic.as_str())
                             .payload(format!("value-{}", i).as_bytes())
                             .key(sink.gen_message_key().as_bytes()),
                     )

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -441,7 +441,8 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp = explain::handle_explain(handler_args, *statement, options, analyze)?;
+                    let rsp =
+                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
 
                     let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {

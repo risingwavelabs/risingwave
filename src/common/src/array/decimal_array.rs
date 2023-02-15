@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ mod tests {
 
     use super::*;
     use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
+    use crate::util::iter_util::ZipEqFast;
 
     #[test]
     fn test_decimal_builder() {
@@ -37,7 +38,7 @@ mod tests {
             builder.append(*i);
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -121,10 +122,12 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
-                Some(inner) => inner.hash(state),
-                None => NULL_VAL_FOR_HASH.hash(state),
-            })
+            v.iter()
+                .zip_eq_fast(&mut states)
+                .for_each(|(x, state)| match x {
+                    Some(inner) => inner.hash(state),
+                    None => NULL_VAL_FOR_HASH.hash(state),
+                })
         });
         let hashes = hash_finish(&mut states[..]);
 

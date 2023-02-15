@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -550,6 +550,8 @@ impl From<&ProstBuffer> for Bitmap {
 }
 
 /// Bitmap iterator.
+///
+/// TODO: add `count_ones` to make it [`ExactSizeIterator`]?
 pub struct BitmapIter<'a> {
     bits: &'a [usize],
     idx: usize,
@@ -579,6 +581,7 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
     }
 }
 
+impl ExactSizeIterator for BitmapIter<'_> {}
 unsafe impl TrustedLen for BitmapIter<'_> {}
 
 #[cfg(test)]

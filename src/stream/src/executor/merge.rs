@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,12 +85,12 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            Schema::default(),
+            schema,
             vec![],
             ActorContext::create(114),
             514,
@@ -147,6 +147,12 @@ impl MergeExecutor {
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
+                        // `Watermark` of upstream may become stale after upstream scaling.
+                        select_all
+                            .buffered_watermarks
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
+
                         if !update.added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
                             let new_upstreams: Vec<_> = update
@@ -193,11 +199,9 @@ impl MergeExecutor {
                             for buffers in select_all.buffered_watermarks.values_mut() {
                                 // Call `check_heap` in case the only upstream(s) that does not have
                                 // watermark in heap is removed
-                                if let Some(watermark) = buffers.remove_buffer(
+                                buffers.remove_buffer(
                                     update.removed_upstream_actor_id.iter().copied().collect(),
-                                ) {
-                                    yield Message::Watermark(watermark);
-                                }
+                                );
                             }
                         }
 
@@ -450,7 +454,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs);
+        let merger = MergeExecutor::for_test(rxs, Schema::default());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();

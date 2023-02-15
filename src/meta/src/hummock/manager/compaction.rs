@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
+use risingwave_pb::hummock::{compact_task, CompactTaskAssignment};
 
-use crate::hummock::compaction::CompactStatus;
-use crate::hummock::error::Result;
+use crate::hummock::compaction::{CompactStatus, LevelSelector};
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
 use crate::model::BTreeMapTransaction;
@@ -34,6 +33,9 @@ pub struct Compaction {
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
     pub deterministic_mode: bool,
+
+    pub compaction_selectors:
+        HashMap<CompactionGroupId, HashMap<compact_task::TaskType, Box<dyn LevelSelector>>>,
 }
 
 impl Compaction {
@@ -41,10 +43,10 @@ impl Compaction {
     pub fn cancel_assigned_tasks_for_context_ids(
         &mut self,
         context_ids: &[HummockContextId],
-    ) -> Result<(
+    ) -> (
         BTreeMapTransaction<'_, CompactionGroupId, CompactStatus>,
         BTreeMapTransaction<'_, HummockCompactionTaskId, CompactTaskAssignment>,
-    )> {
+    ) {
         let mut compact_statuses = BTreeMapTransaction::new(&mut self.compaction_statuses);
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut self.compact_task_assignment);
@@ -84,7 +86,7 @@ impl Compaction {
                 compact_task_assignment.remove(task_id);
             }
         }
-        Ok((compact_statuses, compact_task_assignment))
+        (compact_statuses, compact_task_assignment)
     }
 }
 
@@ -108,16 +110,6 @@ where
             .values()
             .filter(|s| s.context_id == context_id)
             .count() as u64
-    }
-
-    pub async fn get_compaction_config(
-        &self,
-        compaction_group_id: CompactionGroupId,
-    ) -> CompactionConfig {
-        self.compaction_group(compaction_group_id)
-            .await
-            .expect("compaction group exists")
-            .compaction_config()
     }
 
     #[named]
@@ -179,9 +171,7 @@ mod tests {
         );
 
         // irrelevant context id
-        let (compact_status, assignment) = compaction
-            .cancel_assigned_tasks_for_context_ids(&[22])
-            .unwrap();
+        let (compact_status, assignment) = compaction.cancel_assigned_tasks_for_context_ids(&[22]);
         compact_status.commit_memory();
         assignment.commit_memory();
         assert_eq!(
@@ -203,9 +193,7 @@ mod tests {
         );
 
         // target context id
-        let (compact_status, assignment) = compaction
-            .cancel_assigned_tasks_for_context_ids(&[11])
-            .unwrap();
+        let (compact_status, assignment) = compaction.cancel_assigned_tasks_for_context_ids(&[11]);
         compact_status.commit_memory();
         assignment.commit_memory();
         assert_eq!(

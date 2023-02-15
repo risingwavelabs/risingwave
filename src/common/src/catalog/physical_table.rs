@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
 
 use super::{ColumnDesc, ColumnId, TableId};
@@ -46,6 +47,9 @@ pub struct TableDesc {
 
     /// The prefix len of pk, used in bloom filter.
     pub read_prefix_len_hint: usize,
+
+    /// the column indices which could receive watermarks.
+    pub watermark_columns: FixedBitSet,
 }
 
 impl TableDesc {

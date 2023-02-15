@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     targets
         // enable trace for most modules
         .with_target("risingwave_stream", Level::DEBUG)
-        .with_target("risingwave_batch", Level::DEBUG)
+        .with_target("risingwave_batch", Level::INFO)
         .with_target("risingwave_storage", Level::DEBUG)
         .with_target("risingwave_sqlparser", Level::INFO)
         .with_target("risingwave_source", Level::INFO)

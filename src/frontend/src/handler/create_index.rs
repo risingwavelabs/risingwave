@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -83,6 +84,14 @@ pub(crate) fn gen_create_index_plan(
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
 
+    let to_order_pair = |(ident, order): &(Ident, OrderType)| {
+        let x = ident.real_value();
+        table_desc_map
+            .get(&x)
+            .map(|x| OrderPair::new(*x, *order))
+            .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
+    };
+
     let to_column_indices = |ident: &Ident| {
         let x = ident.real_value();
         table_desc_map
@@ -93,7 +102,7 @@ pub(crate) fn gen_create_index_plan(
 
     let mut index_columns = columns
         .iter()
-        .map(to_column_indices)
+        .map(to_order_pair)
         .try_collect::<_, Vec<_>, RwError>()?;
 
     let mut include_columns = if include.is_empty() {
@@ -121,7 +130,7 @@ pub(crate) fn gen_create_index_plan(
     let mut set = HashSet::new();
     index_columns = index_columns
         .into_iter()
-        .filter(|x| set.insert(*x))
+        .filter(|x| set.insert(x.column_idx))
         .collect_vec();
 
     // Remove include columns are already in index columns
@@ -133,7 +142,12 @@ pub(crate) fn gen_create_index_plan(
     // Remove duplicate columns of distributed by columns
     let distributed_by_columns = distributed_by_columns.into_iter().unique().collect_vec();
     // Distributed by columns should be a prefix of index columns
-    if !index_columns.starts_with(&distributed_by_columns) {
+    if !index_columns
+        .iter()
+        .map(|x| x.column_idx)
+        .collect_vec()
+        .starts_with(&distributed_by_columns)
+    {
         return Err(ErrorCode::InvalidInputSyntax(
             "Distributed by columns should be a prefix of index columns".to_string(),
         )
@@ -189,6 +203,9 @@ pub(crate) fn gen_create_index_plan(
             .map(InputRef::to_expr_proto)
             .collect_vec(),
         original_columns: index_columns
+            .iter()
+            .map(|x| x.column_idx)
+            .collect_vec()
             .iter()
             .chain(include_columns.iter())
             .map(|index| *index as i32)
@@ -251,7 +268,7 @@ fn assemble_materialize(
     table_desc: Rc<TableDesc>,
     context: OptimizerContextRef,
     index_name: String,
-    index_columns: &[usize],
+    index_columns: &[OrderPair],
     include_columns: &[usize],
     distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
@@ -270,6 +287,9 @@ fn assemble_materialize(
 
     let exprs = index_columns
         .iter()
+        .map(|x| x.column_idx)
+        .collect_vec()
+        .iter()
         .chain(include_columns.iter())
         .map(|&i| {
             ExprImpl::InputRef(
@@ -284,6 +304,9 @@ fn assemble_materialize(
 
     let out_names: Vec<String> = index_columns
         .iter()
+        .map(|x| x.column_idx)
+        .collect_vec()
+        .iter()
         .chain(include_columns.iter())
         .map(|&i| table_desc.columns.get(i).unwrap().name.clone())
         .collect_vec();
@@ -294,8 +317,13 @@ fn assemble_materialize(
             (0..distributed_by_columns_len).collect(),
         )),
         Order::new(
-            (0..index_columns.len())
-                .map(FieldOrder::ascending)
+            index_columns
+                .iter()
+                .enumerate()
+                .map(|(i, order_pair)| match order_pair.order_type {
+                    OrderType::Ascending => FieldOrder::ascending(i),
+                    OrderType::Descending => FieldOrder::descending(i),
+                })
                 .collect(),
         ),
         project_required_cols,
@@ -304,16 +332,10 @@ fn assemble_materialize(
     .gen_index_plan(index_name)
 }
 
-fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
+fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
-            if column.asc.is_some() {
-                return Err(
-                    ErrorCode::NotImplemented("asc not supported".into(), None.into()).into(),
-                );
-            }
-
             if column.nulls_first.is_some() {
                 return Err(ErrorCode::NotImplemented(
                     "nulls_first not supported".into(),
@@ -325,7 +347,16 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
             use risingwave_sqlparser::ast::Expr;
 
             if let Expr::Identifier(ident) = column.expr {
-                Ok::<_, RwError>(ident)
+                Ok::<(_, _), RwError>((
+                    ident,
+                    column.asc.map_or(OrderType::Ascending, |x| {
+                        if x {
+                            OrderType::Ascending
+                        } else {
+                            OrderType::Descending
+                        }
+                    }),
+                ))
             } else {
                 Err(ErrorCode::NotImplemented(
                     "only identifier is supported for create index".into(),

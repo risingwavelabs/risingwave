@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::literal_parsing;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -172,7 +173,7 @@ impl FunctionCall {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq(fields.to_vec())
+                    .zip_eq_fast(fields.to_vec())
                     .map(|(e, t)| Self::new_cast(e, t, allows))
                     .collect::<Result<Vec<_>>>()?;
                 let return_type = DataType::new_struct(
@@ -267,6 +268,23 @@ impl FunctionCall {
 
     pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
         self.inputs.as_mut()
+    }
+
+    pub(super) fn from_expr_proto(
+        function_call: &risingwave_pb::expr::FunctionCall,
+        expr_type: ExprType,
+        ret_type: DataType,
+    ) -> Result<Self> {
+        let inputs: Vec<_> = function_call
+            .get_children()
+            .iter()
+            .map(ExprImpl::from_expr_proto)
+            .try_collect()?;
+        Ok(Self {
+            func_type: expr_type,
+            return_type: ret_type,
+            inputs,
+        })
     }
 }
 

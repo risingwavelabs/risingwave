@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,7 +53,7 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
 
     /// Create meta client from options, and register as rise-ctl worker
     pub async fn create_meta_client(&self) -> Result<MetaClient> {
-        let client = MetaClient::register_new(
+        let (client, _) = MetaClient::register_new(
             &self.meta_addr,
             WorkerType::RiseCtl,
             &get_new_ctl_identity(),

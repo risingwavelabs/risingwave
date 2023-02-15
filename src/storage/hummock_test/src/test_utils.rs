@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::hummock::pin_version_response;
+use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::backup_reader::BackupReader;
@@ -47,7 +47,7 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
@@ -84,7 +84,7 @@ pub async fn prepare_first_valid_version(
     .await;
     observer_manager.start().await;
     let hummock_version = match rx.recv().await {
-        Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(
+        Some(HummockEvent::VersionUpdate(version_update_payload::Payload::PinnedVersion(
             version,
         ))) => version,
         _ => unreachable!("should be full version"),
@@ -205,19 +205,13 @@ impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalState
     }
 }
 
-impl<G: Clone, L: Clone> Clone for LocalGlobalStateStoreHolder<G, L> {
+impl<G, L> Clone for LocalGlobalStateStoreHolder<G, L> {
     fn clone(&self) -> Self {
-        Self {
-            local: self.local.clone(),
-            global: self.global.clone(),
-        }
+        unimplemented!()
     }
 }
 
-impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G>
-where
-    <G as StateStore>::Local: Clone,
-{
+impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G> {
     type Local = G::Local;
 
     type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;
@@ -283,7 +277,7 @@ impl HummockStateStoreTestTrait for HummockStorageV1 {
 
 pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -317,7 +311,7 @@ pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -415,7 +409,7 @@ impl HummockTestEnv {
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
 

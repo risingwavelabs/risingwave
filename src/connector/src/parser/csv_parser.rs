@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -161,7 +161,7 @@ impl CsvParser {
     }
 
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    pub async fn into_stream(mut self, data_stream: BoxSourceStream) {
+    async fn into_stream(mut self, data_stream: BoxSourceStream) {
         // the remain length of the last seen message
         let mut remain_len = 0;
         // current offset

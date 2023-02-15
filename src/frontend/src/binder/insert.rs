@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
@@ -109,7 +112,7 @@ impl Binder {
         // internal implicit cast.
         // In other cases, the `source` query is handled on its own and assignment cast is done
         // afterwards.
-        let (source, cast_exprs) = match source {
+        let (source, cast_exprs, nulls_inserted) = match source {
             Query {
                 with: None,
                 body: SetExpr::Values(values),
@@ -118,7 +121,8 @@ impl Binder {
                 offset: None,
                 fetch: None,
             } if order.is_empty() => {
-                let values = self.bind_values(values, Some(expected_types.clone()))?;
+                let (values, nulls_inserted) =
+                    self.bind_values(values, Some(expected_types.clone()))?;
                 let body = BoundSetExpr::Values(values.into());
                 (
                     BoundQuery {
@@ -130,6 +134,7 @@ impl Binder {
                         extra_order_exprs: vec![],
                     },
                     vec![],
+                    nulls_inserted,
                 )
             }
             query => {
@@ -146,7 +151,7 @@ impl Binder {
                             .collect(),
                     )?,
                 };
-                (bound, cast_exprs)
+                (bound, cast_exprs, false)
             }
         };
 
@@ -166,19 +171,40 @@ impl Binder {
             ))));
         }
 
+        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
+        // We added the null values above. Above is equivalent to
+        // insert into t1 values (NULL, 5);
+        let target_table_col_indices = if !target_table_col_indices.is_empty() && nulls_inserted {
+            let provided_insert_cols: HashSet<usize> =
+                target_table_col_indices.iter().cloned().collect();
+
+            let mut result: Vec<usize> = target_table_col_indices.clone();
+            for i in 0..columns_to_insert.len() {
+                if !provided_insert_cols.contains(&i) {
+                    result.push(i);
+                }
+            }
+            result
+        } else {
+            target_table_col_indices
+        };
+
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
-        let returning = !returning_list.is_empty();
+        let is_returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
         // insert into t1 (v1) values (5, 6);         // ...less target columns than values
-        let (eq_len, msg) = match target_table_col_indices.len().cmp(&expected_types.len()) {
-            std::cmp::Ordering::Equal => (true, ""),
-            std::cmp::Ordering::Greater => (false, "INSERT has more target columns than values"),
-            std::cmp::Ordering::Less => (false, "INSERT has less target columns than values"),
+        let err_msg = match target_table_col_indices.len().cmp(&expected_types.len()) {
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => Some("INSERT has more target columns than values"),
+            std::cmp::Ordering::Less => Some("INSERT has less target columns than values"),
         };
-        if !eq_len && !target_table_col_indices.is_empty() {
-            return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
+
+        if let Some(msg) = err_msg && !target_table_col_indices.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(
+                msg.to_string(),
+            )));
         }
 
         // Check if column was used multiple times in query e.g.
@@ -201,13 +227,12 @@ impl Binder {
             source,
             cast_exprs,
             returning_list,
-            returning_schema: if returning {
+            returning_schema: if is_returning {
                 Some(Schema { fields })
             } else {
                 None
             },
         };
-
         Ok(insert)
     }
 
@@ -221,7 +246,7 @@ impl Binder {
             std::cmp::Ordering::Equal => {
                 return exprs
                     .into_iter()
-                    .zip_eq(expected_types)
+                    .zip_eq_fast(expected_types)
                     .map(|(e, t)| e.cast_assign(t.clone()))
                     .try_collect();
             }

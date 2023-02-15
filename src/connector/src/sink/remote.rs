@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
@@ -26,6 +26,7 @@ use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
@@ -46,7 +47,7 @@ use tonic::{Request, Status, Streaming};
 use crate::sink::{Result, Sink, SinkError};
 use crate::ConnectorParams;
 
-pub const VALID_REMOTE_SINKS: [&str; 2] = ["jdbc", "file"];
+pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
 
 pub fn is_valid_remote_sink(sink_type: &str) -> bool {
     VALID_REMOTE_SINKS.contains(&sink_type)
@@ -66,7 +67,7 @@ impl RemoteConfig {
             .to_string();
 
         if !is_valid_remote_sink(sink_type.as_str()) {
-            return Err(SinkError::Config(format!("invalid sink type: {sink_type}")));
+            return Err(SinkError::Config(anyhow!("invalid sink type: {sink_type}")));
         }
 
         Ok(RemoteConfig {
@@ -100,7 +101,7 @@ impl ResponseStreamImpl {
 }
 
 #[derive(Debug)]
-pub struct RemoteSink {
+pub struct RemoteSink<const APPEND_ONLY: bool> {
     pub sink_type: String,
     properties: HashMap<String, String>,
     epoch: Option<u64>,
@@ -111,7 +112,7 @@ pub struct RemoteSink {
     response_stream: ResponseStreamImpl,
 }
 
-impl RemoteSink {
+impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
     pub async fn new(
         config: RemoteConfig,
         schema: Schema,
@@ -172,14 +173,11 @@ impl RemoteSink {
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
 
-        let mut response = tokio::time::timeout(
-            Duration::from_secs(3),
-            client.sink_stream(Request::new(UnboundedReceiverStream::new(request_receiver))),
-        )
-        .await
-        .map_err(|e| SinkError::Remote(format!("failed to start sink: {:?}", e)))?
-        .map_err(|e| SinkError::Remote(format!("{:?}", e)))?
-        .into_inner();
+        let mut response = client
+            .sink_stream(Request::new(UnboundedReceiverStream::new(request_receiver)))
+            .await
+            .map_err(|e| SinkError::Remote(format!("failed to start sink: {:?}", e)))?
+            .into_inner();
         let _ = response.next().await.unwrap();
 
         Ok(RemoteSink {
@@ -236,14 +234,14 @@ impl RemoteSink {
 }
 
 #[async_trait]
-impl Sink for RemoteSink {
+impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut row_ops = vec![];
         for (op, row_ref) in chunk.rows() {
             let mut map = serde_json::Map::new();
             row_ref
                 .iter()
-                .zip_eq(self.schema.fields.iter())
+                .zip_eq_fast(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));
                 });
@@ -359,7 +357,7 @@ mod test {
         let (request_sender, mut request_recv) = mpsc::unbounded_channel();
         let (_, resp_recv) = mpsc::unbounded_channel();
 
-        let mut sink = RemoteSink::for_test(resp_recv, request_sender);
+        let mut sink = RemoteSink::<true>::for_test(resp_recv, request_sender);
         let chunk = StreamChunk::new(
             vec![Op::Insert],
             vec![
@@ -402,7 +400,7 @@ mod test {
     async fn test_remote_sink() {
         let (request_sender, mut request_receiver) = mpsc::unbounded_channel();
         let (response_sender, response_receiver) = mpsc::unbounded_channel();
-        let mut sink = RemoteSink::for_test(response_receiver, request_sender);
+        let mut sink = RemoteSink::<true>::for_test(response_receiver, request_sender);
 
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],

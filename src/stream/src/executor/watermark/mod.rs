@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,6 +49,15 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
                 .insert(id, Default::default())
                 .unwrap();
         });
+    }
+
+    pub fn clear(&mut self) {
+        self.first_buffered_watermarks.clear();
+        self.other_buffered_watermarks
+            .values_mut()
+            .for_each(|staged_watermarks| {
+                std::mem::take(staged_watermarks);
+            });
     }
 
     /// Handle a new watermark message. Optionally returns the watermark message to emit and the

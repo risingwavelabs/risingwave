@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,12 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
+use crate::executor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
-use crate::task::{BatchTaskExecution, ComputeNodeContext, TaskId, TaskOutput, TaskOutputId};
+use crate::task::{
+    BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
+};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
@@ -50,10 +53,13 @@ pub struct BatchManager {
     /// When each task context report their own usage, it will apply the diff into this total mem
     /// value for all tasks.
     total_mem_val: Arc<TrAdder<i64>>,
+
+    /// Metrics for batch manager.
+    metrics: BatchManagerMetrics,
 }
 
 impl BatchManager {
-    pub fn new(config: BatchConfig) -> Self {
+    pub fn new(config: BatchConfig, metrics: BatchManagerMetrics) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             if let Some(worker_threads_num) = config.worker_threads_num {
@@ -73,6 +79,7 @@ impl BatchManager {
             runtime: Box::leak(Box::new(runtime)),
             config,
             total_mem_val: TrAdder::new().into(),
+            metrics,
         }
     }
 
@@ -82,6 +89,7 @@ impl BatchManager {
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
+        state_reporter: StateReporter,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime)?;
@@ -92,6 +100,7 @@ impl BatchManager {
         // it's possible do not found parent task id in theory.
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
+            self.metrics.task_num.inc();
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -100,7 +109,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.clone().async_execute().await?;
+        task.clone().async_execute(state_reporter).await?;
         ret
     }
 
@@ -141,23 +150,16 @@ impl BatchManager {
 
     pub fn abort_task(&self, sid: &ProstTaskId) {
         let sid = TaskId::from(sid);
-        match self.tasks.lock().get(&sid) {
-            Some(task) => task.abort_task(),
+        match self.tasks.lock().remove(&sid) {
+            Some(task) => {
+                tracing::trace!("Removed task: {:?}", task.get_task_id());
+                task.abort_task();
+                self.metrics.task_num.dec()
+            }
             None => {
                 warn!("Task id not found for abort task")
             }
         };
-    }
-
-    pub fn remove_task(
-        &self,
-        sid: &ProstTaskId,
-    ) -> Result<Option<Arc<BatchTaskExecution<ComputeNodeContext>>>> {
-        let task_id = TaskId::from(sid);
-        match self.tasks.lock().remove(&task_id) {
-            Some(t) => Ok(Some(t)),
-            None => Err(TaskNotFound.into()),
-        }
     }
 
     /// Returns error if task is not running.
@@ -223,7 +225,7 @@ impl BatchManager {
             }
             // Alternatively, we can use a bool flag to indicate end of execution.
             // Now we use only store 0 bytes in Context after execution ends.
-            let mem_usage = t.get_mem_usage();
+            let mem_usage = t.mem_usage();
             if mem_usage > max_mem {
                 max_mem = mem_usage;
                 max_mem_task_id = Some(t_id.clone());
@@ -231,13 +233,15 @@ impl BatchManager {
         }
         if let Some(id) = max_mem_task_id {
             let t = guard.get(&id).unwrap();
+            // FIXME: `Abort` will not report error but truncated results to user. We should
+            // consider throw error.
             t.abort_task();
         }
     }
 
     /// Called by global memory manager for total usage of batch tasks. This op is designed to be
     /// light-weight
-    pub fn get_all_memory_usage(&self) -> usize {
+    pub fn total_mem_usage(&self) -> usize {
         self.total_mem_val.get() as usize
     }
 
@@ -248,17 +252,11 @@ impl BatchManager {
     }
 }
 
-impl Default for BatchManager {
-    fn default() -> Self {
-        BatchManager::new(BatchConfig::default())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::make_i32_literal;
+    use risingwave_expr::expr::test_utils::make_i32_literal;
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -270,12 +268,13 @@ mod tests {
     use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
-    use crate::task::{BatchManager, ComputeNodeContext, TaskId};
+    use crate::executor::BatchManagerMetrics;
+    use crate::task::{BatchManager, ComputeNodeContext, StateReporter, TaskId};
 
     #[test]
     fn test_task_not_found() {
         use tonic::Status;
-        let manager = BatchManager::new(BatchConfig::default());
+        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
@@ -303,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        let manager = BatchManager::new(BatchConfig::default());
+        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -330,11 +329,18 @@ mod tests {
                 plan.clone(),
                 to_committed_batch_query_epoch(0),
                 context.clone(),
+                StateReporter::new_with_test(),
             )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, to_committed_batch_query_epoch(0), context)
+            .fire_task(
+                &task_id,
+                plan,
+                to_committed_batch_query_epoch(0),
+                context,
+                StateReporter::new_with_test(),
+            )
             .await
             .unwrap_err();
         assert!(err
@@ -344,7 +350,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_aborted() {
-        let manager = BatchManager::new(BatchConfig::default());
+        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -380,12 +386,12 @@ mod tests {
                 plan.clone(),
                 to_committed_batch_query_epoch(0),
                 context.clone(),
+                StateReporter::new_with_test(),
             )
             .await
             .unwrap();
         manager.abort_task(&task_id);
         let task_id = TaskId::from(&task_id);
-        let res = manager.wait_until_task_aborted(&task_id).await;
-        assert_eq!(res, Ok(()));
+        assert!(!manager.tasks.lock().contains_key(&task_id));
     }
 }

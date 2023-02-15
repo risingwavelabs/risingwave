@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -744,7 +744,7 @@ async fn test_multiple_epoch_sync() {
         .await
         .unwrap();
     let test_get = || {
-        let hummock_storage_clone = hummock_storage.clone();
+        let hummock_storage_clone = &hummock_storage;
         async move {
             assert_eq!(
                 hummock_storage_clone

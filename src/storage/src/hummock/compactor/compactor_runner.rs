@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
+use super::TaskConfig;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
@@ -42,15 +43,15 @@ pub struct CompactorRunner {
 }
 
 impl CompactorRunner {
-    pub fn new(split_index: usize, context: &CompactorContext, task: CompactTask) -> Self {
-        let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
+    pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
+        let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
         let total_file_size = task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|table| table.file_size)
             .sum::<u64>();
-        let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -76,20 +77,24 @@ impl CompactorRunner {
                     .collect_vec()
             })
             .collect();
+
         let compactor = Compactor::new(
-            context.context.clone(),
+            context.clone(),
             options,
-            key_range.clone(),
-            CachePolicy::NotFill,
-            task.gc_delete_keys,
-            task.watermark,
-            Some(stats_target_table_ids),
+            TaskConfig {
+                key_range: key_range.clone(),
+                cache_policy: CachePolicy::NotFill,
+                gc_delete_keys: task.gc_delete_keys,
+                watermark: task.watermark,
+                stats_target_table_ids: Some(stats_target_table_ids),
+                task_type: task.task_type(),
+            },
         );
 
         Self {
             compactor,
             compact_task: task,
-            sstable_store: context.context.sstable_store.clone(),
+            sstable_store: context.sstable_store.clone(),
             key_range,
             split_index,
         }
@@ -103,7 +108,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let (ssts, table_stats_map) = self
+        let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -113,7 +118,7 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        Ok((self.split_index, ssts, table_stats_map))
+        Ok((self.split_index, ssts, compaction_stat))
     }
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(

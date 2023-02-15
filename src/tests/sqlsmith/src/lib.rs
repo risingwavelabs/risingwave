@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 #![feature(if_let_guard)]
 #![feature(once_cell)]
 
+use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement,
@@ -43,6 +44,25 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
     let (mview, table) = gen.gen_mview_stmt(name);
     (mview.to_string(), table)
+}
+
+/// TODO(noel): Eventually all session variables should be fuzzed.
+/// For now we start of with a few hardcoded configs.
+/// Some config need workarounds, for instance `QUERY_MODE`,
+/// which can lead to stack overflow
+/// (a simple workaround is limit length of
+/// generated query when `QUERY_MODE=local`.
+#[allow(dead_code)]
+pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
+    [
+        "SET RW_ENABLE_TWO_PHASE_AGG TO TRUE",
+        "SET RW_ENABLE_TWO_PHASE_AGG TO FALSE",
+        "SET RW_FORCE_TWO_PHASE_AGG TO TRUE",
+        "SET RW_FORCE_TWO_PHASE_AGG TO FALSE",
+    ]
+    .choose(rng)
+    .unwrap()
+    .to_string()
 }
 
 /// Parse SQL

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,6 +58,9 @@ enum MetaErrorInner {
     #[error("Election failed: {0}")]
     Election(etcd_client::Error),
 
+    #[error("SystemParam error: {0}")]
+    SystemParam(String),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -114,6 +117,10 @@ impl MetaError {
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
+    }
+
+    pub fn system_param<T: Into<String>>(s: T) -> Self {
+        MetaErrorInner::SystemParam(s.into()).into()
     }
 
     pub fn unavailable(s: String) -> Self {

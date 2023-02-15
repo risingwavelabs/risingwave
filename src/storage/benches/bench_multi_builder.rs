@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,9 @@ use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStor
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache,
+    BatchSstableWriterFactory, BloomFilterBuilder, CachePolicy, CompressionAlgorithm,
+    HummockResult, MemoryLimiter, SstableBuilder, SstableBuilderOptions, SstableStore,
+    SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory, TieredCache,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -61,9 +61,10 @@ impl<F: SstableWriterFactory> LocalTableBuilderFactory<F> {
 
 #[async_trait::async_trait]
 impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F> {
+    type Filter = BloomFilterBuilder;
     type Writer = <F as SstableWriterFactory>::Writer;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>> {
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {

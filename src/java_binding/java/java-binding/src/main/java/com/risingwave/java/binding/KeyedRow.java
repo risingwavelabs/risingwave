@@ -1,8 +1,8 @@
 package com.risingwave.java.binding;
 
 public class KeyedRow implements AutoCloseable {
-    final long pointer;
-    boolean isClosed;
+    private final long pointer;
+    private boolean isClosed;
 
     KeyedRow(long pointer) {
         this.pointer = pointer;
@@ -17,8 +17,28 @@ public class KeyedRow implements AutoCloseable {
         return Binding.rowIsNull(pointer, index);
     }
 
+    public short getShort(int index) {
+        return Binding.rowGetInt16Value(pointer, index);
+    }
+
+    public int getInt(int index) {
+        return Binding.rowGetInt32Value(pointer, index);
+    }
+
     public long getLong(int index) {
         return Binding.rowGetInt64Value(pointer, index);
+    }
+
+    public float getFloat(int index) {
+        return Binding.rowGetFloatValue(pointer, index);
+    }
+
+    public double getDouble(int index) {
+        return Binding.rowGetDoubleValue(pointer, index);
+    }
+
+    public boolean getBoolean(int index) {
+        return Binding.rowGetBooleanValue(pointer, index);
     }
 
     public String getString(int index) {

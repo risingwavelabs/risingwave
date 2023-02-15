@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName, SelectItem};
 
 use super::{Binder, Relation};
@@ -91,7 +92,7 @@ impl Binder {
                 }
                 // (col1, col2) = (expr1, expr2)
                 (ids, Expr::Row(values)) if ids.len() == values.len() => {
-                    id.into_iter().zip_eq(values.into_iter()).collect()
+                    id.into_iter().zip_eq_fast(values.into_iter()).collect()
                 }
                 // (col1, col2) = <other expr>
                 _ => {

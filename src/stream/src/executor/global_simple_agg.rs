@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::RowExt;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::aggregation::{
@@ -64,6 +65,10 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// table when `flush_data` is called.
     result_table: StateTable<S>,
 
+    /// State tables for deduplicating rows on distinct key for distinct agg calls.
+    /// One table per distinct column (may be shared by multiple agg calls).
+    distinct_dedup_tables: HashMap<usize, StateTable<S>>,
+
     /// Extreme state cache size
     extreme_cache_size: usize,
 
@@ -97,6 +102,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
+        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
         pk_indices: PkIndices,
         executor_id: u64,
         extreme_cache_size: usize,
@@ -117,6 +123,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             agg_calls,
             storages,
             result_table,
+            distinct_dedup_tables,
             extreme_cache_size,
             state_changed: false,
         })
@@ -128,32 +135,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         identity: &str,
         agg_calls: &[AggCall],
         storages: &mut [AggStateStorage<S>],
-        result_table: &mut StateTable<S>,
-        input_pk_indices: &PkIndices,
-        input_schema: &Schema,
-        agg_group: &mut Option<AggGroup<S>>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
+        agg_group: &mut AggGroup<S>,
         chunk: StreamChunk,
-        extreme_cache_size: usize,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<()> {
-        // Create `AggGroup` if not exists. This will fetch previous agg result
-        // from the result table.
-        if agg_group.is_none() {
-            *agg_group = Some(
-                AggGroup::create(
-                    None,
-                    agg_calls,
-                    storages,
-                    result_table,
-                    input_pk_indices,
-                    extreme_cache_size,
-                    input_schema,
-                )
-                .await?,
-            );
-        }
-        let agg_group = agg_group.as_mut().unwrap();
-
         // Mark state as changed.
         *state_changed = true;
 
@@ -179,7 +165,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // Materialize input chunk if needed.
         storages
             .iter_mut()
-            .zip_eq(visibilities.iter().map(Option::as_ref))
+            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
             .for_each(|(storage, visibility)| {
                 if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
@@ -196,26 +182,38 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             });
 
         // Apply chunk to each of the state (per agg_call)
-        agg_group.apply_chunk(storages, &ops, &columns, visibilities)?;
+        agg_group
+            .apply_chunk(
+                storages,
+                &ops,
+                &columns,
+                visibilities,
+                distinct_dedup_tables,
+            )
+            .await?;
 
         Ok(())
     }
 
     async fn flush_data(
         schema: &Schema,
-        agg_group: &mut Option<AggGroup<S>>,
+        agg_group: &mut AggGroup<S>,
         epoch: EpochPair,
         storages: &mut [AggStateStorage<S>],
         result_table: &mut StateTable<S>,
+        distinct_dedup_tables: &mut HashMap<usize, StateTable<S>>,
         state_changed: &mut bool,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         if *state_changed {
-            let agg_group = agg_group.as_mut().unwrap();
-            agg_group.flush_state_if_needed(storages).await?;
+            agg_group
+                .flush_state_if_needed(storages, distinct_dedup_tables)
+                .await?;
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
-                iter_table_storage(storages).map(|state_table| state_table.commit(epoch)),
+                iter_table_storage(storages)
+                    .chain(distinct_dedup_tables.values_mut())
+                    .map(|state_table| state_table.commit(epoch)),
             )
             .await?;
 
@@ -259,9 +257,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(storages).for_each(|state_table| {
-                state_table.commit_no_data_expected(epoch);
-            });
+            iter_table_storage(storages)
+                .chain(distinct_dedup_tables.values_mut())
+                .for_each(|state_table| {
+                    state_table.commit_no_data_expected(epoch);
+                });
             result_table.commit_no_data_expected(epoch);
             Ok(None)
         }
@@ -279,17 +279,52 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             extreme_cache_size,
             mut storages,
             mut result_table,
+            mut distinct_dedup_tables,
             mut state_changed,
         } = self;
 
-        let mut agg_group = None;
-
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut storages).for_each(|state_table| {
-            state_table.init_epoch(barrier.epoch);
-        });
+        iter_table_storage(&mut storages)
+            .chain(distinct_dedup_tables.values_mut())
+            .for_each(|state_table| {
+                state_table.init_epoch(barrier.epoch);
+            });
         result_table.init_epoch(barrier.epoch);
+
+        // Create `AggGroup`. This will fetch previous agg result
+        // from the result table.
+        let mut agg_group = AggGroup::create(
+            None,
+            &agg_calls,
+            &storages,
+            &result_table,
+            &input_pk_indices,
+            extreme_cache_size,
+            &input_schema,
+        )
+        .await?;
+
+        if agg_group.is_uninitialized() {
+            let data_types = input_schema
+                .fields
+                .iter()
+                .map(|f| f.data_type())
+                .collect::<Vec<_>>();
+            let chunk = StreamChunk::from_rows(&[], &data_types[..]);
+            // Apply empty chunk
+            Self::apply_chunk(
+                &ctx,
+                &info.identity,
+                &agg_calls,
+                &mut storages,
+                &mut distinct_dedup_tables,
+                &mut agg_group,
+                chunk,
+                &mut state_changed,
+            )
+            .await?;
+        }
 
         yield Message::Barrier(barrier);
 
@@ -297,22 +332,16 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-
+                Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
                         &ctx,
                         &info.identity,
                         &agg_calls,
                         &mut storages,
-                        &mut result_table,
-                        &input_pk_indices,
-                        &input_schema,
+                        &mut distinct_dedup_tables,
                         &mut agg_group,
                         chunk,
-                        extreme_cache_size,
                         &mut state_changed,
                     )
                     .await?;
@@ -324,6 +353,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         barrier.epoch,
                         &mut storages,
                         &mut result_table,
+                        &mut distinct_dedup_tables,
                         &mut state_changed,
                     )
                     .await?
@@ -368,13 +398,14 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, vec![2]); // pk
         tx.push_barrier(1, false);
+        tx.push_barrier(2, false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             + 100 200 1001
             +  10  14 1002
             +   4 300 1003",
         ));
-        tx.push_barrier(2, false);
+        tx.push_barrier(3, false);
         tx.push_chunk(StreamChunk::from_pretty(
             "   I   I    I
             - 100 200 1001
@@ -382,7 +413,7 @@ mod tests {
             -   4 300 1003
             + 104 500 1004",
         ));
-        tx.push_barrier(3, false);
+        tx.push_barrier(4, false);
 
         // This is local simple aggregation, so we add another row count state
         let append_only = false;
@@ -394,6 +425,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -402,6 +434,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -410,6 +443,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Min,
@@ -418,6 +452,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ];
 
@@ -440,7 +475,22 @@ mod tests {
             *msg.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I   I   I  I
-                + 3 114 514  4"
+                + 0   .   .  . "
+            )
+        );
+        assert_matches!(
+            simple_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
+
+        // Consume stream chunk
+        let msg = simple_agg.next().await.unwrap().unwrap();
+        assert_eq!(
+            *msg.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I   I   I  I
+                U- 0   .   .  .
+                U+ 3 114 514  4"
             )
         );
         assert_matches!(

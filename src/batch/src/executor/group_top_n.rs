@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::encoding_for_comparison::encode_chunk;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -187,7 +188,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 
             for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.order_pairs)
                 .into_iter()
-                .zip_eq(keys.into_iter())
+                .zip_eq_fast(keys.into_iter())
                 .enumerate()
             {
                 let heap = groups

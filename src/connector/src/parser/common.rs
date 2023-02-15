@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use anyhow::{anyhow, Result};
-use itertools::Itertools;
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
     str_with_time_zone_to_timestamptz,
@@ -66,7 +66,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             let fields = struct_type_info
                 .field_names
                 .iter()
-                .zip_eq(struct_type_info.fields.iter())
+                .zip_eq_fast(struct_type_info.fields.iter())
                 .map(|field| {
                     simd_json_parse_value(field.1, v.get(field.0.to_ascii_lowercase().as_str()))
                 })

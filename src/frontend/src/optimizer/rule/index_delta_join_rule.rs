@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::stream_plan::ChainType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// Use index scan and delta joins for supported queries.
 pub struct IndexDeltaJoinRule {}
@@ -51,11 +51,11 @@ impl Rule for IndexDeltaJoinRule {
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
 
-        fn match_indexes(join_indices: &[usize], table_scan: &StreamTableScan) -> Option<PlanRef> {
-            if table_scan.logical().indexes().is_empty() {
-                return None;
-            }
-
+        fn match_indexes(
+            join_indices: &[usize],
+            table_scan: &StreamTableScan,
+            chain_type: ChainType,
+        ) -> Option<PlanRef> {
             for index in table_scan.logical().indexes() {
                 // Only full covering index can be used in delta join
                 if !index.full_covering() {
@@ -97,31 +97,46 @@ impl Rule for IndexDeltaJoinRule {
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
                             p2s_mapping,
+                            chain_type,
                         )
                         .into(),
                 );
             }
 
-            None
+            // Primary table is also an index.
+            let primary_table = table_scan.logical();
+            if let Some(primary_table_distribution_key) = primary_table.distribution_key()
+                && primary_table_distribution_key == join_indices {
+                // Check join key is prefix of primary table order key
+                let primary_table_order_key_prefix = primary_table.table_desc().pk.iter()
+                    .map(|x| x.column_idx)
+                    .take(primary_table_distribution_key.len())
+                    .collect_vec();
+
+                if primary_table_order_key_prefix != join_indices {
+                    return None;
+                }
+
+                if chain_type != table_scan.chain_type() {
+                    Some(
+                        StreamTableScan::new_with_chain_type(table_scan.logical().clone(), chain_type).into()
+                    )
+                } else {
+                    Some(table_scan.clone().into())
+                }
+            } else {
+                None
+            }
         }
 
-        if let Some(left) = match_indexes(&left_indices, input_left) {
-            if let Some(right) = match_indexes(&right_indices, input_right) {
+        // Delta join only needs to backfill one stream flow and others should be upstream only
+        // chain. Here we choose the left one to backfill and right one to upstream only
+        // chain.
+        if let Some(left) = match_indexes(&left_indices, input_left, ChainType::Backfill) {
+            if let Some(right) = match_indexes(&right_indices, input_right, ChainType::UpstreamOnly)
+            {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
-
-                fn upstream_hash_shard_to_hash_shard(plan: PlanRef) -> PlanRef {
-                    if let Distribution::UpstreamHashShard(key, _) = plan.distribution() {
-                        RequiredDist::hash_shard(key)
-                            .enforce_if_not_satisfies(plan, &Order::any())
-                            .unwrap()
-                    } else {
-                        plan
-                    }
-                }
-                let left = upstream_hash_shard_to_hash_shard(left);
-                let right = upstream_hash_shard_to_hash_shard(right);
-
                 Some(
                     join.to_delta_join()
                         .clone_with_left_right(left, right)
@@ -137,7 +152,6 @@ impl Rule for IndexDeltaJoinRule {
 }
 
 impl IndexDeltaJoinRule {
-    #[expect(dead_code)]
     pub fn create() -> BoxedRule {
         Box::new(Self {})
     }

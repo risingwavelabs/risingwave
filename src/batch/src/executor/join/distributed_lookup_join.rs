@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::expr_unary::new_unary_expr;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, new_unary_expr, BoxedExpression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::expr::expr_node::Type;
@@ -354,12 +354,12 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()
-            .zip_eq(
+            .zip_eq_fast(
                 self.outer_side_key_types
                     .iter()
                     .take(self.lookup_prefix_len),
             )
-            .zip_eq(
+            .zip_eq_fast(
                 self.inner_side_key_types
                     .iter()
                     .take(self.lookup_prefix_len),
