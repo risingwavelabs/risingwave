@@ -186,7 +186,7 @@
     using (x);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Coalesce(i.x, i.x)] }
+    └─BatchProject { exprs: [Coalesce(i.x, i.x) as $expr0] }
       └─BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
         ├─BatchExchange { order: [], dist: HashShard(i.x) }
         | └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
@@ -383,7 +383,7 @@
     create table b(x int);
     select x, a.x, b.x from a natural full join b;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.x, b.x), a.x, b.x] }
+    LogicalProject { exprs: [Coalesce(a.x, b.x) as $expr0, a.x, b.x] }
     └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
@@ -407,16 +407,16 @@
     create table c(x int, a int);
     select x, a.x, b.x, c.x from a natural full join b natural full join c;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x) as $expr0, a.x, b.x, c.x] }
     └─LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
       ├─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       | ├─LogicalScan { table: a, columns: [a.x, a.y, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
       └─LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x), a.x, b.x, c.x] }
-    └─LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: [a.x, b.x, c.x] }
-      ├─LogicalProject { exprs: [a.x, b.x, Coalesce(a.x, b.x)] }
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x) as $expr0, a.x, b.x, c.x] }
+    └─LogicalJoin { type: FullOuter, on: ($expr2 = c.x), output: [a.x, b.x, c.x] }
+      ├─LogicalProject { exprs: [a.x, b.x, Coalesce(a.x, b.x) as $expr2] }
       | └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       |   ├─LogicalScan { table: a, columns: [a.x] }
       |   └─LogicalScan { table: b, columns: [b.x] }
@@ -428,7 +428,7 @@
     create table c(x int, a int);
     select a, x, a.a, c.a, b.x, c.x from a natural full join b natural full join c;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.a, c.a), Coalesce(b.x, c.x), a.a, c.a, b.x, c.x] }
+    LogicalProject { exprs: [Coalesce(a.a, c.a) as $expr0, Coalesce(b.x, c.x) as $expr1, a.a, c.a, b.x, c.x] }
     └─LogicalJoin { type: FullOuter, on: (a.a = c.a) AND (b.x = c.x), output: all }
       ├─LogicalJoin { type: FullOuter, on: true, output: all }
       | ├─LogicalScan { table: a, columns: [a.a, a.y, a._row_id] }
@@ -469,7 +469,7 @@
     create table t3(x int);
     select *, x, t1.x, t2.x, t3.x from t1 full join (t2 full join t3 using (x)) using (x);
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x), Coalesce(t1.x, t2.x, t3.x), t1.x, t2.x, t3.x] }
+    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x) as $expr0, Coalesce(t1.x, t2.x, t3.x) as $expr1, t1.x, t2.x, t3.x] }
     └─LogicalJoin { type: FullOuter, on: (t1.x = Coalesce(t2.x, t3.x)), output: all }
       ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
       └─LogicalJoin { type: FullOuter, on: (t2.x = t3.x), output: all }
@@ -481,17 +481,17 @@
     create table b(x int);
     select 2 * x as Y, x + x as Z from a natural full join b where 2 * x < 10 order by x + x;
   logical_plan: |
-    LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
-    └─LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+    LogicalProject { exprs: [$expr0, $expr1] }
+    └─LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr0, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2] }
       └─LogicalFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
         └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
           ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
           └─LogicalScan { table: b, columns: [b.x, b._row_id] }
   batch_plan: |
-    BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
-    └─BatchExchange { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC], dist: Single }
-      └─BatchSort { order: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) ASC] }
-        └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))] }
+    BatchProject { exprs: [$expr0, $expr1] }
+    └─BatchExchange { order: [$expr2 ASC], dist: Single }
+      └─BatchSort { order: [$expr2 ASC] }
+        └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr0, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2] }
           └─BatchFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
             └─BatchHashJoin { type: FullOuter, predicate: a.x = b.x, output: all }
               ├─BatchExchange { order: [], dist: HashShard(a.x) }
@@ -499,7 +499,7 @@
               └─BatchExchange { order: [], dist: HashShard(b.x) }
                 └─BatchScan { table: b, columns: [b.x], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [y, z, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x))(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], pk_columns: [a._row_id, b._row_id, a.x, b.x], order_descs: [(Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), a._row_id, b._row_id, a.x, b.x] }
+    StreamMaterialize { columns: [y, z, $expr2(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], pk_columns: [a._row_id, b._row_id, a.x, b.x], order_descs: [$expr2, a._row_id, b._row_id, a.x, b.x] }
     └─StreamExchange { dist: HashShard(a._row_id, b._row_id, a.x, b.x) }
       └─StreamProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)), a._row_id, b._row_id, a.x, b.x] }
         └─StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
@@ -558,10 +558,10 @@
     create table t2(x int, y int);
     select * from t1, t2 where t1.x + t1.y = t2.x + t2.y;
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: ((t1.x + t1.y) = (t2.x + t2.y)), output: [t1.x, t1.y, t2.x, t2.y] }
-    ├─LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y)] }
+    LogicalJoin { type: Inner, on: ($expr2 = $expr2), output: [t1.x, t1.y, t2.x, t2.y] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y) as $expr2] }
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y)] }
+    └─LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y) as $expr2] }
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - name: Use project to align return types
   sql: |
@@ -569,8 +569,8 @@
     create table t2(x int, y decimal);
     select * from t1, t2 where t1.x = t2.y;
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.x::Decimal = t2.y), output: [t1.x, t1.y, t2.x, t2.y] }
-    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
+    LogicalJoin { type: Inner, on: ($expr2 = t2.y), output: [t1.x, t1.y, t2.x, t2.y] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal as $expr2] }
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - name: Lookup join with no eq keys after pulling up predicate will revert to hash join
@@ -593,16 +593,16 @@
     select * from t1 join t2 on v1 IS NOT DISTINCT FROM v2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t1.v1::Int64 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
-      ├─BatchExchange { order: [], dist: HashShard(t1.v1::Int64) }
-      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64] }
+    └─BatchHashJoin { type: Inner, predicate: $expr1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
+      ├─BatchExchange { order: [], dist: HashShard($expr1) }
+      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64 as $expr1] }
       |   └─BatchScan { table: t1, columns: [t1.v1], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
         └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t1.v1::Int64(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, t1.v1::Int64, v2] }
-    └─StreamHashJoin { type: Inner, predicate: t1.v1::Int64 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, t1.v1::Int64, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.v1::Int64) }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr1(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr1, v2] }
+    └─StreamHashJoin { type: Inner, predicate: $expr1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, $expr1, t2._row_id] }
+      ├─StreamExchange { dist: HashShard($expr1) }
       | └─StreamProject { exprs: [t1.v1, t1.v1::Int64, t1._row_id] }
       |   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v2) }

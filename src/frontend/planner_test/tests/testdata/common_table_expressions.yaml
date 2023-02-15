@@ -53,7 +53,7 @@
           ├─LogicalAgg { group_key: [t1.x], aggs: [] }
           | └─LogicalProject { exprs: [t1.x] }
           |   └─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
-          └─LogicalProject { exprs: [0.1:Decimal] }
+          └─LogicalProject { exprs: [0.1:Decimal as $expr0] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: Ensure we can bind CTE with aliases in both table name and columns
   sql: |

@@ -38,8 +38,8 @@
 - sql: |
     select 'pg_namespace'::regclass
   logical_plan: |
-    LogicalProject { exprs: [2:Int32] }
+    LogicalProject { exprs: [2:Int32 as $expr0] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [2:Int32] }
+    BatchProject { exprs: [2:Int32 as $expr0] }
     └─BatchValues { rows: [[]] }

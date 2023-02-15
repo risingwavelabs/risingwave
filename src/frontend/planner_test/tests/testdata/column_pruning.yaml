@@ -62,48 +62,48 @@
     create table t (v1 bigint, v2 double precision, v3 int);
     select 1 from t
   logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
+    LogicalProject { exprs: [1:Int32 as $expr0] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
+    LogicalProject { exprs: [1:Int32 as $expr0] }
     └─LogicalScan { table: t, columns: [] }
 - name: constant + filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select 1 from t where v2>1
   logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
+    LogicalProject { exprs: [1:Int32 as $expr0] }
     └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32] }
+    LogicalProject { exprs: [1:Int32 as $expr0] }
     └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32) }
 - name: constant agg
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(1) from t
   logical_plan: |
-    LogicalProject { exprs: [count(1:Int32)] }
-    └─LogicalAgg { aggs: [count(1:Int32)] }
-      └─LogicalProject { exprs: [1:Int32] }
+    LogicalProject { exprs: [count($expr0)] }
+    └─LogicalAgg { aggs: [count($expr0)] }
+      └─LogicalProject { exprs: [1:Int32 as $expr0] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(1:Int32)] }
-    └─LogicalProject { exprs: [1:Int32] }
+    LogicalAgg { aggs: [count($expr0)] }
+    └─LogicalProject { exprs: [1:Int32 as $expr0] }
       └─LogicalScan { table: t, columns: [] }
 - name: constant agg + filter
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(1) from t where v2>1
   logical_plan: |
-    LogicalProject { exprs: [count(1:Int32)] }
-    └─LogicalAgg { aggs: [count(1:Int32)] }
-      └─LogicalProject { exprs: [1:Int32] }
+    LogicalProject { exprs: [count($expr0)] }
+    └─LogicalAgg { aggs: [count($expr0)] }
+      └─LogicalProject { exprs: [1:Int32 as $expr0] }
         └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(1:Int32)] }
-    └─LogicalProject { exprs: [1:Int32] }
+    LogicalAgg { aggs: [count($expr0)] }
+    └─LogicalProject { exprs: [1:Int32 as $expr0] }
       └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32) }
 - name: join + filter
   sql: |
@@ -125,14 +125,14 @@
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(1), count(v1) from t where v2>1
   logical_plan: |
-    LogicalProject { exprs: [count(1:Int32), count(t.v1)] }
-    └─LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
-      └─LogicalProject { exprs: [1:Int32, t.v1] }
+    LogicalProject { exprs: [count($expr0), count(t.v1)] }
+    └─LogicalAgg { aggs: [count($expr0), count(t.v1)] }
+      └─LogicalProject { exprs: [1:Int32 as $expr0, t.v1] }
         └─LogicalFilter { predicate: (t.v2 > 1:Int32) }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
-    └─LogicalProject { exprs: [1:Int32, t.v1] }
+    LogicalAgg { aggs: [count($expr0), count(t.v1)] }
+    └─LogicalProject { exprs: [1:Int32 as $expr0, t.v1] }
       └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 1:Int32) }
 - name: hop window, time_col not selected
   sql: |

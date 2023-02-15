@@ -5,38 +5,38 @@
     create view v2 as select x * z as a, y * z as b from t1, v1 where z = x;
     select * from v1, v2 where z = a;
   logical_plan: |
-    LogicalProject { exprs: [(t1.x + t1.y), (t1.x * (t1.x + t1.y)), (t1.y * (t1.x + t1.y))] }
-    └─LogicalFilter { predicate: ((t1.x + t1.y) = (t1.x * (t1.x + t1.y))) }
+    LogicalProject { exprs: [$expr0, $expr0, $expr1] }
+    └─LogicalFilter { predicate: ($expr0 = $expr0) }
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalShare { id = 4 }
-        | └─LogicalProject { exprs: [(t1.x + t1.y)] }
+        | └─LogicalProject { exprs: [(t1.x + t1.y) as $expr0] }
         |   └─LogicalFilter { predicate: (t1.y > 0:Int32) }
         |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         └─LogicalShare { id = 9 }
-          └─LogicalProject { exprs: [(t1.x * (t1.x + t1.y)), (t1.y * (t1.x + t1.y))] }
-            └─LogicalFilter { predicate: ((t1.x + t1.y) = t1.x) }
+          └─LogicalProject { exprs: [(t1.x * $expr0) as $expr0, (t1.y * $expr0) as $expr1] }
+            └─LogicalFilter { predicate: ($expr0 = t1.x) }
               └─LogicalJoin { type: Inner, on: true, output: all }
                 ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
                 └─LogicalShare { id = 4 }
-                  └─LogicalProject { exprs: [(t1.x + t1.y)] }
+                  └─LogicalProject { exprs: [(t1.x + t1.y) as $expr0] }
                     └─LogicalFilter { predicate: (t1.y > 0:Int32) }
                       └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [z, a, b, t1._row_id(hidden), t1._row_id#1(hidden), t1._row_id#2(hidden), t1.x(hidden), (t1.x + t1.y)(hidden)], pk_columns: [t1._row_id, t1._row_id#1, t1._row_id#2, t1.x, (t1.x + t1.y), z, a] }
-    └─StreamHashJoin { type: Inner, predicate: (t1.x + t1.y) = (t1.x * (t1.x + t1.y)), output: [(t1.x + t1.y), (t1.x * (t1.x + t1.y)), (t1.y * (t1.x + t1.y)), t1._row_id, t1._row_id, t1._row_id, t1.x, (t1.x + t1.y)] }
-      ├─StreamExchange { dist: HashShard((t1.x + t1.y)) }
-      | └─StreamProject { exprs: [(t1.x + t1.y), t1._row_id] }
+    StreamMaterialize { columns: [z, a, b, t1._row_id(hidden), t1._row_id#1(hidden), t1._row_id#2(hidden), t1.x(hidden), $expr0(hidden)], pk_columns: [t1._row_id, t1._row_id#1, t1._row_id#2, t1.x, $expr0, z, a] }
+    └─StreamHashJoin { type: Inner, predicate: $expr0 = $expr0, output: [$expr0, $expr0, $expr1, t1._row_id, t1._row_id, t1._row_id, t1.x, $expr0] }
+      ├─StreamExchange { dist: HashShard($expr0) }
+      | └─StreamProject { exprs: [$expr0, t1._row_id] }
       |   └─StreamShare { id = 212 }
       |     └─StreamProject { exprs: [(t1.x + t1.y), t1._row_id] }
       |       └─StreamFilter { predicate: (t1.y > 0:Int32) }
       |         └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard((t1.x * (t1.x + t1.y))) }
-        └─StreamProject { exprs: [(t1.x * (t1.x + t1.y)), (t1.y * (t1.x + t1.y)), t1._row_id, t1._row_id, t1.x, (t1.x + t1.y)] }
-          └─StreamHashJoin { type: Inner, predicate: t1.x = (t1.x + t1.y), output: [t1.x, t1.y, (t1.x + t1.y), t1._row_id, t1._row_id] }
+      └─StreamExchange { dist: HashShard($expr0) }
+        └─StreamProject { exprs: [(t1.x * $expr0), (t1.y * $expr0), t1._row_id, t1._row_id, t1.x, $expr0] }
+          └─StreamHashJoin { type: Inner, predicate: t1.x = $expr0, output: [t1.x, t1.y, $expr0, t1._row_id, t1._row_id] }
             ├─StreamExchange { dist: HashShard(t1.x) }
             | └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard((t1.x + t1.y)) }
-              └─StreamProject { exprs: [(t1.x + t1.y), t1._row_id] }
+            └─StreamExchange { dist: HashShard($expr0) }
+              └─StreamProject { exprs: [$expr0, t1._row_id] }
                 └─StreamShare { id = 212 }
                   └─StreamProject { exprs: [(t1.x + t1.y), t1._row_id] }
                     └─StreamFilter { predicate: (t1.y > 0:Int32) }

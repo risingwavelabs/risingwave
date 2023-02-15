@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Formatter;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -69,18 +70,14 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
         let fields = exprs
             .iter()
             .enumerate()
-            .map(|(id, expr)| {
+            .map(|(i, expr)| {
                 // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(id) {
+                let (name, sub_fields, type_name) = match o2i.try_map(i) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
-                    None => (
-                        format!("{:?}", ExprDisplay { expr, input_schema }),
-                        vec![],
-                        String::new(),
-                    ),
+                    None => (format!("$expr{i}"), vec![], String::new()),
                 };
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
@@ -169,9 +166,19 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             &self
                 .exprs
                 .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.input.schema(),
+                .enumerate()
+                .map(|(i, expr)| AliasedExpr {
+                    expr: ExprDisplay {
+                        expr,
+                        input_schema: self.input.schema(),
+                    },
+                    alias: {
+                        if expr.is_input_ref() {
+                            None
+                        } else {
+                            Some(format!("$expr{i}"))
+                        }
+                    },
                 })
                 .collect_vec(),
         );
@@ -257,5 +264,20 @@ impl ProjectBuilder {
     /// build the `LogicalProject` from `LogicalProjectBuilder`
     pub fn build<PlanRef: GenericPlanRef>(self, input: PlanRef) -> Project<PlanRef> {
         Project::new(self.exprs, input)
+    }
+}
+
+/// Auxiliary struct for displaying `expr AS alias`
+struct AliasedExpr<'a> {
+    expr: ExprDisplay<'a>,
+    alias: Option<String>,
+}
+
+impl fmt::Debug for AliasedExpr<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.alias {
+            Some(alias) => write!(f, "{:?} as {}", self.expr, alias),
+            None => write!(f, "{:?}", self.expr),
+        }
     }
 }

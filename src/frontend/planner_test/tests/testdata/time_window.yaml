@@ -3,12 +3,12 @@
     create table t1 (id int, created_at date);
     select * from tumble(t1, created_at, interval '3' day);
   logical_plan: |
-    LogicalProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval), (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval)] }
-    └─LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, TumbleStart(t1.created_at, '3 days':Interval), (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval)] }
+    LogicalProject { exprs: [t1.id, t1.created_at, $expr3, $expr4] }
+    └─LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, TumbleStart(t1.created_at, '3 days':Interval) as $expr3, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr4] }
       └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval), (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval)] }
+    └─BatchProject { exprs: [t1.id, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr2, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr3] }
       └─BatchScan { table: t1, columns: [t1.id, t1.created_at], distribution: SomeShard }
 - sql: |
     create materialized view t as select * from s;
@@ -123,14 +123,14 @@
     create table t (v1 varchar, v2 timestamp, v3 float);
     select v1, window_end, avg(v3) as avg from hop( t, v2, interval '1' minute, interval '10' minute) group by v1, window_end;
   logical_plan: |
-    LogicalProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
+    LogicalProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64) as $expr2] }
     └─LogicalAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3)] }
       └─LogicalProject { exprs: [t.v1, window_end, t.v3] }
         └─LogicalHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: all }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64)] }
+    └─BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64) as $expr2] }
       └─BatchHashAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3)] }
         └─BatchHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end] }
           └─BatchExchange { order: [], dist: HashShard(t.v1) }
@@ -147,15 +147,15 @@
     with t2 as (select * from t1 where v1 >= 10)
     select * from tumble(t2, created_at, interval '3' day);
   logical_plan: |
-    LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval), (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval)] }
-    └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval), (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval)] }
+    LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, $expr3, $expr4] }
+    └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr3, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr4] }
       └─LogicalShare { id = 4 }
         └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
           └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
             └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval), (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval)] }
+    └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr3, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr4] }
       └─BatchFilter { predicate: (t1.v1 >= 10:Int32) }
         └─BatchScan { table: t1, columns: [t1.id, t1.v1, t1.created_at], distribution: SomeShard }
   stream_plan: |
@@ -187,10 +187,10 @@
 - sql: |
     with t(ts) as (values ('2020-01-01 12:00:00'::timestamp)) select * from tumble(t, ts, interval '10' second) as z;
   logical_plan: |
-    LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
-    └─LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
+    LogicalProject { exprs: [*VALUES*_0.column_0, $expr1, $expr2] }
+    └─LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
       └─LogicalShare { id = 2 }
         └─LogicalValues { rows: [['2020-01-01 12:00:00':Timestamp]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamp] } }
   batch_plan: |
-    BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval), (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval)] }
+    BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
     └─BatchValues { rows: [['2020-01-01 12:00:00':Timestamp]] }

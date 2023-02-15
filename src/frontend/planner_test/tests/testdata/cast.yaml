@@ -3,7 +3,7 @@
   sql: |
     select 1 having NULL;
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
+    BatchProject { exprs: [1:Int32 as $expr0] }
     └─BatchFilter { predicate: null:Boolean }
       └─BatchSimpleAgg { aggs: [] }
         └─BatchValues { rows: [[]] }
@@ -11,14 +11,14 @@
   sql: |
     select 1 where NULL;
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
+    BatchProject { exprs: [1:Int32 as $expr0] }
     └─BatchFilter { predicate: null:Boolean }
       └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (CASE NULL)
   sql: |
     select case when NULL then 1 end;
   batch_plan: |
-    BatchProject { exprs: [Case(null:Boolean, 1:Int32)] }
+    BatchProject { exprs: [Case(null:Boolean, 1:Int32) as $expr0] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (JOIN ON NULL)
   sql: |
@@ -37,7 +37,7 @@
   sql: |
     select current_schemas(NULL);
   batch_plan: |
-    BatchProject { exprs: [null:List { datatype: Varchar }] }
+    BatchProject { exprs: [null:List { datatype: Varchar } as $expr0] }
     └─BatchValues { rows: [[]] }
 - name: FILTER (FILTER NULL)
   sql: |
@@ -52,20 +52,20 @@
   sql: |
     select 1 having 'y';
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
+    BatchProject { exprs: [1:Int32 as $expr0] }
     └─BatchSimpleAgg { aggs: [] }
       └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (WHERE with literal 'y' of unknown type)
   sql: |
     select 1 where 'y';
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
+    BatchProject { exprs: [1:Int32 as $expr0] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (CASE with literal 'y' of unknown type)
   sql: |
     select case when 'y' then 1 end;
   batch_plan: |
-    BatchProject { exprs: [Case(true:Boolean, 1:Int32)] }
+    BatchProject { exprs: [Case(true:Boolean, 1:Int32) as $expr0] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (JOIN ON with literal 'y' of unknown type)
   sql: |
@@ -82,7 +82,7 @@
   sql: |
     select current_schemas('y');
   batch_plan: |
-    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
+    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar } as $expr0] }
     └─BatchValues { rows: [[]] }
 - name: FILTER (FILTER with literal 'y' of unknown type)
   sql: |

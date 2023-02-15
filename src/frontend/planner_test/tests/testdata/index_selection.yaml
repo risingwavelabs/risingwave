@@ -85,10 +85,10 @@
     create index idx2 on t1(a) include(a);
     select count(1) from t1;
   batch_plan: |
-    BatchSimpleAgg { aggs: [sum0(count(1:Int32))] }
+    BatchSimpleAgg { aggs: [sum0(count($expr0))] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchSimpleAgg { aggs: [count(1:Int32)] }
-        └─BatchProject { exprs: [1:Int32] }
+      └─BatchSimpleAgg { aggs: [count($expr0)] }
+        └─BatchProject { exprs: [1:Int32 as $expr0] }
           └─BatchScan { table: idx2, columns: [], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint);

@@ -2,32 +2,32 @@
 - sql: |
     select current_schema();
   batch_plan: |
-    BatchProject { exprs: ['public':Varchar] }
+    BatchProject { exprs: ['public':Varchar as $expr0] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select current_schema;
   batch_plan: |
-    BatchProject { exprs: ['public':Varchar] }
+    BatchProject { exprs: ['public':Varchar as $expr0] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select session_user;
   batch_plan: |
-    BatchProject { exprs: ['root':Varchar] }
+    BatchProject { exprs: ['root':Varchar as $expr0] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select current_schemas(true);
   batch_plan: |
-    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
+    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar } as $expr0] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select current_schemas(false);
   batch_plan: |
-    BatchProject { exprs: [ARRAY[public]:List { datatype: Varchar }] }
+    BatchProject { exprs: [ARRAY[public]:List { datatype: Varchar } as $expr0] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select current_schemas(null);
   batch_plan: |
-    BatchProject { exprs: [null:List { datatype: Varchar }] }
+    BatchProject { exprs: [null:List { datatype: Varchar } as $expr0] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select current_schemas(true and false);
@@ -37,5 +37,5 @@
 - sql: |
     select current_timestamp;
   batch_plan: |
-    BatchProject { exprs: [Now] }
+    BatchProject { exprs: [Now as $expr0] }
     └─BatchValues { rows: [[]] }
