@@ -354,6 +354,7 @@ where
                                     MergeUpdate {
                                         actor_id,
                                         upstream_fragment_id: fragment_id,
+                                        new_upstream_fragment_id: None,
                                         added_upstream_actor_id: reschedule.added_actors.clone(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors

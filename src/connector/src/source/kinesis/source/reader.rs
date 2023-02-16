@@ -34,7 +34,7 @@ use crate::source::kinesis::KinesisProperties;
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReaderV2,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
@@ -56,7 +56,7 @@ pub struct KinesisSplitReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for KinesisSplitReader {
+impl SplitReader for KinesisSplitReader {
     type Properties = KinesisProperties;
 
     async fn new(
