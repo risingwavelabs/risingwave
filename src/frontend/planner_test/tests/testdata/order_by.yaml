@@ -23,7 +23,7 @@
     select v1, v1+1 from t order by v1;
   batch_plan: |
     BatchExchange { order: [t.v1 ASC], dist: Single }
-    └─BatchProject { exprs: [t.v1, (t.v1 + 1:Int32) as $expr1] }
+    └─BatchProject { exprs: [t.v1, (t.v1 + 1:Int32) as $expr2] }
       └─BatchSort { order: [t.v1 ASC] }
         └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
@@ -130,7 +130,7 @@
     BatchProject { exprs: [t.x, t.y] }
     └─BatchExchange { order: [$expr2 ASC, t.z ASC], dist: Single }
       └─BatchSort { order: [$expr2 ASC, t.z ASC] }
-        └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr2, t.z] }
+        └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr4, t.z] }
           └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [x, y, $expr2(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr2, t.z, t._row_id] }
@@ -212,5 +212,5 @@
     └─BatchSortAgg { group_key: [$expr0], aggs: [sum(test.a)] }
       └─BatchExchange { order: [$expr0 ASC], dist: HashShard($expr0) }
         └─BatchSort { order: [$expr0 ASC] }
-          └─BatchProject { exprs: [(test.b % 2:Int32) as $expr0, test.a] }
+          └─BatchProject { exprs: [(test.b % 2:Int32) as $expr2, test.a] }
             └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }

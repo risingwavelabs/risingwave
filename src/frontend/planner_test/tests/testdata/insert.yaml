@@ -171,7 +171,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: ['2020-01-01 01:02:03':Timestamp::Time as $expr0, 11:Int32 as $expr1, 4.5:Decimal::Float32 as $expr2] }
+        └─BatchProject { exprs: ['2020-01-01 01:02:03':Timestamp::Time as $expr4, 11:Int32 as $expr5, 4.5:Decimal::Float32 as $expr6] }
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - name: insert into select with cast error
   sql: |
@@ -203,7 +203,7 @@
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning *, a, a+b;
   logical_plan: |
-    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr3] }
+    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
       └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
   batch_plan: |
@@ -216,7 +216,7 @@
     create table t (a int, b int);
     insert into t select distinct * from t returning *, a, a+b;
   logical_plan: |
-    LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr3] }
+    LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
       └─LogicalAgg { group_key: [t.a, t.b], aggs: [] }
         └─LogicalProject { exprs: [t.a, t.b] }

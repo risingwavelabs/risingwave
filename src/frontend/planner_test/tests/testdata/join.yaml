@@ -186,7 +186,7 @@
     using (x);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Coalesce(i.x, i.x) as $expr0] }
+    └─BatchProject { exprs: [Coalesce(i.x, i.x) as $expr2] }
       └─BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
         ├─BatchExchange { order: [], dist: HashShard(i.x) }
         | └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
@@ -383,7 +383,7 @@
     create table b(x int);
     select x, a.x, b.x from a natural full join b;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.x, b.x) as $expr0, a.x, b.x] }
+    LogicalProject { exprs: [Coalesce(a.x, b.x) as $expr1, a.x, b.x] }
     └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
       └─LogicalScan { table: b, columns: [b.x, b._row_id] }
@@ -407,16 +407,16 @@
     create table c(x int, a int);
     select x, a.x, b.x, c.x from a natural full join b natural full join c;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x) as $expr0, a.x, b.x, c.x] }
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x) as $expr1, a.x, b.x, c.x] }
     └─LogicalJoin { type: FullOuter, on: (Coalesce(a.x, b.x) = c.x), output: all }
       ├─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       | ├─LogicalScan { table: a, columns: [a.x, a.y, a._row_id] }
       | └─LogicalScan { table: b, columns: [b.x, b.z, b._row_id] }
       └─LogicalScan { table: c, columns: [c.x, c.a, c._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x) as $expr0, a.x, b.x, c.x] }
+    LogicalProject { exprs: [Coalesce(a.x, b.x, c.x) as $expr4, a.x, b.x, c.x] }
     └─LogicalJoin { type: FullOuter, on: ($expr2 = c.x), output: [a.x, b.x, c.x] }
-      ├─LogicalProject { exprs: [a.x, b.x, Coalesce(a.x, b.x) as $expr2] }
+      ├─LogicalProject { exprs: [a.x, b.x, Coalesce(a.x, b.x) as $expr5] }
       | └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
       |   ├─LogicalScan { table: a, columns: [a.x] }
       |   └─LogicalScan { table: b, columns: [b.x] }
@@ -428,7 +428,7 @@
     create table c(x int, a int);
     select a, x, a.a, c.a, b.x, c.x from a natural full join b natural full join c;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(a.a, c.a) as $expr0, Coalesce(b.x, c.x) as $expr1, a.a, c.a, b.x, c.x] }
+    LogicalProject { exprs: [Coalesce(a.a, c.a) as $expr1, Coalesce(b.x, c.x) as $expr2, a.a, c.a, b.x, c.x] }
     └─LogicalJoin { type: FullOuter, on: (a.a = c.a) AND (b.x = c.x), output: all }
       ├─LogicalJoin { type: FullOuter, on: true, output: all }
       | ├─LogicalScan { table: a, columns: [a.a, a.y, a._row_id] }
@@ -469,7 +469,7 @@
     create table t3(x int);
     select *, x, t1.x, t2.x, t3.x from t1 full join (t2 full join t3 using (x)) using (x);
   logical_plan: |
-    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x) as $expr0, Coalesce(t1.x, t2.x, t3.x) as $expr1, t1.x, t2.x, t3.x] }
+    LogicalProject { exprs: [Coalesce(t1.x, t2.x, t3.x) as $expr1, Coalesce(t1.x, t2.x, t3.x) as $expr2, t1.x, t2.x, t3.x] }
     └─LogicalJoin { type: FullOuter, on: (t1.x = Coalesce(t2.x, t3.x)), output: all }
       ├─LogicalScan { table: t1, columns: [t1.x, t1._row_id] }
       └─LogicalJoin { type: FullOuter, on: (t2.x = t3.x), output: all }
@@ -482,7 +482,7 @@
     select 2 * x as Y, x + x as Z from a natural full join b where 2 * x < 10 order by x + x;
   logical_plan: |
     LogicalProject { exprs: [$expr0, $expr1] }
-    └─LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr0, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2] }
+    └─LogicalProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr3] }
       └─LogicalFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
         └─LogicalJoin { type: FullOuter, on: (a.x = b.x), output: all }
           ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
@@ -491,7 +491,7 @@
     BatchProject { exprs: [$expr0, $expr1] }
     └─BatchExchange { order: [$expr2 ASC], dist: Single }
       └─BatchSort { order: [$expr2 ASC] }
-        └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr0, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2] }
+        └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr7, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr8, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr9] }
           └─BatchFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
             └─BatchHashJoin { type: FullOuter, predicate: a.x = b.x, output: all }
               ├─BatchExchange { order: [], dist: HashShard(a.x) }
@@ -559,9 +559,9 @@
     select * from t1, t2 where t1.x + t1.y = t2.x + t2.y;
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: ($expr2 = $expr2), output: [t1.x, t1.y, t2.x, t2.y] }
-    ├─LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y) as $expr2] }
+    ├─LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y) as $expr3] }
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y) as $expr2] }
+    └─LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y) as $expr4] }
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - name: Use project to align return types
   sql: |
@@ -595,7 +595,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: $expr1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
       ├─BatchExchange { order: [], dist: HashShard($expr1) }
-      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64 as $expr1] }
+      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64 as $expr2] }
       |   └─BatchScan { table: t1, columns: [t1.v1], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
         └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }

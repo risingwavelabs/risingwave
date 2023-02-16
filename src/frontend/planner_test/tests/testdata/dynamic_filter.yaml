@@ -51,7 +51,7 @@
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 + v1 > max;
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: ($expr1 > max(t2.v2)), output: [t1.v1] }
-    ├─LogicalProject { exprs: [t1.v1, (t1.v1 + t1.v1) as $expr1] }
+    ├─LogicalProject { exprs: [t1.v1, (t1.v1 + t1.v1) as $expr2] }
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
@@ -127,7 +127,7 @@
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: ($expr1 > max(t2.v2)), output: [t1.v1] }
-    ├─LogicalProject { exprs: [t1.v1, t1.v1::Int64 as $expr1] }
+    ├─LogicalProject { exprs: [t1.v1, t1.v1::Int64 as $expr2] }
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
@@ -168,7 +168,7 @@
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 > $expr0), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
-    └─LogicalProject { exprs: [(2:Int32 * max(t2.v2)) as $expr0] }
+    └─LogicalProject { exprs: [(2:Int32 * max(t2.v2)) as $expr2] }
       └─LogicalAgg { aggs: [max(t2.v2)] }
         └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |

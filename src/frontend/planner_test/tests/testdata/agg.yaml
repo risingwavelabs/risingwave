@@ -20,12 +20,12 @@
     select v1, min(v2) + max(v3) * count(v1) as agg from t group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1))) as $expr1] }
+    └─BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1))) as $expr2] }
       └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1)] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   batch_local_plan: |
-    BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1))) as $expr1] }
+    BatchProject { exprs: [t.v1, (min(t.v2) + (max(t.v3) * count(t.v1))) as $expr4] }
     └─BatchHashAgg { group_key: [t.v1], aggs: [min(t.v2), max(t.v3), count(t.v1)] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
@@ -39,13 +39,13 @@
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
   batch_plan: |
-    BatchProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum0(count(t.v3)))) as $expr0] }
+    BatchProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum0(count(t.v3)))) as $expr2] }
     └─BatchSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v2)), sum0(count(t.v3))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [min(t.v1), max(t.v2), count(t.v3)] }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   batch_local_plan: |
-    BatchProject { exprs: [(min(t.v1) + (max(t.v2) * count(t.v3))) as $expr0] }
+    BatchProject { exprs: [(min(t.v1) + (max(t.v2) * count(t.v3))) as $expr4] }
     └─BatchSimpleAgg { aggs: [min(t.v1), max(t.v2), count(t.v3)] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
@@ -70,16 +70,16 @@
     select v3, min(v1) * avg(v1+v2) as agg from t group by v3;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.v3, (min(t.v1) * (sum($expr2)::Decimal / count($expr2))) as $expr1] }
+    └─BatchProject { exprs: [t.v3, (min(t.v1) * (sum($expr2)::Decimal / count($expr2))) as $expr3] }
       └─BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum($expr2), count($expr2)] }
         └─BatchExchange { order: [], dist: HashShard(t.v3) }
-          └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2) as $expr2] }
+          └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2) as $expr4] }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   batch_local_plan: |
-    BatchProject { exprs: [t.v3, (min(t.v1) * (sum($expr2)::Decimal / count($expr2))) as $expr1] }
+    BatchProject { exprs: [t.v3, (min(t.v1) * (sum($expr2)::Decimal / count($expr2))) as $expr7] }
     └─BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum($expr2), count($expr2)] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2) as $expr2] }
+        └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2) as $expr8] }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v3, agg], pk_columns: [v3] }
@@ -95,7 +95,7 @@
   logical_plan: |
     LogicalProject { exprs: [min(t.v1), sum($expr0)] }
     └─LogicalAgg { group_key: [$expr0], aggs: [min(t.v1), sum($expr0)] }
-      └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr0, t.v1] }
+      └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: test logical_agg with complex group expression
   sql: |
@@ -104,7 +104,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, sum($expr2)] }
     └─LogicalAgg { group_key: [$expr0, t.v1], aggs: [sum($expr2)] }
-      └─LogicalProject { exprs: [((t.v1 + t.v2) / t.v3) as $expr0, t.v1, (t.v1 * t.v2) as $expr2] }
+      └─LogicalProject { exprs: [((t.v1 + t.v2) / t.v3) as $expr1, t.v1, (t.v1 * t.v2) as $expr2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
 - name: test logical_agg with complex group expression
   sql: |
@@ -113,7 +113,7 @@
   logical_plan: |
     LogicalProject { exprs: [$expr0] }
     └─LogicalAgg { group_key: [$expr0], aggs: [] }
-      └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr0] }
+      └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: "test logical_agg with complex group expression \nshould complain about nested agg call \n"
   sql: |
@@ -127,7 +127,7 @@
     create table t(v1 int, v2 int);
     select v1 + v2 from t group by v1, v2;
   logical_plan: |
-    LogicalProject { exprs: [(t.v1 + t.v2) as $expr0] }
+    LogicalProject { exprs: [(t.v1 + t.v2) as $expr1] }
     └─LogicalAgg { group_key: [t.v1, t.v2], aggs: [] }
       └─LogicalProject { exprs: [t.v1, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
@@ -142,12 +142,12 @@
     BatchSimpleAgg { aggs: [sum0(count($expr0)), sum(sum($expr0))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count($expr0), sum($expr0)] }
-        └─BatchProject { exprs: [(t.v1 + t.v2) as $expr0] }
+        └─BatchProject { exprs: [(t.v1 + t.v2) as $expr2] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   batch_local_plan: |
     BatchSimpleAgg { aggs: [count($expr0), sum($expr0)] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchProject { exprs: [(t.v1 + t.v2) as $expr0] }
+      └─BatchProject { exprs: [(t.v1 + t.v2) as $expr4] }
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [cnt, sum], pk_columns: [] }
@@ -162,10 +162,10 @@
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.v1, ((sum($expr1) / count($expr1)) + max(t.v1)) as $expr1] }
+    └─BatchProject { exprs: [t.v1, ((sum($expr1) / count($expr1)) + max(t.v1)) as $expr3] }
       └─BatchHashAgg { group_key: [t.v1], aggs: [sum($expr1), count($expr1), max(t.v1)] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchProject { exprs: [t.v1, (t.v2 + t.v3) as $expr1] }
+          └─BatchProject { exprs: [t.v1, (t.v2 + t.v3) as $expr4] }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v1, agg], pk_columns: [v1] }
@@ -290,7 +290,7 @@
     create table t (v1 real);
     select 1 from t having sum(v1) > 5;
   batch_plan: |
-    BatchProject { exprs: [1:Int32 as $expr0] }
+    BatchProject { exprs: [1:Int32 as $expr2] }
     └─BatchFilter { predicate: (sum(sum(t.v1)) > 5:Int32) }
       └─BatchSimpleAgg { aggs: [sum(sum(t.v1))] }
         └─BatchExchange { order: [], dist: Single }
@@ -301,7 +301,7 @@
     create table t (v1 real);
     select 1 from t group by v1 having v1 > 5;
   logical_plan: |
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr1] }
     └─LogicalFilter { predicate: (t.v1 > 5:Int32) }
       └─LogicalAgg { group_key: [t.v1], aggs: [] }
         └─LogicalProject { exprs: [t.v1] }
@@ -374,14 +374,14 @@
   logical_plan: |
     LogicalProject { exprs: [$expr0] }
     └─LogicalTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
-      └─LogicalProject { exprs: [(t.v2 + t.v3) as $expr0, t.v1] }
+      └─LogicalProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [$expr0] }
     └─BatchExchange { order: [t.v1 ASC], dist: Single }
       └─BatchGroupTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchProject { exprs: [(t.v2 + t.v3) as $expr0, t.v1] }
+          └─BatchProject { exprs: [(t.v2 + t.v3) as $expr3, t.v1] }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: arguments out-of-order
   sql: |
@@ -405,16 +405,16 @@
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v3) * count(v2) as agg from t;
   logical_plan: |
-    LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr0] }
+    LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr1] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
       └─LogicalProject { exprs: [t.v1, t.v3, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr0] }
+    LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr3] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   batch_plan: |
-    BatchProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum0(count(t.v2)))) as $expr0] }
+    BatchProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum0(count(t.v2)))) as $expr5] }
     └─BatchSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v3)), sum0(count(t.v2))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
@@ -590,11 +590,11 @@
   logical_plan: |
     LogicalProject { exprs: [sum($expr2) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalAgg { aggs: [sum($expr2) filter(((t.a * t.b) > 0:Int32))] }
-      └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr2] }
+      └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum($expr2) filter(((t.a * t.b) > 0:Int32))] }
-    └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr2] }
+    └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr3] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
 - name: complex filter clause
   sql: |
@@ -603,11 +603,11 @@
   logical_plan: |
     LogicalProject { exprs: [max($expr2) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
     └─LogicalAgg { aggs: [max($expr2) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-      └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr2] }
+      └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [max($expr2) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
-    └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr2] }
+    └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr3] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [sab], pk_columns: [] }
@@ -623,12 +623,12 @@
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a > b) AS avga from t group by b ;
   logical_plan: |
-    LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))) as $expr0] }
+    LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.b, t.a] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))) as $expr0] }
+    LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))) as $expr3] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
@@ -856,7 +856,7 @@
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
-    └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
+    └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr3] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
     StreamMaterialize { columns: [s1], pk_columns: [] }

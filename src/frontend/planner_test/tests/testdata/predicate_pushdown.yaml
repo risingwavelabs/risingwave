@@ -105,10 +105,10 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, $expr4, $expr5] }
     └─LogicalFilter { predicate: ($expr4 > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND ($expr4 > $expr5) AND ($expr4 > t.v1) }
       └─LogicalShare { id = 3 }
-        └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr4, (t.v3 * t.v4) as $expr5] }
+        └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr1, (t.v3 * t.v4) as $expr2] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr4, (t.v3 * t.v4) as $expr5] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr5, (t.v3 * t.v4) as $expr6] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4], predicate: ((t.v1 + t.v2) > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND ((t.v1 + t.v2) > (t.v3 * t.v4)) AND ((t.v1 + t.v2) > t.v1) }
 - name: filter agg transpose
   sql: |
@@ -120,7 +120,7 @@
       └─LogicalShare { id = 5 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, count, count($expr3)] }
           └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count, count($expr3)] }
-            └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32 as $expr3] }
+            └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32 as $expr1] }
               └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
     LogicalFilter { predicate: (count > t.v1) AND (count > count($expr3)) }

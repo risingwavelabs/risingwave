@@ -159,15 +159,19 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+        ctx: OptimizerContextRef,
+    ) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         builder.field(
             "exprs",
             &self
                 .exprs
                 .iter()
-                .enumerate()
-                .map(|(i, expr)| AliasedExpr {
+                .map(|expr| AliasedExpr {
                     expr: ExprDisplay {
                         expr,
                         input_schema: self.input.schema(),
@@ -175,7 +179,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                     alias: {
                         match expr {
                             ExprImpl::InputRef(_) => None,
-                            _ => Some(format!("$expr{i}")),
+                            _ => Some(format!("$expr{}", ctx.next_expr_display_id())),
                         }
                     },
                 })

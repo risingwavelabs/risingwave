@@ -96,7 +96,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchSimpleAgg { aggs: [string_agg(s.s, $expr1 order_by(s.v ASC NULLS LAST))] }
-      └─BatchProject { exprs: [s.s, ',':Varchar as $expr1, s.v] }
+      └─BatchProject { exprs: [s.s, ',':Varchar as $expr2, s.v] }
         └─BatchScan { table: s, columns: [s.v, s.s], distribution: Single }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
@@ -322,7 +322,7 @@
   batch_plan: |
     BatchSimpleAgg { aggs: [string_agg(t.s, $expr1 order_by(t.o ASC NULLS LAST))] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchProject { exprs: [t.s, ',':Varchar as $expr1, t.o] }
+      └─BatchProject { exprs: [t.s, ',':Varchar as $expr2, t.o] }
         └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }

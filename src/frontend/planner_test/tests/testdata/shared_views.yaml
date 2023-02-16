@@ -9,16 +9,16 @@
     └─LogicalFilter { predicate: ($expr0 = $expr0) }
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalShare { id = 4 }
-        | └─LogicalProject { exprs: [(t1.x + t1.y) as $expr0] }
+        | └─LogicalProject { exprs: [(t1.x + t1.y) as $expr1] }
         |   └─LogicalFilter { predicate: (t1.y > 0:Int32) }
         |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         └─LogicalShare { id = 9 }
-          └─LogicalProject { exprs: [(t1.x * $expr0) as $expr0, (t1.y * $expr0) as $expr1] }
+          └─LogicalProject { exprs: [(t1.x * $expr0) as $expr2, (t1.y * $expr0) as $expr3] }
             └─LogicalFilter { predicate: ($expr0 = t1.x) }
               └─LogicalJoin { type: Inner, on: true, output: all }
                 ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
                 └─LogicalShare { id = 4 }
-                  └─LogicalProject { exprs: [(t1.x + t1.y) as $expr0] }
+                  └─LogicalProject { exprs: [(t1.x + t1.y) as $expr4] }
                     └─LogicalFilter { predicate: (t1.y > 0:Int32) }
                       └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
   stream_plan: |

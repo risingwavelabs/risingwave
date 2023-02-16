@@ -3,47 +3,47 @@
   explain_output: |
     Begin:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Share Source:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr2] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr3] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr4] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr5] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Prune Columns:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr6] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr0] }
+    LogicalProject { exprs: [1:Int32 as $expr7] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     To Batch Physical Plan:
 
-    BatchProject { exprs: [1:Int32 as $expr0] }
+    BatchProject { exprs: [1:Int32 as $expr9] }
     └─BatchValues { rows: [[]] }
 
     To Batch Local Plan:
 
-    BatchProject { exprs: [1:Int32 as $expr0] }
+    BatchProject { exprs: [1:Int32 as $expr10] }
     └─BatchValues { rows: [[]] }
 
     {
