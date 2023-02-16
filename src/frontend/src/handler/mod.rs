@@ -26,9 +26,9 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::copy::handle_copy;
-use self::util::{handle_with_properties, DataChunkToRowSetAdapter};
+use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_system;
@@ -410,7 +410,7 @@ pub async fn handle(
             relation,
             to,
             target,
-        } => handle_copy(context, relation, to, target).await,
+        } => handle_copy(handler_args, relation, to, target).await,
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }

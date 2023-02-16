@@ -1,29 +1,28 @@
-use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{CopyRelation, CopyTarget, Statement};
 
 use super::query::handle_query;
-use crate::session::OptimizerContext;
+use super::{HandlerArgs, RwPgResponse};
 
 pub async fn handle_copy(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     relation: CopyRelation,
     to: bool,
     target: CopyTarget,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     if !to {
         return Err(
             ErrorCode::InvalidInputSyntax("COPY FROM is unsupported yet".to_string()).into(),
         );
     }
-    handle_copy_to(context, relation, target).await
+    handle_copy_to(handler_args, relation, target).await
 }
 
 async fn handle_copy_to(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     relation: CopyRelation,
     target: CopyTarget,
-) -> Result<PgResponse> {
+) -> Result<RwPgResponse> {
     match target {
         CopyTarget::Stdin => {
             return Err(ErrorCode::InvalidInputSyntax(
@@ -38,6 +37,8 @@ async fn handle_copy_to(
             "copying a table is unsupported yet".to_string(),
         )
         .into()),
-        CopyRelation::Query(query) => handle_query(context, Statement::Query(query), false).await,
+        CopyRelation::Query(query) => {
+            handle_query(handler_args, Statement::Query(query), vec![]).await
+        }
     }
 }

@@ -2189,7 +2189,7 @@ pub enum CopyRelation {
 }
 
 impl fmt::Display for CopyRelation {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use CopyRelation::*;
         match self {
             Table { name, columns } => {
@@ -2212,7 +2212,7 @@ pub enum CopyTarget {
 }
 
 impl fmt::Display for CopyTarget {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use CopyTarget::*;
         match self {
             Stdin => write!(f, "STDIN"),
