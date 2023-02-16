@@ -13,6 +13,10 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
+
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
@@ -49,11 +53,7 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, ddl: &str, queri
 /// If we panic or encounter an unexpected error, query generation
 /// should still fail.
 /// Returns ddl and queries.
-pub async fn generate(
-    client: &tokio_postgres::Client,
-    testdata: &str,
-    count: usize,
-) -> (String, String) {
+pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: usize, outdir: &str) {
     let mut rng = rand::rngs::SmallRng::from_entropy();
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
 
@@ -87,9 +87,22 @@ pub async fn generate(
             queries.push_str(&format_drop_mview(&table));
         }
     }
-
     drop_tables(&mviews, testdata, client).await;
-    (setup_sql, queries)
+    write_to_file(outdir, "ddl.sql", &setup_sql);
+    write_to_file(outdir, "queries.sql", &queries);
+}
+
+fn write_to_file(outdir: &str, name: &str, sql: &str) {
+    let resolved = format!("{}/{}", outdir, name);
+    let path = Path::new(&resolved);
+    let mut file = match File::create(&path) {
+        Err(e) => panic!("couldn't create {}: {}", path.display(), e),
+        Ok(file) => file,
+    };
+    match file.write_all(sql.as_bytes()) {
+        Err(why) => panic!("couldn't write to {}: {}", path.display(), why),
+        Ok(_) => tracing::info!("successfully wrote to {}", path.display()),
+    }
 }
 
 /// e2e test runner for sqlsmith

@@ -56,6 +56,10 @@ struct TestOptions {
     /// The number of test cases to generate.
     #[clap(long, default_value = "100")]
     count: usize,
+
+    /// Output directory - only applicable to [`Commands::Generate`]
+    #[clap(long)]
+    outdir: Option<String>,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -76,7 +80,8 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
     let opt = Opt::parse();
-    let opt = match opt.command {
+    let command = opt.command;
+    let opt = match command {
         Commands::PrintFunctionTable => {
             println!("{}", print_function_table());
             return;
@@ -98,8 +103,13 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    match opt.command {
-        Commands::Test(_) => run(&client, &opt.testdata, opt.count).await,
-        Commands::Generate(_) => generate(&client, &opt.testdata, opt.count).await,
-    }
+    run(&client, &opt.testdata, opt.count).await;
+    // Commands::Test(_) => run(&client, &opt.testdata, opt.count).await,
+    //     Commands::Generate(_) => {
+    //         let outdir = &opt
+    //             .outdir
+    //             .unwrap_or_else(|| panic!("missing --outdir argument"));
+    //         generate(&client, &opt.testdata, opt.count, &outdir).await;
+    //     }
+    // }
 }
