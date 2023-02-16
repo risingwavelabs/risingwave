@@ -40,25 +40,15 @@
 
     apply TrivialProjectToValuesRule 1 time(s)
 
-    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [$expr0:Int32] } }
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 
     To Batch Physical Plan:
 
-<<<<<<< HEAD
     BatchValues { rows: [[1:Int32]] }
 
     To Batch Local Plan:
 
     BatchValues { rows: [[1:Int32]] }
-=======
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
-
-    To Batch Local Plan:
-
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
->>>>>>> 540a4e02b (show literal and fix stream project expr display)
 
     {
       "root_stage_id": 0,

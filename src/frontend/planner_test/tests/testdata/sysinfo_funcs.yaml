@@ -2,7 +2,6 @@
 - sql: |
     select current_schema();
   batch_plan: |
-<<<<<<< HEAD
     BatchValues { rows: [['public':Varchar]] }
 - sql: |
     select current_schema;
@@ -24,35 +23,6 @@
     select current_schemas(null);
   batch_plan: |
     BatchValues { rows: [[null:List { datatype: Varchar }]] }
-=======
-    BatchProject { exprs: ['public':Varchar] }
-    └─BatchValues { rows: [[]] }
-- sql: |
-    select current_schema;
-  batch_plan: |
-    BatchProject { exprs: ['public':Varchar] }
-    └─BatchValues { rows: [[]] }
-- sql: |
-    select session_user;
-  batch_plan: |
-    BatchProject { exprs: ['root':Varchar] }
-    └─BatchValues { rows: [[]] }
-- sql: |
-    select current_schemas(true);
-  batch_plan: |
-    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
-- sql: |
-    select current_schemas(false);
-  batch_plan: |
-    BatchProject { exprs: [ARRAY[public]:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
-- sql: |
-    select current_schemas(null);
-  batch_plan: |
-    BatchProject { exprs: [null:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
->>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select current_schemas(true and false);
   binder_error: |-
@@ -61,9 +31,4 @@
 - sql: |
     select current_timestamp;
   batch_plan: |
-<<<<<<< HEAD
     BatchValues { rows: [[Now('2021-04-01 00:00:00+00:00':Timestamptz)]] }
-=======
-    BatchProject { exprs: [Now as $expr23] }
-    └─BatchValues { rows: [[]] }
->>>>>>> 540a4e02b (show literal and fix stream project expr display)
