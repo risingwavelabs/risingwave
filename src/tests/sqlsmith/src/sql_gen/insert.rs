@@ -13,17 +13,16 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, ObjectName, Query, SetExpr, Statement, Values};
 
 use crate::sql_gen::SqlGenerator;
+use crate::Table;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_insert_stmt(&mut self, row_count: usize) -> Statement {
-        let table = self.tables.choose(&mut self.rng).unwrap();
-        let table_name = ObjectName(vec![table.clone().name.as_str().into()]);
+    pub(crate) fn gen_insert_stmt(&mut self, table: Table, row_count: usize) -> Statement {
+        let table_name = ObjectName(vec![table.name.as_str().into()]);
         let data_types = table
             .columns
             .iter()

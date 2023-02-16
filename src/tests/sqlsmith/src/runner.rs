@@ -33,13 +33,15 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     let (tables, base_tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
     tracing::info!("Created tables");
 
-    let row_count = 50;
+    let rows_per_table = 10;
     client
         .query("SET RW_IMPLICIT_FLUSH TO TRUE;", &[])
         .await
         .unwrap();
-    populate_tables(client, &mut rng, base_tables.clone(), row_count).await;
+    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
+
+    let max_rows_inserted = rows_per_table * base_tables.len();
 
     test_sqlsmith(
         client,
@@ -47,7 +49,7 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
         tables.clone(),
         &setup_sql,
         base_tables,
-        row_count,
+        max_rows_inserted,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
@@ -66,8 +68,10 @@ async fn populate_tables<R: Rng>(
     row_count: usize,
 ) {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
-    tracing::info!("Executing: {}", &inserts);
-    client.query(&inserts, &[]).await.unwrap();
+    for insert in inserts {
+        tracing::info!("Executing: {}", &insert);
+        client.query(&insert, &[]).await.unwrap();
+    }
 }
 
 /// Sanity checks for sqlsmith
