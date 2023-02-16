@@ -93,7 +93,12 @@ impl DatabaseManager {
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
+        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
+            for depend_relation_id in &sink.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (sink.id, sink)
+        }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
