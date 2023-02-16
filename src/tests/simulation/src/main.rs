@@ -116,6 +116,12 @@ pub struct Args {
     #[clap(long)]
     run_sqlsmith_queries: bool,
 
+    /// Run sqlsmith to generate queries with the given testdata [`files`],
+    /// and output the ddl + queries to the given directory,
+    /// indicated by this argument.
+    #[clap(long)]
+    generate_sqlsmith_queries: Option<String>,
+
     /// Load etcd data from toml file.
     #[clap(long)]
     etcd_data: Option<PathBuf>,
@@ -177,7 +183,11 @@ async fn main() {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
+                if let Some(outdir) = args.generate_sqlsmith_queries {
+                    risingwave_sqlsmith::runner::generate(rw.pg_client(), &args.files, count, &outdir).await;
+                } else {
+                    risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
+                }
             })
             .await;
         return;
