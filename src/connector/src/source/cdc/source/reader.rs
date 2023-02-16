@@ -29,7 +29,7 @@ use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
@@ -46,7 +46,7 @@ pub struct CdcSplitReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for CdcSplitReader {
+impl SplitReader for CdcSplitReader {
     type Properties = CdcProperties;
 
     #[allow(clippy::unused_async)]
