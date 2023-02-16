@@ -18,7 +18,7 @@ use opendal::Operator;
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
-    /// create opendal hdfs engine.
+    /// create opendal gcs engine.
     pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
