@@ -111,10 +111,10 @@ pub struct Args {
     #[clap(long)]
     sqlsmith: Option<usize>,
 
-    /// Run sqlsmith pre-generated queries with the given directory,
+    /// Run sqlsmith pre-generated queries with the given [`files`] directory,
     /// containing `ddl.sql` and `queries.sql`.
     #[clap(long)]
-    run_sqlsmith_queries: Option<String>,
+    run_sqlsmith_queries: bool,
 
     /// Load etcd data from toml file.
     #[clap(long)]
@@ -183,7 +183,8 @@ async fn main() {
         return;
     }
 
-    if let Some(outdir) = args.run_sqlsmith_queries {
+    if args.run_sqlsmith_queries {
+        let outdir = args.files;
         cluster
             .run_on_client(async move {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
