@@ -208,13 +208,22 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        // Replace source to share source.
-        // Perform share source at the beginning so that we can benefit from predicate pushdown and
-        // column pruning for the share operator.
-        plan = ShareSourceRewriter::share_source(plan);
-        if explain_trace {
-            ctx.trace("Share Source:");
-            ctx.trace(plan.explain_to_string().unwrap());
+        if ctx.session_ctx().config().get_enable_share_plan() {
+            // Replace source to share source.
+            // Perform share source at the beginning so that we can benefit from predicate pushdown
+            // and column pruning for the share operator.
+            plan = ShareSourceRewriter::share_source(plan);
+            if explain_trace {
+                ctx.trace("Share Source:");
+                ctx.trace(plan.explain_to_string().unwrap());
+            }
+        } else {
+            plan = self.optimize_by_rules(
+                plan,
+                "DAG To Tree".to_string(),
+                vec![DagToTreeRule::create()],
+                ApplyOrder::TopDown,
+            );
         }
 
         // Simple Unnesting.
