@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -180,6 +181,27 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             .collect()
     }
 
+    /// Try to find the target create-streaming-job command from track.
+    ///
+    /// Return the target command as it should be cancelled based on the input actors.
+    pub fn find_cancelled_command(
+        &mut self,
+        actors_to_cancel: HashSet<ActorId>,
+    ) -> Option<TrackingCommand<S>> {
+        let epochs = actors_to_cancel
+            .into_iter()
+            .map(|actor_id| self.actor_map.get(&actor_id))
+            .collect_vec();
+        assert!(epochs.iter().all_equal());
+        // If the target command found in progress map, return and remove it. Note that the command
+        // should have finished if not found.
+        if let Some(Some(epoch)) = epochs.first() {
+            Some(self.progress_map.remove(epoch).unwrap().1)
+        } else {
+            None
+        }
+    }
+
     /// Add a new create-mview DDL command to track.
     ///
     /// If the actors to track is empty, return the given command as it can be finished immediately.
@@ -203,14 +225,14 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             if let Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                table_mview_map,
+                upstream_mview_actors,
                 definition,
                 ..
             } = &command.context.command
             {
                 // Keep track of how many times each upstream MV appears.
                 let mut upstream_mv_count = HashMap::new();
-                for (table_id, actors) in table_mview_map {
+                for (table_id, actors) in upstream_mview_actors {
                     assert!(!actors.is_empty());
                     let dispatch_count: usize = dispatchers
                         .iter()
@@ -303,7 +325,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             }
             Entry::Vacant(_) => {
                 tracing::warn!(
-                    "update the progress of an inexistent create-mview DDL: {progress:?}"
+                    "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
                 );
                 None
             }

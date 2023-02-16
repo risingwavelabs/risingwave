@@ -266,6 +266,7 @@ impl From<tonic::Status> for RwError {
                 ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }
     }

@@ -35,6 +35,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -418,6 +419,17 @@ pub async fn handle_create_index(
         index_name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
+
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                index.database_id,
+                index.schema_id,
+                index.name.clone(),
+            ));
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
