@@ -18,7 +18,7 @@ use serde_json::Value;
 use crate::types::{Scalar, ScalarImpl, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JsonbVal(Box<Value>);
+pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarImpl>` smaller.
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(&'a Value);
@@ -43,6 +43,10 @@ impl<'a> ScalarRef<'a> for JsonbRef<'a> {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        // We do not intend to support hashing `jsonb` type.
+        // Before #7981 is done, we do not panic but just hash its string representation.
+        // Note that `serde_json` without feature `preserve_order` uses `BTreeMap` for json object.
+        // So its string form always have keys sorted.
         use std::hash::Hash as _;
         self.0.to_string().hash(state)
     }
@@ -68,6 +72,18 @@ impl PartialOrd for JsonbRef<'_> {
 
 impl Ord for JsonbRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // We do not intend to support ordering `jsonb` type.
+        // Before #7981 is done, we do not panic but just compare its string representation.
+        // Note that `serde_json` without feature `preserve_order` uses `BTreeMap` for json object.
+        // So its string form always have keys sorted.
+        //
+        // In PostgreSQL, Object > Array > Boolean > Number > String > Null.
+        // But here we have Object > true > Null > false > Array > Number > String.
+        // Because in ascii: `{` > `t` > `n` > `f` > `[` > `9` `-` > `"`.
+        //
+        // This is just to keep consistent with the memcomparable encoding, which uses string form.
+        // If we implemented the same typed comparison as PostgreSQL, we would need a corresponding
+        // memcomparable encoding for it.
         self.0.to_string().cmp(&other.0.to_string())
     }
 }
@@ -102,11 +118,17 @@ impl JsonbRef<'_> {
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
     ) -> memcomparable::Result<()> {
+        // As mentioned with `cmp`, this implementation is not intended to be used.
+        // But before #7981 is done, we do not want to `panic` here.
         let s = self.0.to_string();
         serde::Serialize::serialize(&s, serializer)
     }
 
     pub fn value_serialize(&self) -> Vec<u8> {
+        // Reuse the pgwire "BINARY" encoding for jsonb type.
+        // It is not truly binary, but one byte of version `1u8` followed by string form.
+        // This version number helps us maintain compatibility when we switch to more efficient
+        // encoding later.
         let mut output = bytes::BytesMut::new();
         self.0.to_sql(&Type::JSONB, &mut output).unwrap();
         output.freeze().into()
