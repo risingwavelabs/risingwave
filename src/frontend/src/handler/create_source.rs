@@ -16,7 +16,9 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{columns_extend, ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID};
+use risingwave_common::catalog::{
+    columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID,
+};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -397,6 +399,8 @@ pub async fn handle_create_source(
         false,
     )
     .await?;
+
+    debug_assert!(is_column_ids_dedup(&columns));
 
     let watermark_descs =
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
