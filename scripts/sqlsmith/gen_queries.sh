@@ -30,5 +30,7 @@ cargo make sslt-build-all --profile ci-sim
 
 generate_deterministic
 
-zip -r "$TESTS_FOLDER/freeze.zip" $BASE_FOLDER
-rm -r $BASE_FOLDER
+cd $TESTS_FOLDER
+zip -r "freeze.zip" freeze
+rm -r freeze
+cd -
