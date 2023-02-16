@@ -32,7 +32,7 @@ use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReaderV2, MAX_CHUNK_SIZE,
+    SplitReader, MAX_CHUNK_SIZE,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -91,7 +91,7 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
 }
 
 #[async_trait]
-impl SplitReaderV2 for PulsarSplitReader {
+impl SplitReader for PulsarSplitReader {
     type Properties = PulsarProperties;
 
     async fn new(
