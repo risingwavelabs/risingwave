@@ -21,7 +21,9 @@ use futures::Future;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 
-use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
+use super::{
+    Key, MetaStore, MetaStoreError, MetaStoreResult, MetaStoreType, Snapshot, Transaction, Value,
+};
 use crate::storage::etcd_retry_client::EtcdRetryClient as KvClient;
 use crate::storage::WrappedEtcdClient;
 
@@ -186,6 +188,10 @@ impl EtcdMetaStore {
 #[async_trait]
 impl MetaStore for EtcdMetaStore {
     type Snapshot = EtcdSnapshot;
+
+    fn meta_store_type(&self) -> MetaStoreType {
+        MetaStoreType::Etcd
+    }
 
     async fn snapshot(&self) -> Self::Snapshot {
         EtcdSnapshot {

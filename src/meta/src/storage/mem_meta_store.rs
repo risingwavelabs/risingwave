@@ -19,7 +19,8 @@ use async_trait::async_trait;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 
 use super::{
-    ColumnFamily, Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value,
+    ColumnFamily, Key, MetaStore, MetaStoreError, MetaStoreResult, MetaStoreType, Snapshot,
+    Transaction, Value,
 };
 
 pub struct MemSnapshot(OwnedRwLockReadGuard<MemStoreInner>);
@@ -77,6 +78,10 @@ impl MemStore {
 #[async_trait]
 impl MetaStore for MemStore {
     type Snapshot = MemSnapshot;
+
+    fn meta_store_type(&self) -> MetaStoreType {
+        MetaStoreType::Memory
+    }
 
     async fn snapshot(&self) -> Self::Snapshot {
         let guard = self.inner.clone().read_owned().await;

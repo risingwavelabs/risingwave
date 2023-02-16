@@ -26,6 +26,11 @@ pub trait Snapshot: Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>>;
 }
 
+pub enum MetaStoreType {
+    Memory,
+    Etcd,
+}
+
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
 pub trait MetaStore: Clone + Sync + Send + 'static {
@@ -44,6 +49,8 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
         self.snapshot().await.get_cf(cf, key).await
     }
+
+    fn meta_store_type(&self) -> MetaStoreType;
 }
 
 // Error of metastore

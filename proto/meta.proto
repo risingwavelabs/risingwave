@@ -19,6 +19,8 @@ message TelemetryInfoRequest {
 message TelemetryInfoResponse {
   string tracking_id = 1;
   bool telemetry_enabled = 2;
+  // set true if all nodes should kill its telemetry reporting
+  bool should_kill_telemetry = 3;
 }
 
 service TelemetryInfoService {

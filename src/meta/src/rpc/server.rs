@@ -64,7 +64,9 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
+use crate::storage::{
+    EtcdMetaStore, MemStore, MetaStore, MetaStoreType, WrappedEtcdClient as EtcdClient,
+};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::report::start_meta_telemetry_reporting;
 use crate::{hummock, MetaResult};
@@ -541,7 +543,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     sub_tasks.push((abort_notification_handler, abort_sender));
 
     // start telemetry reporting
-    sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await);
+    match meta_store.meta_store_type() {
+        MetaStoreType::Etcd => {
+            sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await)
+        }
+        MetaStoreType::Memory => {
+            tracing::info!("disable telemetry because etcd meta store is not used")
+        }
+    }
 
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
