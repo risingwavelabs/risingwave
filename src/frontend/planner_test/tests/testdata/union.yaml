@@ -10,17 +10,17 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $expr4(hidden), $expr5(hidden)], pk_columns: [t1._row_id, $expr4, $expr5] }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32] }
     └─StreamUnion { all: true }
-      ├─StreamExchange { dist: HashShard(t1._row_id, $expr4, $expr5) }
+      ├─StreamExchange { dist: HashShard(t1._row_id, null:Int64, 0:Int32) }
       | └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Int64, 0:Int32] }
       |   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard($expr3, t2._row_id, $expr5) }
+      └─StreamExchange { dist: HashShard(null:Int64, t2._row_id, 1:Int32) }
         └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int64, t2._row_id, 1:Int32] }
           └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), $expr4(hidden), $expr5(hidden)], pk_columns: [t1._row_id, $expr4, $expr5] }
+      StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32] }
           materialized table: 4294967294
         StreamUnion { all: true }
           StreamExchange Hash([3, 4, 5]) from 1
@@ -38,7 +38,7 @@
           Upstream
           BatchPlanNode
 
-     Table 4294967294 { columns: [a, b, c, t1._row_id, $expr4, $expr5], primary key: [$3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3, 4, 5] }
+     Table 4294967294 { columns: [a, b, c, t1._row_id, null:Int64, 0:Int32], primary key: [$3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3, 4, 5] }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
@@ -63,10 +63,10 @@
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
-            ├─StreamExchange { dist: HashShard(t1._row_id, $expr4, $expr5) }
+            ├─StreamExchange { dist: HashShard(t1._row_id, null:Int64, 0:Int32) }
             | └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Int64, 0:Int32] }
             |   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard($expr3, t2._row_id, $expr5) }
+            └─StreamExchange { dist: HashShard(null:Int64, t2._row_id, 1:Int32) }
               └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int64, t2._row_id, 1:Int32] }
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |
@@ -121,10 +121,10 @@
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
           └─StreamUnion { all: true }
-            ├─StreamExchange { dist: HashShard(t1.a, $expr3) }
+            ├─StreamExchange { dist: HashShard(t1.a, 0:Int32) }
             | └─StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
             |   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
-            └─StreamExchange { dist: HashShard(t2.a, $expr3) }
+            └─StreamExchange { dist: HashShard(t2.a, 1:Int32) }
               └─StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |
@@ -207,16 +207,30 @@
     select 1 union all select 1
   optimized_logical_plan: |
     LogicalUnion { all: true }
+<<<<<<< HEAD
     ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [$expr0:Int32] } }
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [$expr0:Int32] } }
   batch_plan: |
     BatchUnion { all: true }
     ├─BatchValues { rows: [[1:Int32]] }
     └─BatchValues { rows: [[1:Int32]] }
+=======
+    ├─LogicalProject { exprs: [1:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalProject { exprs: [1:Int32] }
+      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |
+    BatchUnion { all: true }
+    ├─BatchProject { exprs: [1:Int32] }
+    | └─BatchValues { rows: [[]] }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select 1 union all select 2 union all select 3 union all select 4 union all select 5
   optimized_logical_plan: |
     LogicalUnion { all: true }
+<<<<<<< HEAD
     ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [$expr0:Int32] } }
     ├─LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [$expr0:Int32] } }
     ├─LogicalValues { rows: [[3:Int32]], schema: Schema { fields: [$expr0:Int32] } }
@@ -229,23 +243,73 @@
     ├─BatchValues { rows: [[3:Int32]] }
     ├─BatchValues { rows: [[4:Int32]] }
     └─BatchValues { rows: [[5:Int32]] }
+=======
+    ├─LogicalProject { exprs: [1:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalProject { exprs: [2:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalProject { exprs: [3:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalProject { exprs: [4:Int32] }
+    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalProject { exprs: [5:Int32] }
+      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |
+    BatchUnion { all: true }
+    ├─BatchProject { exprs: [1:Int32] }
+    | └─BatchValues { rows: [[]] }
+    ├─BatchProject { exprs: [2:Int32] }
+    | └─BatchValues { rows: [[]] }
+    ├─BatchProject { exprs: [3:Int32] }
+    | └─BatchValues { rows: [[]] }
+    ├─BatchProject { exprs: [4:Int32] }
+    | └─BatchValues { rows: [[]] }
+    └─BatchProject { exprs: [5:Int32] }
+      └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select 1 union select 2 union select 3 union select 4 union select 5
   optimized_logical_plan: |
-    LogicalAgg { group_key: [$expr0], aggs: [] }
+    LogicalAgg { group_key: [1:Int32], aggs: [] }
     └─LogicalUnion { all: true }
+<<<<<<< HEAD
       ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [$expr0:Int32] } }
       ├─LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [$expr0:Int32] } }
       ├─LogicalValues { rows: [[3:Int32]], schema: Schema { fields: [$expr0:Int32] } }
       ├─LogicalValues { rows: [[4:Int32]], schema: Schema { fields: [$expr0:Int32] } }
       └─LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [$expr0:Int32] } }
+=======
+      ├─LogicalProject { exprs: [1:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      ├─LogicalProject { exprs: [2:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      ├─LogicalProject { exprs: [3:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      ├─LogicalProject { exprs: [4:Int32] }
+      | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+      └─LogicalProject { exprs: [5:Int32] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg { group_key: [$expr0], aggs: [] }
-      └─BatchExchange { order: [], dist: HashShard($expr0) }
+    └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(1:Int32) }
         └─BatchUnion { all: true }
+<<<<<<< HEAD
           ├─BatchValues { rows: [[1:Int32]] }
           ├─BatchValues { rows: [[2:Int32]] }
           ├─BatchValues { rows: [[3:Int32]] }
           ├─BatchValues { rows: [[4:Int32]] }
           └─BatchValues { rows: [[5:Int32]] }
+=======
+          ├─BatchProject { exprs: [1:Int32] }
+          | └─BatchValues { rows: [[]] }
+          ├─BatchProject { exprs: [2:Int32] }
+          | └─BatchValues { rows: [[]] }
+          ├─BatchProject { exprs: [3:Int32] }
+          | └─BatchValues { rows: [[]] }
+          ├─BatchProject { exprs: [4:Int32] }
+          | └─BatchValues { rows: [[]] }
+          └─BatchProject { exprs: [5:Int32] }
+            └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)

@@ -34,11 +34,11 @@
     create table t (v1 bigint, v2 double precision);
     select v1, 2 from (select v1, v2, 1 from t);
   logical_plan: |
-    LogicalProject { exprs: [t.v1, 2:Int32 as $expr1] }
-    └─LogicalProject { exprs: [t.v1, t.v2, 1:Int32 as $expr2] }
+    LogicalProject { exprs: [t.v1, 2:Int32] }
+    └─LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [t.v1, 2:Int32 as $expr4] }
+    LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalScan { table: t, columns: [t.v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -138,25 +138,25 @@
     create table t2 (x int, y int);
     select count(1) from (select sum(distinct 1) from t1), t2;
   logical_plan: |
-    LogicalProject { exprs: [count($expr0)] }
-    └─LogicalAgg { aggs: [count($expr0)] }
-      └─LogicalProject { exprs: [1:Int32 as $expr1] }
+    LogicalProject { exprs: [count(1:Int32)] }
+    └─LogicalAgg { aggs: [count(1:Int32)] }
+      └─LogicalProject { exprs: [1:Int32] }
         └─LogicalJoin { type: Inner, on: true, output: all }
-          ├─LogicalProject { exprs: [sum(distinct $expr0)] }
-          | └─LogicalAgg { aggs: [sum(distinct $expr0)] }
-          |   └─LogicalProject { exprs: [1:Int32 as $expr2] }
+          ├─LogicalProject { exprs: [sum(distinct 1:Int32)] }
+          | └─LogicalAgg { aggs: [sum(distinct 1:Int32)] }
+          |   └─LogicalProject { exprs: [1:Int32] }
           |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
           └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
   optimized_logical_plan: |
-    LogicalAgg { aggs: [count($expr0)] }
-    └─LogicalProject { exprs: [1:Int32 as $expr4] }
+    LogicalAgg { aggs: [count(1:Int32)] }
+    └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
         ├─LogicalAgg { aggs: [] }
         | └─LogicalScan { table: t1, columns: [] }
         └─LogicalScan { table: t2, columns: [] }
   batch_plan: |
-    BatchSimpleAgg { aggs: [count($expr0)] }
-    └─BatchProject { exprs: [1:Int32 as $expr6] }
+    BatchSimpleAgg { aggs: [count(1:Int32)] }
+    └─BatchProject { exprs: [1:Int32] }
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
         ├─BatchSimpleAgg { aggs: [] }
         | └─BatchExchange { order: [], dist: Single }
@@ -188,7 +188,7 @@
           └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
   batch_plan: |
     BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
-    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr3, pg_user.name] }
+    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr23, pg_user.name] }
       └─BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
         └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
           ├─BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
@@ -211,9 +211,9 @@
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
       | └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
-      └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
-        └─LogicalAgg { group_key: [$expr0], aggs: [] }
-          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
+      └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
+        └─LogicalAgg { group_key: [$expr1], aggs: [] }
+          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
@@ -252,16 +252,16 @@
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
   logical_plan: |
-    LogicalProject { exprs: [1:Int32 as $expr1] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalScan { table: t, columns: [t.v, t._row_id] }
-      └─LogicalProject { exprs: [1:Int32 as $expr2] }
+      └─LogicalProject { exprs: [1:Int32] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } > 1:Int32) }
           └─LogicalAgg { aggs: [] }
             └─LogicalProject { exprs: [] }
               └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32 as $expr4] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
       ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
       └─LogicalAgg { aggs: [] }
@@ -272,18 +272,18 @@
     create table c (c1 int, c2 int);
     select 1 from a where exists ( select 1 from b having exists ( select a1 from c ));
   logical_plan: |
-    LogicalProject { exprs: [1:Int32 as $expr1] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
-      └─LogicalProject { exprs: [1:Int32 as $expr2] }
+      └─LogicalProject { exprs: [1:Int32] }
         └─LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
           ├─LogicalAgg { aggs: [] }
           | └─LogicalProject { exprs: [] }
           |   └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
-          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr3] }
+          └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [1:Int32 as $expr5] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
       ├─LogicalScan { table: a, columns: [a.a1] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }

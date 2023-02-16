@@ -3,37 +3,37 @@
   explain_output: |
     Begin:
 
-    LogicalProject { exprs: [1:Int32 as $expr1] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Share Source:
 
-    LogicalProject { exprs: [1:Int32 as $expr2] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr3] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr4] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr5] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Prune Columns:
 
-    LogicalProject { exprs: [1:Int32 as $expr6] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Predicate Push Down:
 
-    LogicalProject { exprs: [1:Int32 as $expr7] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
     Project Remove:
@@ -44,11 +44,21 @@
 
     To Batch Physical Plan:
 
+<<<<<<< HEAD
     BatchValues { rows: [[1:Int32]] }
 
     To Batch Local Plan:
 
     BatchValues { rows: [[1:Int32]] }
+=======
+    BatchProject { exprs: [1:Int32] }
+    └─BatchValues { rows: [[]] }
+
+    To Batch Local Plan:
+
+    BatchProject { exprs: [1:Int32] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 
     {
       "root_stage_id": 0,
@@ -63,7 +73,7 @@
                   "typeName": "INT32",
                   "isNullable": true
                 },
-                "name": "$expr0"
+                "name": "1:Int32"
               }
             ],
             "children": [],

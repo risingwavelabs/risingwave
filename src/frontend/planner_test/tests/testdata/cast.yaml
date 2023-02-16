@@ -3,7 +3,7 @@
   sql: |
     select 1 having NULL;
   batch_plan: |
-    BatchProject { exprs: [1:Int32 as $expr2] }
+    BatchProject { exprs: [1:Int32] }
     └─BatchFilter { predicate: null:Boolean }
       └─BatchSimpleAgg { aggs: [] }
         └─BatchValues { rows: [[]] }
@@ -11,14 +11,19 @@
   sql: |
     select 1 where NULL;
   batch_plan: |
-    BatchProject { exprs: [1:Int32 as $expr2] }
+    BatchProject { exprs: [1:Int32] }
     └─BatchFilter { predicate: null:Boolean }
       └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (CASE NULL)
   sql: |
     select case when NULL then 1 end;
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[Case(null:Boolean, 1:Int32)]] }
+=======
+    BatchProject { exprs: [Case(null:Boolean, 1:Int32) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - name: implicit cast boolean (JOIN ON NULL)
   sql: |
     create table t1(v1 int);
@@ -36,7 +41,12 @@
   sql: |
     select current_schemas(NULL);
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[null:List { datatype: Varchar }]] }
+=======
+    BatchProject { exprs: [null:List { datatype: Varchar }] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - name: FILTER (FILTER NULL)
   sql: |
     create table t(v1 int);
@@ -50,17 +60,33 @@
   sql: |
     select 1 having 'y';
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[1:Int32]] }
+=======
+    BatchProject { exprs: [1:Int32] }
+    └─BatchSimpleAgg { aggs: [] }
+      └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - name: implicit cast boolean (WHERE with literal 'y' of unknown type)
   sql: |
     select 1 where 'y';
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[1:Int32]] }
+=======
+    BatchProject { exprs: [1:Int32] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - name: implicit cast boolean (CASE with literal 'y' of unknown type)
   sql: |
     select case when 'y' then 1 end;
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[Case(true:Boolean, 1:Int32)]] }
+=======
+    BatchProject { exprs: [Case(true:Boolean, 1:Int32) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - name: implicit cast boolean (JOIN ON with literal 'y' of unknown type)
   sql: |
     create table t1(v1 int);
@@ -76,7 +102,12 @@
   sql: |
     select current_schemas('y');
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[ARRAY[pg_catalog, public]:List { datatype: Varchar }]] }
+=======
+    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - name: FILTER (FILTER with literal 'y' of unknown type)
   sql: |
     create table t(v1 int);

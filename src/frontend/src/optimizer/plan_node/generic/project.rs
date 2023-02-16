@@ -67,6 +67,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
         let o2i = self.o2i_col_mapping();
         let exprs = &self.exprs;
         let input_schema = self.input.schema();
+        let ctx = self.ctx();
         let fields = exprs
             .iter()
             .enumerate()
@@ -77,7 +78,18 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
-                    None => (format!("$expr{i}"), vec![], String::new()),
+                    None => match expr {
+                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => (
+                            format!("{:?}", ExprDisplay { expr, input_schema }),
+                            vec![],
+                            String::new(),
+                        ),
+                        _ => (
+                            format!("$expr{}", ctx.next_expr_display_id()),
+                            vec![],
+                            String::new(),
+                        ),
+                    },
                 };
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
@@ -163,7 +175,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         &self,
         f: &mut fmt::Formatter<'_>,
         name: &str,
-        ctx: OptimizerContextRef,
+        schema: &Schema,
     ) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         builder.field(
@@ -171,15 +183,16 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
             &self
                 .exprs
                 .iter()
-                .map(|expr| AliasedExpr {
+                .zip_eq_fast(schema.fields().iter())
+                .map(|(expr, field)| AliasedExpr {
                     expr: ExprDisplay {
                         expr,
                         input_schema: self.input.schema(),
                     },
                     alias: {
                         match expr {
-                            ExprImpl::InputRef(_) => None,
-                            _ => Some(format!("$expr{}", ctx.next_expr_display_id())),
+                            ExprImpl::InputRef(_) | ExprImpl::Literal(_) => None,
+                            _ => Some(field.name.clone()),
                         }
                     },
                 })
@@ -271,9 +284,9 @@ impl ProjectBuilder {
 }
 
 /// Auxiliary struct for displaying `expr AS alias`
-struct AliasedExpr<'a> {
-    expr: ExprDisplay<'a>,
-    alias: Option<String>,
+pub struct AliasedExpr<'a> {
+    pub expr: ExprDisplay<'a>,
+    pub alias: Option<String>,
 }
 
 impl fmt::Debug for AliasedExpr<'_> {

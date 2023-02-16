@@ -107,8 +107,8 @@
     -- select (c).zipcode from (select (t).country.city as c from t);
     select (c).zipcode from (select (t.country).city as c from t);
   logical_plan: |
-    LogicalProject { exprs: [Field($expr0, 1:Int32) as $expr1] }
-    └─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr2] }
+    LogicalProject { exprs: [Field($expr1, 1:Int32) as $expr2] }
+    └─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr1] }
       └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
@@ -136,10 +136,10 @@
     -- select (c).zipcode from (select min((t).country.city) as c from t);
     select (c).zipcode from (select min((t.country).city) as c from t);
   logical_plan: |
-    LogicalProject { exprs: [Field(min($expr0), 1:Int32) as $expr1] }
-    └─LogicalProject { exprs: [min($expr0)] }
-      └─LogicalAgg { aggs: [min($expr0)] }
-        └─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr2] }
+    LogicalProject { exprs: [Field(min($expr1), 1:Int32) as $expr2] }
+    └─LogicalProject { exprs: [min($expr1)] }
+      └─LogicalAgg { aggs: [min($expr1)] }
+        └─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr1] }
           └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
@@ -166,8 +166,8 @@
     create materialized view t as select * from s;
     select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
   logical_plan: |
-    LogicalProject { exprs: [$expr0, t.id, t.country, t.zipcode, t.rate] }
-    └─LogicalJoin { type: Inner, on: (Field($expr0, 1:Int32) = Field(t.country, 2:Int32)), output: all }
+    LogicalProject { exprs: [$expr1, t.id, t.country, t.zipcode, t.rate] }
+    └─LogicalJoin { type: Inner, on: (Field($expr1, 1:Int32) = Field(t.country, 2:Int32)), output: all }
       ├─LogicalProject { exprs: [Field(t.country, 1:Int32) as $expr1] }
       | └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
       └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
@@ -196,9 +196,9 @@
     create materialized view t as select * from s;
     select min((t.country).city.address) + max((t.country).city.address) * count(zipcode) from t;
   logical_plan: |
-    LogicalProject { exprs: [(min($expr0) + (max($expr0) * count(t.zipcode))) as $expr1] }
-    └─LogicalAgg { aggs: [min($expr0), max($expr0), count(t.zipcode)] }
-      └─LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32) as $expr2, t.zipcode] }
+    LogicalProject { exprs: [(min($expr1) + (max($expr1) * count(t.zipcode))) as $expr2] }
+    └─LogicalAgg { aggs: [min($expr1), max($expr1), count(t.zipcode)] }
+      └─LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32) as $expr1, t.zipcode] }
         └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:
     row_format: protobuf
@@ -225,9 +225,9 @@
     create materialized view t as select * from s;
     select count(1), count((country).city.zipcode) from t where (country).city.address>1;
   logical_plan: |
-    LogicalProject { exprs: [count($expr0), count($expr1)] }
-    └─LogicalAgg { aggs: [count($expr0), count($expr1)] }
-      └─LogicalProject { exprs: [1:Int32 as $expr1, Field(Field(t.country, 1:Int32), 1:Int32) as $expr2] }
+    LogicalProject { exprs: [count(1:Int32), count($expr1)] }
+    └─LogicalAgg { aggs: [count(1:Int32), count($expr1)] }
+      └─LogicalProject { exprs: [1:Int32, Field(Field(t.country, 1:Int32), 1:Int32) as $expr1] }
         └─LogicalFilter { predicate: (Field(Field(t.country, 1:Int32), 0:Int32) > 1:Int32) }
           └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
   create_source:

@@ -19,7 +19,7 @@
     └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Array(1:Int32, t.v1) as $expr3] }
+    └─BatchProject { exprs: [Array(1:Int32, t.v1) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     select ARRAY[null];
@@ -52,21 +52,36 @@
     LogicalProject { exprs: [ArrayCat(Array(66:Int32), Array(123:Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[ArrayCat(Array(66:Int32), Array(123:Int32))]] }
+=======
+    BatchProject { exprs: [ArrayCat(Array(66:Int32), Array(123:Int32)) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select array_cat(array[array[66]], array[233]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(Array(66:Int32)), Array(233:Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[ArrayCat(Array(Array(66:Int32)), Array(233:Int32))]] }
+=======
+    BatchProject { exprs: [ArrayCat(Array(Array(66:Int32)), Array(233:Int32)) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select array_cat(array[233], array[array[66]]);
   logical_plan: |
     LogicalProject { exprs: [ArrayCat(Array(233:Int32), Array(Array(66:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[ArrayCat(Array(233:Int32), Array(Array(66:Int32)))]] }
+=======
+    BatchProject { exprs: [ArrayCat(Array(233:Int32), Array(Array(66:Int32))) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select array_cat(array[233], array[array[array[66]]]);
   binder_error: 'Bind error: unable to find least restrictive type between integer[] and integer[][][]'
@@ -82,7 +97,12 @@
     LogicalProject { exprs: [ArrayAppend(Array(66:Int32), 123:Int32) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[ArrayAppend(Array(66:Int32), 123:Int32)]] }
+=======
+    BatchProject { exprs: [ArrayAppend(Array(66:Int32), 123:Int32) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select array_append(123, 234);
   binder_error: 'Bind error: Cannot append integer to integer'
@@ -98,7 +118,12 @@
     LogicalProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
+<<<<<<< HEAD
     BatchValues { rows: [[ArrayPrepend(123:Int32, Array(66:Int32))]] }
+=======
+    BatchProject { exprs: [ArrayPrepend(123:Int32, Array(66:Int32)) as $expr23] }
+    └─BatchValues { rows: [[]] }
+>>>>>>> 540a4e02b (show literal and fix stream project expr display)
 - sql: |
     select array_prepend(123, 234);
   binder_error: 'Bind error: Cannot prepend integer to integer'

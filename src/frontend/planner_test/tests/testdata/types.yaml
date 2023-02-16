@@ -24,7 +24,7 @@
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: select '1'::iNt2;
   logical_plan: |
-    LogicalProject { exprs: [1:Int16 as $expr1] }
+    LogicalProject { exprs: [1:Int16] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: select ''::"iNt2";
   binder_error: |-

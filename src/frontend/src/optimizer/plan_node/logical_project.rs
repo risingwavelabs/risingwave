@@ -31,7 +31,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
-use crate::OptimizerContextRef;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -112,13 +111,8 @@ impl LogicalProject {
         &self.core.exprs
     }
 
-    pub(super) fn fmt_with_name(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        name: &str,
-        ctx: OptimizerContextRef,
-    ) -> fmt::Result {
-        self.core.fmt_with_name(f, name, ctx)
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        self.core.fmt_with_name(f, name, self.base.schema())
     }
 
     pub fn is_identity(&self) -> bool {
@@ -169,7 +163,7 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProject", self.base.ctx())
+        self.fmt_with_name(f, "LogicalProject")
     }
 }
 
