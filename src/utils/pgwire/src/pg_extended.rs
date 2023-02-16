@@ -25,7 +25,7 @@ use itertools::Itertools;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
@@ -394,7 +394,7 @@ impl PreparedStatement {
         for ((type_oid, raw_param), param_format) in type_description
             .iter()
             .zip_eq_fast(raw_params.iter())
-            .zip_eq_debug(format_iter)
+            .zip_eq_fast(format_iter)
         {
             let str = match type_oid {
                 DataType::Varchar | DataType::Bytea => {
