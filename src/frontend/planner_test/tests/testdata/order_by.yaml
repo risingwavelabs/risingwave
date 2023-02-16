@@ -23,7 +23,7 @@
     select v1, v1+1 from t order by v1;
   batch_plan: |
     BatchExchange { order: [t.v1 ASC], dist: Single }
-    └─BatchProject { exprs: [t.v1, (t.v1 + 1:Int32) as $expr23] }
+    └─BatchProject { exprs: [t.v1, (t.v1 + 1:Int32) as $expr24] }
       └─BatchSort { order: [t.v1 ASC] }
         └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
@@ -59,13 +59,13 @@
     select * from t order by 1+1;
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
-    └─BatchExchange { order: [$expr23 ASC], dist: Single }
-      └─BatchSort { order: [$expr23 ASC] }
-        └─BatchProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr23] }
+    └─BatchExchange { order: [$expr24 ASC], dist: Single }
+      └─BatchSort { order: [$expr24 ASC] }
+        └─BatchProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr24] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, $expr47(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr47, t._row_id] }
-    └─StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr47, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, $expr49(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr49, t._row_id] }
+    └─StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr49, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -124,17 +124,17 @@
     create table t (x int, y int, z int);
     select x, y from t order by x + y, z;
   optimized_logical_plan: |
-    LogicalProject { exprs: [t.x, t.y, (t.x + t.y) as $expr20, t.z] }
+    LogicalProject { exprs: [t.x, t.y, (t.x + t.y) as $expr21, t.z] }
     └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   batch_plan: |
     BatchProject { exprs: [t.x, t.y] }
-    └─BatchExchange { order: [$expr42 ASC, t.z ASC], dist: Single }
-      └─BatchSort { order: [$expr42 ASC, t.z ASC] }
-        └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr42, t.z] }
+    └─BatchExchange { order: [$expr44 ASC, t.z ASC], dist: Single }
+      └─BatchSort { order: [$expr44 ASC, t.z ASC] }
+        └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr44, t.z] }
           └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, $expr66(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr66, t.z, t._row_id] }
-    └─StreamProject { exprs: [t.x, t.y, (t.x + t.y) as $expr66, t.z, t._row_id] }
+    StreamMaterialize { columns: [x, y, $expr69(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr69, t.z, t._row_id] }
+    └─StreamProject { exprs: [t.x, t.y, (t.x + t.y) as $expr69, t.z, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by the number of an output column
   sql: |
@@ -208,9 +208,9 @@
     CREATE TABLE test (a INTEGER, b INTEGER);
     SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
   batch_plan: |
-    BatchExchange { order: [$expr23 ASC], dist: Single }
-    └─BatchSortAgg { group_key: [$expr23], aggs: [sum(test.a)] }
-      └─BatchExchange { order: [$expr23 ASC], dist: HashShard($expr23) }
-        └─BatchSort { order: [$expr23 ASC] }
-          └─BatchProject { exprs: [(test.b % 2:Int32) as $expr23, test.a] }
+    BatchExchange { order: [$expr24 ASC], dist: Single }
+    └─BatchSortAgg { group_key: [$expr24], aggs: [sum(test.a)] }
+      └─BatchExchange { order: [$expr24 ASC], dist: HashShard($expr24) }
+        └─BatchSort { order: [$expr24 ASC] }
+          └─BatchProject { exprs: [(test.b % 2:Int32) as $expr24, test.a] }
             └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }

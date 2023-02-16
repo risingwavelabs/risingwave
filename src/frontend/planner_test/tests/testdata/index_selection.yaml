@@ -608,3 +608,33 @@
     └─BatchExchange { order: [idx1.a DESC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC%'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a <= Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC%E'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: Like(idx.a, 'ABC%E':Varchar) }
+      └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a <= Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC_E'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: Like(idx.a, 'ABC_E':Varchar) }
+      └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a <= Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a = Utf8("ABC")], distribution: UpstreamHashShard(idx.a) }
