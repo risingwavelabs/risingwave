@@ -119,6 +119,9 @@ pub struct Args {
     /// Run sqlsmith to generate queries with the given testdata [`files`],
     /// and output the ddl + queries to the given directory,
     /// indicated by this argument.
+    /// We generate sqlsmith queries via `madsim` because
+    /// it provides a degree of determinism, and we can spawn several
+    /// instances in parallel.
     #[clap(long)]
     generate_sqlsmith_queries: Option<String>,
 
