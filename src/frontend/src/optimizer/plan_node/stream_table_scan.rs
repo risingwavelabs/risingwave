@@ -53,13 +53,18 @@ impl StreamTableScan {
 
         let distribution = {
             match logical.distribution_key() {
-                Some(distribution_key) => if distribution_key.is_empty() {
-                    Distribution::Single
-                } else {
-                    // See also `BatchSeqScan::clone_with_dist`.
-                    Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
-                },
-                None => Distribution::SomeShard
+                Some(distribution_key) => {
+                    if distribution_key.is_empty() {
+                        Distribution::Single
+                    } else {
+                        // See also `BatchSeqScan::clone_with_dist`.
+                        Distribution::UpstreamHashShard(
+                            distribution_key,
+                            logical.table_desc().table_id,
+                        )
+                    }
+                }
+                None => Distribution::SomeShard,
             }
         };
         let base = PlanBase::new_stream(
