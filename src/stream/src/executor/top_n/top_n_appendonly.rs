@@ -188,8 +188,9 @@ where
             .await
     }
 
-    async fn handle_watermark(&mut self, _: Watermark) {
+    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
         // TODO(yuhao): handle watermark
+        None
     }
 }
 
