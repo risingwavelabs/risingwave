@@ -33,6 +33,7 @@
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(is_sorted)]
 
 pub mod backup_restore;
 mod barrier;

@@ -124,6 +124,13 @@ impl SpaceReclaimCompactionPicker {
             state.last_select_end_key = sst.key_range.as_ref().unwrap().right.to_vec();
 
             if level_handler.is_pending_compact(&sst.id) || self.filter(sst) {
+                if !select_input_ssts.is_empty() {
+                    // Our goal is to pick as many complete layers of data as possible and keep the
+                    // picked files contiguous to avoid overlapping key_ranges, so the strategy is
+                    // to pick as many contiguous files as possible (at least one)
+                    break;
+                }
+
                 continue;
             }
 
@@ -374,6 +381,56 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
+        }
+
+        {
+            // test continuous file selection
+            for level_handler in &mut levels_handler {
+                for pending_task_id in &level_handler.pending_tasks_ids() {
+                    level_handler.remove_task(*pending_task_id);
+                }
+            }
+
+            // rebuild selector
+            selector = SpaceReclaimCompactionSelector::default();
+            // cut range [3,4] [6] [8,9,10]
+            levels.member_table_ids = vec![2, 5, 7];
+            let expect_task_file_count = vec![2, 1, 3];
+            let expect_task_sst_id_range = vec![vec![3, 4], vec![6], vec![8, 9, 10]];
+            for (index, x) in expect_task_file_count.iter().enumerate() {
+                // // pick space reclaim
+                let task = selector
+                    .pick_compaction(
+                        1,
+                        &group_config,
+                        &levels,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        HashMap::default(),
+                    )
+                    .unwrap();
+
+                assert_compaction_task(&task, &levels_handler);
+                assert_eq!(task.input.input_levels.len(), 2);
+                assert_eq!(task.input.input_levels[0].level_idx, 4);
+
+                assert_eq!(task.input.input_levels[0].table_infos.len(), *x);
+                let select_sst = &task.input.input_levels[0]
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.id)
+                    .collect_vec();
+                assert!(select_sst.is_sorted());
+                assert_eq!(expect_task_sst_id_range[index], *select_sst);
+
+                assert_eq!(task.input.input_levels[1].level_idx, 4);
+                assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+                assert_eq!(task.input.target_level, 4);
+                assert!(matches!(
+                    task.compaction_task_type,
+                    compact_task::TaskType::SpaceReclaim
+                ));
+            }
         }
     }
 }
