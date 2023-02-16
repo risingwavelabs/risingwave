@@ -683,7 +683,9 @@ impl ArrayImpl {
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
             ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
-            ProstArrayType::Jsonb => todo!(),
+            ProstArrayType::Jsonb => {
+                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
+            }
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),

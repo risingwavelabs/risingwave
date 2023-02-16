@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use postgres_types::{ToSql as _, Type};
+use postgres_types::{FromSql as _, ToSql as _, Type};
 use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
@@ -120,6 +120,11 @@ impl JsonbVal {
     pub fn dummy() -> Self {
         Self(Value::Null.into())
     }
+
+    pub fn value_deserialize(buf: &[u8]) -> Option<Self> {
+        let v = Value::from_sql(&Type::JSONB, buf).ok()?;
+        Some(Self(v.into()))
+    }
 }
 
 impl JsonbRef<'_> {
@@ -197,6 +202,16 @@ impl ArrayBuilder for JsonbArrayBuilder {
             bitmap: self.bitmap.finish(),
             data: self.data,
         }
+    }
+}
+
+impl JsonbArrayBuilder {
+    pub fn append_move(
+        &mut self,
+        value: <<JsonbArrayBuilder as ArrayBuilder>::ArrayType as Array>::OwnedItem,
+    ) {
+        self.bitmap.append(true);
+        self.data.push(*value.0);
     }
 }
 
