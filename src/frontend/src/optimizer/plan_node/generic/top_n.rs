@@ -52,7 +52,6 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         });
         let mut order_cols = HashSet::new();
 
-        assert!(!self.group_key.is_empty());
         // Here we want the state table to store the states in the order we want, firstly in
         // ascending order by the columns specified by the group key, then by the columns
         // specified by `order`. If we do that, when the later group topN operator
