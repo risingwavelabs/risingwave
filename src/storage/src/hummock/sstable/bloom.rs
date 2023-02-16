@@ -126,6 +126,18 @@ impl BloomFilterBuilder {
             bits_per_key,
         }
     }
+
+    pub fn for_test(bits_per_key: usize, capacity: usize) -> Self {
+        let key_hash_entries = if capacity > 0 {
+            Vec::with_capacity(capacity)
+        } else {
+            vec![]
+        };
+        Self {
+            key_hash_entries,
+            bits_per_key,
+        }
+    }
 }
 
 /// Gets Bloom filter bits per key from entries count and FPR
