@@ -28,9 +28,13 @@ use crate::{
 };
 
 /// e2e test runner for pre-generated queries from sqlsmith
-pub async fn run_pre_generated(client: &tokio_postgres::Client, ddl: &str, queries: &str) {
+pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
+    let ddl_path = format!("{}/ddl.sql", outdir);
+    let queries_path = format!("{}/queries.sql", outdir);
+    let ddl = std::fs::read_to_string(ddl_path).unwrap();
+    let queries = std::fs::read_to_string(queries_path).unwrap();
     let mut setup_sql = String::with_capacity(1000);
-    for ddl_statement in parse_sql(ddl) {
+    for ddl_statement in parse_sql(&ddl) {
         let sql = ddl_statement.to_string();
         let response = client.execute(&sql, &[]).await;
         if let Err(e) = response {
@@ -38,7 +42,7 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, ddl: &str, queri
         }
         setup_sql.push_str(&sql);
     }
-    for statement in parse_sql(queries) {
+    for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         let response = client.execute(&sql, &[]).await;
         if let Err(e) = response {
@@ -102,7 +106,7 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
 fn write_to_file(outdir: &str, name: &str, sql: &str) {
     let resolved = format!("{}/{}", outdir, name);
     let path = Path::new(&resolved);
-    let mut file = match File::create(&path) {
+    let mut file = match File::create(path) {
         Err(e) => panic!("couldn't create {}: {}", path.display(), e),
         Ok(file) => file,
     };

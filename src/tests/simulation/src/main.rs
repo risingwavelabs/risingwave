@@ -111,13 +111,10 @@ pub struct Args {
     #[clap(long)]
     sqlsmith: Option<usize>,
 
-    /// Run sqlsmith pre-generated queries.
-    ///
-    /// If this argument is set,
-    /// the `files` argument refers to a directory containing
-    /// pre-generated ddl and queries to run.
+    /// Run sqlsmith pre-generated queries with the given directory,
+    /// containing `ddl.sql` and `queries.sql`.
     #[clap(long)]
-    run_sqlsmith_pre_gen: bool,
+    run_sqlsmith_queries: Option<String>,
 
     /// Load etcd data from toml file.
     #[clap(long)]
@@ -181,6 +178,18 @@ async fn main() {
                     .await
                     .unwrap();
                 risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
+            })
+            .await;
+        return;
+    }
+
+    if let Some(outdir) = args.run_sqlsmith_queries {
+        cluster
+            .run_on_client(async move {
+                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                    .await
+                    .unwrap();
+                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
             })
             .await;
         return;
