@@ -433,6 +433,29 @@ where
         }
     }
 
+    /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
+    async fn clean_up(
+        &self,
+        actors_to_clean: impl IntoIterator<Item = (WorkerId, Vec<ActorId>)>,
+    ) -> MetaResult<()> {
+        let futures = actors_to_clean.into_iter().map(|(node_id, actors)| {
+            let node = self.info.node_map.get(&node_id).unwrap();
+            let request_id = Uuid::new_v4().to_string();
+
+            async move {
+                let client = self.client_pool.get(node).await?;
+                let request = DropActorsRequest {
+                    request_id,
+                    actor_ids: actors.to_owned(),
+                };
+                client.drop_actors(request).await
+            }
+        });
+
+        try_join_all(futures).await?;
+        Ok(())
+    }
+
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
@@ -470,22 +493,7 @@ where
             Command::DropStreamingJobs(table_ids) => {
                 // Tell compute nodes to drop actors.
                 let node_actors = self.fragment_manager.table_node_actors(table_ids).await?;
-                let futures = node_actors.iter().map(|(node_id, actors)| {
-                    let node = self.info.node_map.get(node_id).unwrap();
-                    let request_id = Uuid::new_v4().to_string();
-
-                    async move {
-                        let client = self.client_pool.get(node).await?;
-                        let request = DropActorsRequest {
-                            request_id,
-                            actor_ids: actors.to_owned(),
-                        };
-                        client.drop_actors(request).await
-                    }
-                });
-
-                try_join_all(futures).await?;
-
+                self.clean_up(node_actors).await?;
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(table_ids)
@@ -494,22 +502,7 @@ where
 
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
-                let futures = node_actors.iter().map(|(node_id, actors)| {
-                    let node = self.info.node_map.get(node_id).unwrap();
-                    let request_id = Uuid::new_v4().to_string();
-
-                    async move {
-                        let client = self.client_pool.get(node).await?;
-                        let request = DropActorsRequest {
-                            request_id,
-                            actor_ids: actors.to_owned(),
-                        };
-                        client.drop_actors(request).await
-                    }
-                });
-
-                try_join_all(futures).await?;
-
+                self.clean_up(node_actors).await?;
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
@@ -580,23 +573,7 @@ where
                         }
                     }
                 }
-
-                let drop_actor_futures =
-                    node_dropped_actors.into_iter().map(|(node_id, actors)| {
-                        let node = self.info.node_map.get(&node_id).unwrap();
-                        let request_id = Uuid::new_v4().to_string();
-
-                        async move {
-                            let client = self.client_pool.get(node).await?;
-                            let request = DropActorsRequest {
-                                request_id,
-                                actor_ids: actors.to_owned(),
-                            };
-                            client.drop_actors(request).await
-                        }
-                    });
-
-                try_join_all(drop_actor_futures).await?;
+                self.clean_up(node_dropped_actors).await?;
 
                 // Update fragment info after rescheduling in meta store.
                 self.fragment_manager
