@@ -6010,8 +6010,6 @@ dependencies = [
  "tokio-stream",
  "tower",
  "tracing",
- "twox-hash",
- "url",
  "uuid",
  "workspace-hack",
 ]

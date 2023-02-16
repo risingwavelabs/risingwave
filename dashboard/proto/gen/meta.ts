@@ -65,6 +65,16 @@ export function subscribeTypeToJSON(object: SubscribeType): string {
   }
 }
 
+export interface TelemetryInfoRequest {
+}
+
+export interface TelemetryInfoResponse {
+  trackingId: string;
+  telemetryEnabled: boolean;
+  /** set true if all nodes should kill its telemetry reporting */
+  shouldKillTelemetry: boolean;
+}
+
 export interface HeartbeatRequest {
   nodeId: number;
   /** Lightweight info piggybacked by heartbeat request. */
@@ -560,6 +570,56 @@ export interface GetSystemParamsRequest {
 export interface GetSystemParamsResponse {
   params: SystemParams | undefined;
 }
+
+function createBaseTelemetryInfoRequest(): TelemetryInfoRequest {
+  return {};
+}
+
+export const TelemetryInfoRequest = {
+  fromJSON(_: any): TelemetryInfoRequest {
+    return {};
+  },
+
+  toJSON(_: TelemetryInfoRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TelemetryInfoRequest>, I>>(_: I): TelemetryInfoRequest {
+    const message = createBaseTelemetryInfoRequest();
+    return message;
+  },
+};
+
+function createBaseTelemetryInfoResponse(): TelemetryInfoResponse {
+  return { trackingId: "", telemetryEnabled: false, shouldKillTelemetry: false };
+}
+
+export const TelemetryInfoResponse = {
+  fromJSON(object: any): TelemetryInfoResponse {
+    return {
+      trackingId: isSet(object.trackingId) ? String(object.trackingId) : "",
+      telemetryEnabled: isSet(object.telemetryEnabled) ? Boolean(object.telemetryEnabled) : false,
+      shouldKillTelemetry: isSet(object.shouldKillTelemetry) ? Boolean(object.shouldKillTelemetry) : false,
+    };
+  },
+
+  toJSON(message: TelemetryInfoResponse): unknown {
+    const obj: any = {};
+    message.trackingId !== undefined && (obj.trackingId = message.trackingId);
+    message.telemetryEnabled !== undefined && (obj.telemetryEnabled = message.telemetryEnabled);
+    message.shouldKillTelemetry !== undefined && (obj.shouldKillTelemetry = message.shouldKillTelemetry);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TelemetryInfoResponse>, I>>(object: I): TelemetryInfoResponse {
+    const message = createBaseTelemetryInfoResponse();
+    message.trackingId = object.trackingId ?? "";
+    message.telemetryEnabled = object.telemetryEnabled ?? false;
+    message.shouldKillTelemetry = object.shouldKillTelemetry ?? false;
+    return message;
+  },
+};
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
