@@ -100,6 +100,7 @@ pub enum Command {
         table_mview_map: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
+        definition: String,
     },
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -341,6 +342,7 @@ where
                                     MergeUpdate {
                                         actor_id,
                                         upstream_fragment_id: fragment_id,
+                                        new_upstream_fragment_id: None,
                                         added_upstream_actor_id: reschedule.added_actors.clone(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors
@@ -475,6 +477,7 @@ where
                 dispatchers,
                 table_mview_map,
                 init_split_assignment,
+                ..
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_mview_map.len());
                 for (table_id, actors) in table_mview_map {

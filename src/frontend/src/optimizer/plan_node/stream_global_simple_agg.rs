@@ -120,7 +120,14 @@ impl StreamNode for StreamGlobalSimpleAgg {
             ),
             distinct_dedup_tables: distinct_dedup_tables
                 .into_iter()
-                .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
+                .map(|(key_idx, table)| {
+                    (
+                        key_idx as u32,
+                        table
+                            .with_id(state.gen_table_id_wrapped())
+                            .to_internal_table_prost(),
+                    )
+                })
                 .collect(),
         })
     }

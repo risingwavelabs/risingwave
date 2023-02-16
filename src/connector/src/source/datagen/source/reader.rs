@@ -31,7 +31,7 @@ use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
     BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceInfo, SplitId, SplitImpl,
-    SplitMetaData, SplitReaderV2,
+    SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
@@ -47,7 +47,7 @@ pub struct DatagenSplitReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for DatagenSplitReader {
+impl SplitReader for DatagenSplitReader {
     type Properties = DatagenProperties;
 
     #[allow(clippy::unused_async)]
