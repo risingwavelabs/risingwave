@@ -117,14 +117,18 @@ impl DebeziumAvroParserConfig {
     }
 
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+        Self::map_to_columns_inner(&self.inner_schema)
+    }
+
+    // more convenient for testing
+    pub(crate) fn map_to_columns_inner(schema: &Schema) -> Result<Vec<ColumnDesc>> {
         // there must be a record at top level
-        if let Schema::Record { fields, .. } = self.inner_schema.as_ref() {
+        if let Schema::Record { fields, .. } = schema {
             let mut index = 0;
             let fields = fields
                 .iter()
                 .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                 .collect::<Result<Vec<_>>>()?;
-            tracing::info!("fields is {:?}", fields);
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
@@ -229,5 +233,177 @@ impl DebeziumAvroParser {
                 "payload op is not a string ".to_owned(),
             )))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+    use std::path::PathBuf;
+
+    use apache_avro::Schema;
+    use itertools::Itertools;
+    use maplit::{convert_args, hashmap};
+    use risingwave_common::array::Op;
+    use risingwave_common::catalog::ColumnDesc as CatColumnDesc;
+    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::types::{DataType, ScalarImpl};
+
+    use super::*;
+    use crate::parser::{DebeziumAvroParserConfig, SourceStreamChunkBuilder};
+
+    const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
+
+    fn schema_dir() -> String {
+        let dir = PathBuf::from("src/test_data");
+        std::fs::canonicalize(dir)
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    }
+
+    async fn parse_one(
+        parser: DebeziumAvroParser,
+        columns: Vec<SourceColumnDesc>,
+        payload: &[u8],
+    ) -> Vec<(Op, OwnedRow)> {
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
+        {
+            let writer = builder.row_writer();
+            parser.parse_inner(payload, writer).await.unwrap();
+        }
+        let chunk = builder.finish();
+        chunk
+            .rows()
+            .map(|(op, row_ref)| (op, row_ref.into_owned_row()))
+            .collect::<Vec<_>>()
+    }
+
+    fn get_outer_schema() -> Schema {
+        let mut outer_schema_str = String::new();
+        let location = schema_dir() + "/debezium_avro_msg_schema.avsc";
+        std::fs::File::open(location)
+            .unwrap()
+            .read_to_string(&mut outer_schema_str)
+            .unwrap();
+        Schema::parse_str(&outer_schema_str).unwrap()
+    }
+
+    #[test]
+    fn test_extract_inner_schema() {
+        let inner_shema_str = r#"{
+    "type": "record",
+    "name": "Value",
+    "fields": [
+        {
+            "name": "id",
+            "type": "int"
+        },
+        {
+            "name": "first_name",
+            "type": "string"
+        },
+        {
+            "name": "last_name",
+            "type": "string"
+        },
+        {
+            "name": "email",
+            "type": "string"
+        }
+    ]
+}"#;
+
+        let outer_schema = get_outer_schema();
+        let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
+        let extracted_inner_schema =
+            DebeziumAvroParserConfig::extract_inner_schema(&outer_schema).unwrap();
+        assert_eq!(expected_inner_schema, extracted_inner_schema);
+    }
+
+    #[test]
+    fn test_map_to_columns() {
+        let outer_schema = get_outer_schema();
+        let inner_schema = DebeziumAvroParserConfig::extract_inner_schema(&outer_schema).unwrap();
+        let columns = DebeziumAvroParserConfig::map_to_columns_inner(&inner_schema)
+            .unwrap()
+            .into_iter()
+            .map(CatColumnDesc::from)
+            .collect_vec();
+
+        assert_eq!(columns.len(), 4);
+        assert_eq!(
+            CatColumnDesc {
+                data_type: DataType::Int32,
+                column_id: 1.into(),
+                name: "id".to_owned(),
+                field_descs: Vec::new(),
+                type_name: "".to_owned()
+            },
+            columns[0]
+        );
+
+        assert_eq!(
+            CatColumnDesc {
+                data_type: DataType::Varchar,
+                column_id: 2.into(),
+                name: "first_name".to_owned(),
+                field_descs: Vec::new(),
+                type_name: "".to_owned()
+            },
+            columns[1]
+        );
+
+        assert_eq!(
+            CatColumnDesc {
+                data_type: DataType::Varchar,
+                column_id: 3.into(),
+                name: "last_name".to_owned(),
+                field_descs: Vec::new(),
+                type_name: "".to_owned()
+            },
+            columns[2]
+        );
+
+        assert_eq!(
+            CatColumnDesc {
+                data_type: DataType::Varchar,
+                column_id: 4.into(),
+                name: "email".to_owned(),
+                field_descs: Vec::new(),
+                type_name: "".to_owned()
+            },
+            columns[3]
+        );
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_debezium_avro_parser() -> Result<()> {
+        let props = convert_args!(hashmap!(
+            "kafka.topic" => "dbserver1.inventory.customers"
+        ));
+        let config = DebeziumAvroParserConfig::new(&props, "http://127.0.0.1:8081").await?;
+        let columns = config
+            .map_to_columns()?
+            .into_iter()
+            .map(CatColumnDesc::from)
+            .map(|c| SourceColumnDesc::from(&c))
+            .collect_vec();
+
+        let parser = DebeziumAvroParser::new(columns.clone(), config)?;
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA)
+            .await
+            .try_into()
+            .unwrap();
+        assert_eq!(op, Op::Insert);
+        assert_eq!(row[0], Some(ScalarImpl::Int32(1001)));
+        assert_eq!(row[1], Some(ScalarImpl::Utf8("Sally".into())));
+        assert_eq!(row[2], Some(ScalarImpl::Utf8("Thomas".into())));
+        assert_eq!(
+            row[3],
+            Some(ScalarImpl::Utf8("sally.thomas@acme.com".into()))
+        );
+        Ok(())
     }
 }

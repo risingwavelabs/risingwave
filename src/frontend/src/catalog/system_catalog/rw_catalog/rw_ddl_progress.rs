@@ -12,9 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use simd_json_parser::*;
+use risingwave_common::types::DataType;
 
-mod avro_parser;
-mod operators;
-mod simd_json_parser;
-pub use avro_parser::*;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+
+pub const RW_DDL_PROGRESS_TABLE_NAME: &str = "rw_ddl_progress";
+
+pub const RW_DDL_PROGRESS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int64, "ddl_id"),
+    (DataType::Varchar, "ddl_statement"),
+    (DataType::Varchar, "progress"),
+];
