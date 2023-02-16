@@ -160,11 +160,11 @@ async fn create_tables(
     // Generate some mviews
     for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
         let response = client.execute(&create_sql, &[]).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
+            setup_sql.push_str(&format!("{};", &create_sql));
             tables.push(table.clone());
             mviews.push(table);
         }
@@ -213,7 +213,7 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, 
             {
                 return 1;
             }
-            panic!(
+            let error_msg = format!(
                 "
 Query failed:
 ---- START
@@ -228,6 +228,9 @@ Reason:
 ",
                 setup_sql, query, e
             );
+            // consolidate error reason for deterministic test
+            tracing::info!(error_msg);
+            panic!(error_msg)
         }
     }
 }
