@@ -12,8 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod rw_ddl_progress;
-mod rw_meta_snapshot;
+use risingwave_common::types::DataType;
 
-pub use rw_ddl_progress::*;
-pub use rw_meta_snapshot::*;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+
+pub const RW_DDL_PROGRESS_TABLE_NAME: &str = "rw_ddl_progress";
+
+pub const RW_DDL_PROGRESS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int64, "ddl_id"),
+    (DataType::Varchar, "ddl_statement"),
+    (DataType::Varchar, "progress"),
+];

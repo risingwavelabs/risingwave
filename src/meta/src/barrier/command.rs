@@ -100,6 +100,7 @@ pub enum Command {
         upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
+        definition: String,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -517,6 +518,7 @@ where
                 dispatchers,
                 upstream_mview_actors,
                 init_split_assignment,
+                ..
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
                 for (table_id, actors) in upstream_mview_actors {

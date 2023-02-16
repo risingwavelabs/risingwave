@@ -34,6 +34,7 @@ use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
@@ -693,6 +694,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
         Ok(SystemParams::default().into())
+    }
+
+    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
+        Ok(vec![])
     }
 }
 

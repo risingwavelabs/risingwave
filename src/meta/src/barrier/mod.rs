@@ -28,6 +28,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::stream_plan::Barrier;
@@ -148,6 +149,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     pub(crate) env: MetaSrvEnv<S>,
+
+    tracker: Mutex<CreateMviewProgressTracker<S>>,
 }
 
 /// Controls the concurrent execution of commands.
@@ -492,7 +495,7 @@ where
         );
 
         let snapshot_manager = SnapshotManager::new(hummock_manager.clone()).into();
-
+        let tracker = CreateMviewProgressTracker::new();
         Self {
             interval,
             enable_recovery,
@@ -507,6 +510,7 @@ where
             source_manager,
             metrics,
             env,
+            tracker: Mutex::new(tracker),
         }
     }
 
@@ -533,7 +537,6 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
-        let mut tracker = CreateMviewProgressTracker::new();
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
@@ -584,7 +587,6 @@ where
                         prev_epoch,
                         result,
                         &mut state,
-                        &mut tracker,
                         &mut checkpoint_control,
                     )
                     .await;
@@ -768,7 +770,6 @@ where
         prev_epoch: u64,
         result: MetaResult<Vec<BarrierCompleteResponse>>,
         state: &mut BarrierManagerState,
-        tracker: &mut CreateMviewProgressTracker<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         if let Err(err) = result {
@@ -777,7 +778,7 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
-            self.do_recovery(err, fail_node, state, tracker, checkpoint_control)
+            self.do_recovery(err, fail_node, state, checkpoint_control)
                 .await;
             return;
         }
@@ -787,10 +788,7 @@ where
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
             assert!(matches!(node.state, Completed(_)));
-            if let Err(err) = self
-                .complete_barrier(node, tracker, checkpoint_control)
-                .await
-            {
+            if let Err(err) = self.complete_barrier(node, checkpoint_control).await {
                 index = i;
                 err_msg = Some(err);
                 break;
@@ -801,7 +799,7 @@ where
             let fail_nodes = complete_nodes
                 .drain(index..)
                 .chain(checkpoint_control.barrier_failed().into_iter());
-            self.do_recovery(err, fail_nodes, state, tracker, checkpoint_control)
+            self.do_recovery(err, fail_nodes, state, checkpoint_control)
                 .await;
         }
     }
@@ -811,7 +809,6 @@ where
         err: MetaError,
         fail_nodes: impl IntoIterator<Item = EpochNode<S>>,
         state: &mut BarrierManagerState,
-        tracker: &mut CreateMviewProgressTracker<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         checkpoint_control.clear_changes();
@@ -829,6 +826,7 @@ where
         if self.enable_recovery {
             // If failed, enter recovery mode.
             self.set_status(BarrierManagerStatus::Recovering).await;
+            let mut tracker = self.tracker.lock().await;
             *tracker = CreateMviewProgressTracker::new();
             self.snapshot_manager
                 .unpin_all()
@@ -850,7 +848,6 @@ where
     async fn complete_barrier(
         &self,
         node: &mut EpochNode<S>,
-        tracker: &mut CreateMviewProgressTracker<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
@@ -903,6 +900,7 @@ where
                 // Save `cancelled_command` for Create MVs.
                 let actors_to_cancel = node.command_ctx.actors_to_cancel();
                 let cancelled_command = if !actors_to_cancel.is_empty() {
+                    let mut tracker = self.tracker.lock().await;
                     tracker.find_cancelled_command(actors_to_cancel)
                 } else {
                     None
@@ -911,14 +909,19 @@ where
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {
                     let mut commands = vec![];
-                    if let Some(command) = tracker.add(TrackingCommand {
-                        context: node.command_ctx.clone(),
-                        notifiers,
-                    }) {
+                    let version_stats = self.hummock_manager.get_version_stats().await;
+                    let mut tracker = self.tracker.lock().await;
+                    if let Some(command) = tracker.add(
+                        TrackingCommand {
+                            context: node.command_ctx.clone(),
+                            notifiers,
+                        },
+                        &version_stats,
+                    ) {
                         commands.push(command);
                     }
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                        if let Some(command) = tracker.update(progress) {
+                        if let Some(command) = tracker.update(progress, &version_stats) {
                             commands.push(command);
                         }
                     }
@@ -974,6 +977,10 @@ where
         checkpoint_control.post_resolve(command);
 
         info
+    }
+
+    pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
+        self.tracker.lock().await.gen_ddl_progress()
     }
 }
 

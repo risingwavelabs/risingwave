@@ -64,6 +64,9 @@ pub struct CreateStreamingJobContext {
     /// The properties of the streaming job.
     // TODO: directly store `StreamingJob here.
     pub table_properties: HashMap<String, String>,
+
+    /// DDL definition.
+    pub definition: String,
 }
 
 impl CreateStreamingJobContext {
@@ -316,6 +319,7 @@ where
             table_properties,
             building_locations,
             existing_locations,
+            definition,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
@@ -466,6 +470,7 @@ where
                 upstream_mview_actors,
                 dispatchers,
                 init_split_assignment,
+                definition: definition.to_string(),
             })
             .await
         {
