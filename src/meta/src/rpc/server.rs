@@ -67,7 +67,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::report::start_meta_telemetry_reporting;
+use crate::telemetry::start_meta_telemetry_reporting;
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
