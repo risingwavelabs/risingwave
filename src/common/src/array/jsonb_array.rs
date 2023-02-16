@@ -15,7 +15,10 @@
 use postgres_types::{ToSql as _, Type};
 use serde_json::Value;
 
+use super::{Array, ArrayBuilder};
+use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::{Scalar, ScalarImpl, ScalarRef};
+use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarImpl>` smaller.
@@ -113,6 +116,12 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     }
 }
 
+impl JsonbVal {
+    pub fn dummy() -> Self {
+        Self(Value::Null.into())
+    }
+}
+
 impl JsonbRef<'_> {
     pub fn memcmp_serialize(
         &self,
@@ -132,5 +141,133 @@ impl JsonbRef<'_> {
         let mut output = bytes::BytesMut::new();
         self.0.to_sql(&Type::JSONB, &mut output).unwrap();
         output.freeze().into()
+    }
+}
+
+#[derive(Debug)]
+pub struct JsonbArrayBuilder {
+    bitmap: BitmapBuilder,
+    data: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsonbArray {
+    bitmap: Bitmap,
+    data: Vec<Value>,
+}
+
+impl ArrayBuilder for JsonbArrayBuilder {
+    type ArrayType = JsonbArray;
+
+    fn with_meta(capacity: usize, _meta: super::ArrayMeta) -> Self {
+        Self {
+            bitmap: BitmapBuilder::with_capacity(capacity),
+            data: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
+        match value {
+            Some(x) => {
+                self.bitmap.append_n(n, true);
+                self.data
+                    .extend(std::iter::repeat(x).take(n).map(|x| x.0.clone()));
+            }
+            None => {
+                self.bitmap.append_n(n, false);
+                self.data
+                    .extend(std::iter::repeat(*JsonbVal::dummy().0).take(n));
+            }
+        }
+    }
+
+    fn append_array(&mut self, other: &Self::ArrayType) {
+        for bit in other.bitmap.iter() {
+            self.bitmap.append(bit);
+        }
+        self.data.extend_from_slice(&other.data);
+    }
+
+    fn pop(&mut self) -> Option<()> {
+        self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
+    fn finish(self) -> Self::ArrayType {
+        Self::ArrayType {
+            bitmap: self.bitmap.finish(),
+            data: self.data,
+        }
+    }
+}
+
+impl Array for JsonbArray {
+    type Builder = JsonbArrayBuilder;
+    type OwnedItem = JsonbVal;
+    type RefItem<'a> = JsonbRef<'a>;
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        JsonbRef(self.data.get_unchecked(idx))
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    fn to_protobuf(&self) -> super::ProstArray {
+        use risingwave_pb::common::buffer::CompressionType;
+        use risingwave_pb::common::Buffer;
+
+        let mut offset_buffer =
+            Vec::<u8>::with_capacity((1 + self.data.len()) * std::mem::size_of::<u64>());
+        let mut data_buffer = Vec::<u8>::with_capacity(self.data.len());
+
+        let mut offset = 0;
+        for (v, not_null) in self.data.iter().zip_eq_fast(self.null_bitmap().iter()) {
+            if !not_null {
+                continue;
+            }
+            let d = JsonbRef(v).value_serialize();
+            offset_buffer.extend_from_slice(&(offset as u64).to_be_bytes());
+            data_buffer.extend_from_slice(&d);
+            offset += d.len();
+        }
+        offset_buffer.extend_from_slice(&(offset as u64).to_be_bytes());
+
+        let values = vec![
+            Buffer {
+                compression: CompressionType::None as i32,
+                body: offset_buffer,
+            },
+            Buffer {
+                compression: CompressionType::None as i32,
+                body: data_buffer,
+            },
+        ];
+
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        super::ProstArray {
+            null_bitmap: Some(null_bitmap),
+            values,
+            array_type: super::ProstArrayType::Jsonb as i32,
+            struct_array_data: None,
+            list_array_data: None,
+        }
+    }
+
+    fn null_bitmap(&self) -> &Bitmap {
+        &self.bitmap
+    }
+
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
+    fn set_bitmap(&mut self, bitmap: Bitmap) {
+        self.bitmap = bitmap;
+    }
+
+    fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
+        let array_builder = Self::Builder::new(capacity);
+        super::ArrayBuilderImpl::Jsonb(array_builder)
     }
 }
