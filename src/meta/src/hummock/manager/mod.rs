@@ -61,8 +61,7 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
-    CatalogManager, CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification,
-    MetaSrvEnv, META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
@@ -251,6 +250,7 @@ where
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
     ) -> HummockManagerRef<S> {
+        use crate::manager::CatalogManager;
         let compaction_group_manager =
             Self::build_compaction_group_manager_with_config(&env, config)
                 .await

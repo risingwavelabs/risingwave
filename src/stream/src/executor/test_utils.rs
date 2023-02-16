@@ -368,6 +368,7 @@ pub mod agg_executor {
                 agg_calls,
                 agg_state_tables,
                 result_table,
+                Default::default(),
                 pk_indices,
                 executor_id,
                 1 << 10,

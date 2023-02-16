@@ -395,8 +395,9 @@ impl PlanRoot {
                 // merge should be applied before eliminate
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
+                TrivialProjectToValuesRule::create(),
                 // project-join merge should be applied after merge
-                // and eliminate
+                // eliminate and to values
                 ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
@@ -410,6 +411,7 @@ impl PlanRoot {
                 OverAggToTopNRule::create(),
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
+                TrivialProjectToValuesRule::create(),
             ],
             ApplyOrder::TopDown,
         );

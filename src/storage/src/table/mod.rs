@@ -22,7 +22,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
@@ -133,7 +133,7 @@ pub fn compute_chunk_vnode(
         chunk
             .get_hash_values(indices, Crc32FastBuilder)
             .into_iter()
-            .zip_eq_debug(chunk.vis().iter())
+            .zip_eq_fast(chunk.vis().iter())
             .map(|(h, vis)| {
                 let vnode = h.to_vnode();
                 // Ignore the invisible rows.
