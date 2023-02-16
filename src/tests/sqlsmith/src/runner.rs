@@ -33,13 +33,13 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     let (tables, base_tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
     tracing::info!("Created tables");
 
-    let row_count = 500;
+    let row_count = 50;
     client
         .query("SET RW_IMPLICIT_FLUSH TO TRUE;", &[])
         .await
         .unwrap();
     populate_tables(client, &mut rng, base_tables.clone(), row_count).await;
-    tracing::info!("Created base_tables");
+    tracing::info!("Populated base tables");
 
     test_sqlsmith(
         client,
