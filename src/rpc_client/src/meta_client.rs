@@ -327,6 +327,20 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
+    pub async fn replace_table(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<CatalogVersion> {
+        let request = ReplaceTablePlanRequest {
+            table: Some(table),
+            fragment_graph: Some(graph),
+        };
+        let resp = self.inner.replace_table_plan(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok(resp.version)
+    }
+
     pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
@@ -1326,7 +1340,7 @@ impl GrpcMetaClient {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to connect to meta server {}, trying next address: {}",
+                            "Failed to connect to meta server {}, trying again: {}",
                             addr,
                             e
                         )
@@ -1335,7 +1349,7 @@ impl GrpcMetaClient {
             }
 
             Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
+                "Failed to connect to meta server"
             )))
         })
         .await?;
@@ -1390,6 +1404,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
+            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }

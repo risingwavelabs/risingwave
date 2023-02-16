@@ -293,7 +293,7 @@ impl MaterializeBuffer {
         let key_chunk = data_chunk.reorder_columns(pk_indices);
         key_chunk
             .rows_with_holes()
-            .zip_eq_debug(pks.iter_mut())
+            .zip_eq_fast(pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
                     pk_serde.serialize(r, vnode_and_pk);
