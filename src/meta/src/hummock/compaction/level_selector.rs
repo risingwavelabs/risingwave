@@ -236,6 +236,71 @@ impl DynamicLevelSelectorCore {
         ctx.score_levels.sort_by(|a, b| b.0.cmp(&a.0));
         ctx
     }
+
+    #[allow(dead_code)]
+    fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
+        let ctx = self.calculate_level_base_size(levels);
+
+        // l0
+        let mut compact_pending_bytes = 0;
+        let mut compact_to_next_level_bytes = 0;
+        let l0_size = levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .map(|sub_level| sub_level.total_file_size)
+            .sum::<u64>();
+
+        let mut l0_compaction_trigger = false;
+        if l0_size > self.config.max_bytes_for_level_base {
+            compact_pending_bytes = l0_size;
+            compact_to_next_level_bytes = l0_size;
+            l0_compaction_trigger = true;
+        }
+
+        // l1 and up
+        let mut level_bytes;
+        let mut next_level_bytes = 0;
+        for level in &levels.levels[ctx.base_level - 1..levels.levels.len()] {
+            let level_index = level.get_level_idx() as usize;
+
+            if next_level_bytes > 0 {
+                level_bytes = next_level_bytes;
+                next_level_bytes = 0;
+            } else {
+                level_bytes = level.total_file_size;
+            }
+
+            if level_index == ctx.base_level && l0_compaction_trigger {
+                compact_pending_bytes += level_bytes;
+            }
+
+            level_bytes += compact_to_next_level_bytes;
+            compact_to_next_level_bytes = 0;
+            let level_target = ctx.level_max_bytes[level_index];
+            if level_bytes > level_target {
+                compact_to_next_level_bytes = level_bytes - level_target;
+
+                // Estimate the actual compaction fan-out ratio as size ratio between
+                // the two levels.
+                assert_eq!(0, next_level_bytes);
+                if level_index + 1 < ctx.level_max_bytes.len() {
+                    let next_level = level_index + 1;
+                    next_level_bytes = levels.levels[next_level - 1].total_file_size;
+                }
+
+                if next_level_bytes > 0 {
+                    compact_pending_bytes += (compact_to_next_level_bytes as f64
+                        * (next_level_bytes as f64 / level_bytes as f64 + 1.0))
+                        as u64;
+                }
+            }
+        }
+
+        compact_pending_bytes
+    }
 }
 
 impl LevelSelector for DynamicLevelSelector {
@@ -793,5 +858,52 @@ pub mod tests {
             &mut local_stats,
         );
         assert!(compaction.is_none());
+    }
+
+    #[test]
+    fn test_compact_pending_bytes() {
+        let config = CompactionConfigBuilder::new()
+            .max_bytes_for_level_base(100)
+            .max_level(4)
+            .max_bytes_for_level_multiplier(5)
+            .compaction_mode(CompactionMode::Range as i32)
+            .build();
+        let levels = vec![
+            generate_level(1, vec![]),
+            generate_level(2, generate_tables(0..50, 0..1000, 3, 500)),
+            generate_level(3, generate_tables(30..60, 0..1000, 2, 500)),
+            generate_level(4, generate_tables(60..70, 0..1000, 1, 1000)),
+        ];
+        let levels = Levels {
+            levels,
+            l0: Some(generate_l0_nonoverlapping_sublevels(generate_tables(
+                15..25,
+                0..600,
+                3,
+                100,
+            ))),
+            ..Default::default()
+        };
+
+        let dynamic_level_core = DynamicLevelSelectorCore::new(Arc::new(config));
+        let ctx = dynamic_level_core.calculate_level_base_size(&levels);
+        assert_eq!(1, ctx.base_level);
+        assert_eq!(1000, levels.l0.as_ref().unwrap().total_file_size); // l0
+        assert_eq!(0, levels.levels.get(0).unwrap().total_file_size); // l1
+        assert_eq!(25000, levels.levels.get(1).unwrap().total_file_size); // l2
+        assert_eq!(15000, levels.levels.get(2).unwrap().total_file_size); // l3
+        assert_eq!(10000, levels.levels.get(3).unwrap().total_file_size); // l4
+
+        assert_eq!(100, ctx.level_max_bytes[1]); // l1
+        assert_eq!(500, ctx.level_max_bytes[2]); // l2
+        assert_eq!(2500, ctx.level_max_bytes[3]); // l3
+        assert_eq!(12500, ctx.level_max_bytes[4]); // l4
+
+        // l1 pending = (0 + 1000 - 100) * ((25000 / 1000) + 1) + 1000 = 24400
+        // l2 pending = (25000 + 900 - 500) * ((15000 / (25000 + 900)) + 1) = 40110
+        // l3 pending = (15000 + 25400 - 2500) * ((10000 / (15000 + 25400) + 1)) = 47281
+
+        let compact_pending_bytes = dynamic_level_core.compact_pending_bytes_needed(&levels);
+        assert_eq!(24400 + 40110 + 47281, compact_pending_bytes);
     }
 }
