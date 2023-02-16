@@ -19,7 +19,7 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Array, DataType as AstDataType, Expr, Value};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::typed_null;
 use crate::sql_gen::SqlGenerator;

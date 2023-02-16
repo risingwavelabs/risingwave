@@ -17,6 +17,8 @@ use rand::Rng;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
+
+
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
@@ -34,7 +36,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
         let range = if self.can_recurse() { 3 } else { 4 };
-        match self.rng.gen_range(0..=4) {
+        match self.rng.gen_range(0..=range) {
             0..=0 => self.gen_simple_table(),
             1..=1 => self.gen_time_window_func(),
             2..=3 => self.gen_join_clause(),
@@ -84,6 +86,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
+    /// TODO:
+    /// Generate equi join with columns not of the same type,
+    /// use functions to transform to same type.
     fn gen_equi_join_columns(
         &mut self,
         left_columns: Vec<Column>,
@@ -112,23 +117,25 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         right_columns: Vec<Column>,
         right_table: Vec<Table>,
     ) -> Option<Expr> {
-        // Higher chance for equi join,
-        // since non_equi_join could generate lots of invalid queries,
-        // if it requires streaming nested loop join.
-        match self.rng.gen_bool(0.8) {
-            true if let Some((l, r)) = self.gen_equi_join_columns(left_columns, right_columns) => {
-                Some(create_equi_expr(l.name, r.name))
-            },
-            false => {
-                let old_context = self.new_local_context();
-                self.add_relations_to_context(left_table);
-                self.add_relations_to_context(right_table);
-                let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
-                self.restore_context(old_context);
-                Some(expr)
+        // We always generate an equi join, to avoid stream nested loop join.
+        let Some((l, r)) = self.gen_equi_join_columns(left_columns, right_columns) else {
+            return None;
+        };
+        let mut join_on_expr = create_equi_expr(l.name, r.name);
+        // Add extra boolean expressions
+        if self.flip_coin() {
+            let old_context = self.new_local_context();
+            self.add_relations_to_context(left_table);
+            self.add_relations_to_context(right_table);
+            let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+            self.restore_context(old_context);
+            join_on_expr = Expr::BinaryOp {
+                left: Box::new(join_on_expr),
+                op: BinaryOperator::And,
+                right: Box::new(expr),
             }
-            _ => None,
         }
+        Some(join_on_expr)
     }
 
     fn gen_join_constraint(
@@ -158,18 +165,21 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
         // If many failures due to `StreamNestedLoopJoin`, try disable the others.
-        let join_operator = match self.rng.gen_range(0..=4) {
+        let join_operator = match self.rng.gen_range(0..=3) {
             0 => JoinOperator::Inner(join_constraint),
             1 => JoinOperator::LeftOuter(join_constraint),
             2 => JoinOperator::RightOuter(join_constraint),
-            3 => JoinOperator::FullOuter(join_constraint),
-            _ => JoinOperator::CrossJoin,
+            _ => JoinOperator::FullOuter(join_constraint),
+            // NOTE: Do not generate CrossJoin,
+            // it has been already generated in query.
+            // _ => JoinOperator::CrossJoin,
         };
 
         let right_factor_with_join = Join {
             relation: right_factor,
             join_operator,
         };
+        // TODO: Different structures of joins (bushy, left, right)
         left_table.append(&mut right_table);
         (
             TableWithJoins {
