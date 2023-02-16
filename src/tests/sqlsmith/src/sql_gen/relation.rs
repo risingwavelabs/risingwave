@@ -33,12 +33,12 @@ fn create_equi_expr(left: String, right: String) -> Expr {
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let range = if self.can_recurse() { 10 } else { 9 };
-        match self.rng.gen_range(0..=range) {
-            0..=7 => self.gen_simple_table(),
-            8..=8 => self.gen_time_window_func(),
-            9..=9 => self.gen_join_clause(),
-            10..=10 => self.gen_table_subquery(),
+        let range = if self.can_recurse() { 3 } else { 4 };
+        match self.rng.gen_range(0..=4) {
+            0..=0 => self.gen_simple_table(),
+            1..=1 => self.gen_time_window_func(),
+            2..=3 => self.gen_join_clause(),
+            4..=4 => self.gen_table_subquery(),
             _ => unreachable!(),
         }
     }

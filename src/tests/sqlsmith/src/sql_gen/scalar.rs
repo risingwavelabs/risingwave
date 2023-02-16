@@ -88,13 +88,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: AstDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             })),
-            T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
-                Expr::Array(Array {
-                    elem: self.gen_simple_scalar_list(ty, n),
-                    named: true,
-                })
-            }
+            // T::List { datatype: ref ty } => {
+            //     let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
+            //     Expr::Array(Array {
+            //         elem: self.gen_simple_scalar_list(ty, n),
+            //         named: true,
+            //     })
+            // }
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934
             // T::Struct(ref inner) => Expr::Row(
             //     inner
