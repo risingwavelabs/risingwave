@@ -33,7 +33,7 @@ use serde_derive::Deserialize;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use super::{Sink, SinkError};
+use super::{Sink, SinkError, SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_DEBEZIUM};
 use crate::common::KafkaCommon;
 use crate::sink::Result;
 use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
@@ -94,7 +94,7 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.format != "append_only" && config.format != "debezium" {
+        if config.format != SINK_FORMAT_APPEND_ONLY && config.format != SINK_FORMAT_DEBEZIUM {
             return Err(SinkError::Config(anyhow!(
                 "format must be either append_only or debezium"
             )));

@@ -276,6 +276,8 @@ fn assemble_materialize(
     // LogicalProject(index_columns, include_columns)
     //   LogicalScan(table_desc)
 
+    let definition = context.normalized_sql().to_owned();
+
     let logical_scan = LogicalScan::create(
         table_name,
         false,
@@ -329,7 +331,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_index_plan(index_name)
+    .gen_index_plan(index_name, definition)
 }
 
 fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {

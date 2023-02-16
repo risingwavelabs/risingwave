@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -37,7 +38,7 @@ use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`CreateStreamingJobContext`] carries one-time infos.
+/// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 #[cfg_attr(test, derive(Default))]
@@ -58,7 +59,11 @@ pub struct CreateStreamingJobContext {
     pub existing_locations: Locations,
 
     /// The properties of the streaming job.
+    // TODO: directly store `StreamingJob here.
     pub table_properties: HashMap<String, String>,
+
+    /// DDL definition.
+    pub definition: String,
 }
 
 impl CreateStreamingJobContext {
@@ -69,6 +74,24 @@ impl CreateStreamingJobContext {
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.internal_tables.keys().copied().collect()
     }
+}
+
+/// [`ReplaceTableContext`] carries one-time infos for replacing the plan of an existing table.
+///
+/// Note: for better readability, keep this struct complete and immutable once created.
+pub struct ReplaceTableContext {
+    /// The updates to be applied to the downstream chain actors. Used for schema change.
+    pub merge_updates: Vec<MergeUpdate>,
+
+    /// The locations of the actors to build in the new table to replace.
+    pub building_locations: Locations,
+
+    /// The locations of the existing actors, essentially the downstream chain actors to update.
+    pub existing_locations: Locations,
+
+    /// The properties of the streaming job.
+    // TODO: directly store `StreamingJob here.
+    pub table_properties: HashMap<String, String>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -148,6 +171,7 @@ where
             table_properties,
             building_locations,
             existing_locations,
+            definition,
             ..
         }: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
@@ -298,6 +322,7 @@ where
                 table_mview_map: table_mview_map.clone(),
                 dispatchers: dispatchers.clone(),
                 init_split_assignment: split_assignment,
+                definition: definition.to_string(),
             })
             .await
         {
