@@ -25,7 +25,7 @@ use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::planner::Planner;
-use crate::scheduler::streaming_manager::{CreatingStreamingJobInfo, StreamingJobGuard};
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -146,15 +146,16 @@ pub async fn handle_create_mv(
         (table, graph)
     };
 
-    let _job_guard = StreamingJobGuard::new(
-        CreatingStreamingJobInfo::new(
-            session.session_id(),
-            table.database_id,
-            table.schema_id,
-            table.name.clone(),
-        ),
-        session.env().creating_streaming_job_tracker(),
-    );
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                table.database_id,
+                table.schema_id,
+                table.name.clone(),
+            ));
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
