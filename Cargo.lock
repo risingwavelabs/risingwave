@@ -95,7 +95,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/risingwavelabs/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
+source = "git+https://github.com/risingwavelabs/avro?branch=waruto/modify-decimal#99acf32c68d17d1a94caf08b5918848fc5036cdf"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -743,7 +743,9 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "hyper-rustls",
  "hyper-tls",
+ "lazy_static",
  "pin-project-lite",
  "tokio",
  "tower",
@@ -2757,15 +2759,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hdfs-sys"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73dcfda0dbca0569e98b8bfb87028d83d2f07705587bac1fddea7dc9ee1eca13"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "hdrhistogram"
 version = "7.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2777,21 +2770,6 @@ dependencies = [
  "flate2",
  "nom",
  "num-traits",
-]
-
-[[package]]
-name = "hdrs"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70a8d6dab41a27fd3825810f6413f16f15733c84114504e41955516e4156676c"
-dependencies = [
- "async-lock",
- "blocking",
- "errno",
- "futures",
- "hdfs-sys",
- "libc",
- "log",
 ]
 
 [[package]]
@@ -2966,7 +2944,9 @@ checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
  "hyper",
+ "log",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
 ]
@@ -3541,6 +3521,23 @@ dependencies = [
  "toml 0.7.2",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "madsim-aws-sdk-s3"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e0798f5f47c2c9265e22bb0b9b16c73c8eabbceb79b7fec0610569fdcd293be"
+dependencies = [
+ "aws-sdk-s3",
+ "aws-smithy-http",
+ "aws-smithy-types",
+ "aws-types",
+ "bytes",
+ "http",
+ "madsim",
+ "spin 0.9.5",
+ "tracing",
 ]
 
 [[package]]
@@ -4136,7 +4133,6 @@ dependencies = [
  "bytes",
  "flagset",
  "futures",
- "hdrs",
  "http",
  "hyper",
  "log",
@@ -6128,7 +6124,6 @@ dependencies = [
  "async-trait",
  "async_stack_trace",
  "aws-config",
- "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-types",
  "bytes",
@@ -6137,6 +6132,7 @@ dependencies = [
  "futures",
  "hyper",
  "itertools",
+ "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
  "prometheus",
@@ -6249,6 +6245,7 @@ dependencies = [
  "glob",
  "itertools",
  "madsim",
+ "madsim-aws-sdk-s3",
  "madsim-etcd-client",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -8505,9 +8502,8 @@ dependencies = [
  "arrayvec",
  "auto_enums",
  "auto_enums_derive",
- "aws-smithy-async",
+ "aws-sdk-s3",
  "aws-smithy-client",
- "aws-smithy-http",
  "aws-types",
  "base64 0.21.0",
  "bytes",
@@ -8520,6 +8516,7 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "digest",
  "either",
  "fail",
  "fixedbitset",
@@ -8548,7 +8545,6 @@ dependencies = [
  "log",
  "madsim-tokio",
  "memchr",
- "mime_guess",
  "miniz_oxide",
  "multimap",
  "num-bigint",
@@ -8568,7 +8564,7 @@ dependencies = [
  "regex",
  "regex-syntax",
  "reqwest",
- "rustls",
+ "ring",
  "scopeguard",
  "serde",
  "smallvec",
@@ -8577,7 +8573,6 @@ dependencies = [
  "strum",
  "syn",
  "time 0.3.18",
- "time-macros",
  "tokio",
  "tokio-stream",
  "tokio-util",

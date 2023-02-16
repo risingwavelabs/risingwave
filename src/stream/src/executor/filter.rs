@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::BoxedExpression;
 
 use super::{
@@ -97,7 +97,7 @@ impl SimpleFilterExecutor {
         });
 
         if let ArrayImpl::Bool(bool_array) = &*filter {
-            for (op, res) in ops.into_iter().zip_eq_debug(bool_array.iter()) {
+            for (op, res) in ops.into_iter().zip_eq_fast(bool_array.iter()) {
                 // SAFETY: ops.len() == pred_output.len() == visibility.len()
                 let res = res.unwrap_or(false);
                 match op {
@@ -198,8 +198,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::test_utils::MockSource;

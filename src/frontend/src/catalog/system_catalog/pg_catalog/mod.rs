@@ -18,6 +18,7 @@ pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
+pub mod pg_conversion;
 pub mod pg_database;
 pub mod pg_description;
 pub mod pg_enum;
@@ -45,6 +46,7 @@ pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
+pub use pg_conversion::*;
 pub use pg_database::*;
 pub use pg_description::*;
 pub use pg_enum::*;
@@ -600,6 +602,10 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_tablespace_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_TABLESPACE_DATA_ROWS.clone())
+    }
+
+    pub(crate) fn read_conversion_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
     }
 
     pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {

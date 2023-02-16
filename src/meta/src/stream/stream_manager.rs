@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -37,7 +38,7 @@ use crate::MetaResult;
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`CreateStreamingJobContext`] carries one-time infos.
+/// [`CreateStreamingJobContext`] carries one-time infos for creating a streaming job.
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 #[cfg_attr(test, derive(Default))]
@@ -58,6 +59,7 @@ pub struct CreateStreamingJobContext {
     pub existing_locations: Locations,
 
     /// The properties of the streaming job.
+    // TODO: directly store `StreamingJob here.
     pub table_properties: HashMap<String, String>,
 }
 
@@ -69,6 +71,24 @@ impl CreateStreamingJobContext {
     pub fn internal_table_ids(&self) -> Vec<u32> {
         self.internal_tables.keys().copied().collect()
     }
+}
+
+/// [`ReplaceTableContext`] carries one-time infos for replacing the plan of an existing table.
+///
+/// Note: for better readability, keep this struct complete and immutable once created.
+pub struct ReplaceTableContext {
+    /// The updates to be applied to the downstream chain actors. Used for schema change.
+    pub merge_updates: Vec<MergeUpdate>,
+
+    /// The locations of the actors to build in the new table to replace.
+    pub building_locations: Locations,
+
+    /// The locations of the existing actors, essentially the downstream chain actors to update.
+    pub existing_locations: Locations,
+
+    /// The properties of the streaming job.
+    // TODO: directly store `StreamingJob here.
+    pub table_properties: HashMap<String, String>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -256,9 +276,13 @@ where
         let registered_table_ids = hummock_manager_ref
             .register_table_fragments(&table_fragments, table_properties)
             .await?;
+        debug_assert_eq!(
+            registered_table_ids.len(),
+            table_fragments.all_table_ids().count()
+        );
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
             }
         }));
 
@@ -333,18 +357,16 @@ where
             .await?;
 
         // Unregister from compaction group afterwards.
-        for table_fragments in table_fragments_vec {
-            if let Err(e) = self
-                .hummock_manager
-                .unregister_table_fragments(&table_fragments)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to unregister compaction group for {}. It will be unregistered eventually.\n{:#?}",
-                    table_fragments.table_id(),
+        if let Err(e) = self
+            .hummock_manager
+            .unregister_table_fragments_vec(&table_fragments_vec)
+            .await
+        {
+            tracing::warn!(
+                    "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
+                    table_fragments_vec,
                     e
                 );
-            }
         }
 
         Ok(())
@@ -359,6 +381,7 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
@@ -545,6 +568,7 @@ mod tests {
                 cluster_manager.clone(),
                 meta_metrics.clone(),
                 compactor_manager.clone(),
+                catalog_manager.clone(),
             )
             .await?;
 
@@ -703,6 +727,8 @@ mod tests {
                 fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
+                state_table_ids: vec![0],
+                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );
@@ -759,6 +785,8 @@ mod tests {
                 fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
+                state_table_ids: vec![0],
+                vnode_mapping: Some(ParallelUnitMapping::new_single(0).to_protobuf()),
                 ..Default::default()
             },
         );

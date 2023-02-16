@@ -85,12 +85,12 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>, schema: Schema) -> Self {
         use super::exchange::input::LocalInput;
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            Schema::default(),
+            schema,
             vec![],
             ActorContext::create(114),
             514,
@@ -147,6 +147,8 @@ impl MergeExecutor {
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
+                        assert!(update.new_upstream_fragment_id.is_none());
+
                         // `Watermark` of upstream may become stale after upstream scaling.
                         select_all
                             .buffered_watermarks
@@ -454,7 +456,7 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger = MergeExecutor::for_test(rxs);
+        let merger = MergeExecutor::for_test(rxs, Schema::default());
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
@@ -610,6 +612,7 @@ mod tests {
             (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
+                new_upstream_fragment_id: None,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }
