@@ -108,26 +108,27 @@ impl SpaceReclaimCompactionPicker {
             state.init(start_key, end_key)
         }
 
-        let start_key = state.last_select_end_key.clone();
         let mut select_file_size = 0;
 
         let matched_sst = reclaimed_level
             .table_infos
             .iter()
             .filter(|sst| match &sst.key_range {
-                Some(key_range) => key_range.left >= start_key,
+                Some(key_range) => key_range.left >= state.last_select_end_key,
 
                 None => false,
             });
 
         for sst in matched_sst {
-            state.last_select_end_key = sst.key_range.as_ref().unwrap().right.to_vec();
-
             if level_handler.is_pending_compact(&sst.id) || self.filter(sst) {
                 if !select_input_ssts.is_empty() {
                     // Our goal is to pick as many complete layers of data as possible and keep the
                     // picked files contiguous to avoid overlapping key_ranges, so the strategy is
                     // to pick as many contiguous files as possible (at least one)
+                    state.last_select_end_key.clear();
+                    state
+                        .last_select_end_key
+                        .extend_from_slice(sst.key_range.as_ref().unwrap().right.as_ref());
                     break;
                 }
 
@@ -137,6 +138,10 @@ impl SpaceReclaimCompactionPicker {
             select_input_ssts.push(sst.clone());
             select_file_size += sst.file_size;
             if select_file_size > self.max_space_reclaim_bytes {
+                state.last_select_end_key.clear();
+                state
+                    .last_select_end_key
+                    .extend_from_slice(sst.key_range.as_ref().unwrap().right.as_ref());
                 break;
             }
         }
