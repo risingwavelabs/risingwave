@@ -2,10 +2,14 @@ steps:
   - label: "Triggering pipelines"
     plugins:
       - monebag/monorepo-diff#v2.5.7:
-          diff: "git diff --name-only HEAD~1"
+          diff: "git diff --name-only origin/main"
           watch:
             - path: 
               - "src/"
               - "ci/"
+              - "e2e_test/"
+              - "**/Cargo.toml"
+              - ".config/"
+              - ".cargo/"
               config:
                 command: "buildkite-agent pipeline upload ci/workflows/pull-request-rust.yml"
