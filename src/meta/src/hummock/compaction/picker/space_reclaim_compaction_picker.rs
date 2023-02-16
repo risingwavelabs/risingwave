@@ -14,8 +14,9 @@
 
 use std::collections::HashSet;
 
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
 
 use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
@@ -28,27 +29,32 @@ pub struct SpaceReclaimCompactionPicker {
 
 #[derive(Default)]
 pub struct SpaceReclaimPickerState {
-    pub last_select_end_key: Vec<u8>,
+    // pub last_select_end_key: Vec<u8>,
 
-    pub start_key_in_round: Vec<u8>,
-    pub end_key_in_round: Vec<u8>,
+    // pub start_key_in_round: Vec<u8>,
+    // pub end_key_in_round: Vec<u8>,
+    pub last_select_key_range: KeyRange,
+
+    pub key_range_in_round: KeyRange,
 }
 
 impl SpaceReclaimPickerState {
     pub fn valid(&self) -> bool {
-        !self.start_key_in_round.is_empty() && !self.end_key_in_round.is_empty()
+        !self.key_range_in_round.left.is_empty() && !self.key_range_in_round.right.is_empty()
     }
 
-    pub fn init(&mut self, start_key: Vec<u8>, end_key: Vec<u8>) {
-        self.start_key_in_round = start_key;
-        self.end_key_in_round = end_key;
-        self.last_select_end_key = self.start_key_in_round.clone();
+    pub fn init(&mut self, key_range: KeyRange) {
+        self.key_range_in_round = key_range;
+        self.last_select_key_range = KeyRange {
+            left: vec![],
+            right: self.key_range_in_round.left.clone(),
+            right_exclusive: true,
+        };
     }
 
     pub fn clear(&mut self) {
-        self.last_select_end_key.clear();
-        self.start_key_in_round.clear();
-        self.end_key_in_round.clear();
+        self.key_range_in_round = KeyRange::default();
+        self.last_select_key_range = KeyRange::default();
     }
 }
 
@@ -87,17 +93,22 @@ impl SpaceReclaimCompactionPicker {
             return None;
         }
 
-        let (start_key, end_key) = {
-            let first_sst = reclaimed_level.table_infos.first().unwrap();
-            let last_sst = reclaimed_level.table_infos.last().unwrap();
+        let first_sst = reclaimed_level.table_infos.first().unwrap();
+        let last_sst = reclaimed_level.table_infos.last().unwrap();
 
-            (
-                first_sst.key_range.as_ref().unwrap().left.clone(),
-                last_sst.key_range.as_ref().unwrap().right.clone(),
-            )
+        let key_range_this_round = KeyRange {
+            left: first_sst.key_range.as_ref().unwrap().left.clone(),
+            right: last_sst.key_range.as_ref().unwrap().right.clone(),
+            right_exclusive: last_sst.key_range.as_ref().unwrap().right_exclusive,
         };
 
-        if state.valid() && end_key > state.end_key_in_round {
+        if state.valid()
+            && !last_sst
+                .key_range
+                .as_ref()
+                .unwrap()
+                .sstable_overlap(&state.key_range_in_round)
+        {
             // in round but end_key overflow
             // turn to next_round
             state.clear();
@@ -105,7 +116,8 @@ impl SpaceReclaimCompactionPicker {
         }
 
         if !state.valid() {
-            state.init(start_key, end_key)
+            // new round init key_range bound with table_infos
+            state.init(key_range_this_round);
         }
 
         let mut select_file_size = 0;
@@ -114,7 +126,7 @@ impl SpaceReclaimCompactionPicker {
             .table_infos
             .iter()
             .filter(|sst| match &sst.key_range {
-                Some(key_range) => key_range.left >= state.last_select_end_key,
+                Some(key_range) => !key_range.sstable_overlap(&state.last_select_key_range),
 
                 None => false,
             });
@@ -144,12 +156,12 @@ impl SpaceReclaimCompactionPicker {
             return None;
         }
 
-        let last_sst = select_input_ssts.last().unwrap();
-        state.last_select_end_key.clear();
-        state
-            .last_select_end_key
-            .extend_from_slice(last_sst.key_range.as_ref().unwrap().right.as_ref());
-
+        let select_last_sst = select_input_ssts.last().unwrap();
+        state.last_select_key_range.full_key_extend(&KeyRange {
+            left: vec![],
+            right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
+            right_exclusive: true,
+        });
         Some(CompactionInput {
             input_levels: vec![
                 InputLevel {
