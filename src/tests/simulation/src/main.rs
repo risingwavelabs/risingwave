@@ -184,7 +184,13 @@ async fn main() {
                     .await
                     .unwrap();
                 if let Some(outdir) = args.generate_sqlsmith_queries {
-                    risingwave_sqlsmith::runner::generate(rw.pg_client(), &args.files, count, &outdir).await;
+                    risingwave_sqlsmith::runner::generate(
+                        rw.pg_client(),
+                        &args.files,
+                        count,
+                        &outdir,
+                    )
+                    .await;
                 } else {
                     risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
                 }
