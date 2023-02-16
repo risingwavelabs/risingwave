@@ -117,6 +117,7 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
 }
 
 impl JsonbVal {
+    /// Constructs a value without specific meaning. Usually used as a lightweight placeholder.
     pub fn dummy() -> Self {
         Self(Value::Null.into())
     }
@@ -229,6 +230,10 @@ impl Array for JsonbArray {
     }
 
     fn to_protobuf(&self) -> super::ProstArray {
+        // The memory layout contains `serde_json::Value` trees, but in protobuf we transmit this as
+        // variable length bytes in value encoding. That is, one buffer of length n+1 containing
+        // start and end offsets into the 2nd buffer containing all value bytes concatenated.
+
         use risingwave_pb::common::buffer::CompressionType;
         use risingwave_pb::common::Buffer;
 
