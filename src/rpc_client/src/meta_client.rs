@@ -782,6 +782,12 @@ impl MetaClient {
         Ok(resp.params.unwrap().into())
     }
 
+    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+        let req = SetSystemParamRequest { param, value };
+        self.inner.set_system_param(req).await?;
+        Ok(())
+    }
+
     pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
         let req = GetDdlProgressRequest {};
         let resp = self.inner.get_ddl_progress(req).await?;
@@ -1461,6 +1467,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
+            ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }
     };
 }
