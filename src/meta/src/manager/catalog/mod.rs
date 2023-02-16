@@ -82,6 +82,7 @@ macro_rules! commit_meta {
     };
 }
 pub(crate) use commit_meta;
+use risingwave_pb::meta::CreatingJobInfo;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
@@ -582,7 +583,7 @@ where
             bail!("table is in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id);
+            database_core.mark_creating_streaming_job(table.id, key);
             for &dependent_relation_id in &table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
@@ -973,7 +974,7 @@ where
         } else {
             database_core.mark_creating(&source_key);
             database_core.mark_creating(&mview_key);
-            database_core.mark_creating_streaming_job(table.id);
+            database_core.mark_creating_streaming_job(table.id, mview_key);
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
@@ -1221,7 +1222,7 @@ where
             bail!("index already in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(index_table.id);
+            database_core.mark_creating_streaming_job(index_table.id, key);
             for &dependent_relation_id in &index_table.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
@@ -1312,7 +1313,7 @@ where
             bail!("sink already in creating procedure");
         } else {
             database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(sink.id);
+            database_core.mark_creating_streaming_job(sink.id, key);
             for &dependent_relation_id in &sink.dependent_relations {
                 database_core.increase_ref_count(dependent_relation_id);
             }
@@ -1483,6 +1484,23 @@ where
 
         all_streaming_jobs.extend(guard.database.all_creating_streaming_jobs());
         Ok(all_streaming_jobs)
+    }
+
+    pub async fn find_creating_streaming_job_ids(
+        &self,
+        infos: Vec<CreatingJobInfo>,
+    ) -> Vec<TableId> {
+        let guard = self.core.lock().await;
+        infos
+            .into_iter()
+            .flat_map(|info| {
+                guard.database.find_creating_streaming_job_id(&(
+                    info.database_id,
+                    info.schema_id,
+                    info.name,
+                ))
+            })
+            .collect_vec()
     }
 
     async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {

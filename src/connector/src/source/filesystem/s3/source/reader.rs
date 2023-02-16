@@ -29,7 +29,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
-use crate::source::base::{SplitMetaData, SplitReaderV2, MAX_CHUNK_SIZE};
+use crate::source::base::{SplitMetaData, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::monitor::SourceMetrics;
@@ -144,7 +144,7 @@ impl S3FileReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for S3FileReader {
+impl SplitReader for S3FileReader {
     type Properties = S3Properties;
 
     async fn new(
