@@ -871,12 +871,11 @@ pub enum Statement {
         returning: Vec<SelectItem>,
     },
     Copy {
-        /// TABLE
-        table_name: ObjectName,
-        /// COLUMNS
-        columns: Vec<Ident>,
-        /// VALUES a vector of values to be copied
-        values: Vec<Option<String>>,
+        relation: CopyRelation,
+        /// If true, is a 'COPY TO' statement. If false is a 'COPY FROM'
+        to: bool,
+        /// The source of 'COPY FROM', or the target of 'COPY TO'
+        target: CopyTarget,
     },
     /// UPDATE
     Update {
@@ -1145,29 +1144,17 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Copy {
-                table_name,
-                columns,
-                values,
+                relation,
+                to,
+                target,
             } => {
-                write!(f, "COPY {}", table_name)?;
-                if !columns.is_empty() {
-                    write!(f, " ({})", display_comma_separated(columns))?;
+                write!(f, "COPY {}", relation)?;
+                if *to {
+                    write!(f, " TO ")?;
+                } else {
+                    write!(f, " FROM ")?;
                 }
-                write!(f, " FROM stdin; ")?;
-                if !values.is_empty() {
-                    writeln!(f)?;
-                    let mut delim = "";
-                    for v in values {
-                        write!(f, "{}", delim)?;
-                        delim = "\t";
-                        if let Some(v) = v {
-                            write!(f, "{}", v)?;
-                        } else {
-                            write!(f, "\\N")?;
-                        }
-                    }
-                }
-                write!(f, "\n\\.")
+                write!(f, "{}", target)
             }
             Statement::Update {
                 table_name,
@@ -2188,6 +2175,49 @@ impl fmt::Display for CreateFunctionBody {
             write!(f, " RETURN {expr}")?;
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CopyRelation {
+    Table {
+        name: ObjectName,
+        columns: Vec<Ident>,
+    },
+    Query(Box<Query>),
+}
+
+impl fmt::Display for CopyRelation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use CopyRelation::*;
+        match self {
+            Table { name, columns } => {
+                write!(f, "{}", name)?;
+                if !columns.is_empty() {
+                    write!(f, "{}", display_comma_separated(columns))?;
+                }
+                Ok(())
+            }
+            Query(query) => write!(f, "({})", query),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CopyTarget {
+    Stdin,
+    Stdout,
+}
+
+impl fmt::Display for CopyTarget {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use CopyTarget::*;
+        match self {
+            Stdin => write!(f, "STDIN"),
+            Stdout => write!(f, "STDOUT"),
+        }
     }
 }
 

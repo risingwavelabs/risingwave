@@ -25,14 +25,16 @@ use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
-use self::util::DataChunkToRowSetAdapter;
+use self::copy::handle_copy;
+use self::util::{handle_with_properties, DataChunkToRowSetAdapter};
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
-use crate::session::SessionImpl;
+use crate::session::{OptimizerContext, SessionImpl};
 use crate::utils::WithOptions;
 
 mod alter_system;
 mod alter_table;
 pub mod alter_user;
+pub mod copy;
 mod create_database;
 pub mod create_function;
 pub mod create_index;
@@ -404,8 +406,13 @@ pub async fn handle(
             ROLLBACK,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
-        _ => Err(
-            ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
-        ),
+        Statement::Copy {
+            relation,
+            to,
+            target,
+        } => handle_copy(context, relation, to, target).await,
+        _ => {
+            Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
+        }
     }
 }

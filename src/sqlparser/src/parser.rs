@@ -2361,53 +2361,32 @@ impl Parser {
 
     /// Parse a copy statement
     pub fn parse_copy(&mut self) -> Result<Statement, ParserError> {
-        let table_name = self.parse_object_name()?;
-        let columns = self.parse_parenthesized_column_list(Optional)?;
-        self.expect_keywords(&[Keyword::FROM, Keyword::STDIN])?;
-        self.expect_token(&Token::SemiColon)?;
-        let values = self.parse_tsv();
+        let relation = if self.consume_token(&Token::LParen) {
+            let query = self.parse_query()?;
+            self.expect_token(&Token::RParen)?;
+            CopyRelation::Query(Box::new(query))
+        } else {
+            let name = self.parse_object_name()?;
+            let columns = self.parse_parenthesized_column_list(Optional)?;
+            CopyRelation::Table { name, columns }
+        };
+        let to = match self.parse_one_of_keywords(&[Keyword::FROM, Keyword::TO]) {
+            Some(Keyword::FROM) => false,
+            Some(Keyword::TO) => true,
+            _ => self.expected("FROM or TO", self.peek_token())?,
+        };
+        let target = if self.parse_keyword(Keyword::STDIN) {
+            CopyTarget::Stdin
+        } else if self.parse_keyword(Keyword::STDOUT) {
+            CopyTarget::Stdout
+        } else {
+            return self.expected("STDIN or STDOUT", self.peek_token())?;
+        };
         Ok(Statement::Copy {
-            table_name,
-            columns,
-            values,
+            relation,
+            to,
+            target,
         })
-    }
-
-    /// Parse a tab separated values in
-    /// COPY payload
-    fn parse_tsv(&mut self) -> Vec<Option<String>> {
-        self.parse_tab_value()
-    }
-
-    fn parse_tab_value(&mut self) -> Vec<Option<String>> {
-        let mut values = vec![];
-        let mut content = String::from("");
-        while let Some(t) = self.next_token_no_skip() {
-            match t {
-                Token::Whitespace(Whitespace::Tab) => {
-                    values.push(Some(content.to_string()));
-                    content.clear();
-                }
-                Token::Whitespace(Whitespace::Newline) => {
-                    values.push(Some(content.to_string()));
-                    content.clear();
-                }
-                Token::Backslash => {
-                    if self.consume_token(&Token::Period) {
-                        return values;
-                    }
-                    if let Token::Word(w) = self.next_token() {
-                        if w.value == "N" {
-                            values.push(None);
-                        }
-                    }
-                }
-                _ => {
-                    content.push_str(&t.to_string());
-                }
-            }
-        }
-        values
     }
 
     /// Parse a literal value (numbers, strings, date/time, booleans)
