@@ -93,7 +93,6 @@ impl AvroParserConfig {
                 .iter()
                 .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                 .collect::<Result<Vec<_>>>()?;
-            tracing::info!("fields is {:?}", fields);
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
