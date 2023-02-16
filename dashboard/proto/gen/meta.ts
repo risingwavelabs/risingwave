@@ -561,6 +561,15 @@ export interface GetSystemParamsResponse {
   params: SystemParams | undefined;
 }
 
+export interface SetSystemParamRequest {
+  param: string;
+  /** None means set to default value. */
+  value?: string | undefined;
+}
+
+export interface SetSystemParamResponse {
+}
+
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
 }
@@ -2443,6 +2452,53 @@ export const GetSystemParamsResponse = {
     message.params = (object.params !== undefined && object.params !== null)
       ? SystemParams.fromPartial(object.params)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamRequest(): SetSystemParamRequest {
+  return { param: "", value: undefined };
+}
+
+export const SetSystemParamRequest = {
+  fromJSON(object: any): SetSystemParamRequest {
+    return {
+      param: isSet(object.param) ? String(object.param) : "",
+      value: isSet(object.value) ? String(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SetSystemParamRequest): unknown {
+    const obj: any = {};
+    message.param !== undefined && (obj.param = message.param);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamRequest>, I>>(object: I): SetSystemParamRequest {
+    const message = createBaseSetSystemParamRequest();
+    message.param = object.param ?? "";
+    message.value = object.value ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamResponse(): SetSystemParamResponse {
+  return {};
+}
+
+export const SetSystemParamResponse = {
+  fromJSON(_: any): SetSystemParamResponse {
+    return {};
+  },
+
+  toJSON(_: SetSystemParamResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamResponse>, I>>(_: I): SetSystemParamResponse {
+    const message = createBaseSetSystemParamResponse();
     return message;
   },
 };

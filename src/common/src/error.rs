@@ -132,8 +132,6 @@ pub enum ErrorCode {
     PermissionDenied(String),
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-    #[error("SystemParams error: {0}")]
-    SystemParamsError(String),
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
