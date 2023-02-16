@@ -21,7 +21,7 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::must_match;
 use risingwave_common::types::{Datum, DatumRef, Scalar, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::executor::aggregation::agg_impl::StreamingAggImpl;
 use crate::executor::StreamExecutorResult;
@@ -174,7 +174,7 @@ pub(super) trait StreamingApproxCountDistinct: Sized {
     ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
-                for (op, datum) in ops.iter().zip_eq_debug(data[0].iter()) {
+                for (op, datum) in ops.iter().zip_eq_fast(data[0].iter()) {
                     match op {
                         Op::Insert | Op::UpdateInsert => self.update_registers(datum, true)?,
                         Op::Delete | Op::UpdateDelete => self.update_registers(datum, false)?,
@@ -184,8 +184,8 @@ pub(super) trait StreamingApproxCountDistinct: Sized {
             Some(visibility) => {
                 for ((visible, op), datum) in visibility
                     .iter()
-                    .zip_eq_debug(ops.iter())
-                    .zip_eq_debug(data[0].iter())
+                    .zip_eq_fast(ops.iter())
+                    .zip_eq_fast(data[0].iter())
                 {
                     if visible {
                         match op {

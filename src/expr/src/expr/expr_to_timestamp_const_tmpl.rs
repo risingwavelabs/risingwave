@@ -17,7 +17,7 @@ use std::sync::Arc;
 use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArrayBuilder, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::Expression;
 use crate::vector_op::to_char::ChronoPattern;
@@ -46,7 +46,7 @@ impl Expression for ExprToTimestampConstTmpl {
         let data_arr = self.child.eval_checked(input)?;
         let data_arr: &Utf8Array = data_arr.as_ref().into();
         let mut output = NaiveDateTimeArrayBuilder::new(input.capacity());
-        for (data, vis) in data_arr.iter().zip_eq_debug(input.vis().iter()) {
+        for (data, vis) in data_arr.iter().zip_eq_fast(input.vis().iter()) {
             if !vis {
                 output.append_null();
             } else if let Some(data) = data {
