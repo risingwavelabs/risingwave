@@ -148,7 +148,7 @@ pub async fn compactor_serve(
             max_concurrent_task_number,
         })),
     });
-    let sub_tasks = vec![
+    let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
@@ -159,8 +159,16 @@ pub async fn compactor_serve(
             compactor_context.clone(),
             hummock_meta_client,
         ),
-        start_telemetry_reporting(meta_client.clone(), CompactorTelemetryCreator::new()),
     ];
+
+    if config.server.telemetry_enabled {
+        sub_tasks.push(start_telemetry_reporting(
+            meta_client.clone(),
+            CompactorTelemetryCreator::new(),
+        ))
+    } else {
+        tracing::info!("Telemetry didn't start due to config");
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {

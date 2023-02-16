@@ -19,11 +19,10 @@ use async_trait::async_trait;
 use etcd_client::{Compare, CompareOp, Error as EtcdError, GetOptions, Txn, TxnOp};
 use futures::Future;
 use itertools::Itertools;
+use risingwave_common::config::MetaBackend;
 use tokio::sync::Mutex;
 
-use super::{
-    Key, MetaStore, MetaStoreError, MetaStoreResult, MetaStoreType, Snapshot, Transaction, Value,
-};
+use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
 use crate::storage::etcd_retry_client::EtcdRetryClient as KvClient;
 use crate::storage::WrappedEtcdClient;
 
@@ -189,8 +188,8 @@ impl EtcdMetaStore {
 impl MetaStore for EtcdMetaStore {
     type Snapshot = EtcdSnapshot;
 
-    fn meta_store_type(&self) -> MetaStoreType {
-        MetaStoreType::Etcd
+    fn meta_store_type(&self) -> MetaBackend {
+        MetaBackend::Etcd
     }
 
     async fn snapshot(&self) -> Self::Snapshot {

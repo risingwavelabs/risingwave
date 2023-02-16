@@ -53,14 +53,23 @@ where
                 }
             }
             // fetch telemetry tracking_id and configs from the meta node
-            let info = fetcher.fetch_telemetry_info().await;
-            let (tracking_id, telemetry_enabled) = match info {
-                Ok(resp) => (resp.tracking_id, resp.telemetry_enabled),
-                Err(err) => {
-                    tracing::error!("Telemetry failed to get tracking_id, err {}", err);
-                    continue;
-                }
-            };
+            let (tracking_id, telemetry_enabled, should_kill_telemetry) =
+                match fetcher.fetch_telemetry_info().await {
+                    Ok(resp) => (
+                        resp.tracking_id,
+                        resp.telemetry_enabled,
+                        resp.should_kill_telemetry,
+                    ),
+                    Err(err) => {
+                        tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                        continue;
+                    }
+                };
+
+            if should_kill_telemetry {
+                tracing::info!("Telemetry is shutdown due to meta resp");
+                return;
+            }
 
             // wait for the next interval, do not exit current thread
             if !telemetry_enabled {

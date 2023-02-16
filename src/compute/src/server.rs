@@ -298,11 +298,15 @@ pub async fn compute_node_serve(
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
-    // used for telemetry
-    sub_tasks.push(start_telemetry_reporting(
-        meta_client.clone(),
-        ComputeTelemetryCreator::new(),
-    ));
+    // if set false in yaml config file, telemetry will never start
+    if config.server.telemetry_enabled {
+        sub_tasks.push(start_telemetry_reporting(
+            meta_client.clone(),
+            ComputeTelemetryCreator::new(),
+        ));
+    } else {
+        tracing::info!("Telemetry didn't start due to config");
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

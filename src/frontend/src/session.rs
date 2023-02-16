@@ -250,10 +250,14 @@ impl FrontendEnv {
         let host = opts.health_check_listener_addr.clone();
 
         // start a telemetry reporting thread
-        let (telemetry_join_handle, telemetry_shutdown_sender) =
-            start_telemetry_reporting(meta_client, FrontendTelemetryCreator::new());
-        join_handles.push(telemetry_join_handle);
-        shutdown_senders.push(telemetry_shutdown_sender);
+        if config.server.telemetry_enabled {
+            let (telemetry_join_handle, telemetry_shutdown_sender) =
+                start_telemetry_reporting(meta_client, FrontendTelemetryCreator::new());
+            join_handles.push(telemetry_join_handle);
+            shutdown_senders.push(telemetry_shutdown_sender);
+        } else {
+            tracing::info!("Telemetry didn't start due to config");
+        }
 
         tokio::spawn(async move {
             tonic::transport::Server::builder()

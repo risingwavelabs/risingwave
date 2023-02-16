@@ -16,11 +16,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_common::config::MetaBackend;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 
 use super::{
-    ColumnFamily, Key, MetaStore, MetaStoreError, MetaStoreResult, MetaStoreType, Snapshot,
-    Transaction, Value,
+    ColumnFamily, Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value,
 };
 
 pub struct MemSnapshot(OwnedRwLockReadGuard<MemStoreInner>);
@@ -79,8 +79,8 @@ impl MemStore {
 impl MetaStore for MemStore {
     type Snapshot = MemSnapshot;
 
-    fn meta_store_type(&self) -> MetaStoreType {
-        MetaStoreType::Memory
+    fn meta_store_type(&self) -> MetaBackend {
+        MetaBackend::Mem
     }
 
     async fn snapshot(&self) -> Self::Snapshot {

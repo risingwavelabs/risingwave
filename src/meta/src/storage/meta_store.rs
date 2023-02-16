@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use risingwave_common::config::MetaBackend;
 use thiserror::Error;
 
 use crate::storage::transaction::Transaction;
@@ -24,11 +25,6 @@ pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 pub trait Snapshot: Sync + Send + 'static {
     async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Vec<u8>, Vec<u8>)>>;
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>>;
-}
-
-pub enum MetaStoreType {
-    Memory,
-    Etcd,
 }
 
 /// `MetaStore` defines the functions used to operate metadata.
@@ -50,7 +46,7 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
         self.snapshot().await.get_cf(cf, key).await
     }
 
-    fn meta_store_type(&self) -> MetaStoreType;
+    fn meta_store_type(&self) -> MetaBackend;
 }
 
 // Error of metastore

@@ -187,6 +187,9 @@ pub struct ServerConfig {
     /// 0 = close metrics
     /// >0 = open metrics
     pub metrics_level: u32,
+
+    #[serde(default = "default::server::telemetry_enabled")]
+    pub telemetry_enabled: bool,
 }
 
 impl Default for ServerConfig {
@@ -522,6 +525,10 @@ mod default {
 
         pub fn metrics_level() -> u32 {
             0
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            true
         }
     }
 

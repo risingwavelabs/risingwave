@@ -19,6 +19,7 @@ use std::time::Duration;
 use either::Either;
 use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
+use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -64,9 +65,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
-use crate::storage::{
-    EtcdMetaStore, MemStore, MetaStore, MetaStoreType, WrappedEtcdClient as EtcdClient,
-};
+use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::report::start_meta_telemetry_reporting;
 use crate::{hummock, MetaResult};
@@ -542,14 +541,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     });
     sub_tasks.push((abort_notification_handler, abort_sender));
 
-    // start telemetry reporting
-    match meta_store.meta_store_type() {
-        MetaStoreType::Etcd => {
-            sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await)
-        }
-        MetaStoreType::Memory => {
-            tracing::info!("disable telemetry because etcd meta store is not used")
-        }
+    // May start telemetry reporting
+    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled{
+        sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await);
+    } else {
+        tracing::info!("Telemetry didn't start due to meta backend or config");
     }
 
     let shutdown_all = async move {

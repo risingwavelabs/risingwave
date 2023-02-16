@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::telemetry::telemetry_enabled;
+use risingwave_common::config::MetaBackend;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{TelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use crate::storage::{MetaStore, MetaStoreType};
+use crate::storage::MetaStore;
 use crate::telemetry::report::{TELEMETRY_CF, TELEMETRY_KEY};
 
 pub struct TelemetryInfoServiceImpl<S: MetaStore> {
@@ -21,23 +22,21 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
 
     async fn get_tracking_id(&self) -> Option<String> {
         match self.meta_store.meta_store_type() {
-            MetaStoreType::Etcd => {
-                match self.meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-                    Ok(id) => Uuid::from_slice_le(&id)
-                        .map_err(|e| anyhow!("failed to parse uuid, {}", e))
-                        .ok()
-                        .map(|uuid| uuid.to_string()),
-                    Err(_) => None,
-                }
-            }
-            MetaStoreType::Memory => None,
+            MetaBackend::Etcd => match self.meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
+                Ok(id) => Uuid::from_slice_le(&id)
+                    .map_err(|e| anyhow!("failed to parse uuid, {}", e))
+                    .ok()
+                    .map(|uuid| uuid.to_string()),
+                Err(_) => None,
+            },
+            MetaBackend::Mem => None,
         }
     }
 
     fn should_kill_telemetry(&self) -> bool {
         match self.meta_store.meta_store_type() {
-            MetaStoreType::Memory => true,
-            MetaStoreType::Etcd => false,
+            MetaBackend::Mem => true,
+            MetaBackend::Etcd => false,
         }
     }
 }
@@ -51,7 +50,7 @@ impl<S: MetaStore> TelemetryInfoService for TelemetryInfoServiceImpl<S> {
         match self.get_tracking_id().await {
             Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
                 tracking_id,
-                telemetry_enabled: telemetry_enabled(),
+                telemetry_enabled: telemetry_env_enabled(),
                 should_kill_telemetry: self.should_kill_telemetry(),
             })),
             None => Ok(Response::new(TelemetryInfoResponse {

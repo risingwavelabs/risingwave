@@ -140,8 +140,8 @@ pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(),
     }
 }
 
-/// check whether telemetry is enabled
-pub fn telemetry_enabled() -> bool {
+/// check whether telemetry is enabled in environment variable
+pub fn telemetry_env_enabled() -> bool {
     // default to be true
     std::env::var(TELEMETRY_ENV_ENABLE)
         .unwrap_or("true".to_string())
@@ -214,12 +214,12 @@ mod tests {
 
     #[test]
     fn test_telemetry_enabled() {
-        assert!(telemetry_enabled());
+        assert!(telemetry_env_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
-        assert!(!telemetry_enabled());
+        assert!(!telemetry_env_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "wrong_str");
-        assert!(telemetry_enabled());
+        assert!(telemetry_env_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "False");
-        assert!(!telemetry_enabled());
+        assert!(!telemetry_env_enabled());
     }
 }
