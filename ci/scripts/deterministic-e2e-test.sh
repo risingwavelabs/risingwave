@@ -20,7 +20,7 @@ echo "--- Extract data for sqlsmith"
 cd ./src/tests/sqlsmith/tests
 mkdir -p ./freeze
 unzip -o freeze.zip -d freeze
-cd ../../
+cd -
 
 export RUST_LOG=info
 export LOGDIR=.risingwave/log
