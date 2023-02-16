@@ -58,6 +58,7 @@ impl FilterBuilder for XorFilterBuilder {
             .fingerprints
             .iter()
             .for_each(|x| buf.put_u16_le(*x));
+        buf.put_u8(255);
         buf
     }
 
@@ -85,6 +86,7 @@ impl XorFilterReader {
         let buf = &mut &buf[..];
         let xor_filter_seed = buf.get_u64_le();
         let xor_filter_block_length = buf.get_u32_le();
+        // is correct even when there is an extra 0xff byte in the end of buf
         let len = buf.len() / 2;
         let xor_filter_fingerprints = (0..len)
             .map(|_| buf.get_u16_le())
