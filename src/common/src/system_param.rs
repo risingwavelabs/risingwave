@@ -140,6 +140,7 @@ macro_rules! impl_system_params_from_kv {
 // `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation_on_set {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        #[allow(clippy::ptr_arg)]
         trait ValidateOnSet {
             $(
                 fn $field(_v: &$type) -> Result<()> {
