@@ -36,6 +36,7 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
     let mut setup_sql = String::with_capacity(1000);
     for ddl_statement in parse_sql(&ddl) {
         let sql = ddl_statement.to_string();
+        tracing::info!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
         if let Err(e) = response {
             panic!("{}", format_failed_sql(&setup_sql, &sql, &e))
@@ -44,6 +45,7 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
     }
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
+        tracing::info!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
         if let Err(e) = response {
             panic!("{}", format_failed_sql(&setup_sql, &sql, &e))
