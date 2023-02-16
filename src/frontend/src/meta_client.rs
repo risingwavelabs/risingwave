@@ -18,6 +18,7 @@ use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::CreatingJobInfo;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient, SystemParamsReader};
 
@@ -33,6 +34,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_epoch(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+
+    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()>;
 
     async fn list_table_fragments(
         &self,
@@ -66,6 +69,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
         self.0.flush(checkpoint).await
+    }
+
+    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        self.0.cancel_creating_jobs(infos).await
     }
 
     async fn list_table_fragments(
