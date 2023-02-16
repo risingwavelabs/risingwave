@@ -94,6 +94,7 @@ message ExprNode {
     OVERLAY = 231;
     REGEXP_MATCH = 232;
     POW = 233;
+    EXP = 234;
 
     // Boolean comparison
     IS_TRUE = 301;

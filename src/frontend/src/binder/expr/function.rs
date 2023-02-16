@@ -331,6 +331,7 @@ impl Binder {
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),
+                ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
                 (
                     "to_timestamp",

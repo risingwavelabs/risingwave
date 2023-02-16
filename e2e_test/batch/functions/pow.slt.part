@@ -49,3 +49,36 @@ select pow(100000, 200000000000000);
 
 statement error QueryError: Expr error: Numeric out of range
 select pow(-100000, 200000000000001);
+
+query R
+select exp(0::smallint);
+----
+1
+
+query R
+select exp(0.0);
+----
+1
+
+query R
+select exp(0.0::decimal);
+----
+1
+
+query R
+select exp(2.0);
+----
+7.38905609893065
+
+query R
+select exp(2::smallint)
+----
+7.38905609893065
+
+statement error QueryError: Expr error: Numeric out of range
+select exp(10000000);
+
+query T
+select exp(-10000000);
+----
+0
