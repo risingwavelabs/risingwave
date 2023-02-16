@@ -128,6 +128,9 @@ pub enum DataType {
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
+    #[display("jsonb")]
+    #[from_str(regex = "(?i)^jsonb$")]
+    Jsonb,
 }
 
 impl std::str::FromStr for Box<DataType> {
@@ -154,6 +157,7 @@ impl DataTypeName {
             | DataTypeName::Timestamptz
             | DataTypeName::Time
             | DataTypeName::Bytea
+            | DataTypeName::Jsonb
             | DataTypeName::Interval => true,
 
             DataTypeName::Struct | DataTypeName::List => false,
@@ -176,6 +180,7 @@ impl DataTypeName {
             DataTypeName::Timestamptz => DataType::Timestamptz,
             DataTypeName::Time => DataType::Time,
             DataTypeName::Interval => DataType::Interval,
+            DataTypeName::Jsonb => DataType::Jsonb,
             DataTypeName::Struct | DataTypeName::List => {
                 return None;
             }
@@ -214,6 +219,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Bytea => DataType::Bytea,
+            TypeName::Jsonb => DataType::Jsonb,
             TypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
@@ -259,6 +265,7 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
             DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
+            DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
             }
@@ -288,6 +295,7 @@ impl DataType {
             DataType::Timestamptz => TypeName::Timestamptz,
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
+            DataType::Jsonb => TypeName::Jsonb,
             DataType::Struct { .. } => TypeName::Struct,
             DataType::List { .. } => TypeName::List,
             DataType::Bytea => TypeName::Bytea,
@@ -373,6 +381,7 @@ impl DataType {
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
+            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .fields
@@ -907,6 +916,7 @@ impl ScalarImpl {
                 NaiveDateWrapper::with_days(days)
                     .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
+            Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),
         })
@@ -952,6 +962,7 @@ impl ScalarImpl {
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
+                    DataType::Jsonb => deserializer.skip_bytes()?,
                     DataType::Varchar => deserializer.skip_bytes()?,
                     DataType::Bytea => deserializer.skip_bytes()?,
                 };
@@ -988,6 +999,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Timestamptz, ScalarImpl::Int64(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
+                    | (DataType::Jsonb, ScalarImpl::Jsonb(_))
                     | (DataType::Struct { .. }, ScalarImpl::Struct(_))
                     | (DataType::List { .. }, ScalarImpl::List(_))
             )
@@ -1189,6 +1201,7 @@ mod tests {
                     ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
                     DataType::Interval,
                 ),
+                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
                 DataTypeName::Struct => (
                     ScalarImpl::Struct(StructValue::new(vec![
                         ScalarImpl::Int64(233).into(),

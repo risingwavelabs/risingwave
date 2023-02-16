@@ -427,6 +427,7 @@ pub fn literal_parsing(
         // evaluation).
         DataType::List { .. } => return Err(None),
         DataType::Struct(_) => return Err(None),
+        DataType::Jsonb => return Err(None),
         DataType::Bytea => str_to_bytea(s)?.into(),
     };
     Ok(scalar)
