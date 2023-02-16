@@ -16,11 +16,81 @@
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
+use tokio_postgres::Error;
 
 use crate::validation::is_permissible_error;
 use crate::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, session_sql_gen, sql_gen, Table,
 };
+
+/// e2e test runner for pre-generated queries from sqlsmith
+pub async fn run_pre_generated(client: &tokio_postgres::Client, ddl: &str, queries: &str) {
+    let mut setup_sql = String::with_capacity(1000);
+    for ddl_statement in parse_sql(ddl) {
+        let sql = ddl_statement.to_string();
+        let response = client.execute(&sql, &[]).await;
+        if let Err(e) = response {
+            panic!("{}", format_failed_sql(&setup_sql, &sql, &e))
+        }
+        setup_sql.push_str(&sql);
+    }
+    for statement in parse_sql(queries) {
+        let sql = statement.to_string();
+        let response = client.execute(&sql, &[]).await;
+        if let Err(e) = response {
+            panic!("{}", format_failed_sql(&setup_sql, &sql, &e))
+        }
+    }
+}
+
+/// e2e query generator
+/// The goal is to generate NON-FAILING queries.
+/// If we encounter an expected error, just skip.
+/// If we panic or encounter an unexpected error, query generation
+/// should still fail.
+/// Returns ddl and queries.
+pub async fn generate(
+    client: &tokio_postgres::Client,
+    testdata: &str,
+    count: usize,
+) -> (String, String) {
+    let mut rng = rand::rngs::SmallRng::from_entropy();
+    let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+
+    test_sqlsmith(client, &mut rng, tables.clone(), &setup_sql).await;
+    tracing::info!("Passed sqlsmith tests");
+
+    let mut queries = String::with_capacity(10000);
+    set_distributed_query_mode(client).await;
+    for _ in 0..count {
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
+        let sql = sql_gen(&mut rng, tables.clone());
+        tracing::info!("Executing: {}", sql);
+        let response = client.execute(sql.as_str(), &[]).await;
+        let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
+        if skipped == 0 {
+            queries.push_str(&sql);
+        }
+    }
+
+    for _ in 0..count {
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
+        let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
+        tracing::info!("Executing: {}", sql);
+        let response = client.execute(&sql, &[]).await;
+        let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
+        drop_mview_table(&table, client).await;
+        if skipped == 0 {
+            queries.push_str(&sql);
+            queries.push_str(&format_drop_mview(&table));
+        }
+    }
+
+    drop_tables(&mviews, testdata, client).await;
+    (setup_sql, queries)
+}
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
@@ -80,7 +150,7 @@ async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
 async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
     let session_sql = session_sql_gen(rng);
     tracing::info!("Executing: {}", session_sql);
-    client.query(session_sql.as_str(), &[]).await.unwrap();
+    client.execute(session_sql.as_str(), &[]).await.unwrap();
 }
 
 /// Test batch queries, returns skipped query statistics
@@ -100,7 +170,7 @@ async fn test_batch_queries<R: Rng>(
         // test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("Executing: {}", sql);
-        let response = client.query(sql.as_str(), &[]).await;
+        let response = client.execute(sql.as_str(), &[]).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
     }
     skipped as f64 / sample_size as f64
@@ -172,13 +242,14 @@ async fn create_tables(
     (tables, mviews, setup_sql)
 }
 
+fn format_drop_mview(mview: &Table) -> String {
+    format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name)
+}
+
 /// Drops mview tables.
 async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
     client
-        .execute(
-            &format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name),
-            &[],
-        )
+        .execute(&format_drop_mview(mview), &[])
         .await
         .unwrap();
 }
@@ -202,19 +273,9 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-/// Validate client responses, returning a count of skipped queries.
-fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) -> i64 {
-    match response {
-        Ok(_) => 0,
-        Err(e) => {
-            // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error()
-                && is_permissible_error(&e.to_string())
-            {
-                return 1;
-            }
-            let error_msg = format!(
-                "
+fn format_failed_sql(setup_sql: &str, query: &str, e: &Error) -> String {
+    format!(
+        "
 Query failed:
 ---- START
 -- Setup
@@ -226,11 +287,25 @@ Query failed:
 Reason:
 {}
 ",
-                setup_sql, query, e
-            );
+        setup_sql, query, e
+    )
+}
+
+/// Validate client responses, returning a count of skipped queries.
+fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) -> i64 {
+    match response {
+        Ok(_) => 0,
+        Err(e) => {
+            // Permit runtime errors conservatively.
+            if let Some(e) = e.as_db_error()
+                && is_permissible_error(&e.to_string())
+            {
+                return 1;
+            }
+            let error_msg = format_failed_sql(setup_sql, query, &e);
             // consolidate error reason for deterministic test
             tracing::info!(error_msg);
-            panic!(error_msg)
+            panic!("{}", error_msg)
         }
     }
 }
