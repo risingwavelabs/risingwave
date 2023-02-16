@@ -1,3 +1,23 @@
+cargo-cache: &cargo-cache
+  id: cache
+  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+  restore-keys:
+    - "v1-cache-{{ id }}-{{ runner.os }}-"
+    - "v1-cache-{{ id }}-"
+  backend: s3
+  s3:
+    bucket: ci-cache-bucket
+  paths:
+    - ".cargo/registry/index"
+    - ".cargo/registry/cache"
+    - ".cargo/git/db"
+
+auto-retry: &auto-retry
+  automatic:
+    - exit_status: -1 # Agent was lost
+      limit: 2
+    - exit_status: 255 # Forced agent shutdown
+      limit: 2
 
 steps:
   - label: "check ci image rebuild"
