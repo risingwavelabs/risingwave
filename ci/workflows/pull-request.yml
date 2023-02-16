@@ -9,6 +9,8 @@ steps:
               - "ci/"
               - "e2e_test/"
               - "**/Cargo.toml"
+              - "**/Cargo.lock"
+              - "rust-toolchain"
               - ".config/"
               - ".cargo/"
               config:
