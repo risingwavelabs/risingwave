@@ -595,7 +595,7 @@ impl LogicalAggBuilder {
                 let input = inputs.iter().exactly_one().unwrap();
 
                 // first, we compute sum of squared as sum_sq
-                let squared_input = ExprImpl::from(
+                let squared_input_expr = ExprImpl::from(
                     FunctionCall::new(
                         ExprType::Multiply,
                         vec![ExprImpl::from(input.clone()), ExprImpl::from(input.clone())],
@@ -603,28 +603,30 @@ impl LogicalAggBuilder {
                     .unwrap(),
                 );
 
-                let squared_input_proj_index =
-                    self.input_proj_builder.add_expr(&squared_input).unwrap();
+                let squared_input_proj_index = self
+                    .input_proj_builder
+                    .add_expr(&squared_input_expr)
+                    .unwrap();
 
-                let squared_sum_return_type =
-                    AggCall::infer_return_type(&AggKind::Sum, &[squared_input.return_type()])
+                let sum_of_squares_return_type =
+                    AggCall::infer_return_type(&AggKind::Sum, &[squared_input_expr.return_type()])
                         .unwrap();
 
                 self.agg_calls.push(PlanAggCall {
                     agg_kind: AggKind::Sum,
-                    return_type: squared_sum_return_type.clone(),
+                    return_type: sum_of_squares_return_type.clone(),
                     inputs: vec![InputRef::new(
                         squared_input_proj_index,
-                        squared_input.return_type(),
+                        squared_input_expr.return_type(),
                     )],
                     distinct,
                     order_by_fields: order_by_fields.clone(),
                     filter: filter.clone(),
                 });
 
-                let squared_sum_expr = ExprImpl::from(InputRef::new(
+                let sum_of_squares_expr = ExprImpl::from(InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
-                    squared_sum_return_type,
+                    sum_of_squares_return_type,
                 ))
                 .cast_implicit(return_type.clone())
                 .unwrap();
@@ -641,6 +643,7 @@ impl LogicalAggBuilder {
                     order_by_fields: order_by_fields.clone(),
                     filter: filter.clone(),
                 });
+
                 let sum_expr = ExprImpl::from(InputRef::new(
                     self.group_key.len() + self.agg_calls.len() - 1,
                     sum_return_type,
@@ -667,67 +670,64 @@ impl LogicalAggBuilder {
                 ));
 
                 // we start with variance
-                let mut target_expr = ExprImpl::from(
+
+                // sum * sum
+                let square_of_sum_expr = ExprImpl::from(
+                    FunctionCall::new(ExprType::Multiply, vec![sum_expr.clone(), sum_expr])
+                        .unwrap(),
+                );
+
+                // sum_sq - sum * sum / count
+                let numerator_expr = ExprImpl::from(
                     FunctionCall::new(
-                        ExprType::Divide,
+                        ExprType::Subtract,
                         vec![
+                            sum_of_squares_expr,
                             ExprImpl::from(
                                 FunctionCall::new(
-                                    ExprType::Subtract,
-                                    vec![
-                                        squared_sum_expr,
-                                        ExprImpl::from(
-                                            FunctionCall::new(
-                                                ExprType::Divide,
-                                                vec![
-                                                    ExprImpl::from(
-                                                        FunctionCall::new(
-                                                            ExprType::Multiply,
-                                                            vec![sum_expr.clone(), sum_expr],
-                                                        )
-                                                        .unwrap(),
-                                                    ),
-                                                    count_expr.clone(),
-                                                ],
-                                            )
-                                            .unwrap(),
-                                        ),
-                                    ],
+                                    ExprType::Divide,
+                                    vec![square_of_sum_expr, count_expr.clone()],
                                 )
                                 .unwrap(),
                             ),
-                            match agg_kind {
-                                AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
-                                AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
-                                    FunctionCall::new(
-                                        ExprType::Subtract,
-                                        vec![
-                                            count_expr.clone(),
-                                            ExprImpl::from(Literal::new(
-                                                Datum::from(ScalarImpl::Int64(1)),
-                                                DataType::Int64,
-                                            )),
-                                        ],
-                                    )
-                                    .unwrap(),
-                                ),
-                                _ => unreachable!(),
-                            },
                         ],
                     )
                     .unwrap(),
                 );
 
+                // count or count - 1
+                let denominator_expr = match agg_kind {
+                    AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
+                    AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
+                        FunctionCall::new(
+                            ExprType::Subtract,
+                            vec![
+                                count_expr.clone(),
+                                ExprImpl::from(Literal::new(
+                                    Datum::from(ScalarImpl::Int64(1)),
+                                    DataType::Int64,
+                                )),
+                            ],
+                        )
+                        .unwrap(),
+                    ),
+                    _ => unreachable!(),
+                };
+
+                let mut target_expr = ExprImpl::from(
+                    FunctionCall::new(ExprType::Divide, vec![numerator_expr, denominator_expr])
+                        .unwrap(),
+                );
+
+                // stddev = sqrt(variance)
                 if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
                     target_expr = ExprImpl::from(
                         FunctionCall::new(
                             ExprType::Pow,
                             vec![
                                 target_expr.clone(),
-                                // TODO: Because pow only supports [float64, float64], so the case
-                                // that `target_expr` is Decimal
-                                // is not considered here, please modify me
-                                // after pow supports Decimal in the future
+                                // TODO: The decimal implementation now still relies on float64, so
+                                // float64 is still used here
                                 ExprImpl::from(Literal::new(
                                     Datum::from(ScalarImpl::Float64(OrderedF64::from(0.5))),
                                     DataType::Float64,
@@ -741,26 +741,25 @@ impl LogicalAggBuilder {
                 match agg_kind {
                     AggKind::VarPop | AggKind::StddevPop => Ok(target_expr),
                     AggKind::StddevSamp | AggKind::VarSamp => {
+                        let less_than_expr = ExprImpl::from(
+                            FunctionCall::new(
+                                ExprType::LessThanOrEqual,
+                                vec![
+                                    count_expr,
+                                    ExprImpl::from(Literal::new(
+                                        Datum::from(ScalarImpl::Int64(1)),
+                                        DataType::Int64,
+                                    )),
+                                ],
+                            )
+                            .unwrap(),
+                        );
+                        let null_expr = ExprImpl::from(Literal::new(None, return_type));
+
                         let case_expr = ExprImpl::from(
                             FunctionCall::new(
                                 ExprType::Case,
-                                vec![
-                                    ExprImpl::from(
-                                        FunctionCall::new(
-                                            ExprType::LessThanOrEqual,
-                                            vec![
-                                                count_expr,
-                                                ExprImpl::from(Literal::new(
-                                                    Datum::from(ScalarImpl::Int64(1)),
-                                                    DataType::Int64,
-                                                )),
-                                            ],
-                                        )
-                                        .unwrap(),
-                                    ),
-                                    ExprImpl::from(Literal::new(None, return_type)),
-                                    target_expr,
-                                ],
+                                vec![less_than_expr, null_expr, target_expr],
                             )
                             .unwrap(),
                         );
