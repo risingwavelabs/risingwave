@@ -158,10 +158,6 @@ impl TtlReclaimCompactionPicker {
                     // Our goal is to pick as many complete layers of data as possible and keep the
                     // picked files contiguous to avoid overlapping key_ranges, so the strategy is
                     // to pick as many contiguous files as possible (at least one)
-                    state.last_select_end_key.clear();
-                    state
-                        .last_select_end_key
-                        .extend_from_slice(sst.key_range.as_ref().unwrap().right.as_ref());
                     break;
                 }
 
@@ -171,10 +167,6 @@ impl TtlReclaimCompactionPicker {
             select_input_ssts.push(sst.clone());
             select_file_size += sst.file_size;
             if select_file_size > self.max_ttl_reclaim_bytes {
-                state.last_select_end_key.clear();
-                state
-                    .last_select_end_key
-                    .extend_from_slice(sst.key_range.as_ref().unwrap().right.as_ref());
                 break;
             }
         }
@@ -184,6 +176,12 @@ impl TtlReclaimCompactionPicker {
             state.clear();
             return None;
         }
+
+        let last_sst = select_input_ssts.last().unwrap();
+        state.last_select_end_key.clear();
+        state
+            .last_select_end_key
+            .extend_from_slice(last_sst.key_range.as_ref().unwrap().right.as_ref());
 
         Some(CompactionInput {
             input_levels: vec![
@@ -569,6 +567,97 @@ mod test {
             let expect_task_file_count = vec![3, 2, 1];
             let expect_task_sst_id_range = vec![vec![2, 3, 4], vec![6, 7], vec![10]];
             for (index, x) in expect_task_file_count.iter().enumerate() {
+                // // pick ttl reclaim
+                let task = selector
+                    .pick_compaction(
+                        1,
+                        &group_config,
+                        &levels,
+                        &mut levels_handler,
+                        &mut local_stats,
+                        table_id_to_options.clone(),
+                    )
+                    .unwrap();
+
+                assert_compaction_task(&task, &levels_handler);
+                assert_eq!(task.input.input_levels.len(), 2);
+                assert_eq!(task.input.input_levels[0].level_idx, 4);
+
+                // test table_option_filter
+                assert_eq!(task.input.input_levels[0].table_infos.len(), *x);
+                let select_sst = &task.input.input_levels[0]
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.id)
+                    .collect_vec();
+                assert!(select_sst.is_sorted());
+                assert_eq!(expect_task_sst_id_range[index], *select_sst);
+
+                assert_eq!(task.input.input_levels[1].level_idx, 4);
+                assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+                assert_eq!(task.input.target_level, 4);
+                assert!(matches!(
+                    task.compaction_task_type,
+                    compact_task::TaskType::Ttl
+                ));
+            }
+        }
+
+        {
+            // test continuous file selection  with filter change
+            for level_handler in &mut levels_handler {
+                for pending_task_id in &level_handler.pending_tasks_ids() {
+                    level_handler.remove_task(*pending_task_id);
+                }
+            }
+
+            // rebuild selector
+            selector = TtlCompactionSelector::default();
+            let mut table_id_to_options: HashMap<u32, TableOption> = (2..=10)
+                .map(|table_id| {
+                    (
+                        table_id as u32,
+                        TableOption {
+                            retention_seconds: Some(5_u32),
+                        },
+                    )
+                })
+                .collect();
+
+            // cut range [2,3,4] [6,7] [10]
+            table_id_to_options.insert(
+                5,
+                TableOption {
+                    retention_seconds: Some(7200_u32),
+                },
+            );
+
+            table_id_to_options.insert(
+                8,
+                TableOption {
+                    retention_seconds: Some(7200_u32),
+                },
+            );
+
+            table_id_to_options.insert(
+                9,
+                TableOption {
+                    retention_seconds: Some(7200_u32),
+                },
+            );
+
+            let expect_task_file_count = vec![3, 3];
+            let expect_task_sst_id_range = vec![vec![2, 3, 4], vec![5, 6, 7]];
+            for (index, x) in expect_task_file_count.iter().enumerate() {
+                if index == expect_task_file_count.len() - 1 {
+                    table_id_to_options.insert(
+                        5,
+                        TableOption {
+                            retention_seconds: Some(5_u32),
+                        },
+                    );
+                }
+
                 // // pick ttl reclaim
                 let task = selector
                     .pick_compaction(
