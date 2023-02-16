@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::fmt::Debug;
+use std::ops::RangeBounds;
 
 use paste::paste;
 use risingwave_pb::meta::SystemParams;
@@ -26,15 +28,15 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 macro_rules! for_all_undeprecated_params {
     ($macro:ident) => {
         $macro! {
-            { barrier_interval_ms, 1000_u32 },
-            { checkpoint_frequency, 10_u64 },
-            { sstable_size_mb, 256_u32 },
-            { block_size_kb, 64_u32 },
-            { bloom_false_positive, 0.001_f64 },
-            { state_store, "hummock+memory".to_string() },
-            { data_directory, "hummock_001".to_string() },
-            { backup_storage_url, "memory".to_string() },
-            { backup_storage_directory, "backup".to_string() },
+            { barrier_interval_ms, u32, 1000_u32 },
+            { checkpoint_frequency, u64, 10_u64 },
+            { sstable_size_mb, u32, 256_u32 },
+            { block_size_kb, u32, 64_u32 },
+            { bloom_false_positive, f64, 0.001_f64 },
+            { state_store, String, "hummock+memory".to_string() },
+            { data_directory, String, "hummock_001".to_string() },
+            { backup_storage_url, String, "memory".to_string() },
+            { backup_storage_directory, String, "backup".to_string() },
         }
     };
 }
@@ -54,9 +56,9 @@ macro_rules! key_of {
     };
 }
 
-/// Define key constants for fields in `SystemParams` for use of other modules.
+// Define key constants for fields in `SystemParams` for use of other modules.
 macro_rules! def_key {
-    ($({ $field:ident, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
         paste! {
             $(
                 pub const [<$field:upper _KEY>]: &str = key_of!($field);
@@ -68,8 +70,9 @@ macro_rules! def_key {
 for_all_undeprecated_params!(def_key);
 for_all_deprecated_params!(def_key);
 
+// Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {
-    ($({ $field:ident, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// All undeprecated fields are guaranteed to be contained in the returned map.
         /// Return error if there are missing fields.
         pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
@@ -89,8 +92,9 @@ macro_rules! impl_system_params_to_kv {
     };
 }
 
+// Derive deserialization from kv pairs.
 macro_rules! impl_system_params_from_kv {
-    ($({ $field:ident, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// For each field in `SystemParams`, one of these rules apply:
         /// - Up-to-date: Guaranteed to be `Some`. If it is not present, may try to derive it from previous
         ///   versions of this field.
@@ -131,8 +135,39 @@ macro_rules! impl_system_params_from_kv {
     };
 }
 
+// Define check rules when a field is changed. By default all fields are immutable.
+// If you want custom rules, please override the default implementation in
+// `OverrideValidateOnSet` below.
+macro_rules! impl_default_validation_on_set {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        trait ValidateOnSet {
+            $(
+                fn $field(_v: &$type) -> Result<()> {
+                    Self::expect_immutable(key_of!($field))
+                }
+            )*
+
+            fn expect_immutable(field: &str) -> Result<()> {
+                Err(format!("{:?} is immutable", field))
+            }
+
+            fn expect_range<T, R>(v: T, range: R) -> Result<()>
+            where
+                T: Debug + PartialOrd,
+                R: RangeBounds<T> + Debug,
+            {
+                if !range.contains::<T>(&v) {
+                    Err(format!("value {:?} out of range, expect {:?}", v, range))
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
 macro_rules! impl_set_system_param {
-    ($({ $field:ident, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
         pub fn set_system_param(params: &mut SystemParams, key: &str, value: Option<String>) -> Result<()> {
              match key {
                 $(
@@ -142,7 +177,7 @@ macro_rules! impl_set_system_param {
                         } else {
                             $default
                         };
-                        sanity_check::$field(&v)?;
+                        OverrideValidateOnSet::$field(&v)?;
                         params.$field = Some(v);
                     },
                 )*
@@ -164,63 +199,16 @@ for_all_undeprecated_params!(impl_system_params_to_kv);
 
 for_all_undeprecated_params!(impl_set_system_param);
 
-/// Check the validity of set values.
-mod sanity_check {
-    use std::fmt::Debug;
-    use std::ops::{Bound, RangeBounds};
+for_all_undeprecated_params!(impl_default_validation_on_set);
 
-    use super::*;
-
-    pub fn barrier_interval_ms(v: &u32) -> Result<()> {
-        expect_range(*v, (Bound::Excluded(0), Bound::Unbounded))
+struct OverrideValidateOnSet;
+impl ValidateOnSet for OverrideValidateOnSet {
+    fn barrier_interval_ms(v: &u32) -> Result<()> {
+        Self::expect_range(*v, 1..)
     }
 
-    pub fn checkpoint_frequency(v: &u64) -> Result<()> {
-        expect_range(*v, (Bound::Excluded(0), Bound::Unbounded))
-    }
-
-    pub fn sstable_size_mb(_: &u32) -> Result<()> {
-        expect_immutable(SSTABLE_SIZE_MB_KEY)
-    }
-
-    pub fn block_size_kb(_: &u32) -> Result<()> {
-        expect_immutable(BLOCK_SIZE_KB_KEY)
-    }
-
-    pub fn bloom_false_positive(_: &f64) -> Result<()> {
-        expect_immutable(BLOOM_FALSE_POSITIVE_KEY)
-    }
-
-    pub fn state_store(_: &str) -> Result<()> {
-        expect_immutable(STATE_STORE_KEY)
-    }
-
-    pub fn data_directory(_: &str) -> Result<()> {
-        expect_immutable(DATA_DIRECTORY_KEY)
-    }
-
-    pub fn backup_storage_url(_: &str) -> Result<()> {
-        expect_immutable(BACKUP_STORAGE_URL_KEY)
-    }
-
-    pub fn backup_storage_directory(_: &str) -> Result<()> {
-        expect_immutable(BACKUP_STORAGE_DIRECTORY_KEY)
-    }
-
-    fn expect_immutable(field: &str) -> Result<()> {
-        Err(format!("{:?} is immutable", field))
-    }
-
-    fn expect_range<T, R>(v: T, range: R) -> Result<()>
-    where
-        T: Debug + PartialOrd,
-        R: RangeBounds<T> + Debug,
-    {
-        if !range.contains::<T>(&v) {
-            Err(format!("value {:?} out of range, expect {:?}", v, range))
-        } else {
-            Ok(())
-        }
+    fn checkpoint_frequency(v: &u64) -> Result<()> {
+        Self::expect_range(*v, 1..)
     }
 }
 
