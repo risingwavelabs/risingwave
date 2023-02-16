@@ -128,3 +128,38 @@ async fn get_or_create_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uu
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::storage::MemStore;
+
+    #[tokio::test]
+    async fn test_get_or_create_tracking_id_existing_id() {
+        let meta_store = Arc::new(MemStore::new());
+        let uuid = Uuid::new_v4();
+        meta_store
+            .put_cf(
+                TELEMETRY_CF,
+                TELEMETRY_KEY.to_vec(),
+                uuid.to_bytes_le().to_vec(),
+            )
+            .await
+            .unwrap();
+        let result = get_or_create_tracking_id(Arc::clone(&meta_store))
+            .await
+            .unwrap();
+        assert_eq!(result, uuid);
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_tracking_id_new_id() {
+        let meta_store = Arc::new(MemStore::new());
+        let result = get_or_create_tracking_id(Arc::clone(&meta_store))
+            .await
+            .unwrap();
+        assert!(Uuid::from_slice_le(result.as_bytes()).is_ok());
+    }
+}
