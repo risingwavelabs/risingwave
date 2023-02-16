@@ -152,6 +152,7 @@ impl BatchManager {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
+                tracing::trace!("Removed task: {:?}", task.get_task_id());
                 task.abort_task();
                 self.metrics.task_num.dec()
             }

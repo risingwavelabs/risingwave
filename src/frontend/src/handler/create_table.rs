@@ -18,7 +18,9 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, USER_COLUMN_ID_OFFSET};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, TableVersionId, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
@@ -59,7 +61,7 @@ pub struct ColumnIdGenerator {
     ///
     /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
     /// of the `version_id` field in the original table catalog.
-    pub version_id: u64,
+    pub version_id: TableVersionId,
 }
 
 impl ColumnIdGenerator {
@@ -85,7 +87,7 @@ impl ColumnIdGenerator {
         Self {
             existing: HashMap::new(),
             next_column_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
-            version_id: 0,
+            version_id: INITIAL_TABLE_VERSION_ID,
         }
     }
 

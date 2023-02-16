@@ -21,7 +21,7 @@ use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),

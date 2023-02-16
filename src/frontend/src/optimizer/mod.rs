@@ -395,8 +395,9 @@ impl PlanRoot {
                 // merge should be applied before eliminate
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
+                TrivialProjectToValuesRule::create(),
                 // project-join merge should be applied after merge
-                // and eliminate
+                // eliminate and to values
                 ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
@@ -410,6 +411,7 @@ impl PlanRoot {
                 OverAggToTopNRule::create(),
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
+                TrivialProjectToValuesRule::create(),
             ],
             ApplyOrder::TopDown,
         );
@@ -734,7 +736,7 @@ impl PlanRoot {
             // Note: we first plan it like a materialized view, and then rewrite it into a sink.
             TableType::MaterializedView,
         )
-        .map(|plan| plan.rewrite_into_sink(properties))
+        .and_then(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.
