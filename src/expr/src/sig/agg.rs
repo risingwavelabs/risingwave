@@ -143,7 +143,24 @@ pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<Data
             DataType::Interval => DataType::Interval,
             _ => return None,
         },
+
         (AggKind::Sum, _) => return None,
+
+        // StdDev/Var, stddev_pop, stddev_samp, var_pop, var_samp
+        (
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
+            [input],
+        ) => match input {
+            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
+                DataType::Decimal
+            }
+            DataType::Float32 | DataType::Float64 => DataType::Float64,
+            _ => return None,
+        },
+
+        (AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp, _) => {
+            return None
+        }
 
         (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
         (AggKind::Sum0, _) => return None,
