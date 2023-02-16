@@ -57,9 +57,10 @@ struct TestOptions {
     #[clap(long, default_value = "100")]
     count: usize,
 
-    /// Output directory - only applicable to [`Commands::Generate`]
+    /// Output directory - only applicable if we are generating
+    /// query while testing.
     #[clap(long)]
-    outdir: Option<String>,
+    generate: Option<String>,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -70,9 +71,6 @@ enum Commands {
 
     /// Run testing.
     Test(TestOptions),
-
-    /// Run query generation.
-    Generate(TestOptions),
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
@@ -86,7 +84,7 @@ async fn main() {
             println!("{}", print_function_table());
             return;
         }
-        Commands::Test(test_opts) | Commands::Generate(test_opts) => test_opts,
+        Commands::Test(test_opts) => test_opts,
     };
     let (client, connection) = tokio_postgres::Config::new()
         .host(&opt.host)
@@ -103,13 +101,9 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    run(&client, &opt.testdata, opt.count).await;
-    // Commands::Test(_) => run(&client, &opt.testdata, opt.count).await,
-    //     Commands::Generate(_) => {
-    //         let outdir = &opt
-    //             .outdir
-    //             .unwrap_or_else(|| panic!("missing --outdir argument"));
-    //         generate(&client, &opt.testdata, opt.count, &outdir).await;
-    //     }
-    // }
+    if let Some(outdir) = opt.generate {
+        generate(&client, &opt.testdata, opt.count, &outdir).await;
+    } else {
+        run(&client, &opt.testdata, opt.count).await;
+    }
 }
