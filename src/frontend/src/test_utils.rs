@@ -34,6 +34,7 @@ use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::SystemParams;
@@ -248,6 +249,11 @@ impl CatalogWriter for MockCatalogWriter {
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
         self.create_materialized_view(table, graph).await?;
+        Ok(())
+    }
+
+    async fn replace_table(&self, table: ProstTable, _graph: StreamFragmentGraph) -> Result<()> {
+        self.catalog.write().update_table(&table);
         Ok(())
     }
 
@@ -684,6 +690,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
+        Ok(vec![])
     }
 }
 

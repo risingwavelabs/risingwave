@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use super::monitor::SourceMetrics;
-use super::{SourceInfo, SplitImpl, SplitReaderV2};
+use super::{SourceInfo, SplitImpl, SplitReader};
 use crate::parser::ParserConfig;
 use crate::source::{BoxSourceWithStateStream, Column};
 
@@ -29,7 +29,7 @@ use crate::source::{BoxSourceWithStateStream, Column};
 pub struct DummySplitReader;
 
 #[async_trait]
-impl SplitReaderV2 for DummySplitReader {
+impl SplitReader for DummySplitReader {
     type Properties = ();
 
     async fn new(

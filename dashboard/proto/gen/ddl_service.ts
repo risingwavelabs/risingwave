@@ -226,6 +226,19 @@ export interface GetTableResponse {
   table: Table | undefined;
 }
 
+export interface GetDdlProgressRequest {
+}
+
+export interface DdlProgress {
+  id: number;
+  statement: string;
+  progress: string;
+}
+
+export interface GetDdlProgressResponse {
+  ddlProgress: DdlProgress[];
+}
+
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
   return { db: undefined };
 }
@@ -1389,6 +1402,86 @@ export const GetTableResponse = {
   fromPartial<I extends Exact<DeepPartial<GetTableResponse>, I>>(object: I): GetTableResponse {
     const message = createBaseGetTableResponse();
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    return message;
+  },
+};
+
+function createBaseGetDdlProgressRequest(): GetDdlProgressRequest {
+  return {};
+}
+
+export const GetDdlProgressRequest = {
+  fromJSON(_: any): GetDdlProgressRequest {
+    return {};
+  },
+
+  toJSON(_: GetDdlProgressRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetDdlProgressRequest>, I>>(_: I): GetDdlProgressRequest {
+    const message = createBaseGetDdlProgressRequest();
+    return message;
+  },
+};
+
+function createBaseDdlProgress(): DdlProgress {
+  return { id: 0, statement: "", progress: "" };
+}
+
+export const DdlProgress = {
+  fromJSON(object: any): DdlProgress {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      statement: isSet(object.statement) ? String(object.statement) : "",
+      progress: isSet(object.progress) ? String(object.progress) : "",
+    };
+  },
+
+  toJSON(message: DdlProgress): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.statement !== undefined && (obj.statement = message.statement);
+    message.progress !== undefined && (obj.progress = message.progress);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DdlProgress>, I>>(object: I): DdlProgress {
+    const message = createBaseDdlProgress();
+    message.id = object.id ?? 0;
+    message.statement = object.statement ?? "";
+    message.progress = object.progress ?? "";
+    return message;
+  },
+};
+
+function createBaseGetDdlProgressResponse(): GetDdlProgressResponse {
+  return { ddlProgress: [] };
+}
+
+export const GetDdlProgressResponse = {
+  fromJSON(object: any): GetDdlProgressResponse {
+    return {
+      ddlProgress: Array.isArray(object?.ddlProgress)
+        ? object.ddlProgress.map((e: any) => DdlProgress.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: GetDdlProgressResponse): unknown {
+    const obj: any = {};
+    if (message.ddlProgress) {
+      obj.ddlProgress = message.ddlProgress.map((e) => e ? DdlProgress.toJSON(e) : undefined);
+    } else {
+      obj.ddlProgress = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetDdlProgressResponse>, I>>(object: I): GetDdlProgressResponse {
+    const message = createBaseGetDdlProgressResponse();
+    message.ddlProgress = object.ddlProgress?.map((e) => DdlProgress.fromPartial(e)) || [];
     return message;
   },
 };

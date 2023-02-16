@@ -80,6 +80,7 @@ message BarrierCompleteResponse {
     uint32 chain_actor_id = 1;
     bool done = 2;
     uint64 consumed_epoch = 3;
+    uint64 consumed_rows = 4;
   }
   string request_id = 1;
   common.Status status = 2;

@@ -38,6 +38,11 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
 
+pub const SINK_FORMAT_OPTION: &str = "format";
+pub const SINK_FORMAT_APPEND_ONLY: &str = "append_only";
+pub const SINK_FORMAT_DEBEZIUM: &str = "debezium";
+pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
+
 #[async_trait]
 pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
