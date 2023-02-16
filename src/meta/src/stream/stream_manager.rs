@@ -312,7 +312,7 @@ where
         table_fragments: TableFragments,
         CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors: table_mview_map,
+            upstream_mview_actors,
             table_properties,
             building_locations,
             existing_locations,
@@ -457,15 +457,15 @@ where
 
         let table_id = table_fragments.table_id();
 
-        let split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
+        let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
         if let Err(err) = self
             .barrier_scheduler
             .run_command(Command::CreateStreamingJob {
                 table_fragments,
-                table_mview_map: table_mview_map.clone(),
-                dispatchers: dispatchers.clone(),
-                init_split_assignment: split_assignment,
+                upstream_mview_actors,
+                dispatchers,
+                init_split_assignment,
             })
             .await
         {

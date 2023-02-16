@@ -97,7 +97,7 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         table_fragments: TableFragments,
-        table_mview_map: HashMap<TableId, Vec<ActorId>>,
+        upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
     },
@@ -515,11 +515,11 @@ where
             Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                table_mview_map,
+                upstream_mview_actors,
                 init_split_assignment,
             } => {
-                let mut dependent_table_actors = Vec::with_capacity(table_mview_map.len());
-                for (table_id, actors) in table_mview_map {
+                let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
+                for (table_id, actors) in upstream_mview_actors {
                     let downstream_actors = dispatchers
                         .iter()
                         .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
