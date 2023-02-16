@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use clap::Parser as ClapParser;
 use risingwave_sqlsmith::print_function_table;
-use risingwave_sqlsmith::runner::run;
+use risingwave_sqlsmith::runner::{generate, run};
 use tokio_postgres::NoTls;
 
 #[derive(ClapParser, Debug, Clone)]
@@ -66,6 +66,9 @@ enum Commands {
 
     /// Run testing.
     Test(TestOptions),
+
+    /// Run query generation.
+    Generate(TestOptions),
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
@@ -78,7 +81,7 @@ async fn main() {
             println!("{}", print_function_table());
             return;
         }
-        Commands::Test(test_opts) => test_opts,
+        Commands::Test(test_opts) | Commands::Generate(test_opts) => test_opts,
     };
     let (client, connection) = tokio_postgres::Config::new()
         .host(&opt.host)
@@ -95,5 +98,8 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    run(&client, &opt.testdata, opt.count).await;
+    match opt.command {
+        Commands::Test(_) => run(&client, &opt.testdata, opt.count).await,
+        Commands::Generate(_) => generate(&client, &opt.testdata, opt.count).await,
+    }
 }

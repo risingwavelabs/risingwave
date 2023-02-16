@@ -111,6 +111,14 @@ pub struct Args {
     #[clap(long)]
     sqlsmith: Option<usize>,
 
+    /// Run sqlsmith pre-generated queries.
+    ///
+    /// If this argument is set,
+    /// the `files` argument refers to a directory containing
+    /// pre-generated ddl and queries to run.
+    #[clap(long)]
+    run_sqlsmith_pre_gen: bool,
+
     /// Load etcd data from toml file.
     #[clap(long)]
     etcd_data: Option<PathBuf>,
