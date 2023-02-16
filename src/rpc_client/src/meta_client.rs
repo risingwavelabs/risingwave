@@ -775,6 +775,12 @@ impl MetaClient {
         let resp = self.inner.get_system_params(req).await?;
         Ok(resp.params.unwrap().into())
     }
+
+    pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let req = GetDdlProgressRequest {};
+        let resp = self.inner.get_ddl_progress(req).await?;
+        Ok(resp.ddl_progress)
+    }
 }
 
 #[async_trait]
@@ -1406,6 +1412,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

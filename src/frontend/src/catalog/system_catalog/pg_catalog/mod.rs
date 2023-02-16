@@ -227,6 +227,23 @@ impl SysCatalogReaderImpl {
         Ok(meta_snapshots)
     }
 
+    pub(super) async fn read_ddl_progress(&self) -> Result<Vec<OwnedRow>> {
+        let ddl_grogress = self
+            .meta_client
+            .list_ddl_progress()
+            .await?
+            .into_iter()
+            .map(|s| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(s.id as i64)),
+                    Some(ScalarImpl::Utf8(s.statement.into())),
+                    Some(ScalarImpl::Utf8(s.progress.into())),
+                ])
+            })
+            .collect_vec();
+        Ok(ddl_grogress)
+    }
+
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
     pub(super) fn read_opclass_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])

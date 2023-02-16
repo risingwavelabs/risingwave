@@ -530,6 +530,15 @@ where
             Ok(Response::new(GetTableResponse { table: None }))
         }
     }
+
+    async fn get_ddl_progress(
+        &self,
+        _request: Request<GetDdlProgressRequest>,
+    ) -> Result<Response<GetDdlProgressResponse>, Status> {
+        Ok(Response::new(GetDdlProgressResponse {
+            ddl_progress: self.barrier_manager.get_ddl_progress().await,
+        }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>
@@ -655,6 +664,7 @@ where
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
+            definition: stream_job.mview_definition(),
         };
 
         // 9. Mark creating tables, including internal tables and the table of the stream job.

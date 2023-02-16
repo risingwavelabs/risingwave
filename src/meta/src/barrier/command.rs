@@ -100,6 +100,7 @@ pub enum Command {
         table_mview_map: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
+        definition: String,
     },
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -476,6 +477,7 @@ where
                 dispatchers,
                 table_mview_map,
                 init_split_assignment,
+                ..
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_mview_map.len());
                 for (table_id, actors) in table_mview_map {

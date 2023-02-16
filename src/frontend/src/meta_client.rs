@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_rpc_client::error::Result;
@@ -45,6 +46,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
     async fn get_system_params(&self) -> Result<SystemParamsReader>;
+
+    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -85,5 +88,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_system_params(&self) -> Result<SystemParamsReader> {
         self.0.get_system_params().await
+    }
+
+    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let ddl_progress = self.0.get_ddl_progress().await?;
+        Ok(ddl_progress)
     }
 }
