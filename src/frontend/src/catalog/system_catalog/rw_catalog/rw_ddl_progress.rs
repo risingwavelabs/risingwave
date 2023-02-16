@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+use risingwave_common::types::DataType;
 
-use risingwave_backup::error::BackupResult;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-#[cfg_attr(coverage, no_coverage)]
-fn main() -> BackupResult<()> {
-    use clap::StructOpt;
-    let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(risingwave_meta::backup_restore::restore(opts))
-}
+pub const RW_DDL_PROGRESS_TABLE_NAME: &str = "rw_ddl_progress";
+
+pub const RW_DDL_PROGRESS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Int64, "ddl_id"),
+    (DataType::Varchar, "ddl_statement"),
+    (DataType::Varchar, "progress"),
+];
