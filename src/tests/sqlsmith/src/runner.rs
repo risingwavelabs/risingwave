@@ -62,6 +62,7 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
 
     let mut queries = String::with_capacity(10000);
     set_distributed_query_mode(client).await;
+    let mut generated_queries = 0;
     for _ in 0..count {
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
         // test_session_variable(client, rng).await;
@@ -70,10 +71,13 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         let response = client.execute(sql.as_str(), &[]).await;
         let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
         if skipped == 0 {
-            queries.push_str(&sql);
+            generated_queries += 1;
+            queries.push_str(&format!("{};\n", &sql));
         }
     }
+    tracing::info!("Generated {} batch queries", generated_queries);
 
+    let mut generated_queries = 0;
     for _ in 0..count {
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
         // test_session_variable(client, rng).await;
@@ -83,10 +87,13 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
         if skipped == 0 {
-            queries.push_str(&sql);
-            queries.push_str(&format_drop_mview(&table));
+            generated_queries += 1;
+            queries.push_str(&format!("{};\n", &sql));
+            queries.push_str(&format!("{};\n", format_drop_mview(&table)));
         }
     }
+    tracing::info!("Generated {} stream queries", generated_queries);
+
     drop_tables(&mviews, testdata, client).await;
     write_to_file(outdir, "ddl.sql", &setup_sql);
     write_to_file(outdir, "queries.sql", &queries);
@@ -218,6 +225,8 @@ fn get_seed_table_sql(testdata: &str) -> String {
         .collect::<String>()
 }
 
+/// Create the tables defined in testdata, along with some mviews.
+/// TODO: Generate indexes and sinks.
 async fn create_tables(
     rng: &mut impl Rng,
     testdata: &str,
@@ -235,7 +244,7 @@ async fn create_tables(
 
     for stmt in &statements {
         let create_sql = stmt.to_string();
-        setup_sql.push_str(&format!("{};", &create_sql));
+        setup_sql.push_str(&format!("{};\n", &create_sql));
         client.execute(&create_sql, &[]).await.unwrap();
     }
 
@@ -247,7 +256,7 @@ async fn create_tables(
         let response = client.execute(&create_sql, &[]).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
-            setup_sql.push_str(&format!("{};", &create_sql));
+            setup_sql.push_str(&format!("{};\n", &create_sql));
             tables.push(table.clone());
             mviews.push(table);
         }
