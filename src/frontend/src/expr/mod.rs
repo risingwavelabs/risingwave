@@ -19,6 +19,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
@@ -725,6 +726,24 @@ impl ExprImpl {
                 expr => Expr(expr.to_expr_proto()),
             }),
         }
+    }
+
+    pub fn from_expr_proto(proto: &ExprNode) -> Result<Self> {
+        let rex_node = proto.get_rex_node()?;
+        let ret_type = proto.get_return_type()?.into();
+        let expr_type = proto.get_expr_type()?;
+        Ok(match rex_node {
+            RexNode::InputRef(input_ref) => {
+                Self::InputRef(Box::new(InputRef::from_expr_proto(input_ref, ret_type)?))
+            }
+            RexNode::Constant(_) => Self::Literal(Box::new(Literal::from_expr_proto(proto)?)),
+            RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
+                UserDefinedFunction::from_expr_proto(udf, ret_type)?,
+            )),
+            RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
+                FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
+            )),
+        })
     }
 }
 

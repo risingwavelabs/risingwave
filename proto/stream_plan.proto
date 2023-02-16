@@ -147,8 +147,8 @@ message SinkDesc {
   repeated plan_common.ColumnOrder pk = 5;
   repeated uint32 stream_key = 6;
   repeated uint32 distribution_key = 7;
-  bool append_only = 8;
-  map<string, string> properties = 9;
+  map<string, string> properties = 8;
+  catalog.SinkType sink_type = 9;
 }
 
 message SinkNode {
@@ -218,6 +218,7 @@ message SimpleAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message HashAggNode {
@@ -228,6 +229,7 @@ message HashAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message TopNNode {
@@ -473,6 +475,8 @@ message SortNode {
 message DmlNode {
   // Id of the table on which DML performs.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
 }

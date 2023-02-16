@@ -20,6 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_connector::sink::catalog::SinkType;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
@@ -281,7 +282,11 @@ impl StreamMaterialize {
 
     /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
     pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        StreamSink::new(self.input, self.table.to_sink_desc(properties))
+        // TODO(Yuanxin): Deduce sink type here.
+        StreamSink::new(
+            self.input,
+            self.table.to_sink_desc(properties, SinkType::AppendOnly),
+        )
     }
 }
 
