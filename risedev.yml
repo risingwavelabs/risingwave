@@ -129,6 +129,21 @@ profile:
       # - use: prometheus
       # - use: grafana
 
+  oss:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use google cloud stoage as storage backend, configure hdfs namenode and root path:
+      - use: opendal
+        engine: oss
+        bucket: "risingwave-oss-wcy"
+        root: risingwave
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
+
   full-benchmark:
     steps:
       - use: minio
@@ -876,6 +891,8 @@ template:
     engine: hdfs
 
     namenode: 127.0.0.1:9000"
+
+    bucket: risingwave-test
 
     root: risingwave
 
