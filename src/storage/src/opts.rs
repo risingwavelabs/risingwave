@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::{config::RwConfig, system_param::reader::SystemParamsReader};
+use risingwave_common::config::RwConfig;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::meta::SystemParams;
 
 #[derive(Clone, Debug)]
