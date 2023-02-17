@@ -25,7 +25,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
     Scalar,
@@ -114,6 +114,12 @@ impl RandValue for NaiveDateTimeWrapper {
 impl RandValue for bool {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         rand.gen::<bool>()
+    }
+}
+
+impl RandValue for JsonbVal {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        JsonbVal::dummy()
     }
 }
 
