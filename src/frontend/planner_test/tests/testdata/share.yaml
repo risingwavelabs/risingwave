@@ -150,7 +150,7 @@
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
-      |   └─StreamShare { id = 213 }
+      |   └─StreamShare { id = 210 }
       |     └─StreamProject { exprs: [sum0(count)] }
       |       └─StreamGlobalSimpleAgg { aggs: [count, sum0(count)] }
       |         └─StreamExchange { dist: Single }
@@ -158,7 +158,7 @@
       |             └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
-          └─StreamShare { id = 213 }
+          └─StreamShare { id = 210 }
             └─StreamProject { exprs: [sum0(count)] }
               └─StreamGlobalSimpleAgg { aggs: [count, sum0(count)] }
                 └─StreamExchange { dist: Single }
@@ -198,13 +198,13 @@
             └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id, id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamProject { exprs: [id, _row_id] }
-              |   └─StreamShare { id = 156 }
+              |   └─StreamShare { id = 152 }
               |     └─StreamProject { exprs: [id, _row_id] }
               |       └─StreamRowIdGen { row_id_index: 10 }
               |         └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
               └─StreamExchange { dist: HashShard(id) }
                 └─StreamProject { exprs: [id, _row_id] }
-                  └─StreamShare { id = 156 }
+                  └─StreamShare { id = 152 }
                     └─StreamProject { exprs: [id, _row_id] }
                       └─StreamRowIdGen { row_id_index: 10 }
                         └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
