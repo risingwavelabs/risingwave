@@ -126,6 +126,8 @@ message ExprNode {
     JSONB_ACCESS_INNER = 600;
     // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
     JSONB_ACCESS_STR = 601;
+    JSONB_TYPEOF = 602;
+    JSONB_ARRAY_LENGTH = 603;
 
     // Non-pure functions below (> 1000)
     // ------------------------

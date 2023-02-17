@@ -380,6 +380,8 @@ impl Binder {
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
+                ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // System information operations.
                 (
                     "pg_typeof",
