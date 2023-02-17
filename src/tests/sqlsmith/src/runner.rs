@@ -33,11 +33,13 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     let (tables, base_tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
     tracing::info!("Created tables");
 
+    let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    setup_sql.push_str(&session_sql);
+    let session_sql = set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
+    setup_sql.push_str(&session_sql);
+    tracing::info!("Set session variables");
+
     let rows_per_table = 10;
-    client
-        .query("SET RW_IMPLICIT_FLUSH TO TRUE;", &[])
-        .await
-        .unwrap();
     let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
     tracing::info!("Populated base tables");
@@ -73,7 +75,7 @@ async fn populate_tables<R: Rng>(
         tracing::info!("Executing: {}", insert);
         client.query(insert, &[]).await.unwrap();
     }
-    inserts.into_iter().collect()
+    inserts.into_iter().map(|i| format!("{};\n", i)).collect()
 }
 
 /// Sanity checks for sqlsmith
@@ -122,6 +124,12 @@ async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
         .unwrap();
 }
 
+async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &str) -> String {
+    let s = format!("SET {variable} TO {value};");
+    client.simple_query(&s).await.unwrap();
+    s
+}
+
 #[allow(dead_code)]
 async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
     let session_sql = session_sql_gen(rng);
@@ -160,7 +168,6 @@ async fn test_batch_queries<R: Rng>(
     setup_sql: &str,
     sample_size: usize,
 ) -> f64 {
-    set_distributed_query_mode(client).await;
     let mut skipped = 0;
     for _ in 0..sample_size {
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
