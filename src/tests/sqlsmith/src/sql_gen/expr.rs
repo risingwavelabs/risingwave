@@ -117,7 +117,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_data_type_inner(&mut self, depth: usize) -> DataType {
         match self.rng.gen_bool(0.8) {
-            true if self.bound_columns.len() > 0 => self.bound_columns.choose(&mut self.rng).unwrap().data_type.clone(),
+            true if !self.bound_columns.is_empty() => self
+                .bound_columns
+                .choose(&mut self.rng)
+                .unwrap()
+                .data_type
+                .clone(),
             _ => {
                 use {DataType as S, DataTypeName as T};
                 let mut candidate_ret_types = vec![
