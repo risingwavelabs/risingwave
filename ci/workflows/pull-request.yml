@@ -23,7 +23,7 @@ steps:
   - label: "check ci image rebuild"
     plugins:
       - chronotc/monorepo-diff#v2.3.0:
-          diff: "git fetch origin && git diff --name-only origin/main"
+          diff: "git diff --name-only origin/main"
           watch:
             - path: "ci/build-ci-image.sh"
               config:
