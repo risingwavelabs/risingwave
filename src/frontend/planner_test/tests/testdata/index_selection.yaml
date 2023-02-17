@@ -637,5 +637,4 @@
     select * from t1 where a like 'ABC'
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: Like(t1.a, 'ABC':Varchar) }
-      └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.d], distribution: SomeShard }
+    └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a = Utf8("ABC")], distribution: UpstreamHashShard(idx.a) }

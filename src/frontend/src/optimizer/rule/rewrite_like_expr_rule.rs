@@ -103,7 +103,11 @@ impl ExprRewriter for LikeExprRewriter {
             (Some(a), Some(b)) => min(a, b),
             (Some(idx), None) => idx,
             (None, Some(idx)) => idx,
-            (None, None) => return func_call.into(),
+            (None, None) => {
+                let (_, inputs, ret) = func_call.decompose();
+                let func_call = FunctionCall::new_unchecked(ExprType::Equal, inputs, ret);
+                return func_call.into();
+            }
         };
 
         if idx == 0 {
