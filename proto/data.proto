@@ -95,6 +95,7 @@ enum ArrayType {
   STRUCT = 13;
   LIST = 14;
   BYTEA = 15;
+  JSONB = 16;
 }
 
 message Array {
