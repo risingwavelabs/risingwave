@@ -1,0 +1,37 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T rowsort
+values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('[1, true]');
+----
+1
+NULL
+[1,true]
+null
+true
+{"a":[2,true,"",{}]}
+
+statement ok
+create table t (v1 jsonb);
+
+statement ok
+insert into t values ('1'), ('true'), ('null'), (null);
+
+query T rowsort
+select * from t;
+----
+1
+NULL
+null
+true
+
+query T
+select * from t order by v1::varchar;
+----
+1
+null
+true
+NULL
+
+statement ok
+drop table t;

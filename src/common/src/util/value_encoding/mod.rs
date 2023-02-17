@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -156,6 +156,10 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
         DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
+        DataType::Jsonb => ScalarImpl::Jsonb(
+            JsonbVal::value_deserialize(&deserialize_bytea(data))
+                .ok_or(ValueEncodingError::InvalidJsonbEncoding)?,
+        ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::List {
