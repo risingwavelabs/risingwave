@@ -47,7 +47,7 @@ impl RisingWaveService {
     }
 }
 
-const IDLE_EXIT_SECONDS: u64 = 1800;
+const IDLE_EXIT_SECONDS: u64 = 5;
 
 /// Embed the config file and create a temporary file at runtime.
 static CONFIG_PATH_WITH_IDLE_EXIT: LazyLock<TempPath> = LazyLock::new(|| {
