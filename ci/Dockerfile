@@ -34,6 +34,15 @@ RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-so
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
 
+RUN wget https://raw.githubusercontent.com/risingwavelabs/risingwave/main/Makefile.toml
+RUN ENABLE_MINIO=true \
+    ENABLE_ETCD=true \
+    ENABLE_ALL_IN_ONE=true \
+    ENABLE_KAFKA=true \
+    ENABLE_PUBSUB=true \
+    cargo make download-all
+RUN rm Makefile.toml
+
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
 ENV CARGO_INCREMENTAL=0
