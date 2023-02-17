@@ -35,6 +35,7 @@ use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use risingwave_rpc_client::SystemParamsReader;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -314,6 +315,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
+    let system_params_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
+    let system_params_reader: SystemParamsReader = system_params_manager.get_params().await.into();
+
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
@@ -360,8 +365,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
 
-    let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+        hummock_manager.clone(),
+        system_params_reader.checkpoint_frequency() as usize,
+    );
 
     let source_manager = Arc::new(
         SourceManager::new(
@@ -442,8 +449,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
-    let system_params_manager =
-        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
