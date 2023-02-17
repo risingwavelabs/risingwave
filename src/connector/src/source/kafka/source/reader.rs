@@ -30,7 +30,7 @@ use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
@@ -49,7 +49,7 @@ pub struct KafkaSplitReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for KafkaSplitReader {
+impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
 
     async fn new(

@@ -296,9 +296,14 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
-                    AggCallState::ResultValue
-                }
+                AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp => AggCallState::ResultValue,
                 AggKind::ApproxCountDistinct => {
                     if !in_append_only {
                         // FIXME: now the approx count distinct on a non-append-only stream does not
@@ -639,6 +644,9 @@ impl PlanAggCall {
             }
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
+            }
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
+                panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
         };
         PlanAggCall {
