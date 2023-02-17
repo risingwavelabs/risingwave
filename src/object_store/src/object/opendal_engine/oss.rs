@@ -19,7 +19,7 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal oss engine.
-    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+    pub fn new_oss_engine(bucket: String, root: String) -> ObjectResult<Self> {
         // Create oss backend builder.
         let mut builder = Oss::default();
 

@@ -683,7 +683,7 @@ template:
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
-    # AWS s3 bucket used by this compute node
+    # OpenDAL backend used by this compute node
     provide-opendal: "opendal*"
 
     # AWS s3 bucket used by this compute node

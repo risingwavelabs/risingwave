@@ -833,7 +833,7 @@ pub async fn parse_remote_object_store(
             let oss = oss.strip_prefix("oss://").unwrap();
             let (bucket, root) = oss.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
+                OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )
