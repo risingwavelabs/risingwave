@@ -68,7 +68,12 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
 
     let arr = BoolArray::new(data, bitmap);
-    assert_eq!(arr.len(), cardinality);
+    // Either array length should match cardinality,
+    // or it is null, and array length should be 0.
+    // To avoid confusion, "len" here does not refer to length of array,
+    // rather, it is the number of rows of arrays returned.
+    // cardinality also refers to this.
+    assert_eq!(arr.len() == cardinality || arr.len() == 0);
 
     Ok(arr.into())
 }
