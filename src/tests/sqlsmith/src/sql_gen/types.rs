@@ -25,7 +25,6 @@ use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::func::{func_sigs, FuncSign as RwFuncSig};
 use risingwave_frontend::expr::ExprType;
-use risingwave_frontend::expr::ExprType::Position;
 use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
