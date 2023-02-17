@@ -26,6 +26,7 @@ mod decimal_array;
 pub mod error;
 pub mod interval_array;
 mod iterator;
+mod jsonb_array;
 pub mod list_array;
 mod macros;
 mod primitive_array;
@@ -52,6 +53,7 @@ pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
+pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -343,6 +345,7 @@ macro_rules! for_all_variants {
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
             { List, list, ListArray, ListArrayBuilder },
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
@@ -378,6 +381,12 @@ impl From<BoolArray> for ArrayImpl {
 impl From<Utf8Array> for ArrayImpl {
     fn from(arr: Utf8Array) -> Self {
         Self::Utf8(arr)
+    }
+}
+
+impl From<JsonbArray> for ArrayImpl {
+    fn from(arr: JsonbArray) -> Self {
+        Self::Jsonb(arr)
     }
 }
 
@@ -674,6 +683,9 @@ impl ArrayImpl {
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
             ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            ProstArrayType::Jsonb => {
+                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
+            }
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),

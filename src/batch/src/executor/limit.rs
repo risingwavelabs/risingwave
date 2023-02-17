@@ -63,6 +63,9 @@ impl BoxedExecutorBuilder for LimitExecutor {
 impl LimitExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
+        if self.limit == 0 {
+            return Ok(());
+        }
         // the number of rows have been skipped due to offset
         let mut skipped = 0;
         // the number of rows have been returned as execute result

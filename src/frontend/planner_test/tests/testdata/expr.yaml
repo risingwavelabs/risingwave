@@ -29,37 +29,37 @@
     select (((((false is not true) is true) is not false) is false) is not null) is null from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))] }
+    └─BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean)))))) as $expr23] }
       └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - name: bind between
   sql: |
     SELECT 1 between 2 and 3
   logical_plan: |
-    LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))] }
+    LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: null eq null
   sql: |
     SELECT null = null;
   logical_plan: |
-    LogicalProject { exprs: [(null:Varchar = null:Varchar)] }
+    LogicalProject { exprs: [(null:Varchar = null:Varchar) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: null lt null
   sql: |
     SELECT null < null;
   logical_plan: |
-    LogicalProject { exprs: [(null:Varchar < null:Varchar)] }
+    LogicalProject { exprs: [(null:Varchar < null:Varchar) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind is distinct from
   sql: |
     SELECT 1 IS DISTINCT FROM 2
   logical_plan: |
-    LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32)] }
+    LogicalProject { exprs: [IsDistinctFrom(1:Int32, 2:Int32) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind is not distinct from
   sql: |
     SELECT 1 IS NOT DISTINCT FROM 2
   logical_plan: |
-    LogicalProject { exprs: [IsNotDistinctFrom(1:Int32, 2:Int32)] }
+    LogicalProject { exprs: [IsNotDistinctFrom(1:Int32, 2:Int32) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: in-list with aligned types
   sql: |
@@ -80,7 +80,7 @@
     create table t (v1 int);
     SELECT 1 in (3, 0.5*2, min(v1)) from t;
   batch_plan: |
-    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = min(min(t.v1))))] }
+    BatchProject { exprs: [(In(1:Int32::Decimal, 3:Int32::Decimal, (0.5:Decimal * 2:Int32)) OR (1:Int32 = min(min(t.v1)))) as $expr23] }
     └─BatchSimpleAgg { aggs: [min(min(t.v1))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [min(t.v1)] }
@@ -165,7 +165,7 @@
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
-    BatchProject { exprs: [Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar)] }
+    BatchProject { exprs: [Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar) as $expr23] }
     └─BatchFilter { predicate: Like('12':Varchar, '%1':Varchar) }
       └─BatchValues { rows: [[]] }
 - name: case searched form with else
@@ -174,11 +174,11 @@
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) as expr from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)] }
+    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), t._row_id] }
+    └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal) as $expr46, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: case searched form without else
   sql: |
@@ -186,7 +186,7 @@
     select (case when v1=1 then 1 when v1=2 then 2.1 end) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2.1:Decimal)] }
+    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2:Int32), 2.1:Decimal) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: case simple form
   sql: |
@@ -194,7 +194,7 @@
     select (case v1 when 1 then 1 when 2.0 then 2 else 0.0 end) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2.0:Decimal), 2:Int32::Decimal, 0.0:Decimal)] }
+    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Int32::Decimal, (t.v1 = 2.0:Decimal), 2:Int32::Decimal, 0.0:Decimal) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: case misaligned result types
   sql: |
@@ -213,11 +213,11 @@
     select nullif(v1, 1) as expr from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1)] }
+    └─BatchProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1), t._row_id] }
+    └─StreamProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1) as $expr46, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
@@ -234,18 +234,18 @@
     select coalesce(v1, 1) as expr from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Coalesce(t.v1, 1:Int32)] }
+    └─BatchProject { exprs: [Coalesce(t.v1, 1:Int32) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [Coalesce(t.v1, 1:Int32), t._row_id] }
+    └─StreamProject { exprs: [Coalesce(t.v1, 1:Int32) as $expr46, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 int);
     select coalesce(v1, 1.2) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Coalesce(t.v1::Decimal, 1.2:Decimal)] }
+    └─BatchProject { exprs: [Coalesce(t.v1::Decimal, 1.2:Decimal) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     create table t (v1 int);
@@ -260,18 +260,18 @@
     select concat_ws(v1, 1) as expr from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [ConcatWs(t.v1, 1:Int32::Varchar)] }
+    └─BatchProject { exprs: [ConcatWs(t.v1, 1:Int32::Varchar) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [ConcatWs(t.v1, 1:Int32::Varchar), t._row_id] }
+    └─StreamProject { exprs: [ConcatWs(t.v1, 1:Int32::Varchar) as $expr46, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1.2) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [ConcatWs(t.v1, 1.2:Decimal::Varchar)] }
+    └─BatchProject { exprs: [ConcatWs(t.v1, 1.2:Decimal::Varchar) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     create table t (v1 int);
@@ -286,18 +286,18 @@
     select concat(v1, v2, v3, 1) as expr from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, 1:Int32::Varchar)] }
+    └─BatchProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, 1:Int32::Varchar) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, 1:Int32::Varchar), t._row_id] }
+    └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, 1:Int32::Varchar) as $expr46, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 float);
     select concat(v1) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [ConcatWs('':Varchar, t.v1::Varchar)] }
+    └─BatchProject { exprs: [ConcatWs('':Varchar, t.v1::Varchar) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     create table t (v1 int);
@@ -345,27 +345,27 @@
 - sql: |
     select 1 < SOME(null);
   logical_plan: |
-    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 }))] }
+    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 })) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < ANY(null);
   logical_plan: |
-    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 }))] }
+    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 })) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < ALL(null);
   logical_plan: |
-    LogicalProject { exprs: [All((1:Int32 < null:List { datatype: Int32 }))] }
+    LogicalProject { exprs: [All((1:Int32 < null:List { datatype: Int32 })) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < ALL('{2,3}');
   logical_plan: |
-    LogicalProject { exprs: [All((1:Int32 < '{2,3}':Varchar::List { datatype: Int32 }))] }
+    LogicalProject { exprs: [All((1:Int32 < '{2,3}':Varchar::List { datatype: Int32 })) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME(null::integer[]);
   logical_plan: |
-    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 }))] }
+    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 })) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME(null::varchar[]);
@@ -390,46 +390,46 @@
 - sql: |
     select 1 < SOME(array[null]::integer[]);
   logical_plan: |
-    LogicalProject { exprs: [Some((1:Int32 < Array(null:Int32)))] }
+    LogicalProject { exprs: [Some((1:Int32 < Array(null:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME(array[1, 2]);
   logical_plan: |
-    LogicalProject { exprs: [Some((1:Int32 < Array(1:Int32, 2:Int32)))] }
+    LogicalProject { exprs: [Some((1:Int32 < Array(1:Int32, 2:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME((select array[1]) || array[2]);
   logical_plan: |
-    LogicalProject { exprs: [Some((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
+    LogicalProject { exprs: [Some((1:Int32 < ArrayCat($expr1, Array(2:Int32)))) as $expr2] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalProject { exprs: [Array(1:Int32)] }
+      └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr33, Array(2:Int32)))) as $expr40] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[Array(1:Int32)]] }
 - sql: |
     select 1 < ALL(array[null]::integer[]);
   logical_plan: |
-    LogicalProject { exprs: [All((1:Int32 < Array(null:Int32)))] }
+    LogicalProject { exprs: [All((1:Int32 < Array(null:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < ALL(array[1, 2]);
   logical_plan: |
-    LogicalProject { exprs: [All((1:Int32 < Array(1:Int32, 2:Int32)))] }
+    LogicalProject { exprs: [All((1:Int32 < Array(1:Int32, 2:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < ALL((select array[1]) || array[2]);
   logical_plan: |
-    LogicalProject { exprs: [All((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
+    LogicalProject { exprs: [All((1:Int32 < ArrayCat($expr1, Array(2:Int32)))) as $expr2] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-      └─LogicalProject { exprs: [Array(1:Int32)] }
+      └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [All((1:Int32 < ArrayCat(Array(1:Int32), Array(2:Int32))))] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr33, Array(2:Int32)))) as $expr40] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[Array(1:Int32)]] }
@@ -457,10 +457,10 @@
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= (now - '00:00:02':Interval)), output: [t.v1, t._row_id] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= $expr12), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(now - '00:00:02':Interval)], watermark_columns: [(now - '00:00:02':Interval)] }
+        └─StreamProject { exprs: [(now - '00:00:02':Interval) as $expr12], watermark_columns: [(now - '00:00:02':Interval)] }
           └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
@@ -519,7 +519,7 @@
   sql: |
     select ARRAY[1, null] t;
   logical_plan: |
-    LogicalProject { exprs: [Array(1:Int32, null:Int32)] }
+    LogicalProject { exprs: [Array(1:Int32, null:Int32) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: regression (#7641) -fuzzing test failed at Bind error,types Boolean and Varchar cannot be matched
   sql: |
@@ -532,7 +532,7 @@
     select 1 + 2 + v1 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [((1:Int32 + 2:Int32) + t.v1)] }
+    └─BatchProject { exprs: [((1:Int32 + 2:Int32) + t.v1) as $expr23] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: const_eval of division by 0 error
   sql: select 1 / 0 t1;
