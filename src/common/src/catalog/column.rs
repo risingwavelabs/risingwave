@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::{
 };
 
 use super::row_id_column_desc;
-use crate::catalog::Field;
+use crate::catalog::{Field, ROW_ID_COLUMN_ID};
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
@@ -50,6 +50,12 @@ impl ColumnId {
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0 + 1)
+    }
+
+    pub fn apply_delta_if_not_row_id(&mut self, delta: i32) {
+        if self.0 != ROW_ID_COLUMN_ID.get_id() {
+            self.0 += delta;
+        }
     }
 }
 
@@ -289,6 +295,36 @@ impl ColumnCatalog {
             Cow::Borrowed(&self.column_desc.name)
         }
     }
+}
+
+pub fn columns_extend(preserved_columns: &mut Vec<ColumnCatalog>, columns: Vec<ColumnCatalog>) {
+    debug_assert_eq!(ROW_ID_COLUMN_ID.get_id(), 0);
+    let mut max_incoming_column_id = ROW_ID_COLUMN_ID.get_id();
+    columns.iter().for_each(|column| {
+        let column_id = column.column_id().get_id();
+        if column_id > max_incoming_column_id {
+            max_incoming_column_id = column_id;
+        }
+    });
+    preserved_columns.iter_mut().for_each(|column| {
+        column
+            .column_desc
+            .column_id
+            .apply_delta_if_not_row_id(max_incoming_column_id)
+    });
+
+    preserved_columns.extend(columns);
+}
+
+pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
+    let mut column_ids = columns
+        .iter()
+        .map(|column| column.column_id().get_id())
+        .collect_vec();
+    column_ids.sort();
+    let original_len = column_ids.len();
+    column_ids.dedup();
+    column_ids.len() == original_len
 }
 
 #[cfg(test)]

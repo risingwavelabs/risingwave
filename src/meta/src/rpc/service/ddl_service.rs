@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
@@ -530,6 +531,15 @@ where
             Ok(Response::new(GetTableResponse { table: None }))
         }
     }
+
+    async fn get_ddl_progress(
+        &self,
+        _request: Request<GetDdlProgressRequest>,
+    ) -> Result<Response<GetDdlProgressResponse>, Status> {
+        Ok(Response::new(GetDdlProgressResponse {
+            ddl_progress: self.barrier_manager.get_ddl_progress().await,
+        }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>
@@ -557,19 +567,20 @@ where
 
         let (ctx, table_fragments) = self.prepare_stream_job(stream_job, fragment_graph).await?;
 
+        let internal_tables = ctx.internal_tables();
         let result = try {
             if let Some(source) = stream_job.source() {
                 self.source_manager.register_source(source).await?;
             }
             self.stream_manager
-                .create_streaming_job(table_fragments, &ctx)
+                .create_streaming_job(table_fragments, ctx)
                 .await?;
         };
 
         match result {
-            Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
+            Ok(_) => self.finish_stream_job(stream_job, internal_tables).await,
             Err(err) => {
-                self.cancel_stream_job(stream_job, &ctx).await?;
+                self.cancel_stream_job(stream_job, internal_tables).await?;
                 Err(err)
             }
         }
@@ -655,6 +666,7 @@ where
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
+            definition: stream_job.mview_definition(),
         };
 
         // 9. Mark creating tables, including internal tables and the table of the stream job.
@@ -676,9 +688,10 @@ where
     async fn cancel_stream_job(
         &self,
         stream_job: &StreamingJob,
-        ctx: &CreateStreamingJobContext,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
-        let mut creating_internal_table_ids = ctx.internal_table_ids();
+        let mut creating_internal_table_ids =
+            internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.
         match stream_job {
             StreamingJob::MaterializedView(table) => {
@@ -723,19 +736,18 @@ where
     async fn finish_stream_job(
         &self,
         stream_job: &StreamingJob,
-        ctx: &CreateStreamingJobContext,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<u64> {
         // 1. finish procedure.
-        let mut creating_internal_table_ids = ctx.internal_table_ids();
+        let mut creating_internal_table_ids = internal_tables.iter().map(|t| t.id).collect_vec();
         let version = match stream_job {
             StreamingJob::MaterializedView(table) => {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_table_procedure(ctx.internal_tables(), table)
+                    .finish_create_table_procedure(internal_tables, table)
                     .await?
             }
             StreamingJob::Sink(sink) => {
-                let internal_tables = ctx.internal_tables();
                 self.catalog_manager
                     .finish_create_sink_procedure(internal_tables, sink)
                     .await?
@@ -743,7 +755,7 @@ where
             StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
-                    let internal_tables: [_; 1] = ctx.internal_tables().try_into().unwrap();
+                    let internal_tables: [_; 1] = internal_tables.try_into().unwrap();
                     self.catalog_manager
                         .finish_create_table_procedure_with_source(
                             source,
@@ -752,7 +764,6 @@ where
                         )
                         .await?
                 } else {
-                    let internal_tables = ctx.internal_tables();
                     assert!(internal_tables.is_empty());
                     // Though `internal_tables` is empty here, we pass it as a parameter to reuse
                     // the method.
