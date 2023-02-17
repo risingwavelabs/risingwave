@@ -15,7 +15,9 @@
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType::Boolean;
-use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
+use risingwave_sqlparser::ast::{
+    Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
+};
 
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -127,10 +129,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.add_relations_to_context(right_table);
             let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
             self.restore_context(old_context);
-            join_on_expr = Expr::BinaryOp {
-                left: Box::new(join_on_expr),
-                op: BinaryOperator::And,
-                right: Box::new(expr),
+            // FIXME(noel): Hack to reduce streaming nested loop join occurrences.
+            // ... JOIN ON x=y AND false.
+            if expr != Expr::Value(Value::Boolean(false)) {
+                join_on_expr = Expr::BinaryOp {
+                    left: Box::new(join_on_expr),
+                    op: BinaryOperator::And,
+                    right: Box::new(expr),
+                }
             }
         }
         Some(join_on_expr)
