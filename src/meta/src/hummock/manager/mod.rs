@@ -1275,9 +1275,7 @@ where
             compact_task.compaction_group_id,
         );
 
-        if !deterministic_mode
-            && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
-        {
+        if !deterministic_mode {
             self.try_send_compaction_request(
                 compact_task.compaction_group_id,
                 compact_task.task_type(),

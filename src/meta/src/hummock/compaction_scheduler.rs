@@ -49,7 +49,7 @@ type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 /// compaction groups.
 pub struct CompactionRequestChannel {
     request_tx: UnboundedSender<CompactionRequestChannelItem>,
-    scheduled: Mutex<HashSet<CompactionGroupId>>,
+    scheduled: Mutex<HashSet<(CompactionGroupId, compact_task::TaskType)>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -76,16 +76,21 @@ impl CompactionRequestChannel {
         task_type: compact_task::TaskType,
     ) -> Result<bool, SendError<CompactionRequestChannelItem>> {
         let mut guard = self.scheduled.lock();
-        if guard.contains(&compaction_group) {
+        let key = (compaction_group, task_type);
+        if guard.contains(&key) {
             return Ok(false);
         }
-        self.request_tx.send((compaction_group, task_type))?;
-        guard.insert(compaction_group);
+        self.request_tx.send(key)?;
+        guard.insert(key);
         Ok(true)
     }
 
-    pub fn unschedule(&self, compaction_group: CompactionGroupId) {
-        self.scheduled.lock().remove(&compaction_group);
+    pub fn unschedule(
+        &self,
+        compaction_group: CompactionGroupId,
+        task_type: compact_task::TaskType,
+    ) {
+        self.scheduled.lock().remove(&(compaction_group, task_type));
     }
 }
 
@@ -404,7 +409,7 @@ where
         shutdown_rx: Shared<Receiver<()>>,
     ) -> bool {
         sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-        sched_channel.unschedule(compaction_group);
+        sched_channel.unschedule(compaction_group, task_type);
 
         self.task_dispatch(
             compaction_group,

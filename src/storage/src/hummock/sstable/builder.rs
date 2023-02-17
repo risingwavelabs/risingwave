@@ -363,7 +363,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             min_epoch: cmp::min(self.min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(self.max_epoch, tombstone_max_epoch),
         };
-        tracing::info!(
+        tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {}",
             meta.encoded_size(),
             meta.bloom_filter.len(),
