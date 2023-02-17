@@ -4,6 +4,11 @@ select pow(2.0, 3.0)
 8
 
 query R
+select power(2.0, 3.0)
+----
+8
+
+query R
 select pow(2.0::decimal, 3.0::decimal)
 ----
 8
