@@ -2,7 +2,8 @@
 .DS_Store
 
 # Visual Studio Code
-.vscode/
+.vscode/*
+!.vscode/*.example
 .devcontainer/
 
 # JetBrains
