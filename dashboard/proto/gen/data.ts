@@ -20,6 +20,7 @@ export const RwArrayType = {
   STRUCT: "STRUCT",
   LIST: "LIST",
   BYTEA: "BYTEA",
+  JSONB: "JSONB",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -75,6 +76,9 @@ export function rwArrayTypeFromJSON(object: any): RwArrayType {
     case 15:
     case "BYTEA":
       return RwArrayType.BYTEA;
+    case 16:
+    case "JSONB":
+      return RwArrayType.JSONB;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -116,6 +120,8 @@ export function rwArrayTypeToJSON(object: RwArrayType): string {
       return "LIST";
     case RwArrayType.BYTEA:
       return "BYTEA";
+    case RwArrayType.JSONB:
+      return "JSONB";
     case RwArrayType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
