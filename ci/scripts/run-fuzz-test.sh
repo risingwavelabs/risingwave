@@ -36,8 +36,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
 
     echo "--- Prepare RiseDev dev cluster"
     cargo make pre-start-dev
-    echo "--- Link all-in-one binaries"
-cargo make link-all-in-one-binaries
+    cargo make link-all-in-one-binaries
 
     echo "+++ Run sqlsmith tests"
     NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);

@@ -40,12 +40,8 @@ chmod +x ./target/debug/risedev-dev
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.source.env risedev-components.user.env
 
-echo "--- Run dummy cargo make"
-cargo make
-
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
-echo "--- Link all-in-one binaries"
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"

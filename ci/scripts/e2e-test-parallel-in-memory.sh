@@ -37,7 +37,6 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
-echo "--- Link all-in-one binaries"
 cargo make link-all-in-one-binaries
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
