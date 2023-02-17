@@ -132,8 +132,6 @@ pub enum ErrorCode {
     PermissionDenied(String),
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-    #[error("SystemParams error: {0}")]
-    SystemParamsError(String),
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -268,6 +266,7 @@ impl From<tonic::Status> for RwError {
                 ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }
     }

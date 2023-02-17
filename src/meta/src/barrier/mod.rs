@@ -218,6 +218,17 @@ where
         Ok(!self.finished_commands.is_empty())
     }
 
+    fn cancel_command(&mut self, cancelled_command: TrackingCommand<S>) {
+        if let Some(index) = self
+            .command_ctx_queue
+            .iter()
+            .position(|x| x.command_ctx.prev_epoch == cancelled_command.context.prev_epoch)
+        {
+            self.command_ctx_queue.remove(index);
+            self.remove_changes(cancelled_command.context.command.changes());
+        }
+    }
+
     /// Before resolving the actors to be sent or collected, we should first record the newly
     /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
     /// will return `true`.
@@ -253,10 +264,6 @@ where
         match command.changes() {
             CommandChanges::DropTables(tables) => {
                 assert!(
-                    self.creating_tables.is_disjoint(&tables),
-                    "conflict table in concurrent checkpoint"
-                );
-                assert!(
                     self.dropping_tables.is_disjoint(&tables),
                     "duplicated table in concurrent checkpoint"
                 );
@@ -277,7 +284,8 @@ where
 
     /// Barrier can be sent to and collected from an actor if:
     /// 1. The actor is Running and not being dropped or removed in rescheduling.
-    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling.
+    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling and not
+    /// belongs to a canceling command.
     fn can_actor_send_or_collect(
         &self,
         s: ActorState,
@@ -290,7 +298,7 @@ where
             self.creating_tables.contains(&table_id) || self.adding_actors.contains(&actor_id);
 
         match s {
-            ActorState::Inactive => adding,
+            ActorState::Inactive => adding && !removing,
             ActorState::Running => !removing,
             ActorState::Unspecified => unreachable!(),
         }
@@ -889,6 +897,15 @@ where
                     notifier.notify_collected();
                 });
 
+                // Save `cancelled_command` for Create MVs.
+                let actors_to_cancel = node.command_ctx.actors_to_cancel();
+                let cancelled_command = if !actors_to_cancel.is_empty() {
+                    let mut tracker = self.tracker.lock().await;
+                    tracker.find_cancelled_command(actors_to_cancel)
+                } else {
+                    None
+                };
+
                 // Save `finished_commands` for Create MVs.
                 let finished_commands = {
                     let mut commands = vec![];
@@ -921,6 +938,10 @@ where
                 if remaining {
                     assert!(!checkpoint);
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
+                }
+
+                if let Some(command) = cancelled_command {
+                    checkpoint_control.cancel_command(command);
                 }
 
                 node.timer.take().unwrap().observe_duration();

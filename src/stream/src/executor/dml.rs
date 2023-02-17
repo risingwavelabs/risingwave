@@ -217,6 +217,7 @@ mod tests {
         // Message from batch
         dml_manager
             .write_chunk(table_id, INITIAL_TABLE_VERSION_ID, batch_chunk)
+            .await
             .unwrap();
 
         // Consume the 1st message from upstream executor

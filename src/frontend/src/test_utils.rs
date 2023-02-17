@@ -37,7 +37,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -74,6 +74,10 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
     }
 
     fn cancel_queries_in_session(&self, _session_id: SessionId) {
+        todo!()
+    }
+
+    fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
         todo!()
     }
 
@@ -665,6 +669,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
+    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn list_table_fragments(
         &self,
         _table_ids: &[u32],
@@ -686,6 +694,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
         Ok(SystemParams::default().into())
+    }
+
+    async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
