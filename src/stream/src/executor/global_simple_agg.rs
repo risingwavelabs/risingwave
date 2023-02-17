@@ -20,6 +20,7 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
+use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
 };
@@ -28,7 +29,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{BoxedMessageStream, Message, PkIndices};
+use crate::executor::{BoxedMessageStream, Message};
 
 /// `GlobalSimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -104,36 +105,25 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
 }
 
 impl<S: StateStore> GlobalSimpleAggExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        agg_calls: Vec<AggCall>,
-        storages: Vec<AggStateStorage<S>>,
-        result_table: StateTable<S>,
-        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
-        pk_indices: PkIndices,
-        executor_id: u64,
-        extreme_cache_size: usize,
-    ) -> StreamResult<Self> {
-        let input_info = input.info();
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
+        let input_info = args.input.info();
+        let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
-            input,
+            input: args.input,
             inner: ExecutorInner {
-                actor_ctx: ctx,
+                actor_ctx: args.actor_ctx,
                 info: ExecutorInfo {
                     schema,
-                    pk_indices,
-                    identity: format!("GlobalSimpleAggExecutor-{:X}", executor_id),
+                    pk_indices: args.pk_indices,
+                    identity: format!("GlobalSimpleAggExecutor-{:X}", args.executor_id),
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                agg_calls,
-                storages,
-                result_table,
-                distinct_dedup_tables,
-                extreme_cache_size,
+                agg_calls: args.agg_calls,
+                storages: args.storages,
+                result_table: args.result_table,
+                distinct_dedup_tables: args.distinct_dedup_tables,
+                extreme_cache_size: args.extreme_cache_size,
             },
         })
     }

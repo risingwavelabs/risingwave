@@ -29,6 +29,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
+use super::agg_common::AggExecutorArgs;
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
@@ -40,7 +41,7 @@ use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{BoxedMessageStream, Message, PkIndices};
+use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
 type BoxedAggGroup<S> = Box<AggGroup<S>>;
@@ -159,45 +160,36 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
-    #[expect(clippy::too_many_arguments)]
-    pub fn new(
-        ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        agg_calls: Vec<AggCall>,
-        storages: Vec<AggStateStorage<S>>,
-        result_table: StateTable<S>,
-        distinct_dedup_tables: HashMap<usize, StateTable<S>>,
-        pk_indices: PkIndices,
-        extreme_cache_size: usize,
-        executor_id: u64,
-        group_key_indices: Vec<usize>,
-        watermark_epoch: AtomicU64Ref,
-        metrics: Arc<StreamingMetrics>,
-        chunk_size: usize,
-    ) -> StreamResult<Self> {
-        let input_info = input.info();
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
+    pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
+        let extra_args = args.extra.unwrap();
+
+        let input_info = args.input.info();
+        let schema = generate_agg_schema(
+            args.input.as_ref(),
+            &args.agg_calls,
+            Some(&extra_args.group_key_indices),
+        );
         Ok(Self {
-            input,
+            input: args.input,
             inner: ExecutorInner {
                 _phantom: PhantomData,
-                actor_ctx: ctx,
+                actor_ctx: args.actor_ctx,
                 info: ExecutorInfo {
                     schema,
-                    pk_indices,
-                    identity: format!("HashAggExecutor {:X}", executor_id),
+                    pk_indices: args.pk_indices,
+                    identity: format!("HashAggExecutor {:X}", args.executor_id),
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
-                group_key_indices,
-                agg_calls,
-                storages,
-                result_table,
-                distinct_dedup_tables,
-                watermark_epoch,
-                chunk_size,
-                extreme_cache_size,
-                metrics,
+                group_key_indices: extra_args.group_key_indices,
+                agg_calls: args.agg_calls,
+                storages: args.storages,
+                result_table: args.result_table,
+                distinct_dedup_tables: args.distinct_dedup_tables,
+                watermark_epoch: extra_args.watermark_epoch,
+                chunk_size: extra_args.chunk_size,
+                extreme_cache_size: args.extreme_cache_size,
+                metrics: extra_args.metrics,
             },
         })
     }
@@ -615,9 +607,12 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
+    use crate::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::monitor::StreamingMetrics;
-    use crate::executor::test_utils::agg_executor::{create_agg_state_table, create_result_table};
+    use crate::executor::test_utils::agg_executor::{
+        create_agg_state_storage, create_result_table,
+    };
     use crate::executor::test_utils::*;
     use crate::executor::{ActorContext, Executor, HashAggExecutor, Message, PkIndices};
 
@@ -631,10 +626,10 @@ mod tests {
         extreme_cache_size: usize,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        let mut storages = Vec::with_capacity(agg_calls.iter().len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
-            agg_state_tables.push(
-                create_agg_state_table(
+            storages.push(
+                create_agg_state_storage(
                     store.clone(),
                     TableId::new(idx as u32),
                     agg_call,
@@ -655,21 +650,27 @@ mod tests {
         )
         .await;
 
-        HashAggExecutor::<SerializedKey, S>::new(
-            ActorContext::create(123),
+        HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
             input,
-            agg_calls,
-            agg_state_tables,
-            result_table,
-            Default::default(),
+            actor_ctx: ActorContext::create(123),
             pk_indices,
-            extreme_cache_size,
             executor_id,
-            group_key_indices,
-            Arc::new(AtomicU64::new(0)),
-            Arc::new(StreamingMetrics::unused()),
-            1024,
-        )
+
+            extreme_cache_size,
+
+            agg_calls,
+            storages,
+            result_table,
+            distinct_dedup_tables: Default::default(),
+
+            extra: Some(AggExecutorArgsExtra {
+                group_key_indices,
+
+                metrics: Arc::new(StreamingMetrics::unused()),
+                chunk_size: 1024,
+                watermark_epoch: Arc::new(AtomicU64::new(0)),
+            }),
+        })
         .unwrap()
         .boxed()
     }
