@@ -22,12 +22,11 @@ use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
@@ -208,56 +207,29 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         })
     }
 
-    /// Get unique keys, hash codes and visibility map of each key in a batch.
+    /// Get visibilities that mask rows in the chunk for each group. The returned visibility
+    /// is a `Bitmap` rather than `Option<Bitmap>` because it's likely to have multiple groups
+    /// in one chunk.
     ///
-    /// The returned order is the same as how we get distinct final columns from original columns.
-    ///
-    /// `keys` are Hash Keys of all the rows
-    /// `key_hash_codes` are hash codes of the deserialized `keys`
-    /// `visibility`, leave invisible ones out of aggregation
-    fn get_unique_keys(
-        keys: Vec<K>,
-        key_hash_codes: Vec<HashCode>,
-        visibility: Option<&Bitmap>,
-    ) -> StreamExecutorResult<Vec<(K, HashCode, Bitmap)>> {
-        let total_num_rows = keys.len();
-        assert_eq!(key_hash_codes.len(), total_num_rows);
-        // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
-        // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the
-        // `input` The visibility map of each hash key will be passed into `ManagedStateImpl`.
-        let mut key_to_vis_maps = HashMap::new();
-
-        // Give all the unique keys an order and iterate them later,
-        // the order is the same as how we get distinct final columns from original columns.
-        let mut unique_key_and_hash_codes = Vec::new();
-
-        for (row_idx, (key, hash_code)) in
-            keys.iter().zip_eq_fast(key_hash_codes.iter()).enumerate()
-        {
-            // if the visibility map has already shadowed this row,
-            // then we pass
-            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx) {
-                continue;
-            }
-            let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
-                unique_key_and_hash_codes.push((key, hash_code));
-                vec![false; total_num_rows]
-            });
-            vis_map[row_idx] = true;
+    /// * `keys`: Hash Keys of rows.
+    /// * `base_visibility`: Visibility of rows, `None` means all are visible.
+    fn get_group_visibilities(keys: Vec<K>, base_visibility: Option<&Bitmap>) -> Vec<(K, Bitmap)> {
+        let n_rows = keys.len();
+        let mut vis_builders = HashMap::new();
+        for (row_idx, key) in keys.into_iter().enumerate().filter(|(row_idx, _)| {
+            base_visibility
+                .map(|vis| vis.is_set(*row_idx))
+                .unwrap_or(true)
+        }) {
+            vis_builders
+                .entry(key)
+                .or_insert_with(|| BitmapBuilder::zeroed(n_rows))
+                .set(row_idx, true);
         }
-
-        let result = unique_key_and_hash_codes
+        vis_builders
             .into_iter()
-            .map(|(key, hash_code)| {
-                (
-                    key.clone(),
-                    *hash_code,
-                    key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
-                )
-            })
-            .collect_vec();
-
-        Ok(result)
+            .map(|(key, vis_builder)| (key, vis_builder.finish()))
+            .collect()
     }
 
     async fn apply_chunk(
@@ -274,8 +246,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref extreme_cache_size,
             ref mut group_change_set,
             ref schema,
-            lookup_miss_count,
-            total_lookup_count,
+            ref lookup_miss_count,
+            ref total_lookup_count,
             ref mut chunk_lookup_miss_count,
             ref mut chunk_total_lookup_count,
             ..
@@ -283,22 +255,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         agg_group_cache: &mut AggGroupCache<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
-        // Compute hash code here before serializing keys to avoid duplicate hash code computation.
-        let hash_codes = chunk
-            .data_chunk()
-            .get_hash_values(group_key_indices, Crc32FastBuilder);
-        let keys =
-            K::build_from_hash_code(group_key_indices, chunk.data_chunk(), hash_codes.clone());
-
-        // Find unique keys in this batch and generate visibility map for each key
-        // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
-        let unique_keys = Self::get_unique_keys(keys, hash_codes, chunk.visibility())?;
+        // Find groups in this chunk and generate visibility for each group key.
+        let keys = K::build(group_key_indices, chunk.data_chunk())?;
+        let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
 
         let group_key_types = &schema.data_types()[..group_key_indices.len()];
 
-        let futs = unique_keys
+        let futs = group_visibilities
             .iter()
-            .filter_map(|(key, _, _)| {
+            .filter_map(|(key, _)| {
                 total_lookup_count.fetch_add(1, Ordering::Relaxed);
                 if agg_group_cache.contains(key) {
                     None
@@ -342,7 +307,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let visibilities: Vec<_> = agg_calls
+        let call_visibilities: Vec<_> = agg_calls
             .iter()
             .map(|agg_call| {
                 agg_call_filter_res(
@@ -359,7 +324,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Materialize input chunk if needed.
         storages
             .iter_mut()
-            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
+            .zip_eq_fast(call_visibilities.iter().map(Option::as_ref))
             .for_each(|(storage, visibility)| {
                 if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                     let needed_columns = mapping
@@ -376,14 +341,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             });
 
         // Apply chunk to each of the state (per agg_call), for each group.
-        for (key, _, vis_map) in &unique_keys {
+        for (key, visibility) in &group_visibilities {
             // Mark the group as changed.
             group_change_set.insert(key.clone());
             let agg_group = agg_group_cache.get_mut(key).unwrap().as_mut();
-            let visibilities = visibilities
+            let visibilities = call_visibilities
                 .iter()
                 .map(Option::as_ref)
-                .map(|v| v.map_or_else(|| vis_map.clone(), |v| v & vis_map))
+                .map(|call_vis| call_vis.map_or_else(|| visibility.clone(), |v| v & visibility))
                 .map(Some)
                 .collect();
             agg_group
@@ -728,7 +693,7 @@ mod tests {
         .boxed()
     }
 
-    // --- Test HashAgg with in-memory KeyedState ---
+    // --- Test HashAgg with in-memory StateStore ---
 
     #[tokio::test]
     async fn test_local_hash_aggregation_count_in_memory() {
