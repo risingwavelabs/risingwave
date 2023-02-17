@@ -37,7 +37,10 @@ RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-so
 RUN git clone https://github.com/risingwavelabs/risingwave rw-tmp --depth 1 && cd rw-tmp \
     && cp ci/risedev-components.ci.source.env risedev-components.user.env \
     && cargo make download-all
-RUN rm -rf rw-tmp
+RUN mkdir /risingwave/.risingwave \ 
+    && mv rw-tmp/.risingwave/bin \
+    && /risingwave/.risingwave \
+    && rm -rf rw-tmp
 
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
