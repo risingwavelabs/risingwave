@@ -105,7 +105,7 @@ impl DmlManager {
         Ok(handle)
     }
 
-    pub fn write_chunk(
+    pub async fn write_chunk(
         &self,
         table_id: TableId,
         table_version_id: TableVersionId,
@@ -138,7 +138,7 @@ impl DmlManager {
         }
         .with_context(|| format!("no reader for dml in table `{table_id:?}`"))?;
 
-        handle.write_chunk(chunk)
+        handle.write_chunk(chunk).await
     }
 
     pub fn clear(&self) {
@@ -148,11 +148,27 @@ impl DmlManager {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
 
     use super::*;
+
+    #[easy_ext::ext(DmlManagerTestExt)]
+    impl DmlManager {
+        /// Write a chunk and assert that the chunk channel is not blocking.
+        pub fn write_chunk_ready(
+            &self,
+            table_id: TableId,
+            table_version_id: TableVersionId,
+            chunk: StreamChunk,
+        ) -> Result<oneshot::Receiver<usize>> {
+            self.write_chunk(table_id, table_version_id, chunk)
+                .now_or_never()
+                .unwrap()
+        }
+    }
 
     #[test]
     fn test_register_and_drop() {
@@ -178,21 +194,21 @@ mod tests {
 
         // Should be able to write to the table.
         dml_manager
-            .write_chunk(table_id, table_version_id, chunk())
+            .write_chunk_ready(table_id, table_version_id, chunk())
             .unwrap();
 
         // After dropping one reader, the other one should still be able to write.
         // This is to simulate the scale-in of DML executors.
         drop(r1);
         dml_manager
-            .write_chunk(table_id, table_version_id, chunk())
+            .write_chunk_ready(table_id, table_version_id, chunk())
             .unwrap();
 
         // After dropping the last reader, no more writes are allowed.
         // This is to simulate the dropping of the table.
         drop(r2);
         dml_manager
-            .write_chunk(table_id, table_version_id, chunk())
+            .write_chunk_ready(table_id, table_version_id, chunk())
             .unwrap_err();
     }
 
@@ -220,7 +236,7 @@ mod tests {
 
         // Should be able to write to the table.
         dml_manager
-            .write_chunk(table_id, old_version_id, old_chunk())
+            .write_chunk_ready(table_id, old_version_id, old_chunk())
             .unwrap();
 
         // Start reading the new version.
@@ -231,11 +247,11 @@ mod tests {
 
         // Should not be able to write to the old version.
         dml_manager
-            .write_chunk(table_id, old_version_id, old_chunk())
+            .write_chunk_ready(table_id, old_version_id, old_chunk())
             .unwrap_err();
         // Should be able to write to the new version.
         dml_manager
-            .write_chunk(table_id, new_version_id, new_chunk())
+            .write_chunk_ready(table_id, new_version_id, new_chunk())
             .unwrap();
     }
 }
