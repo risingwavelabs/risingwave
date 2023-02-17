@@ -217,7 +217,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -257,17 +257,17 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .await
         .unwrap();
 
-        if let Some(leader_lost_handle) = leader_lost_handle {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("receive ctrl+c");
-                    shutdown_send.send(()).unwrap();
-                    join_handle.await.unwrap();
-                    leader_lost_handle.abort();
-                },
+        let res = tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("receive ctrl+c");
+                shutdown_send.send(()).unwrap();
+                join_handle.await
             }
-        } else {
-            join_handle.await.unwrap();
+            res = &mut join_handle => res,
+        };
+        res.unwrap();
+        if let Some(leader_lost_handle) = leader_lost_handle {
+            leader_lost_handle.abort();
         }
     })
 }
