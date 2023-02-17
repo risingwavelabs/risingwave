@@ -36,6 +36,7 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
+echo "--- Link all-in-one binaries"
 cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"

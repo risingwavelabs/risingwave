@@ -51,6 +51,7 @@ cp ci/risedev-components.ci.source.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
+echo "--- Link all-in-one binaries"
 cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"

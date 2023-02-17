@@ -45,6 +45,7 @@ cargo make
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
+echo "--- Link all-in-one binaries"
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
