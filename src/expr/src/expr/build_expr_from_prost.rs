@@ -68,7 +68,9 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
+        | ConcatOp | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
+            build_binary_expr_prost(prost)
+        }
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
             build_nullable_binary_expr_prost(prost)
         }
