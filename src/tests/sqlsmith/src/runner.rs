@@ -46,7 +46,7 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("Executing: {}", sql);
-        let response = client.execute(&sql, &[]).await;
+        let response = client.query(&sql, &[]).await;
         if let Err(e) = response {
             panic!("{}", format_failed_sql(&setup_sql, &sql, &e))
         }
@@ -74,7 +74,7 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         // test_session_variable(client, rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
-        let response = client.execute(sql.as_str(), &[]).await;
+        let response = client.query(sql.as_str(), &[]).await;
         let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
         if skipped == 0 {
             generated_queries += 1;
@@ -89,7 +89,7 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         // test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
-        let response = client.execute(&sql, &[]).await;
+        let response = client.query(&sql, &[]).await;
         let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
         if skipped == 0 {
@@ -196,7 +196,7 @@ async fn test_batch_queries<R: Rng>(
         // test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("Executing: {}", sql);
-        let response = client.execute(sql.as_str(), &[]).await;
+        let response = client.query(sql.as_str(), &[]).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
     }
     skipped as f64 / sample_size as f64
