@@ -3497,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff08a176759ae5e6cf2c5153028d258cdbb318cfee2e89f986cbd33dc40e1671"
+checksum = "7e3c98b41d46214f4ae435a95e246710ad7fb1100754f809dd7c18606a7607c4"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3525,9 +3525,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e0798f5f47c2c9265e22bb0b9b16c73c8eabbceb79b7fec0610569fdcd293be"
+checksum = "4eeb7fb1e7d0d15c979ee36d9c44074298ff5662b317a1e122807e350d9b92b6"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -3542,9 +3542,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.15"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b25dd57e0c5b84c838451374177f34be28df7b7885d950f736d46937afc42e96"
+checksum = "bb918383c4f5966f29760ec48820e1c2846739e4ae411c2a8aaa4466ce1421b7"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -6278,6 +6278,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "criterion",
+ "easy-ext",
  "futures",
  "futures-async-stream",
  "itertools",
