@@ -40,7 +40,7 @@ pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
-pub use optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+pub use optimizer::{Explainable, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
 #[expect(dead_code)]

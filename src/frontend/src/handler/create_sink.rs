@@ -26,6 +26,7 @@ use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explainable;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;

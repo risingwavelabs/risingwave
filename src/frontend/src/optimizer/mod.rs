@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod plan_node;
-pub use plan_node::PlanRef;
+pub use plan_node::{Explainable, PlanRef};
 pub mod property;
 
 mod delta_join_solver;

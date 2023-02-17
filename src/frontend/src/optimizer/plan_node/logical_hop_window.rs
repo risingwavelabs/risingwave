@@ -413,6 +413,7 @@ mod test {
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
+    use crate::Explainable;
     #[tokio::test]
     /// Pruning
     /// ```text
