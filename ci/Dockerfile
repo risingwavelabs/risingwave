@@ -34,13 +34,9 @@ RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-so
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
 
-RUN git clone https://github.com/risingwavelabs/risingwave rw-tmp --depth 1 && cd rw-tmp && \
-    ENABLE_MINIO=true \
-    ENABLE_ETCD=true \
-    ENABLE_ALL_IN_ONE=true \
-    ENABLE_KAFKA=true \
-    ENABLE_PUBSUB=true \
-    cargo make download-all
+RUN git clone https://github.com/risingwavelabs/risingwave rw-tmp --depth 1 && cd rw-tmp \
+    && cp ci/risedev-components.ci.source.env risedev-components.user.env \
+    && cargo make download-all
 RUN rm -rf rw-tmp
 
 ENV RUSTC_WRAPPER=sccache
