@@ -178,7 +178,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from(with_tables);
-        tracing::info!("bound_columns: {:?}", &self.bound_columns);
         let selection = self.gen_where();
         let group_by = self.gen_group_by();
         let having = self.gen_having(!group_by.is_empty());
