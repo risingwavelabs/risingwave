@@ -20,6 +20,7 @@
 //! until schema changes
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use bitflags::bitflags;
 
@@ -111,12 +112,12 @@ trait ValueRowSerializer: Clone {
 }
 
 trait ValueRowDeserializer: Clone {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> impl ValueRowDeserializer;
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> impl ValueRowDeserializer;
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
 pub trait ValueRowSerde: Clone {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self;
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
     fn serialize(&self, row: impl Row) -> Vec<u8>;
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
@@ -139,8 +140,8 @@ impl ValueRowSerializer for BasicSerializer {
 }
 
 impl ValueRowDeserializer for RowDeserializer {
-    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> RowDeserializer {
-        RowDeserializer::new(schema.to_vec())
+    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> RowDeserializer {
+        RowDeserializer::new(schema.as_ref().to_owned())
     }
 
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
@@ -154,9 +155,9 @@ pub struct BasicSerde {
 }
 
 impl ValueRowSerde for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: &[DataType]) -> BasicSerde {
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
         BasicSerde {
-            deserializer: RowDeserializer::new(schema.to_vec()),
+            deserializer: <RowDeserializer as ValueRowDeserializer>::new(column_ids, schema),
         }
     }
 
@@ -223,11 +224,11 @@ impl Serializer {
 #[derive(Clone)]
 pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
-    schema: Vec<DataType>,
+    schema: Arc<[DataType]>,
 }
 
 impl Deserializer {
-    pub fn new(column_ids: &[ColumnId], schema: &[DataType]) -> Self {
+    pub fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self {
         assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids
@@ -235,7 +236,7 @@ impl Deserializer {
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<BTreeMap<_, _>>(),
-            schema: schema.to_vec(),
+            schema,
         }
     }
 
@@ -305,7 +306,7 @@ pub struct ColumnAwareSerde {
 }
 
 impl ValueRowSerde for ColumnAwareSerde {
-    fn new(column_ids: &[ColumnId], schema: &[DataType]) -> ColumnAwareSerde {
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> ColumnAwareSerde {
         let serializer = Serializer::new(column_ids);
         let deserializer = Deserializer::new(column_ids, schema);
         ColumnAwareSerde {
@@ -385,8 +386,10 @@ mod tests {
         let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
         let row_bytes = serializer.serialize_row_column_aware(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
-        let deserializer =
-            column_aware_row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
+        let deserializer = column_aware_row_encoding::Deserializer::new(
+            &column_ids[..],
+            Arc::from(data_types.into_boxed_slice()),
+        );
         let decoded = deserializer.decode(&row_bytes[..]);
         assert_eq!(
             decoded.unwrap(),
