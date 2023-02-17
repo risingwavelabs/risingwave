@@ -44,6 +44,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
+    TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -732,6 +733,11 @@ where
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn LevelSelector>,
     ) -> Result<Option<CompactTask>> {
+        // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
+        // lock in compaction_guard, take out all table_options in advance there may be a
+        // waste of resources here, need to add a more efficient filter in catalog_manager
+        let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let compaction_statuses = &mut compaction.compaction_statuses;
@@ -777,24 +783,21 @@ where
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
-        let table_id_to_option = self
-            .catalog_manager
-            .get_table_options(
-                &current_version
-                    .get_compaction_group_levels(compaction_group_id)
-                    .member_table_ids,
-            )
-            .await
-            .iter()
-            .map(|(k, v)| (*k, *v))
+        let member_table_ids = &current_version
+            .get_compaction_group_levels(compaction_group_id)
+            .member_table_ids;
+        let table_id_to_option: HashMap<u32, _> = all_table_id_to_option
+            .into_iter()
+            .filter(|(table_id, _)| member_table_ids.contains(table_id))
             .collect();
+
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             &group_config,
             &mut stats,
             selector,
-            table_id_to_option,
+            table_id_to_option.clone(),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
@@ -840,12 +843,15 @@ where
                 }
             }
 
-            compact_task.table_options = self
-                .catalog_manager
-                .get_table_options(&compact_task.existing_table_ids)
-                .await
-                .iter()
-                .map(|(k, v)| (*k, v.into()))
+            compact_task.table_options = table_id_to_option
+                .into_iter()
+                .filter_map(|(table_id, table_option)| {
+                    if compact_task.existing_table_ids.contains(&table_id) {
+                        return Some((table_id, TableOption::from(&table_option)));
+                    }
+
+                    None
+                })
                 .collect();
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
@@ -1275,10 +1281,13 @@ where
             compact_task.compaction_group_id,
         );
 
-        if !deterministic_mode {
+        if !deterministic_mode
+            && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
+        {
+            // only try send Dynamic compaction
             self.try_send_compaction_request(
                 compact_task.compaction_group_id,
-                compact_task.task_type(),
+                compact_task::TaskType::Dynamic,
             );
         }
 
