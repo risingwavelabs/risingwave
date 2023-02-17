@@ -73,7 +73,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     // To avoid confusion, "len" here does not refer to length of array,
     // rather, it is the number of rows of arrays returned.
     // cardinality also refers to this.
-    assert_eq!(arr.len() == cardinality || arr.len() == 0);
+    assert!(arr.len() == cardinality || arr.len() == 0);
 
     Ok(arr.into())
 }

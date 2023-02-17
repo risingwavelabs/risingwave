@@ -38,7 +38,7 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
         .query("SET RW_IMPLICIT_FLUSH TO TRUE;", &[])
         .await
         .unwrap();
-    let populate_sql= populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
     tracing::info!("Populated base tables");
 
