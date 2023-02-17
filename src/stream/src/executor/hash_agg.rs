@@ -31,7 +31,8 @@ use risingwave_storage::StateStore;
 
 use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
 use super::{
-    expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
+    expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
+    StreamExecutorResult, Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
@@ -64,20 +65,12 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     _phantom: PhantomData<K>,
 
     actor_ctx: ActorContextRef,
+    info: ExecutorInfo,
 
-    /// See [`Executor::schema`].
-    schema: Schema,
-
-    /// See [`Executor::pk_indices`].
-    pk_indices: PkIndices,
-
-    /// See [`Executor::identity`].
-    identity: String,
-
-    /// Pk indices from input
+    /// Pk indices from input.
     input_pk_indices: Vec<usize>,
 
-    /// Schema from input
+    /// Schema from input.
     input_schema: Schema,
 
     /// Indices of the columns
@@ -153,15 +146,15 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.inner.schema
+        &self.inner.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.inner.pk_indices
+        &self.inner.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.inner.identity
+        &self.inner.info.identity
     }
 }
 
@@ -189,9 +182,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             inner: ExecutorInner {
                 _phantom: PhantomData,
                 actor_ctx: ctx,
-                schema,
-                pk_indices,
-                identity: format!("HashAggExecutor {:X}", executor_id),
+                info: ExecutorInfo {
+                    schema,
+                    pk_indices,
+                    identity: format!("HashAggExecutor {:X}", executor_id),
+                },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices,
@@ -241,7 +236,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let keys = K::build(&this.group_key_indices, chunk.data_chunk())?;
         let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
 
-        let group_key_types = &this.schema.data_types()[..this.group_key_indices.len()];
+        let group_key_types = &this.info.schema.data_types()[..this.group_key_indices.len()];
 
         let futs = group_visibilities
             .iter()
@@ -295,7 +290,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .map(|agg_call| {
                 agg_call_filter_res(
                     &this.actor_ctx,
-                    &this.identity,
+                    &this.info.identity,
                     agg_call,
                     &columns,
                     visibility.as_ref(),
@@ -389,7 +384,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let dirty_cnt = vars.group_change_set.len();
         if dirty_cnt > 0 {
             // Produce the stream chunk
-            let group_key_data_types = &this.schema.data_types()[..this.group_key_indices.len()];
+            let group_key_data_types =
+                &this.info.schema.data_types()[..this.group_key_indices.len()];
             let mut group_chunks =
                 IterChunks::chunks(vars.group_change_set.drain(), this.chunk_size);
             while let Some(batch) = group_chunks.next() {
@@ -410,7 +406,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // Create array builders.
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
-                let mut builders = this.schema.create_array_builders(this.chunk_size * 2);
+                let mut builders = this.info.schema.create_array_builders(this.chunk_size * 2);
                 let mut new_ops = Vec::with_capacity(this.chunk_size * 2);
 
                 // Calculate current outputs, concurrently.
