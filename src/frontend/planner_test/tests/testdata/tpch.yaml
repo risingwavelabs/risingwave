@@ -244,14 +244,14 @@
       | ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [part.p_partkey, part.p_mfgr, partsupp.ps_supplycost, supplier.s_name, supplier.s_address, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, nation.n_name, nation.n_regionkey] }
       | | ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: [part.p_partkey, part.p_mfgr, partsupp.ps_supplycost, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
       | | | ├─LogicalJoin { type: Inner, on: (part.p_partkey = partsupp.ps_partkey), output: [part.p_partkey, part.p_mfgr, partsupp.ps_suppkey, partsupp.ps_supplycost] }
-      | | | | ├─LogicalScan { table: part, output_columns: [part.p_partkey, part.p_mfgr], required_columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+      | | | | ├─LogicalScan { table: part, output_columns: [part.p_partkey, part.p_mfgr], required_columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
       | | | | └─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost] }
       | | | └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
       | | └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey] }
       | └─LogicalAgg { group_key: [part.p_partkey], aggs: [min(partsupp.ps_supplycost)] }
       |   └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(part.p_partkey, partsupp.ps_partkey), output: [part.p_partkey, partsupp.ps_supplycost] }
       |     ├─LogicalAgg { group_key: [part.p_partkey], aggs: [] }
-      |     | └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [part.p_partkey, part.p_type, part.p_size], predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+      |     | └─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [part.p_partkey, part.p_type, part.p_size], predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
       |     └─LogicalJoin { type: Inner, on: (nation.n_regionkey = region.r_regionkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
       |       ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost, nation.n_regionkey] }
       |       | ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = partsupp.ps_suppkey), output: [partsupp.ps_partkey, partsupp.ps_supplycost, supplier.s_nationkey] }
@@ -275,7 +275,7 @@
               |         └─BatchHashJoin { type: Inner, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, part.p_mfgr, partsupp.ps_suppkey, partsupp.ps_supplycost] }
               |           ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
               |           | └─BatchProject { exprs: [part.p_partkey, part.p_mfgr] }
-              |           |   └─BatchFilter { predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+              |           |   └─BatchFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
               |           |     └─BatchScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], distribution: UpstreamHashShard(part.p_partkey) }
               |           └─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
               |             └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
@@ -284,7 +284,7 @@
                   ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
                   | └─BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
                   |   └─BatchProject { exprs: [part.p_partkey] }
-                  |     └─BatchFilter { predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+                  |     └─BatchFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
                   |       └─BatchScan { table: part, columns: [part.p_partkey, part.p_type, part.p_size], distribution: UpstreamHashShard(part.p_partkey) }
                   └─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
                     └─BatchLookupJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey AND (region.r_name = 'AFRICA':Varchar), output: [partsupp.ps_partkey, partsupp.ps_supplycost] }
@@ -313,7 +313,7 @@
                 |   |   |   | └─StreamHashJoin { type: Inner, predicate: part.p_partkey = partsupp.ps_partkey, output: [part.p_partkey, part.p_mfgr, partsupp.ps_suppkey, partsupp.ps_supplycost, partsupp.ps_partkey] }
                 |   |   |   |   ├─StreamExchange { dist: HashShard(part.p_partkey) }
                 |   |   |   |   | └─StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
-                |   |   |   |   |   └─StreamFilter { predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+                |   |   |   |   |   └─StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
                 |   |   |   |   |     └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 |   |   |   |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                 |   |   |   |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
@@ -328,7 +328,7 @@
                 |         | └─StreamProject { exprs: [part.p_partkey] }
                 |         |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
                 |         |     └─StreamProject { exprs: [part.p_partkey] }
-                |         |       └─StreamFilter { predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+                |         |       └─StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
                 |         |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 |         └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
                 |           └─StreamHashJoin { type: Inner, predicate: nation.n_regionkey = region.r_regionkey, output: [partsupp.ps_partkey, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey, nation.n_regionkey, region.r_regionkey] }
@@ -401,7 +401,7 @@
 
     Fragment 6
       StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
-        StreamFilter { predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+        StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
           Chain { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
@@ -426,7 +426,7 @@
         StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
             result table: 28, state tables: []
           StreamProject { exprs: [part.p_partkey] }
-            StreamFilter { predicate: (part.p_size = 4:Int32) AND (part.p_type = '%TIN':Varchar) }
+            StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
               Chain { table: part, columns: [part.p_partkey, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 Upstream
                 BatchPlanNode
@@ -1603,7 +1603,7 @@
           | ├─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, nation.n_name] }
           | | ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = lineitem.l_suppkey), output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey] }
           | | | ├─LogicalJoin { type: Inner, on: (part.p_partkey = lineitem.l_partkey), output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount] }
-          | | | | ├─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [part.p_partkey, part.p_name], predicate: (part.p_name = '%yellow%':Varchar) }
+          | | | | ├─LogicalScan { table: part, output_columns: [part.p_partkey], required_columns: [part.p_partkey, part.p_name], predicate: Like(part.p_name, '%yellow%':Varchar) }
           | | | | └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount] }
           | | | └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey] }
           | | └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
@@ -1627,7 +1627,7 @@
                               └─BatchHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount] }
                                 ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
                                 | └─BatchProject { exprs: [part.p_partkey] }
-                                |   └─BatchFilter { predicate: (part.p_name = '%yellow%':Varchar) }
+                                |   └─BatchFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
                                 |     └─BatchScan { table: part, columns: [part.p_partkey, part.p_name], distribution: UpstreamHashShard(part.p_partkey) }
                                 └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
                                   └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount], distribution: SomeShard }
@@ -1648,7 +1648,7 @@
               |   |   |   | └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, part.p_partkey, lineitem.l_linenumber] }
               |   |   |   |   ├─StreamExchange { dist: HashShard(part.p_partkey) }
               |   |   |   |   | └─StreamProject { exprs: [part.p_partkey] }
-              |   |   |   |   |   └─StreamFilter { predicate: (part.p_name = '%yellow%':Varchar) }
+              |   |   |   |   |   └─StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
               |   |   |   |   |     └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
               |   |   |   |   └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
               |   |   |   |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
@@ -1702,7 +1702,7 @@
 
     Fragment 6
       StreamProject { exprs: [part.p_partkey] }
-        StreamFilter { predicate: (part.p_name = '%yellow%':Varchar) }
+        StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
           Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
             Upstream
             BatchPlanNode
@@ -2708,14 +2708,14 @@
         ├─LogicalJoin { type: Inner, on: (part.p_partkey = partsupp.ps_partkey), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
         | ├─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
         | └─LogicalScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], predicate: (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type <= 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-        └─LogicalScan { table: supplier, output_columns: [supplier.s_suppkey], required_columns: [supplier.s_suppkey, supplier.s_comment], predicate: (supplier.s_comment = '%Customer%Complaints%':Varchar) }
+        └─LogicalScan { table: supplier, output_columns: [supplier.s_suppkey], required_columns: [supplier.s_suppkey, supplier.s_comment], predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
   batch_plan: |
     BatchExchange { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC], dist: Single }
     └─BatchSort { order: [count(partsupp.ps_suppkey) DESC, part.p_brand ASC, part.p_type ASC, part.p_size ASC] }
       └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(partsupp.ps_suppkey)] }
         └─BatchExchange { order: [], dist: HashShard(part.p_brand, part.p_type, part.p_size) }
           └─BatchHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [] }
-            └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND (supplier.s_comment = '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
+            └─BatchLookupJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey AND Like(supplier.s_comment, '%Customer%Complaints%':Varchar), output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
               └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_suppkey) }
                 └─BatchLookupJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type <= 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32), output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size] }
                   └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
@@ -2737,7 +2737,7 @@
                 |       └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
                 └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
                   └─StreamProject { exprs: [supplier.s_suppkey] }
-                    └─StreamFilter { predicate: (supplier.s_comment = '%Customer%Complaints%':Varchar) }
+                    └─StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
                       └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
   stream_dist_plan: |
     Fragment 0
@@ -2776,7 +2776,7 @@
 
     Fragment 5
       StreamProject { exprs: [supplier.s_suppkey] }
-        StreamFilter { predicate: (supplier.s_comment = '%Customer%Complaints%':Varchar) }
+        StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
           Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
             Upstream
             BatchPlanNode

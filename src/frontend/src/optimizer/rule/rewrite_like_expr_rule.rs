@@ -24,6 +24,10 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionC
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 use crate::optimizer::PlanRef;
 
+/// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
+/// col like 'ABC' => col = 'ABC'
+/// col like 'ABC%' => col >= 'ABC' and col <= 'ABD'
+/// col like 'ABC%E' => col >= 'ABC' and col <= 'ABD' and col like 'ABC%E'
 pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -69,86 +73,98 @@ struct LikeExprRewriter {}
 
 impl ExprRewriter for LikeExprRewriter {
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        let (func_type, inputs, ret) = func_call.clone().decompose();
+        let (func_type, inputs, ret) = func_call.decompose();
         let inputs: Vec<ExprImpl> = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        if func_call.get_expr_type() == ExprType::Like
-            && let (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) = func_call.decompose_as_binary()
-            && matches!(y.return_type(), DataType::Varchar) {
+        let func_call = FunctionCall::new_unchecked(func_type, inputs, ret);
 
-            let data = y.get_data();
-            if let Some(ScalarImpl::Utf8(data)) = data {
-                let bytes = data.as_bytes();
-                let len = bytes.len();
-                let idx = match (memchr(b'%', bytes), memchr(b'_', bytes)) {
-                    (Some(a), Some(b)) => min(a, b),
-                    (Some(idx), None) => idx,
-                    (None, Some(idx)) => idx,
-                    (None, None) => {
-                        return FunctionCall::new_unchecked(ExprType::Equal, inputs, ret).into()
-                    }
-                };
+        if func_call.get_expr_type() != ExprType::Like {
+            return func_call.into();
+        }
 
-                if idx == 0 {
-                    return FunctionCall::new_unchecked(ExprType::Equal, inputs, ret).into()
+        let (_, ExprImpl::InputRef(x), ExprImpl::Literal(y)) = func_call.clone().decompose_as_binary() else {
+            return func_call.into();
+        };
+
+        if y.return_type() != DataType::Varchar {
+            return func_call.into();
+        }
+
+        let data = y.get_data();
+        let Some(ScalarImpl::Utf8(data)) = data else {
+            return func_call.into();
+        };
+
+        let bytes = data.as_bytes();
+        let len = bytes.len();
+        let idx = match (memchr(b'%', bytes), memchr(b'_', bytes)) {
+            (Some(a), Some(b)) => min(a, b),
+            (Some(idx), None) => idx,
+            (None, Some(idx)) => idx,
+            (None, None) => return func_call.into(),
+        };
+
+        if idx == 0 {
+            return func_call.into();
+        }
+
+        let (low, high) = {
+            let low = bytes[0..idx].to_owned();
+            if low[idx - 1] == 255 {
+                return func_call.into();
+            }
+            let mut high = low.clone();
+            high[idx - 1] += 1;
+            match (from_utf8(&low), from_utf8(&high)) {
+                (Ok(low), Ok(high)) => (low.to_owned(), high.to_owned()),
+                _ => {
+                    return func_call.into();
                 }
+            }
+        };
 
-                let (low, high) = {
-                    let low = bytes[0..idx].to_owned();
-                    if low[idx - 1] == 255 {
-                        return FunctionCall::new_unchecked(func_type, inputs, ret).into();
-                    }
-                    let mut high = low.clone();
-                    high[idx - 1] += 1;
-                    match (from_utf8(&low), from_utf8(&high)) {
-                        (Ok(low), Ok(high)) => (low.to_owned(), high.to_owned()),
-                        _ => {
-                            return FunctionCall::new_unchecked(func_type, inputs, ret).into();
-                        }
-                    }
-                };
-
-                let between = FunctionCall::new_unchecked(
-                    ExprType::And,
+        let between = FunctionCall::new_unchecked(
+            ExprType::And,
+            vec![
+                FunctionCall::new_unchecked(
+                    ExprType::GreaterThanOrEqual,
                     vec![
-                        FunctionCall::new_unchecked(
-                            ExprType::GreaterThanOrEqual,
-                            vec![
-                                ExprImpl::InputRef(x.clone()),
-                                ExprImpl::Literal(Literal::new(Some(ScalarImpl::Utf8(low.into())), DataType::Varchar).into())
-                            ],
-                            DataType::Boolean)
-                            .into(),
-                        FunctionCall::new_unchecked(
-                            ExprType::LessThanOrEqual,
-                            vec![
-                                ExprImpl::InputRef(x),
-                                ExprImpl::Literal(Literal::new(Some(ScalarImpl::Utf8(high.into())), DataType::Varchar).into())
-                            ],
-                            DataType::Boolean).into(),
+                        ExprImpl::InputRef(x.clone()),
+                        ExprImpl::Literal(
+                            Literal::new(Some(ScalarImpl::Utf8(low.into())), DataType::Varchar)
+                                .into(),
+                        ),
                     ],
                     DataType::Boolean,
-                );
+                )
+                .into(),
+                FunctionCall::new_unchecked(
+                    ExprType::LessThanOrEqual,
+                    vec![
+                        ExprImpl::InputRef(x),
+                        ExprImpl::Literal(
+                            Literal::new(Some(ScalarImpl::Utf8(high.into())), DataType::Varchar)
+                                .into(),
+                        ),
+                    ],
+                    DataType::Boolean,
+                )
+                .into(),
+            ],
+            DataType::Boolean,
+        );
 
-                if idx == len - 1 {
-                    between.into()
-                } else {
-                    FunctionCall::new_unchecked(
-                        ExprType::And,
-                        vec![
-                            between.into(),
-                            FunctionCall::new_unchecked(func_type, inputs, ret).into(),
-                        ],
-                        DataType::Boolean,
-                    ).into()
-                }
-            } else {
-                FunctionCall::new_unchecked(func_type, inputs, ret).into()
-            }
+        if idx == len - 1 {
+            between.into()
         } else {
-            FunctionCall::new_unchecked(func_type, inputs, ret).into()
+            FunctionCall::new_unchecked(
+                ExprType::And,
+                vec![between.into(), func_call.into()],
+                DataType::Boolean,
+            )
+            .into()
         }
     }
 }
