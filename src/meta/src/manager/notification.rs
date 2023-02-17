@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -37,6 +38,7 @@ pub type NotificationVersion = u64;
 pub enum LocalNotification {
     WorkerNodeIsDeleted(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
+    SystemParamsChange(SystemParamsReader),
 }
 
 #[derive(Debug)]

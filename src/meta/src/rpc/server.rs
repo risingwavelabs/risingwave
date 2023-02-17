@@ -20,6 +20,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -35,7 +36,6 @@ use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use risingwave_rpc_client::SystemParamsReader;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -495,7 +495,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager);
+    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
