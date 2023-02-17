@@ -81,6 +81,9 @@ pub struct MetaMetrics {
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
     pub compact_skip_frequency: IntCounterVec,
+
+    /// compaction
+    pub compact_pending_bytes: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -256,6 +259,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let compact_pending_bytes = register_int_gauge_vec_with_registry!(
+            "storage_compact_pending_bytes",
+            "bytes of Lsm tree needed to reach balance",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -286,6 +297,7 @@ impl MetaMetrics {
             time_after_last_observation: AtomicU64::new(0),
 
             worker_num,
+            compact_pending_bytes,
         }
     }
 

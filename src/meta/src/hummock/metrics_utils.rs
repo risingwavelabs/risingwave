@@ -14,16 +14,20 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
+    HummockVersionStats,
 };
 
+use super::compaction::DynamicLevelSelectorCore;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -221,4 +225,20 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
 
 pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
     metrics.stale_ssts_count.set(total_number as _);
+}
+
+// Triggers a report on compact_pending_bytes_needed
+pub fn trigger_compact_pending_bytes_stat(
+    metrics: &MetaMetrics,
+    group_label: String,
+    compaction_config: Arc<CompactionConfig>,
+    levels: &Levels,
+) {
+    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config);
+    let compact_pending_bytes_needed = dynamic_level_core.compact_pending_bytes_needed(levels);
+
+    metrics
+        .compact_pending_bytes
+        .with_label_values(&[&group_label])
+        .set(compact_pending_bytes_needed as _);
 }

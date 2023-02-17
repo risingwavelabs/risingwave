@@ -56,8 +56,8 @@ use crate::hummock::compaction::{
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat,
+    trigger_compact_pending_bytes_stat, trigger_pin_unpin_snapshot_state,
+    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
@@ -1123,7 +1123,6 @@ where
             for group_id in original_keys {
                 if !current_version.levels.contains_key(&group_id) {
                     compact_statuses.remove(group_id);
-                    compaction.compaction_selectors.remove(&group_id);
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
@@ -1170,6 +1169,21 @@ where
                 current_version.apply_version_delta(&version_delta);
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
+
+                {
+                    let group_config = self
+                        .get_compaction_group_config(compact_task.compaction_group_id)
+                        .await;
+
+                    trigger_compact_pending_bytes_stat(
+                        &self.metrics,
+                        compact_task.compaction_group_id.to_string(),
+                        group_config.compaction_config(),
+                        versioning
+                            .current_version
+                            .get_compaction_group_levels(compact_task.compaction_group_id),
+                    );
+                }
 
                 if !deterministic_mode {
                     self.notify_last_version_delta(versioning);
@@ -1924,7 +1938,7 @@ where
         &self.cluster_manager
     }
 
-    fn notify_last_version_delta(&self, versioning: &mut Versioning) {
+    fn notify_last_version_delta(&self, versioning: &Versioning) {
         self.env
             .notification_manager()
             .notify_hummock_without_version(

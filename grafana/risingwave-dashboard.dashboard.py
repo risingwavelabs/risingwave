@@ -794,6 +794,17 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+                    "Lsm Compact Pending Bytes",
+                    "bytes of Lsm tree needed to reach balance",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_pending_bytes')}) by (instance, group)",
+                            "compact pending bytes - {{group}} @ {{instance}} ",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

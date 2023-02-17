@@ -237,8 +237,11 @@ impl DynamicLevelSelectorCore {
         ctx
     }
 
-    #[allow(dead_code)]
-    fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
+    /// `compact_pending_bytes_needed` calculates the number of compact bytes needed to balance the
+    /// LSM Tree from the current state of each level in the LSM Tree in combination with
+    /// `compaction_config`
+    /// This algorithm refers to the implementation in  `</>https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141</>`
+    pub fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
         let ctx = self.calculate_level_base_size(levels);
 
         // l0
