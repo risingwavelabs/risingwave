@@ -101,6 +101,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
 
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,
+        DataType::Jsonb => HashKeySize::Variable,
         DataType::Struct { .. } => HashKeySize::Variable,
         DataType::List { .. } => HashKeySize::Variable,
     }
