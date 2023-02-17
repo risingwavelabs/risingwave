@@ -78,6 +78,8 @@ select exp(2::smallint)
 statement error QueryError: Expr error: Numeric out of range
 select exp(10000000);
 
+# We remark that this test case underflows in PG. TODO: We can make it fully compatible if necessary
+# https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c#L1649
 query T
 select exp(-10000000);
 ----
