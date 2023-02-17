@@ -443,13 +443,6 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        plan = self.optimize_by_rules(
-            plan,
-            "Agg on Index".to_string(),
-            vec![TopNOnIndexRule::create()],
-            ApplyOrder::TopDown,
-        );
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
@@ -468,6 +461,13 @@ impl PlanRoot {
             plan,
             "DAG To Tree".to_string(),
             vec![DagToTreeRule::create()],
+            ApplyOrder::TopDown,
+        );
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Agg on Index".to_string(),
+            vec![TopNOnIndexRule::create()],
             ApplyOrder::TopDown,
         );
 
