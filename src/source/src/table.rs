@@ -37,6 +37,10 @@ struct TableDmlHandleCore {
     changes_txs: Vec<mpsc::Sender<(StreamChunk, oneshot::Sender<usize>)>>,
 }
 
+/// The buffer size of the channel between each [`TableDmlHandle`] and the source executors.
+// TODO: decide a default value carefully and make this configurable.
+const DML_CHUNK_BUFFER_SIZE: usize = 32;
+
 /// [`TableDmlHandle`] is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
 ///
@@ -66,7 +70,7 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self) -> TableStreamReader {
         let mut core = self.core.write();
-        let (tx, rx) = mpsc::channel(10);
+        let (tx, rx) = mpsc::channel(DML_CHUNK_BUFFER_SIZE);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
