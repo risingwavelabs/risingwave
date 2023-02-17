@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::{
-    BasicSerde, ValueRowSerde, ColumnAwareSerde
+    BasicSerde, ColumnAwareSerde, ValueRowSerde,
 };
 
 struct Case {

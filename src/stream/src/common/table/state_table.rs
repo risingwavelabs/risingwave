@@ -1032,7 +1032,7 @@ where
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
             self.iter_with_pk_range_inner(pk_range, vnode).await?,
-            self.row_serde.clone(),
+            &self.row_serde,
         ))
     }
 
@@ -1044,7 +1044,7 @@ where
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
             self.iter_with_pk_prefix_inner(pk_prefix).await?,
-            self.row_serde.clone(),
+            &self.row_serde,
         ))
     }
 
@@ -1180,17 +1180,17 @@ pub type RowStreamWithPk<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a;
 pub type IterItemStream<'a, S: StateStore> = impl StateStoreIterItemStream + 'a;
 
-fn deserialize_row_stream(
-    stream: impl StateStoreIterItemStream,
-    deserializer: impl ValueRowSerde,
-) -> impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> {
+fn deserialize_row_stream<'a>(
+    stream: impl StateStoreIterItemStream + 'a,
+    deserializer: &'a impl ValueRowSerde,
+) -> impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a {
     stream.map(move |result| {
         result
             .map_err(StreamExecutorError::from)
             .and_then(|(key, value)| {
                 Ok(deserializer
                     .deserialize(&value)
-                    .map(move |row| OwnedRow::new(row))
+                    .map(OwnedRow::new)
                     .map(move |row| (key.user_key.table_key.0, row))?)
             })
     })

@@ -323,7 +323,6 @@ impl ValueRowSerde for ColumnAwareSerde {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use column_aware_row_encoding;
