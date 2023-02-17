@@ -113,7 +113,7 @@ impl UpdateExecutor {
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+        let write_chunk = |chunk: DataChunk| async {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -122,12 +122,9 @@ impl UpdateExecutor {
                 .collect_vec();
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
-            let notifier =
-                self.dml_manager
-                    .write_chunk(self.table_id, self.table_version_id, stream_chunk)?;
-            notifiers.push(notifier);
-
-            Ok(())
+            self.dml_manager
+                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
+                .await
         };
 
         #[for_await]
@@ -155,13 +152,13 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    write_chunk(chunk)?;
+                    notifiers.push(write_chunk(chunk).await?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            write_chunk(chunk)?;
+            notifiers.push(write_chunk(chunk).await?);
         }
 
         // Wait for all chunks to be taken / written.

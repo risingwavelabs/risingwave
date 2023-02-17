@@ -116,10 +116,34 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     }
 }
 
+impl std::str::FromStr for JsonbVal {
+    type Err = <Value as std::str::FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let v: Value = s.parse()?;
+        Ok(Self(v.into()))
+    }
+}
+
 impl JsonbVal {
+    /// Avoid this function (or `impl From<Value>`) which is leak of abstraction.
+    /// In most cases you would be using `JsonbRef`.
+    pub fn from_serde(v: Value) -> Self {
+        Self(v.into())
+    }
+
     /// Constructs a value without specific meaning. Usually used as a lightweight placeholder.
     pub fn dummy() -> Self {
         Self(Value::Null.into())
+    }
+
+    pub fn memcmp_deserialize(
+        deserializer: &mut memcomparable::Deserializer<impl bytes::Buf>,
+    ) -> memcomparable::Result<Self> {
+        let v: Value = <String as serde::Deserialize>::deserialize(deserializer)?
+            .parse()
+            .map_err(|_| memcomparable::Error::Message("invalid json".into()))?;
+        Ok(Self(v.into()))
     }
 
     pub fn value_deserialize(buf: &[u8]) -> Option<Self> {
