@@ -342,7 +342,9 @@ pub struct ConfigMap {
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
     force_two_phase_agg: ForceTwoPhaseAgg,
 
-    /// Enable share plan to construct a DAG plan.
+    /// Enable sharing of common sub-plans.
+    /// This means that DAG structured query plans can be constructed,
+    /// rather than only tree structured query plans.
     enable_share_plan: EnableSharePlan,
 }
 
@@ -538,7 +540,7 @@ impl ConfigMap {
             VariableInfo{
                 name : EnableSharePlan::entry_name().to_lowercase(),
                 setting : self.enable_share_plan.to_string(),
-                description: String::from("Enable share plan to construct a DAG plan.")
+                description: String::from("Enable sharing of common sub-plans. This means that DAG structured query plans can be constructed, rather than only tree structured query plans.")
             },
         ]
     }
