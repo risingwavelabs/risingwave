@@ -14,7 +14,7 @@ use crate::expr::{build_from_prost, Expression};
 use crate::{bail, ensure, ExprError, Result};
 
 /// Converts each array element to its text representation, and concatenates those
-/// separated by the delimiter string. If null_string is given and is not NULL,
+/// separated by the delimiter string. If `null_string` is given and is not NULL,
 /// then NULL array entries are represented by that string; otherwise, they are omitted.
 ///
 /// ```sql
@@ -75,8 +75,16 @@ impl Expression for ArrayToStringExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let list_array = self.array.eval_checked(input)?;
         let list_array = list_array.as_list();
+
         let delim_array = self.delimiter.eval_checked(input)?;
         let delim_array = delim_array.as_utf8();
+
+        let null_string_array = if let Some(expr) = &self.null_string {
+            let null_string_array = expr.eval_checked(input)?;
+            Some(null_string_array)
+        } else {
+            None
+        };
 
         let mut output = Utf8ArrayBuilder::with_meta(input.capacity(), ArrayMeta::Simple);
 
@@ -86,8 +94,20 @@ impl Expression for ArrayToStringExpression {
             } else {
                 let array = list_array.value_at(i);
                 let delim = delim_array.value_at(i);
+                let null_string = if let Some(a) = &null_string_array {
+                    a.as_utf8().value_at(i)
+                } else {
+                    None
+                };
+
                 if let Some(array) = array && let Some(delim) = delim {
-                    output.append(Some(&Self::evaluate(array, delim)));
+                    let result =
+                    if let Some(null_string) = null_string {
+                    Self::evaluate_with_nulls(array, delim, null_string)
+                    } else {
+                        Self::evaluate(array, delim)
+                    };
+                    output.append(Some(&result));
                 } else {
                     output.append_null();
                 }
@@ -97,7 +117,24 @@ impl Expression for ArrayToStringExpression {
     }
 
     fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        todo!()
+        let array = self.array.eval_row(input)?;
+        let delimiter = self.delimiter.eval_row(input)?;
+
+        let result = if let Some(array) = array && let Some(delimiter) = delimiter {
+            if let Some(e) = &self.null_string {
+                let null_string = e.eval_row(input)?;
+                if let Some(null_string) = null_string {
+                    Some(Self::evaluate_with_nulls(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), null_string.as_utf8()))
+                } else {
+                    Some(Self::evaluate(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8()))
+                }
+            } else {
+            None
+            }
+        } else{
+            None
+        };
+        Ok(result.map(|r| r.into()))
     }
 }
 
