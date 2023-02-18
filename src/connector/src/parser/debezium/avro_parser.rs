@@ -135,7 +135,7 @@ impl DebeziumAvroParserConfig {
             Ok(fields.iter().map(|field| field.name.clone()).collect_vec())
         } else {
             Err(RwError::from(InternalError(
-                "inner avro key schema invalid, record required".into(),
+                "Get pk names from key schema: top level message must be a record".into(),
             )))
         }
     }
@@ -156,7 +156,8 @@ impl DebeziumAvroParserConfig {
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
-                "inner avro value schema invalid, record required".into(),
+                "Map to columns from value schema failed: top level message must be a record"
+                    .into(),
             )))
         }
     }
