@@ -432,7 +432,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         } else {
             let prefix = key.deserialize(&self.join_key_data_types)?;
             self.metrics.insert_cache_miss_count += 1;
-            // Refill cache when the join key exist in neither cache or storage.
+            // Refill cache when the join key exists in neither cache or storage.
             if !self.state.table.may_exist(&prefix).await? {
                 let mut state = JoinEntryState::default();
                 state.insert(pk, value.encode());
@@ -468,7 +468,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         } else {
             let prefix = key.deserialize(&self.join_key_data_types)?;
             self.metrics.insert_cache_miss_count += 1;
-            // Refill cache when the join key exist in neither cache or storage.
+            // Refill cache when the join key exists in neither cache or storage.
             if !self.state.table.may_exist(&prefix).await? {
                 let mut state = JoinEntryState::default();
                 state.insert(pk, join_row.encode());
