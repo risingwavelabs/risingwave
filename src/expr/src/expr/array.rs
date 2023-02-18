@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::*;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::to_text::ToText;
@@ -185,22 +184,27 @@ impl Expression for ArrayToStringExpression {
 
 impl ArrayToStringExpression {
     fn evaluate(array: ListRef<'_>, delimiter: &str) -> String {
-        array
-            .values_ref()
-            .iter()
-            .flat_map(|f| f.iter())
-            .map(|f| f.to_text())
-            .join(delimiter)
+        let mut buf = String::new();
+        for element in array.values_ref().iter().flat_map(|f| f.iter()) {
+            if !buf.is_empty() {
+                buf.push_str(delimiter);
+            }
+            element.write(&mut buf).unwrap();
+        }
+        buf
     }
 
     fn evaluate_with_nulls(array: ListRef<'_>, delimiter: &str, null_string: &str) -> String {
-        array
-            .values_ref()
-            .iter()
-            .map(|f| match f {
-                Some(s) => s.to_text(),
-                None => null_string.to_owned(),
-            })
-            .join(delimiter)
+        let mut buf = String::new();
+        for element in array.values_ref() {
+            if !buf.is_empty() {
+                buf.push_str(delimiter);
+            }
+            match element {
+                Some(s) => s.write(&mut buf).unwrap(),
+                None => buf.push_str(null_string),
+            }
+        }
+        buf
     }
 }
