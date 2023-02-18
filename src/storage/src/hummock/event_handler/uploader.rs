@@ -23,7 +23,6 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
-use either::Either;
 use futures::future::{try_join_all, TryJoinAll};
 use futures::FutureExt;
 use itertools::Itertools;
@@ -349,7 +348,6 @@ impl SealedData {
 
         // add the imms of sealed epoch to the `imms_by_table_shard`
         unseal_epoch_data.imms.iter().for_each(|imm| {
-            assert_ne!(imm.shard_id, 0xdeadbeef);
             self.imms_by_table_shard
                 .entry((imm.table_id, imm.shard_id))
                 .or_default()
@@ -383,7 +381,7 @@ impl SealedData {
             .for_each(|task| self.merging_tasks.push_front(task));
     }
 
-    fn update_with_merged_imm(&mut self, merged_imm: &MergedImmutableMemtable) {
+    fn clear_merged_imms(&mut self, merged_imm: &MergedImmutableMemtable) {
         let have_merged =
             HashSet::<ImmId>::from_iter(merged_imm.get_merged_imm_ids().iter().cloned());
 
@@ -602,7 +600,7 @@ impl HummockUploader {
             .entry(epoch)
             .or_default()
             .imms
-            .push_front(imm.clone());
+            .push_front(imm);
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
@@ -638,7 +636,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn update_sealed_data(&mut self, merged_imm: &MergedImmutableMemtable) {
-        self.sealed_data.update_with_merged_imm(merged_imm);
+        self.sealed_data.clear_merged_imms(merged_imm);
     }
 
     pub(crate) fn start_sync_epoch(&mut self, epoch: HummockEpoch) {
@@ -1205,8 +1203,7 @@ mod tests {
             } else {
                 assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
 
-                let unmerged_imm_cnt: usize =
-                    (epoch_cnt - IMM_MERGE_THRESHOLD * merged_imms.len()) as usize;
+                let unmerged_imm_cnt: usize = epoch_cnt - IMM_MERGE_THRESHOLD * merged_imms.len();
 
                 if unmerged_imm_cnt < IMM_MERGE_THRESHOLD {
                     continue;

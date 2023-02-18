@@ -56,7 +56,7 @@ pub(crate) struct SharedBufferBatchInner {
 
 impl SharedBufferBatchInner {
     pub(crate) fn new(
-        epoch: HummockEpoch,
+        _epoch: HummockEpoch,
         items: Vec<SharedBufferItem>,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
@@ -129,9 +129,8 @@ pub struct SharedBufferBatch {
     pub(crate) epoch: HummockEpoch,
     pub table_id: TableId,
     pub shard_id: LocalInstanceId,
-
     // imms that have merged into this batch
-    pub imm_ids: Vec<SharedBufferBatchId>,
+    // pub imm_ids: Vec<SharedBufferBatchId>,
 }
 
 impl SharedBufferBatch {
@@ -153,7 +152,7 @@ impl SharedBufferBatch {
             epoch,
             table_id,
             shard_id: LocalInstanceId::default(),
-            imm_ids: Vec::default(),
+            // imm_ids: Vec::default(),
         }
     }
 
@@ -341,8 +340,8 @@ impl SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
             epoch,
-            shard_id: instance_id.unwrap_or(0xdeadbeef),
-            imm_ids: vec![],
+            shard_id: instance_id.unwrap_or(LocalInstanceId::default()),
+            // imm_ids: vec![],
         }
     }
 
@@ -429,7 +428,7 @@ impl SharedBufferBatch {
             epoch: min_epoch,
             table_id,
             shard_id,
-            imm_ids: vec![],
+            // imm_ids: vec![],
         }
     }
 
