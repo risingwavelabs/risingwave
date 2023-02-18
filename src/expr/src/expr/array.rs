@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{
-    list_array, Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArray, ListRef, ListValue,
-    Utf8Array, Utf8ArrayBuilder,
-};
+use risingwave_common::array::*;
 use risingwave_common::row::OwnedRow;
+use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -21,11 +19,44 @@ use crate::{bail, ensure, ExprError, Result};
 /// array_to_string ( array anyarray, delimiter text [, null_string text ] ) → text
 /// ```
 ///
-/// Example:
+/// Examples:
 ///
-/// ```sql
-/// array_to_string(ARRAY[1, 2, 3, NULL, 5], ',') → 1,2,3,5
-/// array_to_string(ARRAY[1, 2, 3, NULL, 5], ',', '*') → 1,2,3,*,5
+/// ```slt
+/// query T
+/// select array_to_string(array[1, 2, 3, NULL, 5], ',')
+/// ----
+/// 1,2,3,5
+///
+/// query T
+/// select array_to_string(array[1, 2, 3, NULL, 5], ',', '*')
+/// ----
+/// 1,2,3,*,5
+///
+/// query T
+/// select array_to_string(array[null,'foo',null], ',', '*');
+/// ----
+/// *,foo,*
+///
+/// query T
+/// with t as (
+///   select array[1,null,2,3] as arr, ',' as d union all
+///   select array[4,5,6,null,7] as arr, '|')
+/// select array_to_string(arr, d) from t;
+/// ----
+/// 1,2,3
+/// 4|5|6|7
+///
+/// # `array` or `delimiter` are required. Otherwise, returns null.
+/// query T
+/// select array_to_string(array[1,2], NULL);
+/// ----
+/// NULL
+///
+/// # FIXME: this query will panic in binder
+/// # query T
+/// # select array_to_string(NULL, ',');
+/// # ----
+/// # NULL
 /// ```
 #[derive(Debug)]
 pub struct ArrayToStringExpression {
@@ -144,7 +175,7 @@ impl ArrayToStringExpression {
             .values_ref()
             .iter()
             .flat_map(|f| f.iter())
-            .map(|f| f.into_utf8())
+            .map(|f| f.to_text())
             .join(delimiter)
     }
 
@@ -153,8 +184,8 @@ impl ArrayToStringExpression {
             .values_ref()
             .iter()
             .map(|f| match f {
-                Some(s) => s.into_utf8(),
-                None => null_string,
+                Some(s) => s.to_text(),
+                None => null_string.to_owned(),
             })
             .join(delimiter)
     }
