@@ -22,7 +22,9 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar::{
+    Authentication, Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor,
+};
 use risingwave_common::try_match_expand;
 
 use crate::impl_common_split_reader_logic;
@@ -110,10 +112,15 @@ impl SplitReader for PulsarSplitReader {
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let pulsar: Pulsar<_> = Pulsar::builder(service_url, TokioExecutor)
-            .build()
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let mut pulsar_builder = Pulsar::builder(service_url, TokioExecutor);
+        if let Some(auth_token) = props.auth_token {
+            pulsar_builder = pulsar_builder.with_auth(Authentication {
+                name: "token".to_string(),
+                data: Vec::from(auth_token),
+            });
+        }
+
+        let pulsar = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
@@ -179,4 +186,31 @@ impl PulsarSplitReader {
             yield res;
         }
     }
+}
+
+#[tokio::test]
+async fn test() {
+    let pulsar = Pulsar::builder("pulsar+ssl://pulsar-gcp-useast1.streaming.datastax.com:6651", TokioExecutor)
+        .with_auth(Authentication {
+            name: "token".to_string(),
+            data: Vec::from("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzY1MzQ4NDUsImlzcyI6ImRhdGFzdGF4Iiwic3ViIjoiY2xpZW50O2I4OTc4NmE3LTBiNzItNGViMC1iMWViLTcwODE5YTg0NmFkMztiV1ZsZEhWdzs5Mzg3ZmNmMDU3IiwidG9rZW5pZCI6IjkzODdmY2YwNTcifQ.RgRqF5edz6UxYgy_G_10RkF0YZkpj5-NJ3d0pdtXo7sgefBAQBXolNoicVydsob-g28tGW6ho0Z4yp0FbD-3zbtJ6ADOwCaSRn-_ftwclkZKAloyt54h2-EMqaVstHU_BGYddDonEr1Ma0_WXG8y2SlsedBBv9DpAm9aLZ2nA25reJQRpOP_B7LUIf3tWZFwm649VvIRd2fs88WrTwH0QqS1mI-ty5t64BQqAg8CmYhHJP7M4YMzHVpnhxfLgUkDD6z1Ky3FMh4O1nhr0BBWB2zHS2YWtXVMxnw5c78V4Uqig-TNs4l24AiKT1gaUvlBA3mqUS2jYPp4WCM6Nvgoww"),
+        })
+        .build()
+        .await
+        .unwrap();
+    // let admin = pulsar.().await.unwrap();
+    let builder: ConsumerBuilder<TokioExecutor> = pulsar
+        .consumer()
+        .with_topic("persistent://meetup/default/twitter")
+        .with_subscription_type(SubType::Exclusive)
+        .with_subscription(format!(
+            "consumer-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_micros()
+        ))
+        .with_options(ConsumerOptions::default().with_initial_position(InitialPosition::Earliest));
+    let mut consumer: Consumer<Vec<u8>, _> = builder.build().await.unwrap();
+    println!("{:?}", consumer.get_stats().await.unwrap());
 }
