@@ -216,6 +216,10 @@ impl HummockEventHandler {
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
         if !newly_uploaded_sstables.is_empty() {
+            info!(
+                "=== newly_uploaded_sstables.len() {}",
+                newly_uploaded_sstables.len()
+            );
             newly_uploaded_sstables
                 .into_iter()
                 // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
@@ -429,8 +433,9 @@ impl HummockEventHandler {
                     }
 
                     UploaderEvent::ImmMerged(merge_output) => {
+                        // FIXME: After we finish feed merged_imm into `flush`, then uncomment this.
                         // clear the imms have been merged in the sealed data
-                        self.uploader.update_sealed_data(&merge_output.merged_imm);
+                        // self.uploader.update_sealed_data(&merge_output.merged_imm);
 
                         // update read version for corresponding table shard
                         let read_guard = self.read_version_mapping.read();

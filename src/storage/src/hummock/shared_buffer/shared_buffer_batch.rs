@@ -152,7 +152,7 @@ impl SharedBufferBatch {
             )),
             epoch,
             table_id,
-            shard_id: ImmId::default(),
+            shard_id: LocalInstanceId::default(),
             imm_ids: Vec::default(),
         }
     }
@@ -312,7 +312,7 @@ impl SharedBufferBatch {
         size: usize,
         delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
-        shard_id: Option<ImmId>,
+        instance_id: Option<LocalInstanceId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         let delete_range_tombstones = delete_ranges
@@ -341,7 +341,7 @@ impl SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
             epoch,
-            shard_id: shard_id.unwrap_or(ImmId::default()),
+            shard_id: instance_id.unwrap_or(0xdeadbeef),
             imm_ids: vec![],
         }
     }

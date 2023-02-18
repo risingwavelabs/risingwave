@@ -349,6 +349,7 @@ impl SealedData {
 
         // add the imms of sealed epoch to the `imms_by_table_shard`
         unseal_epoch_data.imms.iter().for_each(|imm| {
+            assert_ne!(imm.shard_id, 0xdeadbeef);
             self.imms_by_table_shard
                 .entry((imm.table_id, imm.shard_id))
                 .or_default()
@@ -369,7 +370,7 @@ impl SealedData {
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
     }
 
-    fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch, context: &UploaderContext) {
+    fn gen_merging_tasks(&mut self, sealed_epoch: HummockEpoch, context: &UploaderContext) {
         self.imms_by_table_shard
             .iter_mut()
             .filter(|(_, imms)| imms.len() >= IMM_MERGE_THRESHOLD)
@@ -402,6 +403,9 @@ impl SealedData {
         // drop unfinished merging tasks in the task queue
         self.merging_tasks.clear();
 
+        // BUG(siyuan): When ImmMerged, we have removed those imms that have been merged from the
+        // `imms` queue, thus when a SyncEpoch request comes, we also need to feed merged_imms
+        // into the `flush` procedure.
         let imms = self.imms.drain(..);
 
         // todo: drain merged_imms and feed to the uploading task
@@ -630,7 +634,7 @@ impl HummockUploader {
 
     pub(crate) fn start_merge_imms(&mut self, sealed_epoch: HummockEpoch) {
         self.sealed_data
-            .start_merge_imms(sealed_epoch, &self.context);
+            .gen_merging_tasks(sealed_epoch, &self.context);
     }
 
     pub(crate) fn update_sealed_data(&mut self, merged_imm: &MergedImmutableMemtable) {
@@ -881,7 +885,7 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::collections::{HashSet, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
@@ -907,9 +911,11 @@ mod tests {
         HummockUploader, UploadTaskInfo, UploadTaskOutput, UploadTaskPayload, UploaderContext,
         UploaderEvent, UploadingTask,
     };
+    use crate::hummock::event_handler::LocalInstanceId;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
+    use crate::hummock::store::version::IMM_MERGE_THRESHOLD;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
     use crate::storage_value::StorageValue;
 
@@ -1153,6 +1159,117 @@ mod tests {
         uploader.update_pinned_version(new_pinned_version);
         assert!(uploader.synced_data.is_empty());
         assert_eq!(epoch1, uploader.max_committed_epoch());
+    }
+
+    #[tokio::test]
+    async fn test_uploader_merge_imms_without_flush() {
+        let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut all_imms = VecDeque::new();
+        // assume a chckpoint consists of 11 epochs
+        let ckpt_intervals = 11;
+
+        // For each epoch, we gen imm for 2 shards and add them to uploader and seal the epoch
+        // afterward. check uploader's state after each epoch has been sealed
+        // When we get IMM_MERGE_THRESHOLD epochs, there should be merging task started for sealed
+        // data. Then we await the merging task and check the uploader's state again.
+        let mut merged_imms = VecDeque::new();
+        for i in 1..=ckpt_intervals {
+            let epoch = INITIAL_EPOCH + i;
+            let mut imm1 = gen_imm(epoch).await;
+            let mut imm2 = gen_imm(epoch).await;
+
+            imm1.shard_id = 1 as LocalInstanceId;
+            imm2.shard_id = 2 as LocalInstanceId;
+
+            uploader.add_imm(imm1.clone());
+            uploader.add_imm(imm2.clone());
+
+            // newer imm comes in front
+            all_imms.push_front(imm1);
+            all_imms.push_front(imm2);
+
+            uploader.seal_epoch(epoch);
+
+            assert_eq!(epoch, uploader.max_sealed_epoch);
+            uploader.sealed_data.imms.front().map_or((), |(e, imms)| {
+                if *e == epoch {
+                    assert_eq!(2, imms.len());
+                }
+            });
+
+            let epoch_cnt = (epoch - INITIAL_EPOCH) as usize;
+            if epoch_cnt < IMM_MERGE_THRESHOLD {
+                assert!(uploader.sealed_data.merging_tasks.is_empty());
+                assert!(uploader.sealed_data.spilled_data.is_empty());
+                assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
+            } else {
+                assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
+
+                let unmerged_imm_cnt: usize =
+                    (epoch_cnt - IMM_MERGE_THRESHOLD * merged_imms.len()) as usize;
+
+                if unmerged_imm_cnt < IMM_MERGE_THRESHOLD {
+                    continue;
+                }
+
+                let imms_by_shard = &mut uploader.sealed_data.imms_by_table_shard;
+                // check shard 1
+                imms_by_shard
+                    .get(&(TEST_TABLE_ID, 1 as LocalInstanceId))
+                    .map_or((), |imms| {
+                        assert_eq!(IMM_MERGE_THRESHOLD, imms.len());
+                    });
+
+                // check shard 2
+                imms_by_shard
+                    .get(&(TEST_TABLE_ID, 2 as LocalInstanceId))
+                    .map_or((), |imms| {
+                        assert_eq!(IMM_MERGE_THRESHOLD, imms.len());
+                    });
+
+                // we have enough sealed imms, start merging task
+                println!("start merging task for epoch {}", epoch);
+                uploader.start_merge_imms(epoch);
+                assert!(!uploader.sealed_data.merging_tasks.is_empty());
+                assert!(uploader.sealed_data.spilled_data.is_empty());
+
+                // check after generate merging task
+                uploader
+                    .sealed_data
+                    .imms_by_table_shard
+                    .get(&(TEST_TABLE_ID, 1 as LocalInstanceId))
+                    .map_or((), |imms| {
+                        assert_eq!(0, imms.len());
+                    });
+                uploader
+                    .sealed_data
+                    .imms_by_table_shard
+                    .get(&(TEST_TABLE_ID, 2 as LocalInstanceId))
+                    .map_or((), |imms| {
+                        assert_eq!(0, imms.len());
+                    });
+
+                // poll the merging task and check the result
+                match uploader.next_event().await {
+                    UploaderEvent::ImmMerged(output) => {
+                        uploader.update_sealed_data(&output.merged_imm);
+                        let have_merged = HashSet::<ImmId>::from_iter(
+                            output.merged_imm.get_merged_imm_ids().iter().cloned(),
+                        );
+                        // check whether merged imms have been clear from sealed imms
+                        uploader.sealed_data.imms.iter().for_each(|(_, imms)| {
+                            imms.iter().for_each(|imm| {
+                                assert!(!have_merged.contains(&imm.batch_id()));
+                            });
+                        });
+
+                        println!("merging task success for epoch {}", epoch);
+                        merged_imms.push_front(output.merged_imm);
+                    }
+                    _ => unreachable!(),
+                };
+            }
+        }
     }
 
     #[tokio::test]

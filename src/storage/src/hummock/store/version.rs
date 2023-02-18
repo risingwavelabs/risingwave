@@ -349,16 +349,24 @@ impl HummockReadVersion {
                                     idx = right_idx + 1;
                                     continue;
                                 } else {
+                                    let local_imm_ids = self
+                                        .staging
+                                        .imm
+                                        .iter()
+                                        .map(|imm| imm.batch_id())
+                                        .collect_vec();
                                     unreachable!(
                                         "should not reach here staging_sst.size {},
                                     staging_sst.imm_ids {:?},
                                     staging_sst.epochs {:?},
+                                    local_imm_ids {:?},
                                     intersect_imm_ids {:?},
                                     merged_imm_ids {:?},
                                     merged_epochs {:?}",
                                         staging_sst.imm_size,
                                         staging_sst.imm_ids,
                                         staging_sst.epochs,
+                                        local_imm_ids,
                                         intersect_imm_ids,
                                         imm_ids,
                                         merged_imm.epochs(),
@@ -393,9 +401,32 @@ impl HummockReadVersion {
                     self.staging
                         .imm
                         .retain(|imm| imm.epoch() > max_committed_epoch);
+
+                    self.staging
+                        .merged_imm
+                        .retain(|merged_imm| merged_imm.epoch() > max_committed_epoch);
+
                     self.staging.sst.retain(|sst| {
                         sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
                     });
+
+                    assert!(self
+                        .staging
+                        .imm
+                        .iter()
+                        .chain(self.staging.merged_imm.iter())
+                        .all(|imm| {
+                            match imm {
+                                ImmutableMemtableImpl::Imm(batch) => {
+                                    batch.epoch > max_committed_epoch
+                                }
+                                // MCE would not fall in the middle of epochs
+                                // because imms must be newer than committed version
+                                ImmutableMemtableImpl::MergedImm(m) => {
+                                    m.epoch() > max_committed_epoch
+                                }
+                            }
+                        }));
 
                     // check epochs.last() > MCE
                     assert!(self.staging.sst.iter().all(|sst| {

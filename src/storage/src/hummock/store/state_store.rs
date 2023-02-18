@@ -228,13 +228,14 @@ impl StateStoreWrite for LocalHummockStorage {
                 tracker
             };
 
+            let instance_id = self.core.instance_guard.instance_id;
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
                 sorted_items,
                 size,
                 delete_ranges,
                 table_id,
-                None,
+                Some(instance_id),
                 Some(tracker),
             );
             let imm_size = imm.size();
