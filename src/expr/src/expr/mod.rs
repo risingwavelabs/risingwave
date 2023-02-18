@@ -56,6 +56,7 @@ mod expr_unary;
 mod expr_vnode;
 
 mod agg;
+mod array;
 mod build_expr_from_prost;
 pub(crate) mod data_types;
 mod template;
