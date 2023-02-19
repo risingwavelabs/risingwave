@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,17 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use super::privilege::{check_privileges, resolve_relation_privileges};
+use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::planner::Planner;
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -47,16 +49,20 @@ pub(super) fn get_column_names(
         // If user provide columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
-        if col_names.is_none() && select.aliases.iter().any(Option::is_none) {
-            return Err(ErrorCode::BindError(
-                "An alias must be specified for an expression".to_string(),
-            )
-            .into());
+        if col_names.is_none() {
+            for (i, alias) in select.aliases.iter().enumerate() {
+                if alias.is_none() {
+                    return Err(ErrorCode::BindError(format!(
+                    "An alias must be specified for the {} expression (counting from 1) in result relation", ordinal(i+1)
+                ))
+                .into());
+                }
+            }
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
             resolve_relation_privileges(relation, Action::Select, &mut check_items);
-            check_privileges(session, &check_items)?;
+            session.check_privileges(&check_items)?;
         }
     }
 
@@ -121,14 +127,35 @@ pub async fn handle_create_mv(
     let has_order_by = !query.order_by.is_empty();
 
     session.check_relation_name_duplicated(name.clone())?;
+    let mut notice = String::new();
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
-        let graph = build_graph(plan);
+        let context = plan.plan_base().ctx.clone();
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
+        // Set the timezone for the stream environment
+        let env = graph.env.as_mut().unwrap();
+        env.timezone = context.get_session_timezone();
+        context.append_notice(&mut notice);
 
         (table, graph)
     };
+
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                table.database_id,
+                table.schema_id,
+                table.name.clone(),
+            ));
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
@@ -136,18 +163,28 @@ pub async fn handle_create_mv(
         .await?;
 
     if has_order_by {
-        let notice = r#"
+        notice.push_str(r#"
 The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#;
-        Ok(PgResponse::empty_result_with_notice(
-            StatementType::CREATE_MATERIALIZED_VIEW,
-            notice.to_string(),
-        ))
-    } else {
-        Ok(PgResponse::empty_result(
-            StatementType::CREATE_MATERIALIZED_VIEW,
-        ))
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#);
     }
+    Ok(PgResponse::empty_result_with_notice(
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        notice.to_string(),
+    ))
+}
+
+fn ordinal(i: usize) -> String {
+    let s = i.to_string();
+    let suffix = if s.ends_with('1') && !s.ends_with("11") {
+        "st"
+    } else if s.ends_with('2') && !s.ends_with("12") {
+        "nd"
+    } else if s.ends_with('3') && !s.ends_with("13") {
+        "rd"
+    } else {
+        "th"
+    };
+    s + suffix
 }
 
 #[cfg(test)]
@@ -155,11 +192,12 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{
+        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+    };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::catalog::row_id_column_name;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -214,7 +252,7 @@ pub mod tests {
         assert_eq!(columns, expected_columns);
     }
 
-    /// When creating MV, The only thing to allow without explicit alias is `InputRef`.
+    /// When creating MV, a unique column name must be specified for each column
     #[tokio::test]
     async fn test_no_alias() {
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -222,12 +260,16 @@ pub mod tests {
         let sql = "create table t(x varchar)";
         frontend.run_sql(sql).await.unwrap();
 
-        // Aggregation without alias is forbidden.
-        let sql = "create materialized view mv1 as select count(x) from t";
+        // Aggregation without alias is ok.
+        let sql = "create materialized view mv0 as select count(x) from t";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Same aggregations without alias is forbidden, because it make the same column name.
+        let sql = "create materialized view mv1 as select count(x), count(*) from t";
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Invalid input syntax: column \"count\" specified more than once"
         );
 
         // Literal without alias is forbidden.
@@ -235,15 +277,15 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
         );
 
-        // Function without alias is forbidden.
-        let sql = "create materialized view mv1 as select length(x) from t";
+        // some expression without alias is forbidden.
+        let sql = "create materialized view mv1 as select x is null from t";
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
         );
     }
 

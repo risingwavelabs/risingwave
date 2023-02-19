@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, StreamNode as ProstStreamPlan,
 };
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -46,6 +46,7 @@ impl StreamShare {
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
+            logical.input().watermark_columns().clone(),
         );
         StreamShare { base, logical }
     }
@@ -64,6 +65,12 @@ impl PlanTreeNodeUnary for StreamShare {
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(self.logical.clone_with_input(input))
+    }
+}
+
+impl StreamShare {
+    pub fn replace_input(&self, plan: PlanRef) {
+        self.logical.replace_input(plan);
     }
 }
 
@@ -136,3 +143,5 @@ impl StreamShare {
         }
     }
 }
+
+impl ExprRewritable for StreamShare {}

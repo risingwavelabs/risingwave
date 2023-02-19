@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,6 +76,9 @@ pub enum ErrorCode {
     ConnectorError(BoxedError),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
+    // Tips: Use this only if it's intended to reject the query
+    #[error("Not supported: {0}\nHINT: {1}")]
+    NotSupported(String, String),
     #[error(transparent)]
     IoError(IoError),
     #[error("Storage error: {0}")]
@@ -125,16 +128,10 @@ pub enum ErrorCode {
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
-
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-}
-
-pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
-    ErrorCode::InternalError(msg.into().to_string()).into()
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -269,6 +266,7 @@ impl From<tonic::Status> for RwError {
                 ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }
     }

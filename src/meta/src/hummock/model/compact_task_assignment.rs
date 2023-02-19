@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,8 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::CompactTaskAssignment;
 
+use crate::hummock::model::HUMMOCK_COMPACT_TASK_ASSIGNMENT;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// `cf(compact_task_assignment)`: `CompactTaskId` -> `CompactTaskAssignment`
-const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/compact_task_assignment";
 
 /// `AssignedCompactTasks` tracks compact tasks assigned to context id.
 impl MetadataModel for CompactTaskAssignment {

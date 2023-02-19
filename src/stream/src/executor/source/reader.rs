@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,25 +21,24 @@ use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrat
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_source::BoxSourceWithStateStream;
+use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithState};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Barrier;
 
-type SourceReaderMessage<T> = StreamExecutorResult<Either<Barrier, T>>;
-type SourceReaderArm<T> = BoxStream<'static, SourceReaderMessage<T>>;
-#[allow(type_alias_bounds)]
-type SourceReaderStreamInner<T: Send + 'static> =
-    SelectWithStrategy<SourceReaderArm<T>, SourceReaderArm<T>, impl FnMut(&mut ()) -> PollNext, ()>;
+type SourceReaderMessage = StreamExecutorResult<Either<Barrier, StreamChunkWithState>>;
+type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
+type SourceReaderStreamInner =
+    SelectWithStrategy<SourceReaderArm, SourceReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
 
-pub(super) struct SourceReaderStream<T: Send + 'static> {
-    inner: SourceReaderStreamInner<T>,
+pub(super) struct SourceReaderStream {
+    inner: SourceReaderStreamInner,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl<T: Send + 'static> SourceReaderStream<T> {
+impl SourceReaderStream {
     /// Receive barriers from barrier manager with the channel, error on channel close.
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
@@ -50,8 +49,8 @@ impl<T: Send + 'static> SourceReaderStream<T> {
     }
 
     /// Receive chunks and states from the source reader, hang up on error.
-    #[try_stream(ok = T, error = StreamExecutorError)]
-    async fn source_stream(stream: BoxSourceWithStateStream<T>) {
+    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
+    async fn source_stream(stream: BoxSourceWithStateStream) {
         // TODO: support stack trace for Stream
         #[for_await]
         for chunk in stream {
@@ -68,7 +67,7 @@ impl<T: Send + 'static> SourceReaderStream<T> {
     /// Convert this reader to a stream.
     pub fn new(
         barrier_receiver: UnboundedReceiver<Barrier>,
-        source_stream: BoxSourceWithStateStream<T>,
+        source_stream: BoxSourceWithStateStream,
     ) -> Self {
         Self {
             inner: Self::new_inner(
@@ -84,9 +83,9 @@ impl<T: Send + 'static> SourceReaderStream<T> {
     }
 
     fn new_inner(
-        barrier_receiver_arm: SourceReaderArm<T>,
-        source_stream_arm: SourceReaderArm<T>,
-    ) -> SourceReaderStreamInner<T> {
+        barrier_receiver_arm: SourceReaderArm,
+        source_stream_arm: SourceReaderArm,
+    ) -> SourceReaderStreamInner {
         select_with_strategy(
             barrier_receiver_arm,
             source_stream_arm,
@@ -96,7 +95,7 @@ impl<T: Send + 'static> SourceReaderStream<T> {
     }
 
     /// Replace the source stream with a new one for given `stream`. Used for split change.
-    pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream<T>) {
+    pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
@@ -126,8 +125,8 @@ impl<T: Send + 'static> SourceReaderStream<T> {
     }
 }
 
-impl<T: Send> Stream for SourceReaderStream<T> {
-    type Item = SourceReaderMessage<T>;
+impl Stream for SourceReaderStream {
+    type Item = SourceReaderMessage;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -146,7 +145,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
-    use risingwave_source::TableSource;
+    use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -155,12 +154,8 @@ mod tests {
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
-        let table_source = TableSource::new(vec![]);
-        let source_stream = table_source
-            .stream_reader(vec![])
-            .await
-            .unwrap()
-            .into_stream();
+        let table_dml_handle = TableDmlHandle::new(vec![]);
+        let source_stream = table_dml_handle.stream_reader().into_stream();
 
         let stream = SourceReaderStream::new(barrier_rx, source_stream);
         pin_mut!(stream);
@@ -176,7 +171,10 @@ mod tests {
         }
 
         // Write a chunk, and we should receive it.
-        table_source.write_chunk(StreamChunk::default()).unwrap();
+        table_dml_handle
+            .write_chunk(StreamChunk::default())
+            .await
+            .unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
         barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
@@ -188,7 +186,10 @@ mod tests {
         // Write a barrier.
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
-        table_source.write_chunk(StreamChunk::default()).unwrap();
+        table_dml_handle
+            .write_chunk(StreamChunk::default())
+            .await
+            .unwrap();
 
         // We should receive the barrier.
         assert_matches!(next!().unwrap(), Either::Left(_));

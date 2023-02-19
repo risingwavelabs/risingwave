@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,11 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl};
+use super::generic::GenericPlanRef;
+use super::{
+    ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::utils::Condition;
 
@@ -77,7 +80,10 @@ impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
             search_condition: Some(
-                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(ExprImpl::from(self.logical.predicate().clone()))
+                    .to_expr_proto(),
             ),
         })
     }
@@ -87,5 +93,22 @@ impl ToLocalBatch for BatchFilter {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchFilter {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_filter()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

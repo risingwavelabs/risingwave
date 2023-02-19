@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 pub mod client;
 pub mod cluster;
 pub mod ctl_ext;
-mod kafka;
+pub mod kafka;
 pub mod nexmark;
 pub mod slt;
 pub mod utils;

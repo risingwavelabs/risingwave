@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod meta_service;
-pub use meta_service::*;
+mod context;
 mod hummock_service;
-
-pub use hummock_service::*;
+mod meta_service;
+pub use context::*;

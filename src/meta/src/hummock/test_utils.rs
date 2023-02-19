@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
@@ -31,7 +32,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::TableOption;
+use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
 use crate::rpc::metrics::MetaMetrics;
@@ -89,8 +90,9 @@ where
         temp_compactor = true;
     }
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
         .await
         .unwrap()
         .unwrap();
@@ -156,7 +158,7 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
                 right_exclusive: false,
             }),
             file_size: 2,
-            table_ids: vec![(i + 1) as u32, (i + 2) as u32],
+            table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
@@ -197,9 +199,9 @@ pub async fn register_table_ids_to_compaction_group<S>(
 {
     hummock_manager_ref
         .register_table_ids(
-            &mut table_ids
+            &table_ids
                 .iter()
-                .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
+                .map(|table_id| (*table_id, compaction_group_id))
                 .collect_vec(),
         )
         .await
@@ -228,6 +230,18 @@ pub fn update_filter_key_extractor_for_table_ids(
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
             )),
+        )
+    }
+}
+
+pub fn update_filter_key_extractor_for_tables(
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    tables: &[ProstTable],
+) {
+    for table in tables {
+        filter_key_extractor_manager_ref.update(
+            table.id,
+            Arc::new(FilterKeyExtractorImpl::from_table(table)),
         )
     }
 }
@@ -292,8 +306,7 @@ pub async fn setup_compute_env_with_config(
         compactor_manager,
         config,
     )
-    .await
-    .unwrap();
+    .await;
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,

@@ -127,6 +127,27 @@ create table t (v1 varchar collate "en_US");
 
 # Test create-table-as 
 statement ok
+create table t as select 1;
+
+statement ok
+drop table t;
+
+statement error
+create table t as select 1,2;
+
+statement ok
+create table t as select 1 as a, 2 as b;
+
+statement ok
+drop table t;
+
+statement ok 
+create table t(v1) as select 1;
+
+statement ok
+drop table t;
+
+statement ok
 create table t (v1 int,v2 int);
 
 statement ok
@@ -188,14 +209,8 @@ insert into t values (1);
 statement ok
 insert into t values (2);
 
-statement error 
-create table n1 as select sum(v1) from t;
-
-statement error 
-create table n1(v1) as select sum(v1) from t;
-
 statement ok
-create table n1 as select sum(v1) as sum from t;
+create table n1 as select sum(v1) from t;
 
 statement ok
 flush;

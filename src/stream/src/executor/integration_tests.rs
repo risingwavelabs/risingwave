@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
@@ -60,6 +61,7 @@ async fn test_merger_sum_aggr() {
                     order_pairs: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
                 AggCall {
                     kind: AggKind::Sum,
@@ -68,6 +70,7 @@ async fn test_merger_sum_aggr() {
                     order_pairs: vec![],
                     append_only,
                     filter: None,
+                    distinct: false,
                 },
             ],
             vec![],
@@ -111,8 +114,11 @@ async fn test_merger_sum_aggr() {
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (input, rx) = channel_for_test();
-    let _schema = Schema {
-        fields: vec![Field::unnamed(DataType::Int64)],
+    let schema = Schema {
+        fields: vec![
+            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Int64),
+        ],
     };
     let receiver_op = Box::new(ReceiverExecutor::for_test(rx));
     let dispatcher = DispatchExecutor::new(
@@ -135,7 +141,7 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::for_test(outputs);
+    let merger = MergeExecutor::for_test(outputs, schema);
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
@@ -145,12 +151,13 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         vec![
             AggCall {
-                kind: AggKind::Sum,
+                kind: AggKind::Sum0,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -159,6 +166,7 @@ async fn test_merger_sum_aggr() {
                 order_pairs: vec![],
                 append_only,
                 filter: None,
+                distinct: false,
             },
         ],
         vec![],
@@ -175,6 +183,7 @@ async fn test_merger_sum_aggr() {
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
+        MultiMap::new(),
     );
 
     let items = Arc::new(Mutex::new(vec![]));

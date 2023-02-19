@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_backup::error::BackupResult;
 fn main() -> BackupResult<()> {
     use clap::StructOpt;
     let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use size::Size;
 use tokio::task::JoinHandle;
 
 use super::table::{get_table_catalog, make_state_table};
-use crate::common::HummockServiceOpts;
+use crate::CtlContext;
 
 #[derive(Subcommand)]
 pub enum BenchCommands {
@@ -71,9 +71,9 @@ impl InterestedMetrics {
     }
 }
 
-pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
-    let mut hummock_opts = HummockServiceOpts::from_env()?;
-    let (meta, hummock, metrics) = hummock_opts.create_hummock_store_with_metrics().await?;
+pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
+    let meta = context.meta_client().await?;
+    let (hummock, metrics) = context.hummock_store_with_metrics().await?;
     let next_cnt = Arc::new(AtomicU64::new(0));
     let iter_cnt = Arc::new(AtomicU64::new(0));
     match cmd {
@@ -130,6 +130,5 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
         }
     }
 
-    hummock_opts.shutdown().await;
     Ok(())
 }

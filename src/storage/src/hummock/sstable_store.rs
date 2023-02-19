@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ use bytes::{Buf, BufMut, Bytes};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, ObjectMetadata, ObjectStoreRef, ObjectStreamingUploader,
+    BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
+    ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -125,6 +126,8 @@ impl SstableStore {
         meta_cache_capacity: usize,
         tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
     ) -> Self {
+        // TODO: We should validate path early. Otherwise object store won't report invalid path
+        // error until first write attempt.
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
@@ -282,13 +285,8 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let is_remote = is_remote_sst_id(sst_id);
-        let obj_prefix = self.store.get_object_prefix(sst_id, is_remote);
-        let mut ret = format!("{}/{}{}.data", self.path, obj_prefix, sst_id);
-        if !is_remote {
-            ret = get_local_path(&ret);
-        }
-        ret
+        let obj_prefix = self.store.get_object_prefix(sst_id, true);
+        format!("{}/{}{}.data", self.path, obj_prefix, sst_id)
     }
 
     pub fn get_sst_id_from_path(&self, path: &str) -> HummockSstableId {
@@ -322,18 +320,19 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
-    pub async fn sstable(
+    pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        stats.cache_meta_block_total += 1;
+        stats: &StoreLocalStatistic,
+    ) -> HummockResult<(TableHolder, u64)> {
+        let mut local_cache_meta_block_miss = 0;
         let sst_id = sst.id;
-        self.meta_cache
+        let result = self
+            .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
                 let store = self.store.clone();
                 let meta_path = self.get_sst_data_path(sst_id);
-                stats.cache_meta_block_miss += 1;
+                local_cache_meta_block_miss += 1;
                 let stats_ptr = stats.remote_io_time.clone();
                 let loc = BlockLocation {
                     offset: sst.meta_offset as usize,
@@ -354,12 +353,26 @@ impl SstableStore {
                 }
             })
             .verbose_stack_trace("meta_cache_lookup")
-            .await
+            .await;
+        result.map(|table_holder| (table_holder, local_cache_meta_block_miss))
+    }
+
+    pub async fn sstable(
+        &self,
+        sst: &SstableInfo,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        self.sstable_syncable(sst, stats).await.map(
+            |(table_holder, local_cache_meta_block_miss)| {
+                stats.apply_meta_fetch(local_cache_meta_block_miss);
+                table_holder
+            },
+        )
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
         self.store
-            .list(&self.path)
+            .list(&format!("{}/", self.path))
             .await
             .map_err(HummockError::object_io_error)
     }
@@ -379,8 +392,48 @@ impl SstableStore {
             .insert(sst_id, sst_id, charge, Box::new(sst));
     }
 
+    pub fn insert_block_cache(
+        &self,
+        sst_id: HummockSstableId,
+        block_index: u64,
+        block: Box<Block>,
+    ) {
+        self.block_cache.insert(sst_id, block_index, block);
+    }
+
     pub fn get_meta_memory_usage(&self) -> u64 {
         self.meta_cache.get_memory_usage() as u64
+    }
+
+    pub async fn get_stream(
+        &self,
+        sst: &Sstable,
+        block_index: Option<usize>,
+    ) -> HummockResult<BlockStream> {
+        let start_pos = match block_index {
+            None => None,
+            Some(index) => {
+                let block_meta = sst
+                    .meta
+                    .block_metas
+                    .get(index)
+                    .ok_or_else(HummockError::invalid_block)?;
+
+                Some(block_meta.offset as usize)
+            }
+        };
+
+        let data_path = self.get_sst_data_path(sst.id);
+        let store = self.store().clone();
+
+        Ok(BlockStream::new(
+            store
+                .streaming_read(&data_path, start_pos)
+                .await
+                .map_err(HummockError::object_io_error)?,
+            block_index.unwrap_or(0),
+            &sst.meta,
+        ))
     }
 }
 
@@ -664,6 +717,127 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
     }
 }
 
+pub struct CompactorMemoryCollector {
+    uploading_memory_limiter: Arc<MemoryLimiter>,
+    data_memory_limiter: Arc<MemoryLimiter>,
+    sstable_store: SstableStoreRef,
+}
+
+impl CompactorMemoryCollector {
+    pub fn new(
+        uploading_memory_limiter: Arc<MemoryLimiter>,
+        sstable_store: SstableStoreRef,
+        data_memory_limiter: Arc<MemoryLimiter>,
+    ) -> Self {
+        Self {
+            uploading_memory_limiter,
+            data_memory_limiter,
+            sstable_store,
+        }
+    }
+}
+
+impl MemoryCollector for CompactorMemoryCollector {
+    fn get_meta_memory_usage(&self) -> u64 {
+        self.sstable_store.get_meta_memory_usage()
+    }
+
+    fn get_data_memory_usage(&self) -> u64 {
+        self.data_memory_limiter.get_memory_usage()
+    }
+
+    fn get_uploading_memory_usage(&self) -> u64 {
+        self.uploading_memory_limiter.get_memory_usage()
+    }
+}
+
+/// An iterator that reads the blocks of an SST step by step from a given stream of bytes.
+pub struct BlockStream {
+    /// The stream that provides raw data.
+    byte_stream: MonitoredStreamingReader,
+
+    /// The index of the next block. Note that `block_idx` is relative to the start index of the
+    /// stream (and is compatible with `block_size_vec`); it is not relative to the corresponding
+    /// SST. That is, if streaming starts at block 2 of a given SST `T`, then `block_idx = 0`
+    /// refers to the third block of `T`.
+    block_idx: usize,
+
+    /// The sizes of each block which the stream reads. The first number states the compressed size
+    /// in the stream. The second number is the block's uncompressed size.  Note that the list does
+    /// not contain the size of blocks which precede the first streamed block. That is, if
+    /// streaming starts at block 2 of a given SST, then the list does not contain information
+    /// about block 0 and block 1.
+    block_size_vec: Vec<(usize, usize)>,
+}
+
+impl BlockStream {
+    /// Constructs a new `BlockStream` object that reads from the given `byte_stream` and interprets
+    /// the data as blocks of the SST described in `sst_meta`, starting at block `block_index`.
+    ///
+    /// If `block_index >= sst_meta.block_metas.len()`, then `BlockStream` will not read any data
+    /// from `byte_stream`.
+    fn new(
+        // The stream that provides raw data.
+        byte_stream: MonitoredStreamingReader,
+
+        // Index of the SST's block where the stream starts.
+        block_index: usize,
+
+        // Meta data of the SST that is streamed.
+        sst_meta: &SstableMeta,
+    ) -> Self {
+        let metas = &sst_meta.block_metas;
+
+        // Avoids panicking if `block_index` is too large.
+        let block_index = std::cmp::min(block_index, metas.len());
+
+        let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
+        sst_meta.block_metas[block_index..]
+            .iter()
+            .for_each(|b_meta| {
+                block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
+            });
+
+        Self {
+            byte_stream,
+            block_idx: 0,
+            block_size_vec: block_len_vec,
+        }
+    }
+
+    /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
+    /// left to read.
+    pub async fn next(&mut self) -> HummockResult<Option<Box<Block>>> {
+        if self.block_idx >= self.block_size_vec.len() {
+            return Ok(None);
+        }
+
+        let (block_stream_size, block_full_size) =
+            *self.block_size_vec.get(self.block_idx).unwrap();
+        let mut buffer = vec![0; block_stream_size];
+
+        let bytes_read = self
+            .byte_stream
+            .read_bytes(&mut buffer[..])
+            .await
+            .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
+
+        if bytes_read != block_stream_size {
+            return Err(HummockError::object_io_error(ObjectError::internal(
+                format!(
+                    "unexpected number of bytes: expected: {} read: {}",
+                    block_stream_size, bytes_read
+                ),
+            )));
+        }
+
+        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);
+        self.block_idx += 1;
+
+        Ok(Some(boxed_block))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
@@ -692,14 +866,22 @@ mod tests {
     async fn validate_sst(
         sstable_store: SstableStoreRef,
         info: &SstableInfo,
-        meta: SstableMeta,
+        mut meta: SstableMeta,
         x_range: Range<usize>,
     ) {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
+        let mut filter_data = std::mem::take(&mut meta.bloom_filter);
+        if !filter_data.is_empty() {
+            filter_data.pop();
+        }
         assert_eq!(holder.value().meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
+        assert_eq!(
+            filter_data.as_slice(),
+            holder.value().filter_reader.get_raw_data()
+        );
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,

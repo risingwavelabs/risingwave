@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
-use super::{GenericPlanNode, GenericPlanRef};
+use super::GenericPlanNode;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::TableCatalog;
+use crate::{TableCatalog, WithOptions};
 
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -63,10 +63,14 @@ impl GenericPlanNode for Source {
 }
 
 impl Source {
-    pub fn infer_internal_table_catalog(me: &impl GenericPlanRef) -> TableCatalog {
+    pub fn infer_internal_table_catalog() -> TableCatalog {
         // note that source's internal table is to store partition_id -> offset mapping and its
         // schema is irrelevant to input schema
-        let mut builder = TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+        // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
+        // state in source.
+        // Source state doesn't maintain retention_seconds, internal_table_subset function only
+        // returns retention_seconds so default is used here
+        let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
 
         let key = Field {
             data_type: DataType::Varchar,

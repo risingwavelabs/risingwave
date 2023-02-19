@@ -4,12 +4,16 @@ create table if not exists t3 (v1 int, v2 int, v3 int) with (appendonly = 'true'
 statement ok
 create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 
+statement ok
+create view v3 as select sum(v2) as sum_v2 from t3;
+
 query TT
 describe t3;
 ----
 v1 Int32
 v2 Int32
 v3 Int32
+primary key _row_id
 
 query TT
 show columns from t3;
@@ -27,6 +31,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
+primary key _row_id
 idx1 index(v1, v2) include(v3) distributed by(v1, v2)
 
 statement ok
@@ -56,6 +61,16 @@ show tables from public;
 t3
 
 query T
+show views;
+----
+v3
+
+query T
+show views from public;
+----
+v3
+
+query T
 show materialized views from public;
 ----
 mv3
@@ -64,10 +79,6 @@ query T
 show materialized views;
 ----
 mv3
-
-query T
-show materialized sources;
-----
 
 query T
 show sources;
@@ -98,6 +109,9 @@ statement ok
 drop materialized view mv3;
 
 statement ok
+drop view v3;
+
+statement ok
 drop view v1;
 
 statement ok
@@ -111,7 +125,9 @@ matviewname Varchar
 matviewowner Int32
 definition Varchar
 matviewid Int32
+matviewtimezone Varchar
 matviewgraph Varchar
+primary key schemaname
 
 query TT
 show columns from pg_catalog.pg_matviews;
@@ -121,4 +137,5 @@ matviewname Varchar
 matviewowner Int32
 definition Varchar
 matviewid Int32
+matviewtimezone Varchar
 matviewgraph Varchar

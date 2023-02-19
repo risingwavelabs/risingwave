@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -221,6 +221,10 @@ impl HummockSnapshotManager {
             committed_epoch: std::cmp::max(prev.committed_epoch, snapshot.committed_epoch),
             current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
         });
+    }
+
+    pub fn latest_snapshot_current_epoch(&self) -> Epoch {
+        self.latest_snapshot.load().current_epoch.into()
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use parse_display::Display;
 use risingwave_common::types::DataTypeName;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CastSig {
     pub from_type: DataTypeName,
     pub to_type: DataTypeName,
@@ -90,6 +90,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Timestamptz,
         T::Time,
         T::Interval,
+        T::Jsonb,
     ] {
         m.insert((t, T::Varchar), CastContext::Assign);
         m.insert((T::Varchar, t), CastContext::Explicit);

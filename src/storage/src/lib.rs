@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@
 #![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
+#![feature(local_key_cell_methods)]
 
 pub mod hummock;
 pub mod memory;
@@ -52,10 +53,12 @@ pub mod storage_value;
 #[macro_use]
 pub mod store;
 pub mod error;
+pub mod opts;
 pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
+pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,11 +60,5 @@ impl Notifier {
         if let Some(tx) = self.finished {
             tx.send(()).ok();
         }
-    }
-
-    pub fn notify_all(mut self) {
-        self.notify_to_send();
-        self.notify_collected();
-        self.notify_finished();
     }
 }

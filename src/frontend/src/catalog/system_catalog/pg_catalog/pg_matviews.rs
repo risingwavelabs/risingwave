@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,5 +29,7 @@ pub const PG_MATVIEWS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "definition"),
     // Below are some columns that PostgreSQL doesn't have.
     (DataType::Int32, "matviewid"),
+    (DataType::Varchar, "matviewtimezone"), /* The timezone used to interpret ambiguous
+                                             * dates/timestamps as tstz */
     (DataType::Varchar, "matviewgraph"), // materialized view graph is json encoded fragment infos.
 ];

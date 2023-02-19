@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { DataType } from "./data";
 import { ExprNode } from "./expr";
 import {
   ColumnCatalog,
@@ -11,13 +12,67 @@ import {
 
 export const protobufPackage = "catalog";
 
+export const SinkType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  APPEND_ONLY: "APPEND_ONLY",
+  FORCE_APPEND_ONLY: "FORCE_APPEND_ONLY",
+  UPSERT: "UPSERT",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SinkType = typeof SinkType[keyof typeof SinkType];
+
+export function sinkTypeFromJSON(object: any): SinkType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return SinkType.UNSPECIFIED;
+    case 1:
+    case "APPEND_ONLY":
+      return SinkType.APPEND_ONLY;
+    case 2:
+    case "FORCE_APPEND_ONLY":
+      return SinkType.FORCE_APPEND_ONLY;
+    case 3:
+    case "UPSERT":
+      return SinkType.UPSERT;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SinkType.UNRECOGNIZED;
+  }
+}
+
+export function sinkTypeToJSON(object: SinkType): string {
+  switch (object) {
+    case SinkType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case SinkType.APPEND_ONLY:
+      return "APPEND_ONLY";
+    case SinkType.FORCE_APPEND_ONLY:
+      return "FORCE_APPEND_ONLY";
+    case SinkType.UPSERT:
+      return "UPSERT";
+    case SinkType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /**
  * The rust prost library always treats uint64 as required and message as
- * optional. In order to allow `row_id_index` as optional field in
- * `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
+ * optional. In order to allow `row_id_index` as an optional field, we wrap
+ * uint64 inside this message.
  */
 export interface ColumnIndex {
   index: number;
+}
+
+export interface WatermarkDesc {
+  /** The column idx the watermark is on */
+  watermarkIdx: number;
+  /** The expression to calculate the watermark value. */
+  expr: ExprNode | undefined;
 }
 
 export interface StreamSourceInfo {
@@ -51,7 +106,14 @@ export interface Source {
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
   owner: number;
-  info: StreamSourceInfo | undefined;
+  info:
+    | StreamSourceInfo
+    | undefined;
+  /**
+   * Define watermarks on the source. The `repeated` is just for forward
+   * compatibility, currently, only one watermark on the source
+   */
+  watermarkDescs: WatermarkDesc[];
 }
 
 export interface Source_PropertiesEntry {
@@ -70,7 +132,7 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendOnly: boolean;
+  sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
@@ -95,6 +157,18 @@ export interface Index {
    */
   indexItem: ExprNode[];
   originalColumns: number[];
+}
+
+export interface Function {
+  id: number;
+  schemaId: number;
+  databaseId: number;
+  name: string;
+  argTypes: DataType[];
+  returnType: DataType | undefined;
+  language: string;
+  path: string;
+  owner: number;
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -138,6 +212,12 @@ export interface Table {
   definition: string;
   handlePkConflict: boolean;
   readPrefixLenHint: number;
+  watermarkIndices: number[];
+  /**
+   * Per-table catalog version, used by schema change. `None` for internal tables and tests.
+   * Not to be confused with the global catalog version for notification service.
+   */
+  version: Table_TableVersion | undefined;
 }
 
 export const Table_TableType = {
@@ -191,6 +271,19 @@ export function table_TableTypeToJSON(object: Table_TableType): string {
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface Table_TableVersion {
+  /**
+   * The version number, which will be 0 by default and be increased by 1 for
+   * each schema change in the frontend.
+   */
+  version: number;
+  /**
+   * The ID of the next column to be added, which is used to make all columns
+   * in the table have unique IDs, even if some columns have been dropped.
+   */
+  nextColumnId: number;
 }
 
 export interface Table_PropertiesEntry {
@@ -247,6 +340,33 @@ export const ColumnIndex = {
   fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
     const message = createBaseColumnIndex();
     message.index = object.index ?? 0;
+    return message;
+  },
+};
+
+function createBaseWatermarkDesc(): WatermarkDesc {
+  return { watermarkIdx: 0, expr: undefined };
+}
+
+export const WatermarkDesc = {
+  fromJSON(object: any): WatermarkDesc {
+    return {
+      watermarkIdx: isSet(object.watermarkIdx) ? Number(object.watermarkIdx) : 0,
+      expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined,
+    };
+  },
+
+  toJSON(message: WatermarkDesc): unknown {
+    const obj: any = {};
+    message.watermarkIdx !== undefined && (obj.watermarkIdx = Math.round(message.watermarkIdx));
+    message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WatermarkDesc>, I>>(object: I): WatermarkDesc {
+    const message = createBaseWatermarkDesc();
+    message.watermarkIdx = object.watermarkIdx ?? 0;
+    message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
     return message;
   },
 };
@@ -309,6 +429,7 @@ function createBaseSource(): Source {
     properties: {},
     owner: 0,
     info: undefined,
+    watermarkDescs: [],
   };
 }
 
@@ -330,6 +451,9 @@ export const Source = {
         : {},
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
     };
   },
 
@@ -359,6 +483,11 @@ export const Source = {
     }
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
     return obj;
   },
 
@@ -386,6 +515,7 @@ export const Source = {
     message.info = (object.info !== undefined && object.info !== null)
       ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
     return message;
   },
 };
@@ -425,7 +555,7 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
-    appendOnly: false,
+    sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
     definition: "",
@@ -448,7 +578,7 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
-      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -491,7 +621,7 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
-    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -514,7 +644,7 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendOnly = object.appendOnly ?? false;
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -622,6 +752,71 @@ export const Index = {
   },
 };
 
+function createBaseFunction(): Function {
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    argTypes: [],
+    returnType: undefined,
+    language: "",
+    path: "",
+    owner: 0,
+  };
+}
+
+export const Function = {
+  fromJSON(object: any): Function {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
+      language: isSet(object.language) ? String(object.language) : "",
+      path: isSet(object.path) ? String(object.path) : "",
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+    };
+  },
+
+  toJSON(message: Function): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.name !== undefined && (obj.name = message.name);
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
+    message.language !== undefined && (obj.language = message.language);
+    message.path !== undefined && (obj.path = message.path);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function>, I>>(object: I): Function {
+    const message = createBaseFunction();
+    message.id = object.id ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.databaseId = object.databaseId ?? 0;
+    message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
+    message.language = object.language ?? "";
+    message.path = object.path ?? "";
+    message.owner = object.owner ?? 0;
+    return message;
+  },
+};
+
 function createBaseTable(): Table {
   return {
     id: 0,
@@ -645,6 +840,8 @@ function createBaseTable(): Table {
     definition: "",
     handlePkConflict: false,
     readPrefixLenHint: 0,
+    watermarkIndices: [],
+    version: undefined,
   };
 }
 
@@ -685,6 +882,10 @@ export const Table = {
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      watermarkIndices: Array.isArray(object?.watermarkIndices)
+        ? object.watermarkIndices.map((e: any) => Number(e))
+        : [],
+      version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
 
@@ -743,6 +944,13 @@ export const Table = {
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    if (message.watermarkIndices) {
+      obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
+    } else {
+      obj.watermarkIndices = [];
+    }
+    message.version !== undefined &&
+      (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
@@ -790,6 +998,37 @@ export const Table = {
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
+    message.version = (object.version !== undefined && object.version !== null)
+      ? Table_TableVersion.fromPartial(object.version)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseTable_TableVersion(): Table_TableVersion {
+  return { version: 0, nextColumnId: 0 };
+}
+
+export const Table_TableVersion = {
+  fromJSON(object: any): Table_TableVersion {
+    return {
+      version: isSet(object.version) ? Number(object.version) : 0,
+      nextColumnId: isSet(object.nextColumnId) ? Number(object.nextColumnId) : 0,
+    };
+  },
+
+  toJSON(message: Table_TableVersion): unknown {
+    const obj: any = {};
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    message.nextColumnId !== undefined && (obj.nextColumnId = Math.round(message.nextColumnId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Table_TableVersion>, I>>(object: I): Table_TableVersion {
+    const message = createBaseTable_TableVersion();
+    message.version = object.version ?? 0;
+    message.nextColumnId = object.nextColumnId ?? 0;
     return message;
   },
 };

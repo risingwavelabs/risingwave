@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-    TableFunction, WindowFunction,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
@@ -29,6 +29,7 @@ pub trait ExprMutator {
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
+            ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &mut FunctionCall) {
@@ -56,6 +57,12 @@ pub trait ExprMutator {
             .for_each(|expr| self.visit_expr(expr))
     }
     fn visit_window_function(&mut self, func_call: &mut WindowFunction) {
+        func_call
+            .args
+            .iter_mut()
+            .for_each(|expr| self.visit_expr(expr));
+    }
+    fn visit_user_defined_function(&mut self, func_call: &mut UserDefinedFunction) {
         func_call
             .args
             .iter_mut()

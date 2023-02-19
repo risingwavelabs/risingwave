@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,36 +23,35 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
+use super::TaskConfig;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
-use crate::hummock::compactor::{
-    CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
-};
+use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
     CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
-    SstableBuilderOptions,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
-    sstable_store: CompactorSstableStoreRef,
+    sstable_store: SstableStoreRef,
     key_range: KeyRange,
     split_index: usize,
 }
 
 impl CompactorRunner {
-    pub fn new(split_index: usize, context: &CompactorContext, task: CompactTask) -> Self {
-        let max_target_file_size = context.context.options.sstable_size_mb as usize * (1 << 20);
+    pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
+        let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
         let total_file_size = task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|table| table.file_size)
             .sum::<u64>();
-        let mut options: SstableBuilderOptions = context.context.options.as_ref().into();
+        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -78,14 +77,18 @@ impl CompactorRunner {
                     .collect_vec()
             })
             .collect();
+
         let compactor = Compactor::new(
-            context.context.clone(),
+            context.clone(),
             options,
-            key_range.clone(),
-            CachePolicy::NotFill,
-            task.gc_delete_keys,
-            task.watermark,
-            Some(stats_target_table_ids),
+            TaskConfig {
+                key_range: key_range.clone(),
+                cache_policy: CachePolicy::NotFill,
+                gc_delete_keys: task.gc_delete_keys,
+                watermark: task.watermark,
+                stats_target_table_ids: Some(stats_target_table_ids),
+                task_type: task.task_type(),
+            },
         );
 
         Self {
@@ -105,7 +108,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let (ssts, table_stats_map) = self
+        let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -115,12 +118,12 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        Ok((self.split_index, ssts, table_stats_map))
+        Ok((self.split_index, ssts, compaction_stat))
     }
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         compact_task: &CompactTask,
-        sstable_store: &CompactorSstableStoreRef,
+        sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<RangeTombstonesCollector>> {
         let mut builder = DeleteRangeAggregatorBuilder::default();
@@ -209,7 +212,7 @@ mod tests {
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::{CompactorSstableStore, DeleteRangeTombstone, MemoryLimiter};
+    use crate::hummock::DeleteRangeTombstone;
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
@@ -228,10 +231,6 @@ mod tests {
         )
         .await
         .get_sstable_info();
-        let compact_store = Arc::new(CompactorSstableStore::new(
-            sstable_store,
-            MemoryLimiter::unlimit(),
-        ));
         let compact_task = CompactTask {
             input_ssts: vec![InputLevel {
                 level_idx: 0,
@@ -246,13 +245,15 @@ mod tests {
         ));
         let collector = CompactorRunner::build_delete_range_iter(
             &compact_task,
-            &compact_store,
+            &sstable_store,
             &mut state_clean_up_filter,
         )
         .await
         .unwrap();
-        let ret = collector
-            .get_tombstone_between(&UserKey::default().as_ref(), &UserKey::default().as_ref());
+        let ret = collector.get_tombstone_between(
+            &UserKey::<Bytes>::default().as_ref(),
+            &UserKey::<Bytes>::default().as_ref(),
+        );
         assert_eq!(ret.len(), 1);
         assert_eq!(ret[0], range_tombstones[1]);
     }

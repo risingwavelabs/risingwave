@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,16 @@
 
 use std::borrow::Cow;
 
-pub use anyhow::anyhow;
-use regex;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
+/// A specialized Result type for expression operations.
+pub type Result<T> = std::result::Result<T, ExprError>;
+
+/// The error type for expression operations.
 #[derive(Error, Debug)]
 pub enum ExprError {
     // Ideally "Unsupported" errors are caught by frontend. But when the match arms between
@@ -55,6 +57,9 @@ pub enum ExprError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("UDF error: {0}")]
+    Udf(#[from] risingwave_udf::Error),
 }
 
 impl From<ExprError> for RwError {

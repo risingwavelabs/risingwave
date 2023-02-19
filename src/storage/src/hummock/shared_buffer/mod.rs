@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::filter_single_sst;
 use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, SstableStore};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 pub static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> =
     LazyLock::new(|| AtomicU64::new(0));
@@ -119,7 +119,6 @@ pub type SharedBufferIteratorType<
 pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     uncommitted_data: &OrderSortedUncommittedData,
     sstable_store: Arc<SstableStore>,
-    _stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
     read_options: Arc<SstableIteratorReadOptions>,
 ) -> HummockResult<SharedBufferIteratorType<T::Direction, T::SstableIteratorType>> {

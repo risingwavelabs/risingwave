@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,15 +39,28 @@ import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { StreamNode } from "../proto/gen/stream_plan"
-import { getFragments, getRelations } from "./api/streaming"
+import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import { getFragments, getStreamingJobs } from "./api/streaming"
+
+interface DispatcherNode {
+  [actorId: number]: Dispatcher[]
+}
+
+/** Associated data of each plan node in the fragment graph, including the dispatchers. */
+export interface PlanNodeDatum {
+  name: string
+  children?: PlanNodeDatum[]
+  operatorId: string | number
+  node: StreamNode | DispatcherNode
+  extraInfo?: string
+}
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
-): d3.HierarchyNode<any> {
-  const actor = fragment.actors[0]
+): d3.HierarchyNode<PlanNodeDatum> {
+  const firstActor = fragment.actors[0]
 
-  const hierarchyActorNode = (node: StreamNode): any => {
+  const hierarchyActorNode = (node: StreamNode): PlanNodeDatum => {
     return {
       name: node.nodeBody?.$case.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
@@ -56,13 +69,24 @@ function buildPlanNodeDependency(
     }
   }
 
+  let dispatcherName = "noDispatcher"
+  if (firstActor.dispatcher.length > 1) {
+    dispatcherName = "multipleDispatchers"
+  } else if (firstActor.dispatcher.length === 1) {
+    dispatcherName = `${toLower(firstActor.dispatcher[0].type)}Dispatcher`
+  }
+
+  const dispatcherNode = fragment.actors.reduce((obj, actor) => {
+    obj[actor.actorId] = actor.dispatcher
+    return obj
+  }, {} as DispatcherNode)
+
   return d3.hierarchy({
-    name:
-      actor.dispatcher.map((d) => `${toLower(d.type)}Dispatcher`).join(",") ||
-      "noDispatcher",
+    name: dispatcherName,
     extraInfo: `Actor ${fragment.actors.map((a) => a.actorId).join(", ")}`,
-    children: actor.nodes ? [hierarchyActorNode(actor.nodes)] : [],
+    children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
     operatorId: "dispatcher",
+    node: dispatcherNode,
   })
 }
 
@@ -128,7 +152,7 @@ function useFetch<T>(fetchFn: () => Promise<T>) {
 }
 
 export default function Streaming() {
-  const { response: relationList } = useFetch(getRelations)
+  const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
@@ -170,7 +194,10 @@ export default function Streaming() {
   const planNodeDependenciesCallback = useCallback(() => {
     const fragments_ = fragments?.fragments
     if (fragments_) {
-      const planNodeDependencies = new Map<string, d3.HierarchyNode<any>>()
+      const planNodeDependencies = new Map<
+        string,
+        d3.HierarchyNode<PlanNodeDatum>
+      >()
       for (const fragmentId in fragments_) {
         const fragment = fragments_[fragmentId]
         const dep = buildPlanNodeDependency(fragment)
@@ -280,26 +307,22 @@ export default function Streaming() {
             ></Input>
             <datalist id="relationList">
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.name} key={r.id}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.name} key={r.id}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </datalist>
             <Select
               value={router.query.id}
               onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.id} key={r.name}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.id} key={r.name}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </Select>
           </FormControl>
           <FormControl>

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -214,9 +214,11 @@ impl Cluster {
         let fragments = self
             .ctl
             .spawn(async move {
-                let r: Arc<_> = risingwave_ctl::cmd_impl::meta::get_cluster_info()
-                    .await?
-                    .into();
+                let r: Arc<_> = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?
+                .into();
 
                 let mut results = vec![];
                 for tf in &r.table_fragments {

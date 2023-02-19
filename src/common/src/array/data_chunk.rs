@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
@@ -30,6 +31,7 @@ use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::serialize_datum_into;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
@@ -69,7 +71,7 @@ impl DataChunk {
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -240,7 +242,7 @@ impl DataChunk {
             let end_row_idx = start_row_idx + actual_acquire - 1;
             array_builders
                 .iter_mut()
-                .zip_eq(chunks[chunk_idx].columns())
+                .zip_eq_fast(chunks[chunk_idx].columns())
                 .for_each(|(builder, column)| {
                     let mut array_builder = column
                         .array_ref()
@@ -343,11 +345,7 @@ impl DataChunk {
     /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
     /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        if column_mapping
-            .iter()
-            .copied()
-            .eq((0..self.columns().len()).into_iter())
-        {
+        if column_mapping.iter().copied().eq(0..self.columns().len()) {
             return self;
         }
         let mut new_columns = Vec::with_capacity(column_mapping.len());
@@ -368,7 +366,7 @@ impl DataChunk {
             .map(|col| col.array_ref().create_builder(indexes.len()))
             .collect();
         for &i in indexes {
-            for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
+            for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
                 builder.append_datum(col.array_ref().value_at(i));
             }
         }
@@ -383,11 +381,11 @@ impl DataChunk {
     ///
     /// the returned vector's size is self.capacity() and for the invisible row will give a empty
     /// vec<u8>
-    pub fn serialize(&self) -> Vec<Vec<u8>> {
+    pub fn serialize(&self) -> Vec<Bytes> {
         match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers = vec![vec![]; rows_num];
+                let mut buffers = vec![BytesMut::new(); rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), rows_num);
@@ -400,10 +398,10 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers
+                buffers.into_iter().map(BytesMut::freeze).collect_vec()
             }
             Vis::Compact(rows_num) => {
-                let mut buffers = vec![vec![]; *rows_num];
+                let mut buffers = vec![BytesMut::new(); *rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), *rows_num);
@@ -414,7 +412,7 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers
+                buffers.into_iter().map(BytesMut::freeze).collect_vec()
             }
         }
     }
@@ -484,6 +482,7 @@ impl DataChunkTestExt for DataChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {
@@ -550,7 +549,7 @@ impl DataChunkTestExt for DataChunk {
                             assert!(s.starts_with('{') && s.ends_with('}'));
                             let fields = s[1..s.len() - 1]
                                 .split(',')
-                                .zip_eq(&builder.children_array)
+                                .zip_eq_debug(&builder.children_array)
                                 .map(|(s, builder)| parse_datum(s, builder))
                                 .collect_vec();
                             ScalarImpl::Struct(StructValue::new(fields))

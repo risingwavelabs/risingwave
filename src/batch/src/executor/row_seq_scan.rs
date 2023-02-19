@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -241,7 +241,13 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let ordered = seq_scan_node.ordered;
 
         let epoch = source.epoch.clone();
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = if let Some(chunk_size_) = &seq_scan_node.chunk_size {
+            chunk_size_
+                .get_chunk_size()
+                .min(source.context.get_config().developer.batch_chunk_size as u32)
+        } else {
+            source.context.get_config().developer.batch_chunk_size as u32
+        };
         let metrics = source.context().task_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
@@ -262,7 +268,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 scan_ranges,
                 ordered,
                 epoch,
-                chunk_size,
+                chunk_size as usize,
                 source.plan_node().get_identity().clone(),
                 metrics,
             )))
@@ -394,6 +400,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             next_col_bounds,
         } = scan_range;
 
+        let (start_bound, end_bound) =
+            match table.pk_serializer().get_order_types()[pk_prefix.len()] {
+                OrderType::Ascending => (next_col_bounds.0, next_col_bounds.1),
+                OrderType::Descending => (next_col_bounds.1, next_col_bounds.0),
+            };
+
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
@@ -401,8 +413,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 epoch.into(),
                 &pk_prefix,
                 (
-                    next_col_bounds.0.map(|x| OwnedRow::new(vec![x])),
-                    next_col_bounds.1.map(|x| OwnedRow::new(vec![x])),
+                    start_bound.map(|x| OwnedRow::new(vec![x])),
+                    end_bound.map(|x| OwnedRow::new(vec![x])),
                 ),
                 ordered,
             )

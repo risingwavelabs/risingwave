@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -120,6 +120,16 @@ impl InputRef {
             input: Some(self.to_proto()),
             r#type: Some(self.data_type.to_protobuf()),
         }
+    }
+
+    pub(super) fn from_expr_proto(
+        input_ref: &risingwave_pb::expr::InputRefExpr,
+        ret_type: DataType,
+    ) -> risingwave_common::error::Result<Self> {
+        Ok(Self {
+            index: input_ref.get_column_idx() as usize,
+            data_type: ret_type,
+        })
     }
 }
 

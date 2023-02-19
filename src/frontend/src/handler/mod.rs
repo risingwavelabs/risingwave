@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,19 +21,20 @@ use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{
-    CreateSinkStatement, CreateSourceStatement, DropStatement, ObjectType, Statement,
-};
+use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_system;
+mod alter_table;
 pub mod alter_user;
 mod create_database;
+pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
 pub mod create_schema;
@@ -42,9 +43,10 @@ pub mod create_source;
 pub mod create_table;
 pub mod create_table_as;
 pub mod create_user;
-mod create_view;
+pub mod create_view;
 mod describe;
 mod drop_database;
+pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
@@ -150,20 +152,39 @@ pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
+    session.clear_cancel_query_flag();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     match stmt {
         Statement::Explain {
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze),
-        Statement::CreateSource {
-            is_materialized,
-            stmt,
-        } => create_source::handle_create_source(handler_args, is_materialized, stmt).await,
+        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
+        Statement::CreateSource { stmt } => {
+            create_source::handle_create_source(handler_args, stmt).await
+        }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateFunction {
+            or_replace,
+            temporary,
+            name,
+            args,
+            return_type,
+            params,
+        } => {
+            create_function::handle_create_function(
+                handler_args,
+                or_replace,
+                temporary,
+                name,
+                args,
+                return_type,
+                params,
+            )
+            .await
+        }
         Statement::CreateTable {
             name,
             columns,
@@ -175,6 +196,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
+            source_schema,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -206,6 +228,7 @@ pub async fn handle(
                 columns,
                 constraints,
                 if_not_exists,
+                source_schema,
             )
             .await
         }
@@ -276,15 +299,16 @@ pub async fn handle(
             ObjectType::View => {
                 drop_view::handle_drop_view(handler_args, object_name, if_exists).await
             }
-            ObjectType::MaterializedSource => Err((ErrorCode::InvalidInputSyntax(
-                "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
-            ))
-            .into()),
         },
+        Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(handler_args, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
             name,
@@ -293,10 +317,18 @@ pub async fn handle(
 
             with_options: _, // It is put in OptimizerContext
             or_replace,      // not supported
+            emit_mode,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
                     "CREATE OR REPLACE VIEW".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if emit_mode == Some(EmitMode::OnWindowClose) {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE MATERIALIZED VIEW EMIT ON WINDOW CLOSE".to_string(),
                     None.into(),
                 )
                 .into());
@@ -313,7 +345,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
             table_name,
@@ -339,6 +371,13 @@ pub async fn handle(
                 distributed_by,
             )
             .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::AddColumn { column_def },
+        } => alter_table::handle_add_column(handler_args, name, column_def).await,
+        Statement::AlterSystem { param, value } => {
+            alter_system::handle_alter_system(handler_args, param, value).await
         }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.

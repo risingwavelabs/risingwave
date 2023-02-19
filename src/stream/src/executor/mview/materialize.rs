@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -25,10 +26,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::table::streaming_table::mem_table::RowOp;
+use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ExecutorCache};
@@ -111,7 +113,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         let schema = input.schema().clone();
         let columns = column_ids
             .into_iter()
-            .zip_eq(schema.fields.iter())
+            .zip_eq_fast(schema.fields.iter())
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
@@ -158,9 +160,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         for msg in input {
             let msg = msg?;
             yield match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
+                Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     match self.handle_pk_conflict {
                         true => {
@@ -219,25 +219,25 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
 /// Construct output `StreamChunk` from given buffer.
 fn generate_output(
-    changes: Vec<(Vec<u8>, RowOp)>,
+    changes: Vec<(Vec<u8>, KeyOp)>,
     data_types: Vec<DataType>,
 ) -> StreamExecutorResult<Option<StreamChunk>> {
     // construct output chunk
     // TODO(st1page): when materialize partial columns(), we should construct some columns in the pk
     let mut new_ops: Vec<Op> = vec![];
-    let mut new_rows: Vec<Vec<u8>> = vec![];
+    let mut new_rows: Vec<Bytes> = vec![];
     let row_deserializer = RowDeserializer::new(data_types.clone());
     for (_, row_op) in changes {
         match row_op {
-            RowOp::Insert(value) => {
+            KeyOp::Insert(value) => {
                 new_ops.push(Op::Insert);
                 new_rows.push(value);
             }
-            RowOp::Delete(old_value) => {
+            KeyOp::Delete(old_value) => {
                 new_ops.push(Op::Delete);
                 new_rows.push(old_value);
             }
-            RowOp::Update((old_value, new_value)) => {
+            KeyOp::Update((old_value, new_value)) => {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
                 new_rows.push(old_value);
@@ -261,9 +261,9 @@ fn generate_output(
     }
 }
 
-/// `MaterializeBuffer` is a buffer to handle chunk into `RowOp`.
+/// `MaterializeBuffer` is a buffer to handle chunk into `KeyOp`.
 pub struct MaterializeBuffer {
-    buffer: HashMap<Vec<u8>, RowOp>,
+    buffer: HashMap<Vec<u8>, KeyOp>,
 }
 
 impl MaterializeBuffer {
@@ -293,7 +293,7 @@ impl MaterializeBuffer {
         let key_chunk = data_chunk.reorder_columns(pk_indices);
         key_chunk
             .rows_with_holes()
-            .zip_eq(pks.iter_mut())
+            .zip_eq_fast(pks.iter_mut())
             .for_each(|(r, vnode_and_pk)| {
                 if let Some(r) = r {
                     pk_serde.serialize(r, vnode_and_pk);
@@ -305,7 +305,7 @@ impl MaterializeBuffer {
         let mut buffer = MaterializeBuffer::new();
         match vis {
             Vis::Bitmap(vis) => {
-                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq(vis.iter()) {
+                for ((op, key, value), vis) in izip!(ops, pks, values).zip_eq_debug(vis.iter()) {
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => buffer.insert(key, value),
@@ -326,36 +326,36 @@ impl MaterializeBuffer {
         buffer
     }
 
-    fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
+    fn insert(&mut self, pk: Vec<u8>, value: Bytes) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(RowOp::Insert(value));
+                e.insert(KeyOp::Insert(value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Delete(ref mut old_value) => {
+                KeyOp::Delete(ref mut old_value) => {
                     let old_val = std::mem::take(old_value);
-                    e.insert(RowOp::Update((old_val, value)));
+                    e.insert(KeyOp::Update((old_val, value)));
                 }
                 _ => {
-                    e.insert(RowOp::Insert(value));
+                    e.insert(KeyOp::Insert(value));
                 }
             },
         }
     }
 
-    fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) {
+    fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(RowOp::Delete(old_value));
+                e.insert(KeyOp::Delete(old_value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Insert(_) => {
+                KeyOp::Insert(_) => {
                     e.remove();
                 }
                 _ => {
-                    e.insert(RowOp::Delete(old_value));
+                    e.insert(KeyOp::Delete(old_value));
                 }
             },
         }
@@ -369,7 +369,7 @@ impl MaterializeBuffer {
         self.buffer.keys()
     }
 
-    pub fn into_parts(self) -> HashMap<Vec<u8>, RowOp> {
+    pub fn into_parts(self) -> HashMap<Vec<u8>, KeyOp> {
         self.buffer
     }
 }
@@ -419,7 +419,7 @@ impl MaterializeCache {
         &mut self,
         changes: MaterializeBuffer,
         table: &StateTable<S>,
-    ) -> StreamExecutorResult<Vec<(Vec<u8>, RowOp)>> {
+    ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
         self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
             .await?;
@@ -428,32 +428,32 @@ impl MaterializeCache {
         // handle pk conflict
         for (key, row_op) in changes.into_parts() {
             match row_op {
-                RowOp::Insert(new_row) => {
+                KeyOp::Insert(new_row) => {
                     match self.force_get(&key) {
                         Some(old_row) => fixed_changes.push((
                             key.clone(),
-                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
                         )),
-                        None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
+                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
                     };
                     self.put(key, Some(CompactedRow { row: new_row }));
                 }
-                RowOp::Delete(_) => {
+                KeyOp::Delete(_) => {
                     match self.force_get(&key) {
                         Some(old_row) => {
-                            fixed_changes.push((key.clone(), RowOp::Delete(old_row.row.clone())));
+                            fixed_changes.push((key.clone(), KeyOp::Delete(old_row.row.clone())));
                         }
                         None => (), // delete a nonexistent value
                     };
                     self.put(key, None);
                 }
-                RowOp::Update((_, new_row)) => {
+                KeyOp::Update((_, new_row)) => {
                     match self.force_get(&key) {
                         Some(old_row) => fixed_changes.push((
                             key.clone(),
-                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
                         )),
-                        None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
+                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
                     }
                     self.put(key, Some(CompactedRow { row: new_row }));
                 }
@@ -573,6 +573,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -689,6 +690,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -821,6 +823,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use risingwave_meta::hummock::compaction::ManualCompactionOption;
+use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use risingwave_meta::hummock::test_utils::{
     add_ssts, setup_compute_env, setup_compute_env_with_config,
 };
@@ -43,7 +43,7 @@ use serial_test::serial;
 use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
-use crate::get_test_notification_client;
+use crate::get_notification_client_for_test;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -159,7 +159,10 @@ async fn test_syncpoints_test_local_notification_receiver() {
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
     let mut task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -241,20 +244,16 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         &hummock_manager_ref,
         TableId::from(existing_table_id),
     )
     .await;
-    let compact_ctx = Arc::new(
-        prepare_compactor_and_filter(
-            &storage,
-            &hummock_meta_client,
-            hummock_manager_ref.clone(),
-            existing_table_id,
-        )
-        .await,
-    );
+    let compact_ctx = Arc::new(prepare_compactor_and_filter(
+        &storage,
+        &hummock_meta_client,
+        existing_table_id,
+    ));
 
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
@@ -330,7 +329,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     storage.wait_version(version).await;
     let read_options = ReadOptions {
         ignore_range_tombstone: false,
-        check_bloom_filter: false,
+
         prefix_hint: None,
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, ExprImpl, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
@@ -44,7 +44,12 @@ pub struct OptimizerContext {
     next_correlated_id: RefCell<u32>,
     /// Store options or properties from the `with` clause
     with_options: WithOptions,
+    /// Store the Session Timezone and whether it was used.
+    session_timezone: RefCell<SessionTimezone>,
+    /// Store expr display id.
+    next_expr_display_id: RefCell<usize>,
 }
+
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
@@ -56,6 +61,9 @@ impl OptimizerContext {
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
+        let session_timezone = RefCell::new(SessionTimezone::new(
+            handler_args.session.config().get_timezone().to_owned(),
+        ));
         Self {
             session_ctx: handler_args.session,
             next_plan_node_id: RefCell::new(0),
@@ -66,6 +74,8 @@ impl OptimizerContext {
             logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options: handler_args.with_options,
+            session_timezone,
+            next_expr_display_id: RefCell::new(0),
         }
     }
 
@@ -83,6 +93,8 @@ impl OptimizerContext {
             logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
+            session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
+            next_expr_display_id: RefCell::new(0),
         }
         .into()
     }
@@ -90,6 +102,11 @@ impl OptimizerContext {
     pub fn next_plan_node_id(&self) -> PlanNodeId {
         *self.next_plan_node_id.borrow_mut() += 1;
         PlanNodeId(*self.next_plan_node_id.borrow())
+    }
+
+    pub fn next_expr_display_id(&self) -> usize {
+        *self.next_expr_display_id.borrow_mut() += 1;
+        *self.next_expr_display_id.borrow()
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {
@@ -145,6 +162,22 @@ impl OptimizerContext {
     /// Return the normalized SQL.
     pub fn normalized_sql(&self) -> &str {
         &self.normalized_sql
+    }
+
+    pub fn expr_with_session_timezone(&self, expr: ExprImpl) -> ExprImpl {
+        let mut session_timezone = self.session_timezone.borrow_mut();
+        session_timezone.rewrite_expr(expr)
+    }
+
+    /// Appends any information that the optimizer needs to alert the user about to the PG NOTICE
+    pub fn append_notice(&self, notice: &mut String) {
+        if let Some(warning) = self.session_timezone.borrow().warning() {
+            notice.push_str(&warning);
+        }
+    }
+
+    pub fn get_session_timezone(&self) -> String {
+        self.session_timezone.borrow().timezone()
     }
 }
 

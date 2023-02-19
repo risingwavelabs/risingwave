@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,16 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(let_chains)]
 
-use task_stats_alloc::TaskLocalAlloc;
-use tikv_jemallocator::Jemalloc;
-
-#[global_allocator]
-static GLOBAL: TaskLocalAlloc<Jemalloc> = TaskLocalAlloc(Jemalloc);
-
 use std::collections::HashMap;
 use std::env;
 
 use anyhow::{bail, Result};
 use clap::StructOpt;
 use risingwave_cmd_all::playground;
+use risingwave_common::enable_task_local_jemalloc_on_linux;
+use tracing::Level;
+
+enable_task_local_jemalloc_on_linux!();
 
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
@@ -43,7 +41,9 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false));
+                risingwave_rt::init_risingwave_logger(
+                    risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
+                );
 
                 risingwave_rt::main_okk(risingwave_compute::start(opts));
 
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_meta::start(opts));
 
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_frontend::FrontendOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_frontend::start(opts));
 
@@ -88,7 +88,7 @@ fn main() -> Result<()> {
         );
     }
 
-    // frontend node configuration
+    // compactor node configuration
     for fn_name in ["compactor", "compactor-node", "compactor_node"] {
         fns.insert(
             fn_name,
@@ -97,7 +97,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_compactor::CompactorOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_compactor::start(opts));
 
@@ -114,7 +114,7 @@ fn main() -> Result<()> {
                 eprintln!("launching risectl");
 
                 let opts = risingwave_ctl::CliOpts::parse_from(args);
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_ctl::start(opts))
             }),
@@ -126,11 +126,10 @@ fn main() -> Result<()> {
         fns.insert(
             fn_name,
             Box::new(move |_: Vec<String>| {
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-
-                // Enable tokio console for `./risedev p` by replacing the above statement to:
-                // risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false,
-                // true));
+                let settings = risingwave_rt::LoggerSettings::new()
+                    .enable_tokio_console(false)
+                    .with_target("risingwave_storage", Level::INFO);
+                risingwave_rt::init_risingwave_logger(settings);
 
                 risingwave_rt::main_okk(playground())
             }),

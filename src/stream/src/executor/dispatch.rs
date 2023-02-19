@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use smallvec::{smallvec, SmallVec};
@@ -164,13 +164,8 @@ impl DispatchExecutorInner {
         // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
         // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
         if let DispatcherImpl::Hash(dispatcher) = dispatcher {
-            dispatcher.hash_mapping = {
-                let compressed_mapping = update.get_hash_mapping()?;
-                decompress_data(
-                    &compressed_mapping.original_indices,
-                    &compressed_mapping.data,
-                )
-            }
+            dispatcher.hash_mapping =
+                ActorMapping::from_protobuf(update.get_hash_mapping()?).to_expanded();
         }
 
         Ok(())
@@ -320,13 +315,8 @@ impl DispatcherImpl {
                     .map(|i| *i as usize)
                     .collect();
 
-                let hash_mapping = {
-                    let compressed_mapping = dispatcher.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                };
+                let hash_mapping =
+                    ActorMapping::from_protobuf(dispatcher.get_hash_mapping()?).to_expanded();
 
                 DispatcherImpl::Hash(HashDataDispatcher::new(
                     outputs,
@@ -521,7 +511,7 @@ pub struct HashDataDispatcher {
     keys: Vec<usize>,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
-    hash_mapping: Vec<ActorId>,
+    hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
 }
 
@@ -539,7 +529,7 @@ impl HashDataDispatcher {
     pub fn new(
         outputs: Vec<BoxedOutput>,
         keys: Vec<usize>,
-        hash_mapping: Vec<ActorId>,
+        hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
@@ -607,7 +597,7 @@ impl Dispatcher for HashDataDispatcher {
 
             let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
                 // Build visibility map for every output chunk.
-                for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
                     vis_map.append(
                         visible && self.hash_mapping[vnode.to_index()] == output.actor_id(),
                     );
@@ -638,16 +628,20 @@ impl Dispatcher for HashDataDispatcher {
 
             match visibility {
                 None => {
-                    vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
-                        build_op_vis(vnode, op, true);
-                    });
+                    vnodes
+                        .iter()
+                        .copied()
+                        .zip_eq_fast(ops)
+                        .for_each(|(vnode, op)| {
+                            build_op_vis(vnode, op, true);
+                        });
                 }
                 Some(visibility) => {
                     vnodes
                         .iter()
                         .copied()
-                        .zip_eq(ops)
-                        .zip_eq(visibility.iter())
+                        .zip_eq_fast(ops)
+                        .zip_eq_fast(visibility.iter())
                         .for_each(|((vnode, op), visible)| {
                             build_op_vis(vnode, op, visible);
                         });
@@ -657,7 +651,7 @@ impl Dispatcher for HashDataDispatcher {
             let ops = new_ops;
 
             // individually output StreamChunk integrated with vis_map
-            for (vis_map, output) in vis_maps.into_iter().zip_eq(self.outputs.iter_mut()) {
+            for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
@@ -865,6 +859,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
@@ -1190,12 +1185,12 @@ mod tests {
             }
             let output_idx =
                 hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
-            for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
+            for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }
             output_cols[output_idx]
                 .iter_mut()
-                .zip_eq(one_row.iter())
+                .zip_eq_fast(one_row.iter())
                 .for_each(|(each_column, val)| each_column.push(*val));
             output_ops[output_idx].push(op);
         }
@@ -1226,7 +1221,7 @@ mod tests {
                 real_chunk
                     .columns()
                     .iter()
-                    .zip_eq(output_cols[output_idx].iter())
+                    .zip_eq_fast(output_cols[output_idx].iter())
                     .for_each(|(real_col, expect_col)| {
                         let real_vals = real_chunk
                             .visibility()

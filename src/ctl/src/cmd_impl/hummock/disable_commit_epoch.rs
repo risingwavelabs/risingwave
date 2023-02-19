@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn disable_commit_epoch() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let version = meta_client.disable_commit_epoch().await?;
     println!(
         "Disabled.\

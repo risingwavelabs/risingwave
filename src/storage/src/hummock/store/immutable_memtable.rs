@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
 use std::future::Future;
@@ -22,7 +23,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::{
@@ -219,6 +220,33 @@ impl MergedImmutableMemtable {
             )),
             table_id,
         }
+    }
+
+    pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
+        self.inner
+            .binary_search_by(|m| {
+                let key = &m.0;
+                let too_left = match &table_key_range.0 {
+                    std::ops::Bound::Included(range_start) => range_start.as_ref() > key.as_ref(),
+                    std::ops::Bound::Excluded(range_start) => range_start.as_ref() >= key.as_ref(),
+                    std::ops::Bound::Unbounded => false,
+                };
+                if too_left {
+                    return Ordering::Less;
+                }
+
+                let too_right = match &table_key_range.1 {
+                    std::ops::Bound::Included(range_end) => range_end.as_ref() < key.as_ref(),
+                    std::ops::Bound::Excluded(range_end) => range_end.as_ref() <= key.as_ref(),
+                    std::ops::Bound::Unbounded => false,
+                };
+                if too_right {
+                    return Ordering::Greater;
+                }
+
+                Ordering::Equal
+            })
+            .is_ok()
     }
 
     pub fn get(

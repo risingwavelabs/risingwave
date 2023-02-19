@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,12 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl};
+use super::generic::GenericPlanRef;
+use super::{
+    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    ToDistributedBatch,
+};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -127,7 +131,12 @@ impl ToBatchProst for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.logical.join_type() as i32,
-            join_cond: Some(ExprImpl::from(self.logical.on().clone()).to_expr_proto()),
+            join_cond: Some(
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(ExprImpl::from(self.logical.on().clone()))
+                    .to_expr_proto(),
+            ),
             output_indices: self
                 .logical
                 .output_indices()
@@ -147,5 +156,22 @@ impl ToLocalBatch for BatchNestedLoopJoin {
             .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
+    }
+}
+
+impl ExprRewritable for BatchNestedLoopJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

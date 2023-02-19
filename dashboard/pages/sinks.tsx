@@ -1,5 +1,5 @@
 /*
- * Copyright 2023 Singularity Data
+ * Copyright 2023 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,13 @@
  *
  */
 
-import { Column, Relations } from "../components/Relations"
-import { Sink } from "../proto/gen/catalog"
+import {
+  connectorColumn,
+  Relations,
+  streamingJobColumns,
+} from "../components/Relations"
 import { getSinks } from "./api/streaming"
 
 export default function Sinks() {
-  const columns: Column<Sink>[] = [
-    {
-      name: "Connector",
-      width: 3,
-      content: (r) => r.properties.connector ?? "unknown",
-    },
-  ]
-
-  return Relations("Sinks", getSinks, columns)
+  return Relations("Sinks", getSinks, [connectorColumn, ...streamingJobColumns])
 }

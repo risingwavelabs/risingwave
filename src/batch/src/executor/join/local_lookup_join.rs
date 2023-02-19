@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,15 +20,15 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
-    HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
+    ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
-use risingwave_expr::expr::expr_unary::new_unary_expr;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, new_unary_expr, BoxedExpression, LiteralExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -50,7 +50,7 @@ use crate::task::{BatchTaskContext, TaskId};
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
     table_desc: StorageTableDesc,
-    vnode_mapping: VnodeMapping,
+    vnode_mapping: ExpandedParallelUnitMapping,
     outer_side_key_types: Vec<DataType>,
     inner_side_schema: Schema,
     inner_side_column_ids: Vec<i32>,
@@ -114,6 +114,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             scan_ranges,
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
+            chunk_size: None,
         });
 
         Ok(row_seq_scan_node)
@@ -173,12 +174,12 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         for ((datum, outer_type), inner_type) in key_datums
             .into_iter()
-            .zip_eq(
+            .zip_eq_fast(
                 self.outer_side_key_types
                     .iter()
                     .take(self.lookup_prefix_len),
             )
-            .zip_eq(
+            .zip_eq_fast(
                 self.inner_side_key_types
                     .iter()
                     .take(self.lookup_prefix_len),
@@ -193,7 +194,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(OwnedRow::empty())?
+                cast_expr.eval_row(&OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);
@@ -471,8 +472,9 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{
+        new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
+    };
     use risingwave_pb::expr::expr_node::Type;
 
     use super::LocalLookupJoinExecutorArgs;
@@ -553,7 +555,7 @@ mod tests {
             lookup_prefix_len: 1,
             chunk_builder: DataChunkBuilder::new(original_schema.data_types(), CHUNK_SIZE),
             schema: original_schema.clone(),
-            output_indices: (0..original_schema.len()).into_iter().collect(),
+            output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
         }

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,16 @@
 // limitations under the License.
 
 pub mod batch_table;
-pub mod streaming_table;
 
 use std::sync::{Arc, LazyLock};
 
-use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
@@ -82,7 +81,7 @@ pub trait TableIter: Send {
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match self.next_row().await? {
                 Some(row) => {
-                    for (datum, builder) in row.iter().zip_eq(builders.iter_mut()) {
+                    for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
                         builder.append_datum(datum);
                     }
                     row_count += 1;
@@ -134,7 +133,7 @@ pub fn compute_chunk_vnode(
         chunk
             .get_hash_values(indices, Crc32FastBuilder)
             .into_iter()
-            .zip_eq(chunk.vis().iter())
+            .zip_eq_fast(chunk.vis().iter())
             .map(|(h, vis)| {
                 let vnode = h.to_vnode();
                 // Ignore the invisible rows.

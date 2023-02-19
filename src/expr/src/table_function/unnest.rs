@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListArray, ListRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::*;
 
@@ -49,7 +50,7 @@ impl TableFunction for Unnest {
 
         match bitmap {
             Some(bitmap) => {
-                for (list, visible) in arr_list.iter().zip_eq(bitmap.iter()) {
+                for (list, visible) in arr_list.iter().zip_eq_fast(bitmap.iter()) {
                     let array = if !visible {
                         empty_array(self.return_type())
                     } else if let Some(list) = list {

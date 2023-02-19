@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
 
@@ -137,6 +137,25 @@ export interface CreateTableResponse {
   version: number;
 }
 
+export interface CreateFunctionRequest {
+  function: Function | undefined;
+}
+
+export interface CreateFunctionResponse {
+  status: Status | undefined;
+  functionId: number;
+  version: number;
+}
+
+export interface DropFunctionRequest {
+  functionId: number;
+}
+
+export interface DropFunctionResponse {
+  status: Status | undefined;
+  version: number;
+}
+
 export interface DropTableRequest {
   sourceId?: { $case: "id"; id: number };
   tableId: number;
@@ -175,6 +194,49 @@ export interface DropIndexRequest {
 export interface DropIndexResponse {
   status: Status | undefined;
   version: number;
+}
+
+export interface ReplaceTablePlanRequest {
+  /**
+   * The new table catalog, with the correct table ID and a new version.
+   * If the new version does not match the subsequent version in the meta service's
+   * catalog, this request will be rejected.
+   */
+  table:
+    | Table
+    | undefined;
+  /** The new materialization plan, where all schema are updated. */
+  fragmentGraph: StreamFragmentGraph | undefined;
+}
+
+export interface ReplaceTablePlanResponse {
+  status:
+    | Status
+    | undefined;
+  /** The new global catalog version. */
+  version: number;
+}
+
+export interface GetTableRequest {
+  databaseName: string;
+  tableName: string;
+}
+
+export interface GetTableResponse {
+  table: Table | undefined;
+}
+
+export interface GetDdlProgressRequest {
+}
+
+export interface DdlProgress {
+  id: number;
+  statement: string;
+  progress: string;
+}
+
+export interface GetDdlProgressResponse {
+  ddlProgress: DdlProgress[];
 }
 
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
@@ -904,6 +966,113 @@ export const CreateTableResponse = {
   },
 };
 
+function createBaseCreateFunctionRequest(): CreateFunctionRequest {
+  return { function: undefined };
+}
+
+export const CreateFunctionRequest = {
+  fromJSON(object: any): CreateFunctionRequest {
+    return { function: isSet(object.function) ? Function.fromJSON(object.function) : undefined };
+  },
+
+  toJSON(message: CreateFunctionRequest): unknown {
+    const obj: any = {};
+    message.function !== undefined && (obj.function = message.function ? Function.toJSON(message.function) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateFunctionRequest>, I>>(object: I): CreateFunctionRequest {
+    const message = createBaseCreateFunctionRequest();
+    message.function = (object.function !== undefined && object.function !== null)
+      ? Function.fromPartial(object.function)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreateFunctionResponse(): CreateFunctionResponse {
+  return { status: undefined, functionId: 0, version: 0 };
+}
+
+export const CreateFunctionResponse = {
+  fromJSON(object: any): CreateFunctionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      functionId: isSet(object.functionId) ? Number(object.functionId) : 0,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: CreateFunctionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.functionId !== undefined && (obj.functionId = Math.round(message.functionId));
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateFunctionResponse>, I>>(object: I): CreateFunctionResponse {
+    const message = createBaseCreateFunctionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.functionId = object.functionId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropFunctionRequest(): DropFunctionRequest {
+  return { functionId: 0 };
+}
+
+export const DropFunctionRequest = {
+  fromJSON(object: any): DropFunctionRequest {
+    return { functionId: isSet(object.functionId) ? Number(object.functionId) : 0 };
+  },
+
+  toJSON(message: DropFunctionRequest): unknown {
+    const obj: any = {};
+    message.functionId !== undefined && (obj.functionId = Math.round(message.functionId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropFunctionRequest>, I>>(object: I): DropFunctionRequest {
+    const message = createBaseDropFunctionRequest();
+    message.functionId = object.functionId ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropFunctionResponse(): DropFunctionResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const DropFunctionResponse = {
+  fromJSON(object: any): DropFunctionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: DropFunctionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropFunctionResponse>, I>>(object: I): DropFunctionResponse {
+    const message = createBaseDropFunctionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
 function createBaseDropTableRequest(): DropTableRequest {
   return { sourceId: undefined, tableId: 0 };
 }
@@ -1125,6 +1294,194 @@ export const DropIndexResponse = {
       ? Status.fromPartial(object.status)
       : undefined;
     message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseReplaceTablePlanRequest(): ReplaceTablePlanRequest {
+  return { table: undefined, fragmentGraph: undefined };
+}
+
+export const ReplaceTablePlanRequest = {
+  fromJSON(object: any): ReplaceTablePlanRequest {
+    return {
+      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+    };
+  },
+
+  toJSON(message: ReplaceTablePlanRequest): unknown {
+    const obj: any = {};
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    message.fragmentGraph !== undefined &&
+      (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanRequest>, I>>(object: I): ReplaceTablePlanRequest {
+    const message = createBaseReplaceTablePlanRequest();
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
+      ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseReplaceTablePlanResponse(): ReplaceTablePlanResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const ReplaceTablePlanResponse = {
+  fromJSON(object: any): ReplaceTablePlanResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: ReplaceTablePlanResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanResponse>, I>>(object: I): ReplaceTablePlanResponse {
+    const message = createBaseReplaceTablePlanResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetTableRequest(): GetTableRequest {
+  return { databaseName: "", tableName: "" };
+}
+
+export const GetTableRequest = {
+  fromJSON(object: any): GetTableRequest {
+    return {
+      databaseName: isSet(object.databaseName) ? String(object.databaseName) : "",
+      tableName: isSet(object.tableName) ? String(object.tableName) : "",
+    };
+  },
+
+  toJSON(message: GetTableRequest): unknown {
+    const obj: any = {};
+    message.databaseName !== undefined && (obj.databaseName = message.databaseName);
+    message.tableName !== undefined && (obj.tableName = message.tableName);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetTableRequest>, I>>(object: I): GetTableRequest {
+    const message = createBaseGetTableRequest();
+    message.databaseName = object.databaseName ?? "";
+    message.tableName = object.tableName ?? "";
+    return message;
+  },
+};
+
+function createBaseGetTableResponse(): GetTableResponse {
+  return { table: undefined };
+}
+
+export const GetTableResponse = {
+  fromJSON(object: any): GetTableResponse {
+    return { table: isSet(object.table) ? Table.fromJSON(object.table) : undefined };
+  },
+
+  toJSON(message: GetTableResponse): unknown {
+    const obj: any = {};
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetTableResponse>, I>>(object: I): GetTableResponse {
+    const message = createBaseGetTableResponse();
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    return message;
+  },
+};
+
+function createBaseGetDdlProgressRequest(): GetDdlProgressRequest {
+  return {};
+}
+
+export const GetDdlProgressRequest = {
+  fromJSON(_: any): GetDdlProgressRequest {
+    return {};
+  },
+
+  toJSON(_: GetDdlProgressRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetDdlProgressRequest>, I>>(_: I): GetDdlProgressRequest {
+    const message = createBaseGetDdlProgressRequest();
+    return message;
+  },
+};
+
+function createBaseDdlProgress(): DdlProgress {
+  return { id: 0, statement: "", progress: "" };
+}
+
+export const DdlProgress = {
+  fromJSON(object: any): DdlProgress {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      statement: isSet(object.statement) ? String(object.statement) : "",
+      progress: isSet(object.progress) ? String(object.progress) : "",
+    };
+  },
+
+  toJSON(message: DdlProgress): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.statement !== undefined && (obj.statement = message.statement);
+    message.progress !== undefined && (obj.progress = message.progress);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DdlProgress>, I>>(object: I): DdlProgress {
+    const message = createBaseDdlProgress();
+    message.id = object.id ?? 0;
+    message.statement = object.statement ?? "";
+    message.progress = object.progress ?? "";
+    return message;
+  },
+};
+
+function createBaseGetDdlProgressResponse(): GetDdlProgressResponse {
+  return { ddlProgress: [] };
+}
+
+export const GetDdlProgressResponse = {
+  fromJSON(object: any): GetDdlProgressResponse {
+    return {
+      ddlProgress: Array.isArray(object?.ddlProgress)
+        ? object.ddlProgress.map((e: any) => DdlProgress.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: GetDdlProgressResponse): unknown {
+    const obj: any = {};
+    if (message.ddlProgress) {
+      obj.ddlProgress = message.ddlProgress.map((e) => e ? DdlProgress.toJSON(e) : undefined);
+    } else {
+      obj.ddlProgress = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetDdlProgressResponse>, I>>(object: I): GetDdlProgressResponse {
+    const message = createBaseGetDdlProgressResponse();
+    message.ddlProgress = object.ddlProgress?.map((e) => DdlProgress.fromPartial(e)) || [];
     return message;
   },
 };

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops;
+use std::ops::{self, Deref};
 
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
-use crate::types::{DataType, Datum, DatumRef, ToDatumRef};
+use crate::types::{
+    DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    NaiveTimeWrapper, ScalarImpl, ToDatumRef,
+};
+use crate::util::iter_util::ZipEqDebug;
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
 /// An owned row type with a `Vec<Datum>`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct OwnedRow(Vec<Datum>); // made private to avoid abuse
+pub struct OwnedRow(Vec<Datum>);
 
 /// Do not implement `IndexMut` to make it immutable.
 impl ops::Index<usize> for OwnedRow {
@@ -33,24 +37,20 @@ impl ops::Index<usize> for OwnedRow {
     }
 }
 
-impl PartialOrd for OwnedRow {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.0.len() != other.0.len() {
-            return None;
-        }
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl Ord for OwnedRow {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap_or_else(|| {
-            panic!("cannot compare rows with different lengths:\n left: {self:?}\nright: {other:?}")
-        })
+impl AsRef<OwnedRow> for OwnedRow {
+    fn as_ref(&self) -> &OwnedRow {
+        self
     }
 }
 
 impl OwnedRow {
+    /// Returns an empty row.
+    ///
+    /// Note: use [`empty`](super::empty) if possible.
+    pub const fn empty() -> Self {
+        Self(vec![])
+    }
+
     pub const fn new(values: Vec<Datum>) -> Self {
         Self(values)
     }
@@ -60,12 +60,35 @@ impl OwnedRow {
         self.0
     }
 
-    /// Returns a reference to an empty row.
-    ///
-    /// Note: use [`empty`](super::empty) if possible.
-    pub fn empty<'a>() -> &'a Self {
-        static EMPTY_ROW: OwnedRow = OwnedRow(Vec::new());
-        &EMPTY_ROW
+    pub fn as_inner(&self) -> &[Datum] {
+        &self.0
+    }
+
+    /// Parse an [`OwnedRow`] from a pretty string, only used in tests.
+    pub fn from_pretty_with_tys(tys: &[DataType], s: impl AsRef<str>) -> Self {
+        let datums: Vec<_> = tys
+            .iter()
+            .zip_eq_debug(s.as_ref().split_ascii_whitespace())
+            .map(|(ty, x)| {
+                let scalar: ScalarImpl = match ty {
+                    DataType::Int16 => x.parse::<i16>().unwrap().into(),
+                    DataType::Int32 => x.parse::<i32>().unwrap().into(),
+                    DataType::Int64 => x.parse::<i64>().unwrap().into(),
+                    DataType::Float32 => x.parse::<f32>().unwrap().into(),
+                    DataType::Float64 => x.parse::<f64>().unwrap().into(),
+                    DataType::Varchar => x.to_string().into(),
+                    DataType::Boolean => x.parse::<bool>().unwrap().into(),
+                    DataType::Date => x.parse::<NaiveDateWrapper>().unwrap().into(),
+                    DataType::Time => x.parse::<NaiveTimeWrapper>().unwrap().into(),
+                    DataType::Timestamp => x.parse::<NaiveDateTimeWrapper>().unwrap().into(),
+                    DataType::Interval => x.parse::<IntervalUnit>().unwrap().into(),
+                    DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
+                    _ => todo!(),
+                };
+                Some(scalar)
+            })
+            .collect();
+        Self::new(datums)
     }
 }
 
@@ -135,6 +158,53 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
 
     pub fn data_types(&self) -> &[DataType] {
         self.data_types.as_ref()
+    }
+}
+
+/// A simple wrapper for [`OwnedRow`], which assumes that all fields are defined as `ASC` order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AscentOwnedRow(OwnedRow);
+
+impl AscentOwnedRow {
+    pub fn into_inner(self) -> OwnedRow {
+        self.0
+    }
+}
+
+impl Deref for AscentOwnedRow {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Row for AscentOwnedRow {
+    type Iter<'a> = <OwnedRow as Row>::Iter<'a>;
+
+    deref_forward_row! {}
+
+    fn into_owned_row(self) -> OwnedRow {
+        self.into_inner()
+    }
+}
+
+impl PartialOrd for AscentOwnedRow {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.as_inner().partial_cmp(other.0.as_inner())
+    }
+}
+
+impl Ord for AscentOwnedRow {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
+    }
+}
+
+impl From<OwnedRow> for AscentOwnedRow {
+    fn from(row: OwnedRow) -> Self {
+        Self(row)
     }
 }
 

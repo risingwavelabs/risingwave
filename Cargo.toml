@@ -13,6 +13,7 @@ members = [
   "src/expr",
   "src/frontend",
   "src/frontend/planner_test",
+  "src/java_binding",
   "src/meta",
   "src/object_store",
   "src/prost",
@@ -35,6 +36,7 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tracing",
+  "src/udf",
   "src/utils/async_stack_trace",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
@@ -67,6 +69,7 @@ lto = 'off'
 
 [profile.release]
 debug = true
+lto = 'thin'
 
 [profile.bench]
 opt-level = 3
@@ -110,6 +113,7 @@ opt-level = 3
 [profile.ci-sim]
 inherits = "dev"
 opt-level = 2
+incremental = false
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

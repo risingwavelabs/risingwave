@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -28,6 +28,7 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -83,6 +84,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::NaiveTime(v) => {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
+        ScalarRefImpl::Jsonb(v) => serialize_str(&v.value_serialize(), buf),
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
     }
@@ -154,6 +156,10 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
         DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
+        DataType::Jsonb => ScalarImpl::Jsonb(
+            JsonbVal::value_deserialize(&deserialize_bytea(data))
+                .ok_or(ValueEncodingError::InvalidJsonbEncoding)?,
+        ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::List {
@@ -215,18 +221,21 @@ fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {
     let secs = data.get_u32_le();
     let nano = data.get_u32_le();
-    NaiveTimeWrapper::with_secs_nano_value(secs, nano)
+    NaiveTimeWrapper::with_secs_nano(secs, nano)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))
 }
 
 fn deserialize_naivedatetime(data: &mut impl Buf) -> Result<NaiveDateTimeWrapper> {
     let secs = data.get_i64_le();
     let nsecs = data.get_u32_le();
-    NaiveDateTimeWrapper::with_secs_nsecs_value(secs, nsecs)
+    NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))
 }
 
 fn deserialize_naivedate(data: &mut impl Buf) -> Result<NaiveDateWrapper> {
     let days = data.get_i32_le();
-    NaiveDateWrapper::with_days_value(days)
+    NaiveDateWrapper::with_days(days)
+        .map_err(|_e| ValueEncodingError::InvalidNaiveDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {

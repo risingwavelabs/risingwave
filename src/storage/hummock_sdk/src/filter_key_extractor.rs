@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
 
+use crate::info_in_release;
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -307,11 +308,13 @@ pub struct FilterKeyExtractorManager {
 impl FilterKeyExtractorManager {
     /// Insert (`table_id`, `filter_key_extractor`) as mapping to `HashMap` for `acquire`
     pub fn update(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+        info_in_release!("update key extractor of {}", table_id);
         self.inner.update(table_id, filter_key_extractor);
     }
 
     /// Remove a mapping by `table_id`
     pub fn remove(&self, table_id: u32) {
+        info_in_release!("remove key extractor of {}", table_id);
         self.inner.remove(table_id);
     }
 
@@ -461,6 +464,8 @@ mod tests {
             definition: "".into(),
             handle_pk_conflict: false,
             read_prefix_len_hint: 1,
+            version: None,
+            watermark_indices: vec![],
         }
     }
 

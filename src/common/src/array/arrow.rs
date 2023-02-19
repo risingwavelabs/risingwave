@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,38 @@
 //! Converts between arrays and Apache Arrow arrays.
 use arrow_schema::Field;
 use chrono::{NaiveDateTime, NaiveTime};
-use itertools::Itertools;
 
+use super::column::Column;
 use super::*;
 use crate::types::struct_type::StructType;
+use crate::util::iter_util::ZipEqFast;
+
+// Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
+
+impl From<&DataChunk> for arrow_array::RecordBatch {
+    fn from(chunk: &DataChunk) -> Self {
+        arrow_array::RecordBatch::try_from_iter(
+            chunk
+                .columns()
+                .iter()
+                .map(|column| ("", column.array_ref().into())),
+        )
+        .unwrap()
+    }
+}
+
+impl From<&arrow_array::RecordBatch> for DataChunk {
+    fn from(batch: &arrow_array::RecordBatch) -> Self {
+        DataChunk::new(
+            batch
+                .columns()
+                .iter()
+                .map(|array| Column::new(Arc::new(array.into())))
+                .collect(),
+            batch.num_rows(),
+        )
+    }
+}
 
 /// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
 macro_rules! converts_generic {
@@ -100,6 +128,12 @@ impl From<&arrow_schema::DataType> for DataType {
     }
 }
 
+impl From<arrow_schema::DataType> for DataType {
+    fn from(value: arrow_schema::DataType) -> Self {
+        (&value).into()
+    }
+}
+
 impl From<&DataType> for arrow_schema::DataType {
     fn from(value: &DataType) -> Self {
         match value {
@@ -127,6 +161,12 @@ impl From<&DataType> for arrow_schema::DataType {
     }
 }
 
+impl From<DataType> for arrow_schema::DataType {
+    fn from(value: DataType) -> Self {
+        (&value).into()
+    }
+}
+
 fn get_field_vector_from_struct_type(struct_type: &StructType) -> Vec<Field> {
     // Check for length equality between field_name vector and datatype vector.
     if struct_type.field_names.len() != struct_type.fields.len() {
@@ -139,7 +179,7 @@ fn get_field_vector_from_struct_type(struct_type: &StructType) -> Vec<Field> {
         struct_type
             .fields
             .iter()
-            .zip_eq(struct_type.field_names.clone())
+            .zip_eq_fast(struct_type.field_names.clone())
             .map(|(f, f_name)| Field::new(f_name, f.into(), true))
             .collect()
     }
@@ -403,6 +443,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
+            ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
@@ -429,15 +470,15 @@ impl From<&StructArray> for arrow_array::StructArray {
                 array
                     .field_arrays()
                     .iter()
-                    .zip_eq(array.children_array_types())
+                    .zip_eq_fast(array.children_array_types())
                     .map(|(arr, datatype)| (Field::new("", datatype.into(), true), (*arr).into()))
                     .collect()
             } else {
                 array
                     .field_arrays()
                     .iter()
-                    .zip_eq(array.children_array_types())
-                    .zip_eq(array.children_names())
+                    .zip_eq_fast(array.children_array_types())
+                    .zip_eq_fast(array.children_names())
                     .map(|((arr, datatype), field_name)| {
                         (Field::new(field_name, datatype.into(), true), (*arr).into())
                     })

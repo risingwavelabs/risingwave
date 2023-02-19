@@ -1,6 +1,20 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::TableKey;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::RangeIteratorTyped;
@@ -19,6 +33,13 @@ pub enum ImmutableMemtableImpl {
 }
 
 impl ImmutableMemtableImpl {
+    pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
+        match self {
+            ImmutableMemtableImpl::Imm(batch) => batch.range_exists(table_key_range),
+            ImmutableMemtableImpl::MergedImm(m) => m.range_exists(table_key_range),
+        }
+    }
+
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
         match self {
             ImmutableMemtableImpl::Imm(batch) => batch.start_table_key(),

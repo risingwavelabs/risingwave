@@ -4,6 +4,7 @@ package plan_common;
 
 import "data.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // Field is a column in the streaming or batch plan.
@@ -78,4 +79,6 @@ enum RowFormatType {
   MAXWELL = 5;
   CANAL_JSON = 6;
   CSV = 7;
+  NATIVE = 8;
+  DEBEZIUM_AVRO = 9;
 }

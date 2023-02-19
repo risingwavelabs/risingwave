@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,22 +16,18 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_common::{must_match, try_match_expand};
-use risingwave_expr::ExprError;
-use risingwave_pb::expr::expr_node::Type;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
-use crate::optimizer::plan_node::stream_now::StreamNow;
+use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter, StreamProject, ToStreamContext,
+    StreamFilter, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -179,6 +175,22 @@ impl ColPrunable for LogicalFilter {
     }
 }
 
+impl ExprRewritable for LogicalFilter {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            core,
+        }
+        .into()
+    }
+}
+
 impl PredicatePushdown for LogicalFilter {
     fn predicate_pushdown(
         &self,
@@ -198,18 +210,6 @@ impl ToBatch for LogicalFilter {
     }
 }
 
-/// Apply filters by selectivity and then applicabiliy of watermark - equality condition
-/// first, then conditions of the form T > now() - Y (the timestamp needs to be greater
-/// than a watermark), then conditions similar to T < now() - Y
-fn convert_comparator_to_priority(comparator: Type) -> i32 {
-    match comparator {
-        Type::Equal => 0,
-        Type::GreaterThan | Type::GreaterThanOrEqual => 1,
-        Type::LessThan | Type::LessThanOrEqual => 2,
-        _ => -1,
-    }
-}
-
 impl ToStream for LogicalFilter {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
@@ -220,118 +220,23 @@ impl ToStream for LogicalFilter {
             .iter()
             .any(|cond| cond.count_nows() > 0);
         if has_now {
-            let mut conjunctions = predicate.conjunctions.clone();
-            // Check if the now expr is valid
-            for conjunction in &conjunctions {
-                if conjunction.count_nows() > 0 {
-                    let comparator_expr = try_match_expand!(conjunction, ExprImpl::FunctionCall)?;
-                    if convert_comparator_to_priority(comparator_expr.get_expr_type()) < 0 {
-                        // TODO: We should avoid using `ExprError` in frontend, same 2 below.
-                        return Err(ExprError::InvalidParam {
-                            name: "now",
-                            reason: String::from("now expression must be placed in a comparison"),
-                        }
-                        .into());
-                    }
-                    try_match_expand!(&comparator_expr.inputs()[0], ExprImpl::InputRef)?;
-                    let now_expr =
-                        try_match_expand!(&comparator_expr.inputs()[1], ExprImpl::FunctionCall)?;
-                    match now_expr.get_expr_type() {
-                        Type::Now => {
-                            // Do nothing.
-                        }
-                        Type::Add | Type::Subtract => {
-                            if try_match_expand!(&now_expr.inputs()[0], ExprImpl::FunctionCall)?
-                                .get_expr_type()
-                                != Type::Now
-                                || !matches!(
-                                    &now_expr.inputs()[1],
-                                    ExprImpl::Literal(_) | ExprImpl::FunctionCall(_)
-                                )
-                                || now_expr.inputs()[1].has_input_ref()
-                            {
-                                return Err(ExprError::InvalidParam {
-                                    name: "now",
-                                    reason: String::from("expressions containing now must be of the form `col [cmp] now() +- [literal]`"),
-                                }
-                                .into());
-                            }
-                        }
-                        _ => {
-                            return Err(ExprError::InvalidParam {
-                                name: "now",
-                                reason: String::from("now delta expression must be a trivial add/subtract expression"),
-                            }
-                            .into());
-                        }
-                    }
-                }
+            if predicate
+                .conjunctions
+                .iter()
+                .any(|expr| expr.count_nows() > 0 && expr.as_now_comparison_cond().is_none())
+            {
+                bail!(
+                    "Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or \
+                    `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column \
+                    and contains no `now()`."
+                );
             }
-
-            let mut now_conds = conjunctions
-                .drain_filter(|cond| cond.count_nows() > 0)
-                .map(|cond| {
-                    must_match!(cond, ExprImpl::FunctionCall(function_call) => {
-                        (convert_comparator_to_priority(function_call.get_expr_type()), function_call)
-                    })
-                })
-                .collect_vec();
-            now_conds.sort_by_key(|(comparator_priority, _)| *comparator_priority);
-            // We do simple logical filters first because it can reduce size of dynamic filter's
-            // cache.
-
-            let mut cur_streaming = if conjunctions.is_empty() {
-                new_input
-            } else {
-                let simple_logical = LogicalFilter::new(self.input(), Condition { conjunctions });
-                PlanRef::from(StreamFilter::new(
-                    simple_logical.clone_with_input(new_input),
-                ))
-            };
-            // Rewrite each now condition. Replace `NowExpr` with `StreamNow` and replace
-            // `LogicalFilter` with `DynamicFilter`.
-            for (_, now_cond) in now_conds {
-                let left_index = must_match!(now_cond.inputs()[0], ExprImpl::InputRef(box ref input_ref) => input_ref.index());
-                let rht = must_match!(now_cond.inputs()[1], ExprImpl::FunctionCall(box ref function_call) => {
-                    match function_call.get_expr_type() {
-                        Type::Now => PlanRef::from(StreamNow::new(self.ctx())),
-                        Type::Add | Type::Subtract => {
-                            let mut now_delta_expr = function_call.clone();
-                            now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamp));
-                            // We cannot call `LogicalProject::to_stream()` here, because its input is already a stream.
-                            StreamProject::new(LogicalProject::new(StreamNow::new(self.ctx()).into(), vec![ExprImpl::from(now_delta_expr)])).into()
-                        },
-                        // We can panic here because we have checked above
-                        _ => panic!(),
-                    }
-                });
-                cur_streaming = StreamDynamicFilter::new(
-                    left_index,
-                    Condition {
-                        conjunctions: vec![ExprImpl::from(FunctionCall::new(
-                            now_cond.get_expr_type(),
-                            vec![
-                                ExprImpl::from(InputRef::new(
-                                    left_index,
-                                    self.schema().fields()[left_index].data_type(),
-                                )),
-                                ExprImpl::from(InputRef::new(
-                                    self.schema().len(),
-                                    rht.schema().fields()[0].data_type(),
-                                )),
-                            ],
-                        )?)],
-                    },
-                    cur_streaming,
-                    rht,
-                )
-                .into();
-            }
-            Ok(cur_streaming)
-        } else {
-            let new_logical = self.clone_with_input(new_input);
-            Ok(StreamFilter::new(new_logical).into())
+            bail!(
+                "All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound."
+            );
         }
+        let new_logical = self.clone_with_input(new_input);
+        Ok(StreamFilter::new(new_logical).into())
     }
 
     fn logical_rewrite_for_stream(

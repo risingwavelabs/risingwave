@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,8 @@ impl UserInfoReader {
     }
 
     pub fn read_guard(&self) -> UserInfoReadGuard {
-        self.0.read_arc()
+        // Make this recursive so that one can get this guard in the same thread without fear.
+        self.0.read_arc_recursive()
     }
 }
 

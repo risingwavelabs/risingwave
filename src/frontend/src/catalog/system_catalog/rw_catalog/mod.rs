@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,5 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod rw_ddl_progress;
 mod rw_meta_snapshot;
+
+pub use rw_ddl_progress::*;
 pub use rw_meta_snapshot::*;

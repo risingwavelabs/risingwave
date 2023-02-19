@@ -5,6 +5,7 @@ package expr;
 import "data.proto";
 import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
@@ -33,6 +34,8 @@ message ExprNode {
     OR = 22;
     NOT = 23;
     IN = 24;
+    SOME = 25;
+    ALL = 26;
     // bitwise operators
     BITWISE_AND = 31;
     BITWISE_OR = 32;
@@ -51,6 +54,8 @@ message ExprNode {
     // Parse text to timestamp by format string.
     // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
     TO_TIMESTAMP1 = 107;
+    // Performs a cast with additional timezone information.
+    CAST_WITH_TIME_ZONE = 108;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -88,6 +93,8 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    POW = 233;
+    EXP = 234;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -110,13 +117,16 @@ message ExprNode {
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
-    // Search operator and Search ARGument
-    SEARCH = 998;
-    SARG = 999;
+    FORMAT_TYPE = 534;
+
+    // Non-pure functions below (> 600)
+    // ------------------------
     // Internal functions
     VNODE = 1101;
     // Non-deterministic functions
     NOW = 2022;
+    // User defined functions
+    UDF = 3000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
@@ -124,6 +134,7 @@ message ExprNode {
     InputRefExpr input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
+    UserDefinedFunction udf = 7;
   }
 }
 
@@ -195,6 +206,10 @@ message AggCall {
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
     SUM0 = 10;
+    VAR_POP = 11;
+    VAR_SAMP = 12;
+    STDDEV_POP = 13;
+    STDDEV_SAMP = 14;
   }
   message Arg {
     InputRefExpr input = 1;
@@ -212,4 +227,12 @@ message AggCall {
   }
   repeated OrderByField order_by_fields = 5;
   ExprNode filter = 6;
+}
+
+message UserDefinedFunction {
+  repeated ExprNode children = 1;
+  string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string path = 5;
 }

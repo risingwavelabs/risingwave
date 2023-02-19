@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -14,6 +14,7 @@ else
 fi
 
 protoc --plugin=./node_modules/.bin/protoc-gen-ts_proto \
+    --experimental_allow_proto3_optional \
     --ts_proto_out=proto/gen/ \
     --proto_path=tmp_gen \
     --ts_proto_opt=outputServices=false \

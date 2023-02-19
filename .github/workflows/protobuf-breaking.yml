@@ -1,0 +1,21 @@
+name: Protobuf Breaking Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [proto/**]
+
+jobs:
+  buf-breaking-check:
+    runs-on: ubuntu-latest
+    name: Check breaking changes in Protobuf files
+    steps:
+      - uses: actions/checkout@v2
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+      # Run breaking change detection against the `main` branch
+      - uses: bufbuild/buf-breaking-action@v1
+        with:
+          input: 'proto'
+          against: 'https://github.com/risingwavelabs/risingwave.git#branch=main,subdir=proto'

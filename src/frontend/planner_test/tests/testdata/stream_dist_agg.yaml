@@ -31,8 +31,8 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [s.v, s.t._row_id], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 1 { columns: [count, max(s.v)], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [s_v, s_t__row_id], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 1 { columns: [count, max(s_v)], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: sum_on_single
   before:
@@ -59,7 +59,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [count, sum(s.v)], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, sum(s_v)], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: cnt_on_single
   before:
@@ -86,7 +86,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [count, count(s.v)], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, count(s_v)], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: string_agg_on_single
   before:
@@ -116,8 +116,8 @@
                 Upstream
                 BatchPlanNode
 
-     Table 0 { columns: [s.v, s.t._row_id, s.s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
-     Table 1 { columns: [count, string_agg(s.s, ',':Varchar order_by(s.v ASC NULLS LAST))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [s_v, s_t__row_id, s_s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
+     Table 1 { columns: [count, string_agg(s_s, ',':Varchar order_by(s_v ASC NULLS LAST))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: extreme_on_T
   before:
@@ -132,32 +132,32 @@
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [max(max(t.v))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t.v))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, max(max(t.v))] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v)] }
-            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t.v)] }
+            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [a1], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [max(max(t.v))] }
-          StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t.v))] }
+          StreamGlobalSimpleAgg { aggs: [count, max(max(t.v))] }
               result table: 1, state tables: [0]
             StreamExchange Single from 1
 
     Fragment 1
-      StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v)] }
+      StreamHashAgg { group_key: [$expr1], aggs: [count, max(t.v)] }
           result table: 3, state tables: [2]
-        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
+        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
           Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [max(t.v), Vnode(t._row_id)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 1 { columns: [sum0(count), max(max(t.v))], primary key: [], value indices: [0, 1], distribution key: [] }
-     Table 2 { columns: [Vnode(t._row_id), t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [Vnode(t._row_id), count, max(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
+     Table 0 { columns: [max(t_v), $expr1], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 1 { columns: [count, max(max(t_v))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 2 { columns: [$expr1, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 3 { columns: [$expr1, count, max(t_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: extreme_on_AO
   before:
@@ -167,7 +167,7 @@
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [max(max(ao.v))] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), max(max(ao.v))] }
+      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(max(ao.v))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, max(ao.v)] }
             └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
@@ -176,7 +176,7 @@
       StreamMaterialize { columns: [a1], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [max(max(ao.v))] }
-          StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), max(max(ao.v))] }
+          StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(max(ao.v))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -186,7 +186,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum0(count), max(max(ao.v))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, max(max(ao_v))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: sum_on_T
   before:
@@ -201,7 +201,7 @@
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [sum(sum(t.v))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(t.v))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, sum(sum(t.v))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v)] }
             └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -210,7 +210,7 @@
       StreamMaterialize { columns: [a1], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [sum(sum(t.v))] }
-          StreamGlobalSimpleAgg { aggs: [sum0(count), sum(sum(t.v))] }
+          StreamGlobalSimpleAgg { aggs: [count, sum(sum(t.v))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -220,7 +220,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum0(count), sum(sum(t.v))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, sum(sum(t_v))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: sum_on_AO
   before:
@@ -230,7 +230,7 @@
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [sum(sum(ao.v))] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), sum(sum(ao.v))] }
+      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [count, sum(sum(ao.v))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(ao.v)] }
             └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
@@ -239,7 +239,7 @@
       StreamMaterialize { columns: [a1], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [sum(sum(ao.v))] }
-          StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), sum(sum(ao.v))] }
+          StreamAppendOnlyGlobalSimpleAgg { aggs: [count, sum(sum(ao.v))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -249,7 +249,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum0(count), sum(sum(ao.v))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, sum(sum(ao_v))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: cnt_on_T
   before:
@@ -264,7 +264,7 @@
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [sum0(count(t.v))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum0(count(t.v))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, sum0(count(t.v))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, count(t.v)] }
             └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -273,7 +273,7 @@
       StreamMaterialize { columns: [a1], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [sum0(count(t.v))] }
-          StreamGlobalSimpleAgg { aggs: [sum0(count), sum0(count(t.v))] }
+          StreamGlobalSimpleAgg { aggs: [count, sum0(count(t.v))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -283,7 +283,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum0(count), sum0(count(t.v))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, sum0(count(t_v))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: cnt_on_AO
   before:
@@ -293,7 +293,7 @@
   stream_plan: |
     StreamMaterialize { columns: [a1], pk_columns: [] }
     └─StreamProject { exprs: [sum0(count(ao.v))] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), sum0(count(ao.v))] }
+      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [count, sum0(count(ao.v))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, count(ao.v)] }
             └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
@@ -302,7 +302,7 @@
       StreamMaterialize { columns: [a1], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [sum0(count(ao.v))] }
-          StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), sum0(count(ao.v))] }
+          StreamAppendOnlyGlobalSimpleAgg { aggs: [count, sum0(count(ao.v))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -312,7 +312,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum0(count), sum0(count(ao.v))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, sum0(count(ao_v))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: string_agg_on_T
   before:
@@ -346,8 +346,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t.o, t._row_id, t.s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
-     Table 1 { columns: [count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [t_o, t__row_id, t_s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
+     Table 1 { columns: [count, string_agg(t_s, ',':Varchar order_by(t_o ASC NULLS LAST))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: string_agg_on_AO
   before:
@@ -376,7 +376,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [count, string_agg(ao_s, ',':Varchar order_by(ao_o ASC NULLS LAST))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: extreme_count_on_T
   before:
@@ -391,32 +391,32 @@
   stream_plan: |
     StreamMaterialize { columns: [a1, a2], pk_columns: [] }
     └─StreamProject { exprs: [max(max(t.v)), sum0(count(t.v))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t.v)), sum0(count(t.v))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, max(max(t.v)), sum0(count(t.v))] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v), count(t.v)] }
-            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t.v), count(t.v)] }
+            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [max(max(t.v)), sum0(count(t.v))] }
-          StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t.v)), sum0(count(t.v))] }
+          StreamGlobalSimpleAgg { aggs: [count, max(max(t.v)), sum0(count(t.v))] }
               result table: 1, state tables: [0]
             StreamExchange Single from 1
 
     Fragment 1
-      StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, max(t.v), count(t.v)] }
+      StreamHashAgg { group_key: [$expr1], aggs: [count, max(t.v), count(t.v)] }
           result table: 3, state tables: [2]
-        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id)] }
+        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
           Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [max(t.v), Vnode(t._row_id)], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 1 { columns: [sum0(count), max(max(t.v)), sum0(count(t.v))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
-     Table 2 { columns: [Vnode(t._row_id), t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [Vnode(t._row_id), count, max(t.v), count(t.v)], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [], vnode column idx: 0 }
+     Table 0 { columns: [max(t_v), $expr1], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 1 { columns: [count, max(max(t_v)), sum0(count(t_v))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 2 { columns: [$expr1, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 3 { columns: [$expr1, count, max(t_v), count(t_v)], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_count_on_AO
   before:
@@ -426,7 +426,7 @@
   stream_plan: |
     StreamMaterialize { columns: [a1, a2], pk_columns: [] }
     └─StreamProject { exprs: [max(max(ao.v)), sum0(count(ao.v))] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), max(max(ao.v)), sum0(count(ao.v))] }
+      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(max(ao.v)), sum0(count(ao.v))] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, max(ao.v), count(ao.v)] }
             └─StreamTableScan { table: ao, columns: [ao.v, ao._row_id], pk: [ao._row_id], dist: UpstreamHashShard(ao._row_id) }
@@ -435,7 +435,7 @@
       StreamMaterialize { columns: [a1, a2], pk_columns: [] }
           materialized table: 4294967294
         StreamProject { exprs: [max(max(ao.v)), sum0(count(ao.v))] }
-          StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), max(max(ao.v)), sum0(count(ao.v))] }
+          StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max(max(ao.v)), sum0(count(ao.v))] }
               result table: 0, state tables: []
             StreamExchange Single from 1
 
@@ -445,7 +445,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [sum0(count), max(max(ao.v)), sum0(count(ao.v))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [count, max(max(ao_v)), sum0(count(ao_v))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: count_string_agg_on_T
   before:
@@ -479,8 +479,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t.o, t._row_id, t.s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
-     Table 1 { columns: [count, count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [t_o, t__row_id, t_s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
+     Table 1 { columns: [count, count(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: count_string_agg_on_AO
   before:
@@ -509,7 +509,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [count, count(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [count, count(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_string_agg_on_T
   before:
@@ -543,9 +543,9 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t.v, t._row_id], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 1 { columns: [t.o, t._row_id, t.s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
-     Table 2 { columns: [count, max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [t_v, t__row_id], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 1 { columns: [t_o, t__row_id, t_s, ',':Varchar], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
+     Table 2 { columns: [count, max(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_string_agg_on_AO
   before:
@@ -574,7 +574,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [count, max(ao.v), string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [count, max(ao_v), string_agg(ao_s, ',':Varchar order_by(ao_o ASC NULLS LAST))], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_on_T_by_k
   before:
@@ -607,8 +607,8 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t.k, t.v, t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 1 { columns: [t.k, count, max(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [t_k, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 1 { columns: [t_k, count, max(t_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: extreme_on_Tk_by_k
   before:
@@ -636,8 +636,8 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [tk.k, tk.v, tk.t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 1 { columns: [tk.k, count, max(tk.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [tk_k, tk_v, tk_t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 1 { columns: [tk_k, count, max(tk_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: extreme_on_S_by_k
   before:
@@ -670,8 +670,8 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [s.k, s.v, s.t._row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 1 { columns: [s.k, count, max(s.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [s_k, s_v, s_t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 1 { columns: [s_k, count, max(s_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: extreme_on_AO_by_k
   before:
@@ -698,7 +698,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, max(ao.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [ao_k, count, max(ao_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_T_by_k
   before:
@@ -731,7 +731,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t.k, count, sum(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [t_k, count, sum(t_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_Tk_by_k
   before:
@@ -759,7 +759,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [tk.k, count, sum(tk.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [tk_k, count, sum(tk_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_S_by_k
   before:
@@ -792,7 +792,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [s.k, count, sum(s.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [s_k, count, sum(s_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: sum_on_AO_by_k
   before:
@@ -819,7 +819,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, sum(ao.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [ao_k, count, sum(ao_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_T_by_k
   before:
@@ -852,7 +852,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t.k, count, count(t.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [t_k, count, count(t_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_Tk_by_k
   before:
@@ -880,7 +880,7 @@
               Upstream
               BatchPlanNode
 
-     Table 0 { columns: [tk.k, count, count(tk.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [tk_k, count, count(tk_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_S_by_k
   before:
@@ -913,7 +913,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [s.k, count, count(s.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [s_k, count, count(s_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: cnt_on_AO_by_k
   before:
@@ -940,7 +940,7 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, count(ao.v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [ao_k, count, count(ao_v)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_T_by_k
   before:
@@ -976,8 +976,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t.k, t.o, t._row_id, t.s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2, 3, 4], distribution key: [0] }
-     Table 1 { columns: [t.k, count, string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [t_k, t_o, t__row_id, t_s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2, 3, 4], distribution key: [0] }
+     Table 1 { columns: [t_k, count, string_agg(t_s, ',':Varchar order_by(t_o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, t.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_Tk_by_k
   before:
@@ -1008,8 +1008,8 @@
                 Upstream
                 BatchPlanNode
 
-     Table 0 { columns: [tk.k, tk.o, tk.t._row_id, tk.s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2, 3, 4], distribution key: [0] }
-     Table 1 { columns: [tk.k, count, string_agg(tk.s, ',':Varchar order_by(tk.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [tk_k, tk_o, tk_t__row_id, tk_s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2, 3, 4], distribution key: [0] }
+     Table 1 { columns: [tk_k, count, string_agg(tk_s, ',':Varchar order_by(tk_o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, tk.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_S_by_k
   before:
@@ -1045,8 +1045,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [s.k, s.o, s.t._row_id, s.s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2, 3, 4], distribution key: [0] }
-     Table 1 { columns: [s.k, count, string_agg(s.s, ',':Varchar order_by(s.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [s_k, s_o, s_t__row_id, s_s, ',':Varchar], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2, 3, 4], distribution key: [0] }
+     Table 1 { columns: [s_k, count, string_agg(s_s, ',':Varchar order_by(s_o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, s.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
 - id: string_agg_on_AO_by_k
   before:
@@ -1075,5 +1075,5 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [ao.k, count, string_agg(ao.s, ',':Varchar order_by(ao.o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [ao_k, count, string_agg(ao_s, ',':Varchar order_by(ao_o ASC NULLS LAST))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [a1, ao.k], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }

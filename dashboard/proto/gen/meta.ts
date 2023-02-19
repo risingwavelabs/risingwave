@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { MetaBackupManifestId } from "./backup_service";
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -13,7 +13,7 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import { Dispatcher, StreamActor, StreamNode } from "./stream_plan";
+import { Dispatcher, StreamActor, StreamEnvironment, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
@@ -86,6 +86,7 @@ export interface TableFragments {
   fragments: { [key: number]: TableFragments_Fragment };
   actorStatus: { [key: number]: TableFragments_ActorStatus };
   actorSplits: { [key: number]: ConnectorSplits };
+  env: StreamEnvironment | undefined;
 }
 
 /** The state of the fragments of this table */
@@ -278,6 +279,12 @@ export interface TableFragments_ActorSplitsEntry {
   value: ConnectorSplits | undefined;
 }
 
+/** / Parallel unit mapping with fragment id, used for notification. */
+export interface FragmentParallelUnitMapping {
+  fragmentId: number;
+  mapping: ParallelUnitMapping | undefined;
+}
+
 /** TODO: remove this when dashboard refactored. */
 export interface ActorLocation {
   node: WorkerNode | undefined;
@@ -291,6 +298,20 @@ export interface FlushRequest {
 export interface FlushResponse {
   status: Status | undefined;
   snapshot: HummockSnapshot | undefined;
+}
+
+export interface CreatingJobInfo {
+  databaseId: number;
+  schemaId: number;
+  name: string;
+}
+
+export interface CancelCreatingJobsRequest {
+  infos: CreatingJobInfo[];
+}
+
+export interface CancelCreatingJobsResponse {
+  status: Status | undefined;
 }
 
 export interface ListTableFragmentsRequest {
@@ -314,6 +335,7 @@ export interface ListTableFragmentsResponse_FragmentInfo {
 
 export interface ListTableFragmentsResponse_TableFragmentInfo {
   fragments: ListTableFragmentsResponse_FragmentInfo[];
+  env: StreamEnvironment | undefined;
 }
 
 export interface ListTableFragmentsResponse_TableFragmentsEntry {
@@ -374,8 +396,9 @@ export interface MetaSnapshot {
   tables: Table[];
   indexes: Index[];
   views: View[];
+  functions: Function[];
   users: UserInfo[];
-  parallelUnitMappings: ParallelUnitMapping[];
+  parallelUnitMappings: FragmentParallelUnitMapping[];
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
@@ -401,8 +424,9 @@ export interface SubscribeResponse {
     | { $case: "sink"; sink: Sink }
     | { $case: "index"; index: Index }
     | { $case: "view"; view: View }
+    | { $case: "function"; function: Function }
     | { $case: "user"; user: UserInfo }
-    | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
     | { $case: "node"; node: WorkerNode }
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
@@ -463,17 +487,6 @@ export function subscribeResponse_OperationToJSON(object: SubscribeResponse_Oper
   }
 }
 
-export interface MetaLeaderInfo {
-  nodeAddress: string;
-  leaseId: number;
-}
-
-export interface MetaLeaseInfo {
-  leader: MetaLeaderInfo | undefined;
-  leaseRegisterTime: number;
-  leaseExpireTime: number;
-}
-
 export interface PauseRequest {
 }
 
@@ -523,6 +536,52 @@ export interface RescheduleRequest_ReschedulesEntry {
 
 export interface RescheduleResponse {
   success: boolean;
+}
+
+export interface MembersRequest {
+}
+
+export interface MetaMember {
+  address: HostAddress | undefined;
+  isLeader: boolean;
+}
+
+export interface MembersResponse {
+  members: MetaMember[];
+}
+
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields.
+ * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ */
+export interface SystemParams {
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
+}
+
+export interface GetSystemParamsRequest {
+}
+
+export interface GetSystemParamsResponse {
+  params: SystemParams | undefined;
+}
+
+export interface SetSystemParamRequest {
+  param: string;
+  /** None means set to default value. */
+  value?: string | undefined;
+}
+
+export interface SetSystemParamResponse {
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -614,7 +673,14 @@ export const HeartbeatResponse = {
 };
 
 function createBaseTableFragments(): TableFragments {
-  return { tableId: 0, state: TableFragments_State.UNSPECIFIED, fragments: {}, actorStatus: {}, actorSplits: {} };
+  return {
+    tableId: 0,
+    state: TableFragments_State.UNSPECIFIED,
+    fragments: {},
+    actorStatus: {},
+    actorSplits: {},
+    env: undefined,
+  };
 }
 
 export const TableFragments = {
@@ -643,6 +709,7 @@ export const TableFragments = {
           return acc;
         }, {})
         : {},
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -668,6 +735,7 @@ export const TableFragments = {
         obj.actorSplits[k] = ConnectorSplits.toJSON(v);
       });
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -701,6 +769,9 @@ export const TableFragments = {
       },
       {},
     );
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -902,6 +973,36 @@ export const TableFragments_ActorSplitsEntry = {
   },
 };
 
+function createBaseFragmentParallelUnitMapping(): FragmentParallelUnitMapping {
+  return { fragmentId: 0, mapping: undefined };
+}
+
+export const FragmentParallelUnitMapping = {
+  fromJSON(object: any): FragmentParallelUnitMapping {
+    return {
+      fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
+      mapping: isSet(object.mapping) ? ParallelUnitMapping.fromJSON(object.mapping) : undefined,
+    };
+  },
+
+  toJSON(message: FragmentParallelUnitMapping): unknown {
+    const obj: any = {};
+    message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
+    message.mapping !== undefined &&
+      (obj.mapping = message.mapping ? ParallelUnitMapping.toJSON(message.mapping) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<FragmentParallelUnitMapping>, I>>(object: I): FragmentParallelUnitMapping {
+    const message = createBaseFragmentParallelUnitMapping();
+    message.fragmentId = object.fragmentId ?? 0;
+    message.mapping = (object.mapping !== undefined && object.mapping !== null)
+      ? ParallelUnitMapping.fromPartial(object.mapping)
+      : undefined;
+    return message;
+  },
+};
+
 function createBaseActorLocation(): ActorLocation {
   return { node: undefined, actors: [] };
 }
@@ -984,6 +1085,86 @@ export const FlushResponse = {
       : undefined;
     message.snapshot = (object.snapshot !== undefined && object.snapshot !== null)
       ? HummockSnapshot.fromPartial(object.snapshot)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreatingJobInfo(): CreatingJobInfo {
+  return { databaseId: 0, schemaId: 0, name: "" };
+}
+
+export const CreatingJobInfo = {
+  fromJSON(object: any): CreatingJobInfo {
+    return {
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+    };
+  },
+
+  toJSON(message: CreatingJobInfo): unknown {
+    const obj: any = {};
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreatingJobInfo>, I>>(object: I): CreatingJobInfo {
+    const message = createBaseCreatingJobInfo();
+    message.databaseId = object.databaseId ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsRequest(): CancelCreatingJobsRequest {
+  return { infos: [] };
+}
+
+export const CancelCreatingJobsRequest = {
+  fromJSON(object: any): CancelCreatingJobsRequest {
+    return { infos: Array.isArray(object?.infos) ? object.infos.map((e: any) => CreatingJobInfo.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: CancelCreatingJobsRequest): unknown {
+    const obj: any = {};
+    if (message.infos) {
+      obj.infos = message.infos.map((e) => e ? CreatingJobInfo.toJSON(e) : undefined);
+    } else {
+      obj.infos = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsRequest>, I>>(object: I): CancelCreatingJobsRequest {
+    const message = createBaseCancelCreatingJobsRequest();
+    message.infos = object.infos?.map((e) => CreatingJobInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsResponse(): CancelCreatingJobsResponse {
+  return { status: undefined };
+}
+
+export const CancelCreatingJobsResponse = {
+  fromJSON(object: any): CancelCreatingJobsResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: CancelCreatingJobsResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsResponse>, I>>(object: I): CancelCreatingJobsResponse {
+    const message = createBaseCancelCreatingJobsResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
       : undefined;
     return message;
   },
@@ -1133,7 +1314,7 @@ export const ListTableFragmentsResponse_FragmentInfo = {
 };
 
 function createBaseListTableFragmentsResponse_TableFragmentInfo(): ListTableFragmentsResponse_TableFragmentInfo {
-  return { fragments: [] };
+  return { fragments: [], env: undefined };
 }
 
 export const ListTableFragmentsResponse_TableFragmentInfo = {
@@ -1142,6 +1323,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
       fragments: Array.isArray(object?.fragments)
         ? object.fragments.map((e: any) => ListTableFragmentsResponse_FragmentInfo.fromJSON(e))
         : [],
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -1152,6 +1334,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
     } else {
       obj.fragments = [];
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -1160,6 +1343,9 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
   ): ListTableFragmentsResponse_TableFragmentInfo {
     const message = createBaseListTableFragmentsResponse_TableFragmentInfo();
     message.fragments = object.fragments?.map((e) => ListTableFragmentsResponse_FragmentInfo.fromPartial(e)) || [];
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -1459,6 +1645,7 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     tables: [],
     indexes: [],
     views: [],
+    functions: [],
     users: [],
     parallelUnitMappings: [],
     nodes: [],
@@ -1479,9 +1666,10 @@ export const MetaSnapshot = {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       indexes: Array.isArray(object?.indexes) ? object.indexes.map((e: any) => Index.fromJSON(e)) : [],
       views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
+      functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => Function.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
-        ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
+        ? object.parallelUnitMappings.map((e: any) => FragmentParallelUnitMapping.fromJSON(e))
         : [],
       nodes: Array.isArray(object?.nodes)
         ? object.nodes.map((e: any) => WorkerNode.fromJSON(e))
@@ -1532,13 +1720,20 @@ export const MetaSnapshot = {
     } else {
       obj.views = [];
     }
+    if (message.functions) {
+      obj.functions = message.functions.map((e) => e ? Function.toJSON(e) : undefined);
+    } else {
+      obj.functions = [];
+    }
     if (message.users) {
       obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
     } else {
       obj.users = [];
     }
     if (message.parallelUnitMappings) {
-      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
+      obj.parallelUnitMappings = message.parallelUnitMappings.map((e) =>
+        e ? FragmentParallelUnitMapping.toJSON(e) : undefined
+      );
     } else {
       obj.parallelUnitMappings = [];
     }
@@ -1568,8 +1763,10 @@ export const MetaSnapshot = {
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     message.indexes = object.indexes?.map((e) => Index.fromPartial(e)) || [];
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
+    message.functions = object.functions?.map((e) => Function.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
-    message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
+    message.parallelUnitMappings =
+      object.parallelUnitMappings?.map((e) => FragmentParallelUnitMapping.fromPartial(e)) || [];
     message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
@@ -1646,12 +1843,14 @@ export const SubscribeResponse = {
         ? { $case: "index", index: Index.fromJSON(object.index) }
         : isSet(object.view)
         ? { $case: "view", view: View.fromJSON(object.view) }
+        : isSet(object.function)
+        ? { $case: "function", function: Function.fromJSON(object.function) }
         : isSet(object.user)
         ? { $case: "user", user: UserInfo.fromJSON(object.user) }
         : isSet(object.parallelUnitMapping)
         ? {
           $case: "parallelUnitMapping",
-          parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+          parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
         }
         : isSet(object.node)
         ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
@@ -1690,9 +1889,11 @@ export const SubscribeResponse = {
     message.info?.$case === "index" &&
       (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
     message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
+    message.info?.$case === "function" &&
+      (obj.function = message.info?.function ? Function.toJSON(message.info?.function) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
-      ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
+      ? FragmentParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
       : undefined);
     message.info?.$case === "node" &&
       (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
@@ -1738,6 +1939,9 @@ export const SubscribeResponse = {
     if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
       message.info = { $case: "view", view: View.fromPartial(object.info.view) };
     }
+    if (object.info?.$case === "function" && object.info?.function !== undefined && object.info?.function !== null) {
+      message.info = { $case: "function", function: Function.fromPartial(object.info.function) };
+    }
     if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
       message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };
     }
@@ -1748,7 +1952,7 @@ export const SubscribeResponse = {
     ) {
       message.info = {
         $case: "parallelUnitMapping",
-        parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+        parallelUnitMapping: FragmentParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
       };
     }
     if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
@@ -1787,65 +1991,6 @@ export const SubscribeResponse = {
         metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
       };
     }
-    return message;
-  },
-};
-
-function createBaseMetaLeaderInfo(): MetaLeaderInfo {
-  return { nodeAddress: "", leaseId: 0 };
-}
-
-export const MetaLeaderInfo = {
-  fromJSON(object: any): MetaLeaderInfo {
-    return {
-      nodeAddress: isSet(object.nodeAddress) ? String(object.nodeAddress) : "",
-      leaseId: isSet(object.leaseId) ? Number(object.leaseId) : 0,
-    };
-  },
-
-  toJSON(message: MetaLeaderInfo): unknown {
-    const obj: any = {};
-    message.nodeAddress !== undefined && (obj.nodeAddress = message.nodeAddress);
-    message.leaseId !== undefined && (obj.leaseId = Math.round(message.leaseId));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<MetaLeaderInfo>, I>>(object: I): MetaLeaderInfo {
-    const message = createBaseMetaLeaderInfo();
-    message.nodeAddress = object.nodeAddress ?? "";
-    message.leaseId = object.leaseId ?? 0;
-    return message;
-  },
-};
-
-function createBaseMetaLeaseInfo(): MetaLeaseInfo {
-  return { leader: undefined, leaseRegisterTime: 0, leaseExpireTime: 0 };
-}
-
-export const MetaLeaseInfo = {
-  fromJSON(object: any): MetaLeaseInfo {
-    return {
-      leader: isSet(object.leader) ? MetaLeaderInfo.fromJSON(object.leader) : undefined,
-      leaseRegisterTime: isSet(object.leaseRegisterTime) ? Number(object.leaseRegisterTime) : 0,
-      leaseExpireTime: isSet(object.leaseExpireTime) ? Number(object.leaseExpireTime) : 0,
-    };
-  },
-
-  toJSON(message: MetaLeaseInfo): unknown {
-    const obj: any = {};
-    message.leader !== undefined && (obj.leader = message.leader ? MetaLeaderInfo.toJSON(message.leader) : undefined);
-    message.leaseRegisterTime !== undefined && (obj.leaseRegisterTime = Math.round(message.leaseRegisterTime));
-    message.leaseExpireTime !== undefined && (obj.leaseExpireTime = Math.round(message.leaseExpireTime));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<MetaLeaseInfo>, I>>(object: I): MetaLeaseInfo {
-    const message = createBaseMetaLeaseInfo();
-    message.leader = (object.leader !== undefined && object.leader !== null)
-      ? MetaLeaderInfo.fromPartial(object.leader)
-      : undefined;
-    message.leaseRegisterTime = object.leaseRegisterTime ?? 0;
-    message.leaseExpireTime = object.leaseExpireTime ?? 0;
     return message;
   },
 };
@@ -2224,6 +2369,230 @@ export const RescheduleResponse = {
   fromPartial<I extends Exact<DeepPartial<RescheduleResponse>, I>>(object: I): RescheduleResponse {
     const message = createBaseRescheduleResponse();
     message.success = object.success ?? false;
+    return message;
+  },
+};
+
+function createBaseMembersRequest(): MembersRequest {
+  return {};
+}
+
+export const MembersRequest = {
+  fromJSON(_: any): MembersRequest {
+    return {};
+  },
+
+  toJSON(_: MembersRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MembersRequest>, I>>(_: I): MembersRequest {
+    const message = createBaseMembersRequest();
+    return message;
+  },
+};
+
+function createBaseMetaMember(): MetaMember {
+  return { address: undefined, isLeader: false };
+}
+
+export const MetaMember = {
+  fromJSON(object: any): MetaMember {
+    return {
+      address: isSet(object.address) ? HostAddress.fromJSON(object.address) : undefined,
+      isLeader: isSet(object.isLeader) ? Boolean(object.isLeader) : false,
+    };
+  },
+
+  toJSON(message: MetaMember): unknown {
+    const obj: any = {};
+    message.address !== undefined && (obj.address = message.address ? HostAddress.toJSON(message.address) : undefined);
+    message.isLeader !== undefined && (obj.isLeader = message.isLeader);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaMember>, I>>(object: I): MetaMember {
+    const message = createBaseMetaMember();
+    message.address = (object.address !== undefined && object.address !== null)
+      ? HostAddress.fromPartial(object.address)
+      : undefined;
+    message.isLeader = object.isLeader ?? false;
+    return message;
+  },
+};
+
+function createBaseMembersResponse(): MembersResponse {
+  return { members: [] };
+}
+
+export const MembersResponse = {
+  fromJSON(object: any): MembersResponse {
+    return { members: Array.isArray(object?.members) ? object.members.map((e: any) => MetaMember.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: MembersResponse): unknown {
+    const obj: any = {};
+    if (message.members) {
+      obj.members = message.members.map((e) => e ? MetaMember.toJSON(e) : undefined);
+    } else {
+      obj.members = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
+    const message = createBaseMembersResponse();
+    message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return {
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
+  };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsRequest(): GetSystemParamsRequest {
+  return {};
+}
+
+export const GetSystemParamsRequest = {
+  fromJSON(_: any): GetSystemParamsRequest {
+    return {};
+  },
+
+  toJSON(_: GetSystemParamsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsRequest>, I>>(_: I): GetSystemParamsRequest {
+    const message = createBaseGetSystemParamsRequest();
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsResponse(): GetSystemParamsResponse {
+  return { params: undefined };
+}
+
+export const GetSystemParamsResponse = {
+  fromJSON(object: any): GetSystemParamsResponse {
+    return { params: isSet(object.params) ? SystemParams.fromJSON(object.params) : undefined };
+  },
+
+  toJSON(message: GetSystemParamsResponse): unknown {
+    const obj: any = {};
+    message.params !== undefined && (obj.params = message.params ? SystemParams.toJSON(message.params) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsResponse>, I>>(object: I): GetSystemParamsResponse {
+    const message = createBaseGetSystemParamsResponse();
+    message.params = (object.params !== undefined && object.params !== null)
+      ? SystemParams.fromPartial(object.params)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamRequest(): SetSystemParamRequest {
+  return { param: "", value: undefined };
+}
+
+export const SetSystemParamRequest = {
+  fromJSON(object: any): SetSystemParamRequest {
+    return {
+      param: isSet(object.param) ? String(object.param) : "",
+      value: isSet(object.value) ? String(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SetSystemParamRequest): unknown {
+    const obj: any = {};
+    message.param !== undefined && (obj.param = message.param);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamRequest>, I>>(object: I): SetSystemParamRequest {
+    const message = createBaseSetSystemParamRequest();
+    message.param = object.param ?? "";
+    message.value = object.value ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamResponse(): SetSystemParamResponse {
+  return {};
+}
+
+export const SetSystemParamResponse = {
+  fromJSON(_: any): SetSystemParamResponse {
+    return {};
+  },
+
+  toJSON(_: SetSystemParamResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamResponse>, I>>(_: I): SetSystemParamResponse {
+    const message = createBaseSetSystemParamResponse();
     return message;
   },
 };

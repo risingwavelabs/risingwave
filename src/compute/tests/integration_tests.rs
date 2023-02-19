@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,13 +28,16 @@ use risingwave_batch::executor::{
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
@@ -49,7 +52,7 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source_executor_v2::SourceExecutorV2;
+use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
 };
@@ -147,7 +150,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let pk_indices = PkIndices::from([0]);
     let column_descs = all_column_ids
         .iter()
-        .zip_eq(all_schema.fields.iter().cloned())
+        .zip_eq_fast(all_schema.fields.iter().cloned())
         .map(|(column_id, field)| ColumnDesc {
             data_type: field.data_type,
             column_id: *column_id,
@@ -162,7 +165,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let actor_ctx = ActorContext::create(0x3f3f3f);
 
     // Create a `SourceExecutor` to read the changes.
-    let source_executor = SourceExecutorV2::<PanicStateStore>::new(
+    let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
         all_schema.clone(),
         pk_indices.clone(),
@@ -181,6 +184,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         2,
         dml_manager.clone(),
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
     );
 
@@ -225,12 +229,14 @@ async fn test_table_materialize() -> StreamResult<()> {
     ));
     let insert = Box::new(InsertExecutor::new(
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         dml_manager.clone(),
         insert_inner,
         1024,
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
         Some(row_id_index),
+        false,
     ));
 
     tokio::spawn(async move {
@@ -239,6 +245,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         Ok::<_, RwError>(())
     });
 
+    let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = StorageTable::for_test(
         memory_state_store.clone(),
@@ -246,6 +253,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0],
+        value_indices,
     );
 
     let scan = Box::new(RowSeqScanExecutor::new(
@@ -342,10 +350,12 @@ async fn test_table_materialize() -> StreamResult<()> {
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let delete = Box::new(DeleteExecutor::new(
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         dml_manager.clone(),
         delete_inner,
         1024,
         "DeleteExecutor".to_string(),
+        false,
     ));
 
     tokio::spawn(async move {
@@ -436,11 +446,11 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0],
+        vec![0, 1, 2],
     );
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
@@ -451,7 +461,9 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(5_i32.into()),
         Some(8_i64.into()),
     ]));
-    state.commit_for_test(epoch.inc()).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,

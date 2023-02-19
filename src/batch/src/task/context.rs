@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
@@ -62,7 +62,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn store_mem_usage(&self, val: usize);
 
-    fn get_mem_usage(&self) -> usize;
+    fn mem_usage(&self) -> usize;
 }
 
 /// Batch task context on compute node.
@@ -130,7 +130,7 @@ impl BatchTaskContext for ComputeNodeContext {
         self.cur_mem_val.store(val, Ordering::Relaxed);
     }
 
-    fn get_mem_usage(&self) -> usize {
+    fn mem_usage(&self) -> usize {
         self.cur_mem_val.load(Ordering::Relaxed)
     }
 }

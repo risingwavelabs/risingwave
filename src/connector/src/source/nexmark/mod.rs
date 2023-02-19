@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -273,9 +273,6 @@ impl From<&NexmarkPropertiesInner> for NexmarkConfig {
         set!(base_time);
         set!(num_categories);
         set!(auction_id_lead);
-        set!(hot_seller_ratio_2);
-        set!(hot_auction_ratio_2);
-        set!(hot_bidder_ratio_2);
         set!(person_proportion);
         set!(auction_proportion);
         set!(bid_proportion);

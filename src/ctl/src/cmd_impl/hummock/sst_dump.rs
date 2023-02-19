@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use bytes::{Buf, Bytes};
 use itertools::Itertools;
 use risingwave_common::row::{Row, RowDeserializer};
 use risingwave_common::types::to_text::ToText;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
@@ -30,14 +31,14 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
 
-use crate::common::HummockServiceOpts;
+use crate::CtlContext;
 
 type TableData = HashMap<u32, TableCatalog>;
 
-pub async fn sst_dump() -> anyhow::Result<()> {
+pub async fn sst_dump(context: &CtlContext) -> anyhow::Result<()> {
     // Retrieves the Sstable store so we can access the SstableMeta
-    let mut hummock_opts = HummockServiceOpts::from_env()?;
-    let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
+    let meta_client = context.meta_client().await?;
+    let hummock = context.hummock_store().await?;
     let version = hummock.inner().get_pinned_version().version();
 
     let table_data = load_table_schemas(&meta_client).await?;
@@ -75,7 +76,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             print_blocks(id, &table_data, sstable_store, sstable_meta).await?;
         }
     }
-    hummock_opts.shutdown().await;
     Ok(())
 }
 
@@ -213,7 +213,7 @@ fn print_table_column(
         .collect_vec();
     let row_deserializer = RowDeserializer::new(data_types);
     let row = row_deserializer.deserialize(user_val)?;
-    for (c, v) in column_desc.iter().zip_eq(row.iter()) {
+    for (c, v) in column_desc.iter().zip_eq_fast(row.iter()) {
         println!("\t\t    column: {} {}", c, v.to_text());
     }
 

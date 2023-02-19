@@ -3,8 +3,8 @@
 
 hakari-package = "workspace-hack"
 
-# Format for `workspace-hack = ...` lines in other Cargo.tomls. Requires cargo-hakari 0.9.8 or above.
-dep-format-version = "2"
+# Format for `workspace-hack = ...` lines in other Cargo.tomls. Requires cargo-hakari 0.9.22 or above.
+dep-format-version = "4"
 
 # Setting workspace.resolver = "2" in the root Cargo.toml is HIGHLY recommended.
 # Hakari works much better with the new feature resolver.
@@ -24,4 +24,7 @@ platforms = [
 # exact-versions = true
 
 [traversal-excludes]
-workspace-members = ["workspace-config"]
+workspace-members = ["workspace-config", "risingwave_object_store"]
+third-party = [
+    { name = "opendal" },
+]

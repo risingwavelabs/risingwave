@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,12 @@ fn main() {
         }
 
         let tokens = Tokenizer::new(&sql).tokenize().unwrap();
-        println!("{:?}", tokens);
+        println!("tokens: {:?}", tokens);
         let ast = Parser::parse_sql(&sql).unwrap();
-        println!("{:?}", ast);
+        println!("ast: {:?}", ast);
+        for stmt in ast {
+            println!("unparse: {}", stmt);
+        }
 
         sql = String::new();
     }

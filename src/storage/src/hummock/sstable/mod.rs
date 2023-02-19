@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,14 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
+use std::ops::BitXor;
 
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
-use bloom::Bloom;
+pub use bloom::BloomFilterBuilder;
+use bloom::BloomFilterReader;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -42,12 +44,15 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
+mod filter;
 mod sstable_id_manager;
 mod utils;
+
 pub use delete_range_aggregator::{
     get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
     RangeTombstonesCollector, SingleDeleteRangeIterator, SstableDeleteRangeIterator,
 };
+pub use filter::FilterBuilder;
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -120,6 +125,7 @@ impl DeleteRangeTombstone {
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
+    pub filter_reader: BloomFilterReader,
 }
 
 impl Debug for Sstable {
@@ -132,36 +138,42 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
-        Self { id, meta }
+    pub fn new(id: HummockSstableId, mut meta: SstableMeta) -> Self {
+        let filter_data = std::mem::take(&mut meta.bloom_filter);
+        let filter_reader = BloomFilterReader::new(filter_data);
+        Self {
+            id,
+            meta,
+            filter_reader,
+        }
     }
 
     pub fn has_bloom_filter(&self) -> bool {
-        !self.meta.bloom_filter.is_empty()
+        !self.filter_reader.is_empty()
     }
 
-    pub fn surely_not_have_dist_key(&self, dist_key: &[u8]) -> bool {
+    pub fn may_match(&self, dist_key: &[u8]) -> bool {
         let enable_bloom_filter: fn() -> bool = || {
             fail_point!("disable_bloom_filter", |_| false);
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
-            self.surely_not_have_hashvalue(hash)
+            self.may_match_hash(hash)
         } else {
-            false
+            true
         }
     }
 
     #[inline(always)]
-    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
-        xxh32::xxh32(dist_key, 0)
+    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u32 {
+        let dist_key_hash = xxh32::xxh32(dist_key, 0);
+        table_id.bitxor(dist_key_hash)
     }
 
     #[inline(always)]
-    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
-        let bloom = Bloom::new(&self.meta.bloom_filter);
-        bloom.surely_not_have_hash(hash)
+    pub fn may_match_hash(&self, hash: u32) -> bool {
+        self.filter_reader.may_match(hash)
     }
 
     pub fn block_count(&self) -> usize {

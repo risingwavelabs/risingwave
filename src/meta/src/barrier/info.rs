@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,13 +64,5 @@ impl BarrierActorInfo {
             .get(node_id)
             .map(|actor_ids| actor_ids.clone().into_iter())
             .unwrap_or_else(|| vec![].into_iter())
-    }
-
-    pub fn nothing_to_do(&self) -> bool {
-        if self.actor_map.is_empty() {
-            assert!(self.actor_map_to_send.is_empty());
-            return true;
-        }
-        false
     }
 }

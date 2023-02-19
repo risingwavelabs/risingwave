@@ -457,7 +457,7 @@ fn parse_compound_expr_1() {
     use self::Expr::*;
     let sql = "a + b * c";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("a + (b * c)", &ast.to_string());
+    assert_eq!("a + b * c", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(Identifier(Ident::new("a"))),
@@ -478,7 +478,7 @@ fn parse_compound_expr_2() {
     use self::Expr::*;
     let sql = "a * b + c";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("(a * b) + c", &ast.to_string());
+    assert_eq!("a * b + c", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(BinaryOp {
@@ -498,7 +498,7 @@ fn parse_unary_math() {
     use self::Expr::*;
     let sql = "- a + - b";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("(- a) + (- b)", &ast.to_string());
+    assert_eq!("- a + - b", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(UnaryOp {
@@ -565,7 +565,7 @@ fn parse_not_precedence() {
     // NOT has higher precedence than OR/AND, so the following must parse as (NOT true) OR true
     let sql = "NOT true OR true";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("(NOT true) OR true", &ast.to_string());
+    assert_eq!("NOT true OR true", &ast.to_string());
     assert_matches!(
         ast,
         Expr::BinaryOp {
@@ -578,7 +578,7 @@ fn parse_not_precedence() {
     // NULL)
     let sql = "NOT a IS NULL";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("NOT (a IS NULL)", &ast.to_string());
+    assert_eq!("NOT a IS NULL", &ast.to_string());
     assert_matches!(
         ast,
         Expr::UnaryOp {
@@ -605,7 +605,7 @@ fn parse_not_precedence() {
     // NOT has lower precedence than LIKE, so the following parses as NOT ('a' NOT LIKE 'b')
     let sql = "NOT 'a' NOT LIKE 'b'";
     let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
-    assert_eq!("NOT ('a' NOT LIKE 'b')", &ast.to_string());
+    assert_eq!("NOT 'a' NOT LIKE 'b'", &ast.to_string());
     assert_eq!(
         ast,
         Expr::UnaryOp {
@@ -795,6 +795,32 @@ fn parse_bitwise_ops() {
             select.projection[0]
         );
     }
+}
+
+#[test]
+fn parse_binary_some() {
+    let select = verified_only_select("SELECT a = SOME(b)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+        }),
+        select.projection[0]
+    );
+}
+
+#[test]
+fn parse_binary_all() {
+    let select = verified_only_select("SELECT a = ALL(b)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+        }),
+        select.projection[0]
+    );
 }
 
 #[test]
@@ -1085,17 +1111,7 @@ fn parse_cast() {
     assert_eq!(
         &Expr::Cast {
             expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::BigInt(None)
-        },
-        expr_from_projection(only(&select.projection))
-    );
-
-    let sql = "SELECT CAST(id AS TINYINT) FROM customer";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &Expr::Cast {
-            expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::TinyInt(None)
+            data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
     );
@@ -1125,7 +1141,7 @@ fn parse_try_cast() {
     assert_eq!(
         &Expr::TryCast {
             expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::BigInt(None)
+            data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
     );
@@ -1236,7 +1252,7 @@ fn parse_create_table() {
                     ColumnDef::new("lng".into(), DataType::Double, None, vec![],),
                     ColumnDef::new(
                         "constrained".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![
                             ColumnOptionDef {
@@ -1263,7 +1279,7 @@ fn parse_create_table() {
                     ),
                     ColumnDef::new(
                         "ref".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -1277,7 +1293,7 @@ fn parse_create_table() {
                     ),
                     ColumnDef::new(
                         "ref2".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -1968,9 +1984,9 @@ fn parse_literal_decimal() {
 
 #[test]
 fn parse_literal_string() {
-    let sql = "SELECT 'one', N'national string', X'deadBEEF'";
+    let sql = r"SELECT 'one', N'national string', X'deadBEEF', E'c style escape string \x3f'";
     let select = verified_only_select(sql);
-    assert_eq!(3, select.projection.len());
+    assert_eq!(4, select.projection.len());
     assert_eq!(
         &Expr::Value(Value::SingleQuotedString("one".to_string())),
         expr_from_projection(&select.projection[0])
@@ -1982,6 +1998,12 @@ fn parse_literal_string() {
     assert_eq!(
         &Expr::Value(Value::HexStringLiteral("deadBEEF".to_string())),
         expr_from_projection(&select.projection[2])
+    );
+    assert_eq!(
+        &Expr::Value(Value::CstyleEscapesString(
+            r"c style escape string \x3f".to_string()
+        )),
+        expr_from_projection(&select.projection[3])
     );
 
     one_statement_parses_to("SELECT x'deadBEEF'", "SELECT X'deadBEEF'");
@@ -2898,6 +2920,7 @@ fn parse_create_view() {
             or_replace,
             materialized,
             with_options,
+            emit_mode,
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(Vec::<Ident>::new(), columns);
@@ -2905,6 +2928,7 @@ fn parse_create_view() {
             assert!(!materialized);
             assert!(!or_replace);
             assert_eq!(with_options, vec![]);
+            assert_eq!(emit_mode, None);
         }
         _ => unreachable!(),
     }
@@ -2944,13 +2968,15 @@ fn parse_create_view_with_columns() {
             with_options,
             query,
             materialized,
+            emit_mode,
         } => {
             assert_eq!("v", name.to_string());
             assert_eq!(columns, vec![Ident::new("has"), Ident::new("cols")]);
             assert_eq!(with_options, vec![]);
             assert_eq!("SELECT 1, 2", query.to_string());
             assert!(!materialized);
-            assert!(!or_replace)
+            assert!(!or_replace);
+            assert_eq!(emit_mode, None);
         }
         _ => unreachable!(),
     }
@@ -2966,13 +2992,15 @@ fn parse_create_or_replace_view() {
             with_options,
             query,
             materialized,
+            emit_mode,
         } => {
             assert_eq!("v", name.to_string());
             assert_eq!(columns, vec![]);
             assert_eq!(with_options, vec![]);
             assert_eq!("SELECT 1", query.to_string());
             assert!(!materialized);
-            assert!(or_replace)
+            assert!(or_replace);
+            assert_eq!(emit_mode, None);
         }
         _ => unreachable!(),
     }
@@ -2993,13 +3021,15 @@ fn parse_create_or_replace_materialized_view() {
             with_options,
             query,
             materialized,
+            emit_mode,
         } => {
             assert_eq!("v", name.to_string());
             assert_eq!(columns, vec![]);
             assert_eq!(with_options, vec![]);
             assert_eq!("SELECT 1", query.to_string());
             assert!(materialized);
-            assert!(or_replace)
+            assert!(or_replace);
+            assert_eq!(emit_mode, None);
         }
         _ => unreachable!(),
     }
@@ -3016,6 +3046,7 @@ fn parse_create_materialized_view() {
             query,
             materialized,
             with_options,
+            emit_mode,
         } => {
             assert_eq!("myschema.myview", name.to_string());
             assert_eq!(Vec::<Ident>::new(), columns);
@@ -3023,6 +3054,58 @@ fn parse_create_materialized_view() {
             assert!(materialized);
             assert_eq!(with_options, vec![]);
             assert!(!or_replace);
+            assert_eq!(emit_mode, None);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_create_materialized_view_emit_immediately() {
+    let sql = "CREATE MATERIALIZED VIEW myschema.myview EMIT IMMEDIATELY AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateView {
+            name,
+            or_replace,
+            columns,
+            query,
+            materialized,
+            with_options,
+            emit_mode,
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(Vec::<Ident>::new(), columns);
+            assert_eq!("SELECT foo FROM bar", query.to_string());
+            assert!(materialized);
+            assert_eq!(with_options, vec![]);
+            assert!(!or_replace);
+            assert_eq!(emit_mode, Some(EmitMode::Immediately));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_create_materialized_view_emit_on_window_close() {
+    let sql =
+        "CREATE MATERIALIZED VIEW myschema.myview EMIT ON WINDOW CLOSE AS SELECT foo FROM bar";
+    match verified_stmt(sql) {
+        Statement::CreateView {
+            name,
+            or_replace,
+            columns,
+            query,
+            materialized,
+            with_options,
+            emit_mode,
+        } => {
+            assert_eq!("myschema.myview", name.to_string());
+            assert_eq!(Vec::<Ident>::new(), columns);
+            assert_eq!("SELECT foo FROM bar", query.to_string());
+            assert!(materialized);
+            assert_eq!(with_options, vec![]);
+            assert!(!or_replace);
+            assert_eq!(emit_mode, Some(EmitMode::OnWindowClose));
         }
         _ => unreachable!(),
     }
@@ -3480,7 +3563,7 @@ fn parse_create_index() {
 
 #[test]
 fn parse_grant() {
-    let sql = "GRANT SELECT, INSERT, UPDATE (shape, size), USAGE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON abc, def TO xyz, m WITH GRANT OPTION GRANTED BY jj";
+    let sql = "GRANT SELECT, INSERT, UPDATE (shape, size), EXECUTE, TEMPORARY, USAGE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON abc, def TO xyz, m WITH GRANT OPTION GRANTED BY jj";
     match verified_stmt(sql) {
         Statement::Grant {
             privileges,
@@ -3498,6 +3581,8 @@ fn parse_grant() {
                         Action::Update {
                             columns: Some(vec![Ident::new("shape"), Ident::new("size")])
                         },
+                        Action::Execute,
+                        Action::Temporary,
                         Action::Usage,
                         Action::Delete,
                         Action::Truncate,

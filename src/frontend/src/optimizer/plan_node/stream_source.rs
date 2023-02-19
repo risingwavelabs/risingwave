@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +14,13 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{SourceNode, StreamSource as ProstStreamSource};
 
-use super::{LogicalSource, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -32,6 +33,14 @@ pub struct StreamSource {
 
 impl StreamSource {
     pub fn new(logical: LogicalSource) -> Self {
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
+        if let Some(catalog) = logical.source_catalog() {
+            catalog
+                .watermark_descs
+                .iter()
+                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
+        }
+
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
@@ -43,6 +52,7 @@ impl StreamSource {
                 .catalog
                 .as_ref()
                 .map_or(true, |s| s.append_only),
+            watermark_columns,
         );
         Self { base, logical }
     }
@@ -101,3 +111,5 @@ impl StreamNode for StreamSource {
         ProstStreamNode::Source(SourceNode { source_inner })
     }
 }
+
+impl ExprRewritable for StreamSource {}

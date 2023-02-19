@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
-use risingwave_sqlparser::ast::{Statement, TableAlias};
+use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
+mod create;
 mod delete;
 mod expr;
 mod insert;
@@ -36,9 +37,10 @@ pub use bind_context::{BindContext, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
+use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
@@ -49,15 +51,20 @@ pub use update::BoundUpdate;
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::ViewId;
 use crate::session::{AuthContext, SessionImpl};
+
+pub type ShareId = usize;
 
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
     db_name: String,
+    session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
+    bind_timestamp_ms: u64,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -73,28 +80,40 @@ pub struct Binder {
 
     next_subquery_id: usize,
     next_values_id: usize,
-    /// Map the cte's name to its Relation::Subquery.
-    cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
+    /// The `ShareId` is used to identify the share relation which could be a CTE, a source, a view
+    /// and so on.
+    next_share_id: ShareId,
 
     search_path: SearchPath,
     /// Whether the Binder is binding an MV.
     in_create_mv: bool,
+
+    /// `ShareId`s identifying shared views.
+    shared_views: HashMap<ViewId, ShareId>,
 }
 
 impl Binder {
     fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
+        let now_ms = session
+            .env()
+            .hummock_snapshot_manager()
+            .latest_snapshot_current_epoch()
+            .as_unix_millis();
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
+            session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
+            bind_timestamp_ms: now_ms,
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
             next_values_id: 0,
-            cte_to_relation: HashMap::new(),
+            next_share_id: 0,
             search_path: session.config().get_search_path(),
             in_create_mv,
+            shared_views: HashMap::new(),
         }
     }
 
@@ -113,6 +132,7 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
+        self.context.cte_to_relation = new_context.cte_to_relation.clone();
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -130,6 +150,7 @@ impl Binder {
 
     fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
+        self.context.cte_to_relation = new_context.cte_to_relation.clone();
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -170,6 +191,12 @@ impl Binder {
     fn next_values_id(&mut self) -> usize {
         let id = self.next_values_id;
         self.next_values_id += 1;
+        id
+    }
+
+    fn next_share_id(&mut self) -> ShareId {
+        let id = self.next_share_id;
+        self.next_share_id += 1;
         id
     }
 }

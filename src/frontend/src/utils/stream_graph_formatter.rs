@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -180,10 +180,6 @@ impl StreamGraphFormatter {
                         })
                         .join(", ")
                 )),
-                stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
                 stream_node::NodeBody::HashJoin(node) => Some(format!(
                     "left table: {}, right table {},{}{}",
                     self.add_table(node.get_left_table().unwrap()),
@@ -201,9 +197,9 @@ impl StreamGraphFormatter {
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
                 )),
-                stream_node::NodeBody::Lookup(node) => Some(format!(
-                    "arrange table: {}",
-                    self.add_table(node.get_arrangement_table().unwrap())
+                stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(
+                    "state table: {}",
+                    self.add_table(node.get_table().unwrap())
                 )),
                 stream_node::NodeBody::Arrange(node) => Some(format!(
                     "arrange table: {}",
@@ -217,6 +213,14 @@ impl StreamGraphFormatter {
                 stream_node::NodeBody::GroupTopN(node) => Some(format!(
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
+                )),
+                stream_node::NodeBody::AppendOnlyGroupTopN(node) => Some(format!(
+                    "state table: {}",
+                    self.add_table(node.get_table().unwrap())
+                )),
+                stream_node::NodeBody::Now(node) => Some(format!(
+                    "state table: {}",
+                    self.add_table(node.get_state_table().unwrap())
                 )),
                 _ => None,
             };

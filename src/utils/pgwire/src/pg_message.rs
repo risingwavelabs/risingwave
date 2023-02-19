@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,15 +82,8 @@ pub struct FeQueryMessage {
 
 #[derive(Debug)]
 pub struct FeBindMessage {
-    // param_format_code:
-    //  false: text
-    //  true: binary
-    pub param_format_code: bool,
-
-    // result_format_code:
-    //  false: text
-    //  true: binary
-    pub result_format_code: bool,
+    pub param_format_codes: Vec<i16>,
+    pub result_format_codes: Vec<i16>,
 
     pub params: Vec<Bytes>,
     pub portal_name: Bytes,
@@ -175,22 +168,10 @@ impl FeBindMessage {
     pub fn parse(mut buf: Bytes) -> Result<FeMessage> {
         let portal_name = read_null_terminated(&mut buf)?;
         let statement_name = read_null_terminated(&mut buf)?;
-        // Read FormatCode
-        let len = buf.get_i16();
 
-        let param_format_code = if len == 0 || len == 1 {
-            if len == 0 {
-                false
-            } else {
-                buf.get_i16() == 1
-            }
-        } else {
-            let first_value = buf.get_i16();
-            for _ in 1..len {
-                assert!(buf.get_i16() == first_value,"Only support uniform param format (TEXT or BINARY), can't support mix format now.");
-            }
-            first_value == 1
-        };
+        let len = buf.get_i16();
+        let param_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
         // Read Params
         let len = buf.get_i16();
         let params = (0..len)
@@ -200,34 +181,12 @@ impl FeBindMessage {
             })
             .collect();
 
-        // Read ResultFormatCode
-        // result format code depend on following rule:
-        // - If the length is 0, format is false(text).
-        // - If the length is 1, format is decide by format_codes[0].
-        // - If the length > 1, each column can have their own format and it depend on according
-        //   format code. But RisingWave can't support return col with different format now, when
-        //   length>1, we guarantee all format code is the same (0,0,0..) or (1,1,1,...).
         let len = buf.get_i16();
-        let format_codes = (0..len).map(|_| buf.get_i16()).collect::<Vec<_>>();
-        let all_elements_are_equal = format_codes.iter().all(|&x| x == format_codes[0]);
-
-        if !all_elements_are_equal {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Only support uniform result format (TEXT or BINARY), can't support mix format now.",
-            ));
-        }
-
-        let result_format_code = if len == 0 {
-            // default format:text
-            false
-        } else {
-            format_codes[0] == 1
-        };
+        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
 
         Ok(FeMessage::Bind(FeBindMessage {
-            param_format_code,
-            result_format_code,
+            param_format_codes,
+            result_format_codes,
             params,
             portal_name,
             statement_name,
@@ -332,8 +291,14 @@ impl FeStartupMessage {
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let len = stream.read_i32().await?;
         let protocol_num = stream.read_i32().await?;
-        let payload_len = len - 8;
-        let mut payload = vec![0; payload_len as usize];
+        let payload_len = (len - 8) as usize;
+        if payload_len >= isize::MAX as usize {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Payload length has exceed usize::MAX {:?}", payload_len),
+            ));
+        }
+        let mut payload = vec![0; payload_len];
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
@@ -506,8 +471,14 @@ impl<'a> BeMessage<'a> {
             // +-----+-----------+-----------------+
             BeMessage::CommandComplete(cmd) => {
                 let rows_cnt = cmd.rows_cnt;
-                let stmt_type = cmd.stmt_type;
+                let mut stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                stmt_type = match stmt_type {
+                    StatementType::INSERT_RETURNING => StatementType::INSERT,
+                    StatementType::DELETE_RETURNING => StatementType::DELETE,
+                    StatementType::UPDATE_RETURNING => StatementType::UPDATE,
+                    s => s,
+                };
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");

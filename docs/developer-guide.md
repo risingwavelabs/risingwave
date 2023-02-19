@@ -9,39 +9,43 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 ## Table of contents
 
-- [Developer guide](#developer-guide)
-  - [Table of contents](#table-of-contents)
-  - [Read the design docs](#read-the-design-docs)
-  - [Learn about the code structure](#learn-about-the-code-structure)
-  - [Set up the development environment](#set-up-the-development-environment)
-  - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
-    - [Configure additional components](#configure-additional-components)
-    - [Configure system variables](#configure-system-variables)
-    - [Start the playground with RiseDev](#start-the-playground-with-risedev)
-    - [Start the playground with cargo](#start-the-playground-with-cargo)
-  - [Develop the dashboard](#develop-the-dashboard)
-    - [Dashboard v1](#dashboard-v1)
-    - [Dashboard v2](#dashboard-v2)
-  - [Observability components](#observability-components)
-    - [Cluster Control](#cluster-control)
-    - [Monitoring](#monitoring)
-    - [Tracing](#tracing)
-    - [Dashboard](#dashboard)
-    - [Logging](#logging)
-  - [Test your code changes](#test-your-code-changes)
-    - [Lint](#lint)
-    - [Unit tests](#unit-tests)
-    - [Planner tests](#planner-tests)
-    - [End-to-end tests](#end-to-end-tests)
-    - [End-to-end tests on CI](#end-to-end-tests-on-ci)
-    - [DocSlt tests](#docslt-tests)
-    - [Deterministic simulation tests](#deterministic-simulation-tests)
-  - [Miscellaneous checks](#miscellaneous-checks)
-  - [Update Grafana dashboard](#update-grafana-dashboard)
-  - [Add new files](#add-new-files)
-  - [Add new dependencies](#add-new-dependencies)
-  - [Submit PRs](#submit-prs)
+<!--
+Table of contents generated with markdown-toc:
+http://ecotrust-canada.github.io/markdown-toc/
+-->
 
+- [Read the design docs](#read-the-design-docs)
+- [Learn about the code structure](#learn-about-the-code-structure)
+- [Set up the development environment](#set-up-the-development-environment)
+- [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
+  * [Configure additional components](#configure-additional-components)
+  * [Configure system variables](#configure-system-variables)
+  * [Start the playground with RiseDev](#start-the-playground-with-risedev)
+  * [Start the playground with cargo](#start-the-playground-with-cargo)
+- [Debug playground using vscode](#debug-playground-using-vscode)
+- [Develop the dashboard](#develop-the-dashboard)
+  * [Dashboard v1](#dashboard-v1)
+  * [Dashboard v2](#dashboard-v2)
+- [Observability components](#observability-components)
+  * [Cluster Control](#cluster-control)
+  * [Monitoring](#monitoring)
+  * [Tracing](#tracing)
+  * [Dashboard](#dashboard)
+  * [Logging](#logging)
+- [Test your code changes](#test-your-code-changes)
+  * [Lint](#lint)
+  * [Unit tests](#unit-tests)
+  * [Planner tests](#planner-tests)
+  * [End-to-end tests](#end-to-end-tests)
+  * [End-to-end tests on CI](#end-to-end-tests-on-ci)
+  * [DocSlt tests](#docslt-tests)
+  * [Deterministic simulation tests](#deterministic-simulation-tests)
+- [Miscellaneous checks](#miscellaneous-checks)
+- [Update Grafana dashboard](#update-grafana-dashboard)
+- [Add new files](#add-new-files)
+- [Add new dependencies](#add-new-dependencies)
+- [Submit PRs](#submit-prs)
+- [Profiling](#profiling)
 
 ## Read the design docs
 
@@ -63,10 +67,10 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 
 * Rust toolchain
 * CMake
-* protobuf
+* protobuf (>= 3.12.0)
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
-* Tmux
+* Tmux (>= v3.2a)
 * LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
@@ -194,6 +198,10 @@ Then, connect to the playground instance via:
 psql -h localhost -p 4566 -d dev -U root
 ```
 
+## Debug playground using vscode 
+
+To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`. 
+
 ## Develop the dashboard
 
 Currently, RisingWave has two versions of dashboards. You can use RiseDev config to select which version to use.
@@ -229,7 +237,7 @@ cargo run --bin risectl -- --help
 ... or
 
 ```
-./risingwave risectl --help
+./risedev ctl --help
 ```
 
 for more information.
@@ -299,7 +307,7 @@ Use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run R
 sqllogictest installation is included when you install test tools with the `./risedev install-tools` command. You may also install it with:
 
 ```shell
-cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest
+cargo install sqllogictest-bin --locked
 ```
 
 Before running end-to-end tests, you will need to start a full cluster first:
@@ -447,16 +455,20 @@ license-eye -c .licenserc.yaml header fix
 
 ## Add new dependencies
 
-To avoid rebuild some common dependencies across different crates in workspace, use
+`./risedev check-hakari`: To avoid rebuild some common dependencies across different crates in workspace, use
 [cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
 are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
 after deps get updated.
 
-Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
-workspace.
+`./risedev check-udeps`: Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in workspace.
 
-And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+`./risedev check-dep-sort`: Use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
 ## Submit PRs
 
 Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
+
+## Profiling
+
+- [CPU Profiling Guide](./cpu-profiling.md)
+- [Memory (Heap) Profiling Guide](./memory-profiling.md)

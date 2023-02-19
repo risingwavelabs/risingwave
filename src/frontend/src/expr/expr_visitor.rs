@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-    TableFunction, WindowFunction,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// Traverse an expression tree.
@@ -41,6 +41,7 @@ pub trait ExprVisitor<R: Default> {
             ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
+            ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> R {
@@ -83,6 +84,14 @@ pub trait ExprVisitor<R: Default> {
             .unwrap_or_default()
     }
     fn visit_window_function(&mut self, func_call: &WindowFunction) -> R {
+        func_call
+            .args
+            .iter()
+            .map(|expr| self.visit_expr(expr))
+            .reduce(Self::merge)
+            .unwrap_or_default()
+    }
+    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> R {
         func_call
             .args
             .iter()

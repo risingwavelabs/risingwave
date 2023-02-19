@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl Worker {
     }
 
     pub fn worker_type(&self) -> WorkerType {
-        WorkerType::from_i32(self.worker_node.r#type).expect("Invalid worker type")
+        self.worker_node.r#type()
     }
 
     pub fn expire_at(&self) -> u64 {

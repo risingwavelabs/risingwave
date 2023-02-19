@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ mod visibility_mode;
 
 use std::ops::Deref;
 
+use chrono_tz::Tz;
+use derivative::{self, Derivative};
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
@@ -30,7 +32,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 13] = [
+const CONFIG_KEYS: [&str; 19] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -44,6 +46,12 @@ const CONFIG_KEYS: [&str; 13] = [
     "QUERY_EPOCH",
     "RW_BATCH_ENABLE_SORT_AGG",
     "VISIBILITY_MODE",
+    "TIMEZONE",
+    "STREAMING_PARALLELISM",
+    "RW_STREAMING_ENABLE_DELTA_JOIN",
+    "RW_ENABLE_TWO_PHASE_AGG",
+    "RW_FORCE_TWO_PHASE_AGG",
+    "RW_ENABLE_SHARE_PLAN",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -61,6 +69,12 @@ const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 const QUERY_EPOCH: usize = 10;
 const BATCH_ENABLE_SORT_AGG: usize = 11;
 const VISIBILITY_MODE: usize = 12;
+const TIMEZONE: usize = 13;
+const STREAMING_PARALLELISM: usize = 14;
+const STREAMING_ENABLE_DELTA_JOIN: usize = 15;
+const ENABLE_TWO_PHASE_AGG: usize = 16;
+const FORCE_TWO_PHASE_AGG: usize = 17;
+const RW_ENABLE_SHARE_PLAN: usize = 18;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -254,8 +268,15 @@ type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, true>;
 type BatchEnableSortAgg = ConfigBool<BATCH_ENABLE_SORT_AGG, true>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
+type Timezone = ConfigString<TIMEZONE>;
+type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
+type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
+type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
+type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
+type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 
-#[derive(Default)]
+#[derive(Derivative)]
+#[derivative(Default)]
 pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
@@ -300,6 +321,31 @@ pub struct ConfigMap {
 
     /// select as of specific epoch
     query_epoch: QueryEpoch,
+
+    /// Session timezone. Defaults to UTC.
+    #[derivative(Default(value = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
+    timezone: Timezone,
+
+    /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as
+    /// streaming parallelism.
+    streaming_parallelism: StreamingParallelism,
+
+    /// Enable delta join in streaming query. Defaults to false.
+    streaming_enable_delta_join: StreamingEnableDeltaJoin,
+
+    /// Enable two phase agg optimization. Defaults to true.
+    /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
+    enable_two_phase_agg: EnableTwoPhaseAgg,
+
+    /// Force two phase agg optimization whenever there's a choice between
+    /// optimizations. Defaults to false.
+    /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
+    force_two_phase_agg: ForceTwoPhaseAgg,
+
+    /// Enable sharing of common sub-plans.
+    /// This means that DAG structured query plans can be constructed,
+    /// rather than only tree structured query plans.
+    enable_share_plan: EnableSharePlan,
 }
 
 impl ConfigMap {
@@ -329,6 +375,30 @@ impl ConfigMap {
             self.visibility_mode = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             self.query_epoch = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
+            let raw: Timezone = val.as_slice().try_into()?;
+            // Check if the provided string is a valid timezone.
+            Tz::from_str_insensitive(&raw.0).map_err(|_e| ErrorCode::InvalidConfigValue {
+                config_entry: Timezone::entry_name().to_string(),
+                config_value: raw.0.to_string(),
+            })?;
+            self.timezone = raw;
+        } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
+            self.streaming_parallelism = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
+            self.streaming_enable_delta_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
+            self.enable_two_phase_agg = val.as_slice().try_into()?;
+            if !*self.enable_two_phase_agg {
+                self.force_two_phase_agg = ConfigBool(false);
+            }
+        } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
+            self.force_two_phase_agg = val.as_slice().try_into()?;
+            if *self.force_two_phase_agg {
+                self.enable_two_phase_agg = ConfigBool(true);
+            }
+        } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
+            self.enable_share_plan = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -363,6 +433,18 @@ impl ConfigMap {
             Ok(self.transaction_isolation_level.to_string())
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             Ok(self.query_epoch.to_string())
+        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
+            Ok(self.timezone.clone())
+        } else if key.eq_ignore_ascii_case(StreamingParallelism::entry_name()) {
+            Ok(self.streaming_parallelism.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
+            Ok(self.streaming_enable_delta_join.to_string())
+        } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
+            Ok(self.enable_two_phase_agg.to_string())
+        } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
+            Ok(self.force_two_phase_agg.to_string())
+        } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
+            Ok(self.enable_share_plan.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -425,11 +507,41 @@ impl ConfigMap {
                 setting : self.visibility_mode.to_string(),
                 description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
             },
-            VariableInfo {
+            VariableInfo{
                 name: QueryEpoch::entry_name().to_lowercase(),
                 setting : self.query_epoch.to_string(),
                 description : String::from("Sets the historical epoch for querying data. If 0, querying latest data.")
-            }
+            },
+            VariableInfo{
+                name : Timezone::entry_name().to_lowercase(),
+                setting : self.timezone.to_string(),
+                description : String::from("The session timezone. This will affect how timestamps are cast into timestamps with timezone.")
+            },
+            VariableInfo{
+                name : StreamingParallelism::entry_name().to_lowercase(),
+                setting : self.streaming_parallelism.to_string(),
+                description: String::from("Sets the parallelism for streaming. If 0, use default value.")
+            },
+            VariableInfo{
+                name : StreamingEnableDeltaJoin::entry_name().to_lowercase(),
+                setting : self.streaming_enable_delta_join.to_string(),
+                description: String::from("Enable delta join in streaming query.")
+            },
+            VariableInfo{
+                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
+                setting : self.enable_two_phase_agg.to_string(),
+                description: String::from("Enable two phase aggregation.")
+            },
+            VariableInfo{
+                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
+                setting : self.enable_two_phase_agg.to_string(),
+                description: String::from("Force two phase aggregation.")
+            },
+            VariableInfo{
+                name : EnableSharePlan::entry_name().to_lowercase(),
+                setting : self.enable_share_plan.to_string(),
+                description: String::from("Enable sharing of common sub-plans. This means that DAG structured query plans can be constructed, rather than only tree structured query plans.")
+            },
         ]
     }
 
@@ -486,5 +598,32 @@ impl ConfigMap {
             return Some((self.query_epoch.0).into());
         }
         None
+    }
+
+    pub fn get_timezone(&self) -> &str {
+        &self.timezone
+    }
+
+    pub fn get_streaming_parallelism(&self) -> Option<u64> {
+        if self.streaming_parallelism.0 != 0 {
+            return Some(self.streaming_parallelism.0);
+        }
+        None
+    }
+
+    pub fn get_streaming_enable_delta_join(&self) -> bool {
+        *self.streaming_enable_delta_join
+    }
+
+    pub fn get_enable_two_phase_agg(&self) -> bool {
+        *self.enable_two_phase_agg
+    }
+
+    pub fn get_force_two_phase_agg(&self) -> bool {
+        *self.force_two_phase_agg
+    }
+
+    pub fn get_enable_share_plan(&self) -> bool {
+        *self.enable_share_plan
     }
 }

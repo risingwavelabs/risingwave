@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,12 +134,13 @@ pub mod IdCategory {
     pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
-    pub const Source: IdCategoryType = 10;
+    pub const _Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
-    pub const Sink: IdCategoryType = 13;
-    pub const Index: IdCategoryType = 14;
+    pub const _Sink: IdCategoryType = 13;
+    pub const _Index: IdCategoryType = 14;
     pub const CompactionGroup: IdCategoryType = 15;
+    pub const Function: IdCategoryType = 16;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -152,6 +153,7 @@ pub struct IdGeneratorManager<S> {
     database: Arc<StoredIdGenerator<S>>,
     schema: Arc<StoredIdGenerator<S>>,
     table: Arc<StoredIdGenerator<S>>,
+    function: Arc<StoredIdGenerator<S>>,
     worker: Arc<StoredIdGenerator<S>>,
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
@@ -181,6 +183,7 @@ where
                 )
                 .await,
             ),
+            function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))
                     .await,
@@ -226,6 +229,7 @@ where
             IdCategory::Database => &self.database,
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
+            IdCategory::Function => &self.function,
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,9 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::enable_jemalloc_on_linux;
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() {
@@ -25,7 +24,7 @@ fn main() {
 
     let opts = risingwave_compactor::CompactorOpts::parse();
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
     risingwave_rt::main_okk(risingwave_compactor::start(opts))
 }

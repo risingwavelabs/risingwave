@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,26 +15,25 @@
 use std::assert_matches::assert_matches;
 use std::collections::HashSet;
 use std::fmt;
+use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::{
+    SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableType};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
+use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::WithOptions;
-
-/// The first column id to allocate for a new materialized view.
-///
-/// Note: not starting from 0 helps us to debug misusing of the column id and the index.
-const COLUMN_ID_BASE: i32 = 1000;
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -90,7 +89,7 @@ impl StreamMaterialize {
                 let mut c = ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         field,
-                        i as i32 + COLUMN_ID_BASE,
+                        i as i32 + USER_COLUMN_ID_OFFSET,
                     ),
                     is_hidden: !user_cols.contains(i),
                 };
@@ -120,6 +119,7 @@ impl StreamMaterialize {
             false,
             None,
             table_type,
+            None,
         )?;
 
         Ok(Self::new(input, table))
@@ -140,6 +140,7 @@ impl StreamMaterialize {
         definition: String,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
+        version: Option<TableVersion>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -152,6 +153,7 @@ impl StreamMaterialize {
             handle_pk_conflict,
             row_id_index,
             TableType::Table,
+            version,
         )?;
 
         Ok(Self::new(input, table))
@@ -199,17 +201,22 @@ impl StreamMaterialize {
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         table_type: TableType,
+        version: Option<TableVersion>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
+        let watermark_columns = input.watermark_columns().clone();
         // Note(congyi): avoid pk duplication
         let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
         let schema = input.schema();
         let distribution = input.distribution();
 
-        // Assert the uniqueness of column names, including hidden columns.
+        // Assert the uniqueness of column names and IDs, including hidden columns.
         if let Some(name) = columns.iter().map(|c| c.name()).duplicates().next() {
-            panic!("column \"{}\" specified more than once", name);
+            panic!("duplicated column name \"{name}\"");
+        }
+        if let Some(id) = columns.iter().map(|c| c.column_id()).duplicates().next() {
+            panic!("duplicated column ID {id}");
         }
         // Assert that the schema of given `columns` is correct.
         assert_eq!(
@@ -262,6 +269,8 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
+            version,
+            watermark_columns,
         })
     }
 
@@ -276,14 +285,41 @@ impl StreamMaterialize {
     }
 
     /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
-    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        let Self {
-            base,
-            input,
-            mut table,
-        } = self;
-        table.properties = properties;
-        StreamSink::with_base(input, table, base)
+    pub fn rewrite_into_sink(self, properties: WithOptions) -> Result<StreamSink> {
+        let frontend_derived_append_only = self.table.append_only;
+        let user_defined_append_only =
+            properties.value_eq_ignore_case(SINK_FORMAT_OPTION, SINK_FORMAT_APPEND_ONLY);
+        let user_force_append_only =
+            properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true");
+
+        let sink_type = match (
+            frontend_derived_append_only,
+            user_defined_append_only,
+            user_force_append_only,
+        ) {
+            (true, true, _) => SinkType::AppendOnly,
+            (false, true, true) => SinkType::ForceAppendOnly,
+            (_, false, false) => SinkType::Upsert,
+            (false, true, false) => {
+                return Err(ErrorCode::SinkError(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in WITH options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
+                )))
+                .into());
+            }
+            (_, false, true) => {
+                return Err(ErrorCode::SinkError(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Cannot force the sink to be append-only without \"format='append_only'\"in WITH options",
+                )))
+                .into());
+            }
+        };
+
+        Ok(StreamSink::new(
+            self.input,
+            self.table.to_sink_desc(properties, sink_type),
+        ))
     }
 }
 
@@ -355,3 +391,5 @@ impl StreamNode for StreamMaterialize {
         })
     }
 }
+
+impl ExprRewritable for StreamMaterialize {}

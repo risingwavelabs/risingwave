@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -163,7 +163,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: format!("TopNExecutorNew {:X}", executor_id),
+                identity: format!("TopNExecutor {:X}", executor_id),
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
@@ -226,6 +226,11 @@ where
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
+    }
+
+    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
+        // TODO(yuhao): handle watermark
+        None
     }
 }
 
@@ -729,8 +734,12 @@ mod tests {
     }
 
     mod test2 {
+        use risingwave_storage::memory::MemoryStateStore;
+
         use super::*;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::ActorContext;
+
         fn create_source_new() -> Box<MockSource> {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -932,7 +941,8 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_offset_and_limit_new_after_recovery() {
-            let state_table = create_in_memory_state_table(
+            let state_store = MemoryStateStore::new();
+            let state_table = create_in_memory_state_table_from_state_store(
                 &[
                     DataType::Int64,
                     DataType::Int64,
@@ -941,6 +951,7 @@ mod tests {
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &pk_indices(),
+                state_store.clone(),
             )
             .await;
             let top_n_executor = Box::new(
@@ -951,7 +962,7 @@ mod tests {
                     (1, 3),
                     order_by(),
                     1,
-                    state_table.clone(),
+                    state_table,
                 )
                 .unwrap(),
             );
@@ -982,6 +993,19 @@ mod tests {
                 top_n_executor.next().await.unwrap().unwrap(),
                 Message::Barrier(_)
             );
+
+            let state_table = create_in_memory_state_table_from_state_store(
+                &[
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                    DataType::Int64,
+                ],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &pk_indices(),
+                state_store,
+            )
+            .await;
 
             // recovery
             let top_n_executor_after_recovery = Box::new(
@@ -1035,8 +1059,12 @@ mod tests {
     }
 
     mod test_with_ties {
+        use risingwave_storage::memory::MemoryStateStore;
+
         use super::*;
+        use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::ActorContext;
+
         fn create_source() -> Box<MockSource> {
             let mut chunks = vec![
                 StreamChunk::from_pretty(
@@ -1246,10 +1274,12 @@ mod tests {
 
         #[tokio::test]
         async fn test_with_ties_recovery() {
-            let state_table = create_in_memory_state_table(
+            let state_store = MemoryStateStore::new();
+            let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
                 &pk_indices(),
+                state_store.clone(),
             )
             .await;
             let top_n_executor = Box::new(
@@ -1260,7 +1290,7 @@ mod tests {
                     (0, 3),
                     order_by(),
                     1,
-                    state_table.clone(),
+                    state_table,
                 )
                 .unwrap(),
             );
@@ -1297,6 +1327,14 @@ mod tests {
                 top_n_executor.next().await.unwrap().unwrap(),
                 Message::Barrier(_)
             );
+
+            let state_table = create_in_memory_state_table_from_state_store(
+                &[DataType::Int64, DataType::Int64],
+                &[OrderType::Ascending, OrderType::Ascending],
+                &pk_indices(),
+                state_store,
+            )
+            .await;
 
             // recovery
             let top_n_executor_after_recovery = Box::new(

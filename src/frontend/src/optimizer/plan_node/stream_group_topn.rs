@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
@@ -35,13 +36,28 @@ impl StreamGroupTopN {
         assert!(!logical.group_key().is_empty());
         assert!(logical.limit() > 0);
         let input = logical.input();
+        let schema = input.schema().clone();
+
+        let watermark_columns = if input.append_only() {
+            input.watermark_columns().clone()
+        } else {
+            let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+            for &idx in logical.group_key() {
+                if input.watermark_columns().contains(idx) {
+                    watermark_columns.insert(idx);
+                }
+            }
+            watermark_columns
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
-            input.schema().clone(),
+            schema,
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             false,
+            watermark_columns,
         );
         StreamGroupTopN {
             base,
@@ -78,6 +94,7 @@ impl StreamNode for StreamGroupTopN {
             .logical
             .infer_internal_table_catalog(self.vnode_col_idx)
             .with_id(state.gen_table_id_wrapped());
+        assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {
             limit: self.limit(),
             offset: self.offset(),
@@ -86,14 +103,21 @@ impl StreamNode for StreamGroupTopN {
             table: Some(table.to_internal_table_prost()),
             order_by: self.topn_order().to_protobuf(),
         };
-
-        ProstStreamNode::GroupTopN(group_topn_node)
+        if self.input().append_only() {
+            ProstStreamNode::AppendOnlyGroupTopN(group_topn_node)
+        } else {
+            ProstStreamNode::GroupTopN(group_topn_node)
+        }
     }
 }
 
 impl fmt::Display for StreamGroupTopN {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamGroupTopN");
+        let mut builder = f.debug_struct(if self.input().append_only() {
+            "StreamAppendOnlyGroupTopN"
+        } else {
+            "StreamGroupTopN"
+        });
         let input = self.input();
         let input_schema = input.schema();
         builder.field(
@@ -128,3 +152,5 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
         Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }
+
+impl ExprRewritable for StreamGroupTopN {}

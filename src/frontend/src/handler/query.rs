@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::types::Format;
 use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -28,7 +29,7 @@ use risingwave_sqlparser::ast::Statement;
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::flush::do_flush;
-use crate::handler::privilege::{check_privileges, resolve_privileges};
+use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
@@ -54,7 +55,7 @@ pub fn gen_batch_query_plan(
     };
 
     let check_items = resolve_privileges(&bound);
-    check_privileges(session, &check_items)?;
+    session.check_privileges(&check_items)?;
 
     let mut planner = Planner::new(context);
 
@@ -93,18 +94,20 @@ pub fn gen_batch_query_plan(
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
     let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
+    let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-    let (query, query_mode, output_schema) = {
+    let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
+        let context = plan.plan_base().ctx.clone();
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
             plan.explain_to_string()?,
@@ -113,9 +116,12 @@ pub async fn handle_query(
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
-        );
-        (plan_fragmenter.split(plan)?, query_mode, schema)
+            plan,
+        )?;
+        context.append_notice(&mut notice);
+        (plan_fragmenter, query_mode, schema)
     };
+    let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let pg_descs = output_schema
@@ -128,6 +134,9 @@ pub async fn handle_query(
         .iter()
         .map(|f| f.data_type())
         .collect_vec();
+
+    // Used in counting row count.
+    let first_field_format = formats.first().copied().unwrap_or(Format::Text);
 
     let mut row_stream = {
         let query_epoch = session.config().get_query_epoch();
@@ -145,32 +154,43 @@ pub async fn handle_query(
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
-                format,
+                formats,
+                session.clone(),
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
                     distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
-                    format,
+                    formats,
+                    session.clone(),
                 ))
             }
         }
     };
 
-    let rows_count = match stmt_type {
-        StatementType::SELECT => None,
+    let rows_count: Option<i32> = match stmt_type {
+        StatementType::SELECT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE_RETURNING => None,
+
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            // Get the row from the row_stream.
-            let first_row_set = row_stream
-                .next()
-                .await
-                .expect("compute node should return affected rows in output")
-                .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
+            let first_row_set = row_stream.next().await;
+            let first_row_set = match first_row_set {
+                None => {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "no affected rows in output".to_string(),
+                    )))
+                }
+                Some(row) => {
+                    row.map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?
+                }
+            };
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            if format {
+            if let Format::Binary = first_field_format {
                 Some(
                     i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
                         .unwrap()
@@ -189,28 +209,34 @@ pub async fn handle_query(
         _ => unreachable!(),
     };
 
-    // Implicitly flush the writes.
-    if session.config().get_implicit_flush() {
-        flush_for_write(&session, stmt_type).await?;
-    }
+    // We need to do some post work after the query is finished and before the `Complete` response
+    // it sent. This is achieved by the `callback` in `PgResponse`.
+    let callback = async move {
+        // Implicitly flush the writes.
+        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+            do_flush(&session).await?;
+        }
 
-    // update some metrics
-    if query_mode == QueryMode::Local {
-        session
-            .env()
-            .frontend_metrics
-            .latency_local_execution
-            .observe(query_start_time.elapsed().as_secs_f64());
+        // update some metrics
+        if query_mode == QueryMode::Local {
+            session
+                .env()
+                .frontend_metrics
+                .latency_local_execution
+                .observe(query_start_time.elapsed().as_secs_f64());
 
-        session
-            .env()
-            .frontend_metrics
-            .query_counter_local_execution
-            .inc();
-    }
+            session
+                .env()
+                .frontend_metrics
+                .query_counter_local_execution
+                .inc();
+        }
 
-    Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+        Ok(())
+    };
+
+    Ok(PgResponse::new_for_stream_extra(
+        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
     ))
 }
 
@@ -219,9 +245,27 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 
     match stmt {
         Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { .. } => Ok(INSERT),
-        Statement::Delete { .. } => Ok(DELETE),
-        Statement::Update { .. } => Ok(UPDATE),
+        Statement::Insert { returning, .. } => {
+            if returning.is_empty() {
+                Ok(INSERT)
+            } else {
+                Ok(INSERT_RETURNING)
+            }
+        }
+        Statement::Delete { returning, .. } => {
+            if returning.is_empty() {
+                Ok(DELETE)
+            } else {
+                Ok(DELETE_RETURNING)
+            }
+        }
+        Statement::Update { returning, .. } => {
+            if returning.is_empty() {
+                Ok(UPDATE)
+            } else {
+                Ok(UPDATE_RETURNING)
+            }
+        }
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),
@@ -256,17 +300,8 @@ pub async fn local_execute(
         "",
         pinned_snapshot,
         session.auth_context(),
+        session.reset_cancel_query_flag(),
     );
 
     Ok(execution.stream_rows())
-}
-
-pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    match stmt_type {
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            do_flush(session).await?;
-        }
-        _ => {}
-    }
-    Ok(())
 }

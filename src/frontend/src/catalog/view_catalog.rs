@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
 use risingwave_common::catalog::Field;
 use risingwave_pb::catalog::View as ProstView;
 
-use super::ViewId;
+use super::{RelationCatalog, ViewId};
+use crate::user::UserId;
 use crate::WithOptions;
 
 #[derive(Clone, Debug)]
@@ -23,7 +24,7 @@ pub struct ViewCatalog {
     pub id: ViewId,
     pub name: String,
 
-    pub owner: u32,
+    pub owner: UserId,
     pub properties: WithOptions,
     pub sql: String,
     pub columns: Vec<Field>,
@@ -50,5 +51,11 @@ impl ViewCatalog {
     /// Returns the SQL statement that can be used to create this view.
     pub fn create_sql(&self) -> String {
         format!("CREATE VIEW {} AS {}", self.name, self.sql)
+    }
+}
+
+impl RelationCatalog for ViewCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

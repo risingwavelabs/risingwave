@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamEnvironment,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 pub type LocalFragmentId = u32;
@@ -51,9 +52,6 @@ pub struct StreamFragment {
 pub struct StreamFragmentEdge {
     /// Dispatch strategy for the fragment.
     pub dispatch_strategy: DispatchStrategy,
-
-    /// Whether the two linked nodes should be placed on the same worker node
-    pub same_worker_node: bool,
 
     /// A unique identifier of this edge. Generally it should be exchange node's operator id. When
     /// rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
@@ -94,6 +92,9 @@ pub struct StreamFragmentGraph {
 
     /// stores edges between fragments: (upstream, downstream) => edge.
     edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
+
+    /// Stores the environment for the streaming plan
+    env: StreamEnvironment,
 }
 
 impl StreamFragmentGraph {
@@ -105,9 +106,11 @@ impl StreamFragmentGraph {
                 .map(|(k, v)| (*k, v.to_protobuf()))
                 .collect(),
             edges: self.edges.values().cloned().collect(),
+            env: Some(self.env.clone()),
             // To be filled later
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
+            parallelism: None,
         }
     }
 
@@ -133,7 +136,6 @@ impl StreamFragmentGraph {
             upstream_id,
             downstream_id,
             dispatch_strategy: Some(edge.dispatch_strategy),
-            same_worker_node: edge.same_worker_node,
             link_id: edge.link_id,
         };
 

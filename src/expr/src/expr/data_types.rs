@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,6 +70,18 @@ macro_rules! list {
 }
 
 pub(crate) use list;
+
+#[macro_export]
+macro_rules! jsonb {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Jsonb,
+            risingwave_common::array::JsonbArray
+        }
+    };
+}
+
+pub(crate) use jsonb;
 
 #[macro_export]
 macro_rules! int16 {

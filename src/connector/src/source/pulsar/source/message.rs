@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use pulsar::consumer::Message;
 
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SourceMeta};
 
 impl From<Message<Vec<u8>>> for SourceMessage {
     fn from(msg: Message<Vec<u8>>) -> Self {
@@ -30,6 +30,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
                 message_id.batch_index.unwrap_or(-1)
             ),
             split_id: msg.topic.into(),
+            meta: SourceMeta::Empty,
         }
     }
 }

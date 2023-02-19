@@ -34,7 +34,7 @@
     "react-flow-renderer": "10.3.16",
     "react-json-view": "^1.21.3",
     "react-syntax-highlighter": "^15.5.0",
-    "recharts": "^2.1.16",
+    "recharts": "^2.3.2",
     "styled-components": "5.3.0",
     "ts-proto": "^1.131.0"
   },

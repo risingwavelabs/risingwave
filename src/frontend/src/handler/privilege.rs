@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{Action as ProstAction, Object as ProstObject};
 
 use crate::binder::{BoundStatement, Relation};
+use crate::catalog::RelationCatalog;
 use crate::session::SessionImpl;
 use crate::user::UserId;
 
@@ -121,46 +122,87 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
     objects
 }
 
-pub(crate) fn check_super_user(session: &SessionImpl) -> bool {
-    let user_reader = session.env().user_info_reader();
-    let reader = user_reader.read_guard();
+impl SessionImpl {
+    /// Check whether the user of the current session has privileges in `items`.
+    pub fn check_privileges(&self, items: &[ObjectCheckItem]) -> Result<()> {
+        let user_reader = self.env().user_info_reader();
+        let reader = user_reader.read_guard();
 
-    if let Some(info) = reader.get_user_by_name(session.user_name()) {
-        info.is_super
-    } else {
-        false
-    }
-}
-
-/// check whether user in `session` has privileges in `items`
-pub(crate) fn check_privileges(session: &SessionImpl, items: &Vec<ObjectCheckItem>) -> Result<()> {
-    let user_reader = session.env().user_info_reader();
-    let reader = user_reader.read_guard();
-
-    if let Some(info) = reader.get_user_by_name(session.user_name()) {
-        if info.is_super {
-            return Ok(());
-        }
-        for item in items {
-            if item.owner == info.id {
-                continue;
+        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+            if info.is_super {
+                return Ok(());
             }
-            let has_privilege = info.grant_privileges.iter().any(|privilege| {
-                privilege.object.is_some()
-                    && privilege.object.as_ref().unwrap() == &item.object
-                    && privilege
-                        .action_with_opts
-                        .iter()
-                        .any(|ao| ao.action == item.action as i32)
-            });
-            if !has_privilege {
-                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+            for item in items {
+                if item.owner == info.id {
+                    continue;
+                }
+                let has_privilege = info.grant_privileges.iter().any(|privilege| {
+                    privilege.object.is_some()
+                        && privilege.object.as_ref().unwrap() == &item.object
+                        && privilege
+                            .action_with_opts
+                            .iter()
+                            .any(|ao| ao.action == item.action as i32)
+                });
+                if !has_privilege {
+                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                }
             }
+        } else {
+            return Err(PermissionDenied("Session user is invalid".to_string()).into());
         }
-    } else {
-        return Err(PermissionDenied("Session user is invalid".to_string()).into());
+
+        Ok(())
     }
-    Ok(())
+
+    /// Returns `true` if the user of the current session is a super user.
+    fn is_super_user(&self) -> bool {
+        let reader = self.env().user_info_reader().read_guard();
+
+        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+            info.is_super
+        } else {
+            false
+        }
+    }
+
+    /// Check whether the user of the current session has the privilege to drop or alter the
+    /// relation `relation` in the schema with name `schema_name`.
+    ///
+    /// Note that the right to drop or alter in PostgreSQL is special and not covered by the general
+    /// `GRANT`s.
+    ///
+    /// > The right to drop an object, or to alter its definition in any way, is not treated as a
+    /// > grantable privilege; it is inherent in the owner, and cannot be granted or revoked.
+    /// >
+    /// > Reference: <https://www.postgresql.org/docs/current/sql-grant.html>
+    pub fn check_privilege_for_drop_alter(
+        &self,
+        schema_name: &str,
+        relation: &impl RelationCatalog,
+    ) -> Result<()> {
+        let schema_owner = self
+            .env()
+            .catalog_reader()
+            .read_guard()
+            .get_schema_by_name(self.database(), schema_name)
+            .unwrap()
+            .owner();
+
+        // https://www.postgresql.org/docs/current/sql-droptable.html
+        if self.user_id() != relation.owner()
+            && self.user_id() != schema_owner
+            && !self.is_super_user()
+        {
+            return Err(PermissionDenied(
+                "Only the relation owner, the schema owner, and superuser can drop a relation."
+                    .to_string(),
+            )
+            .into());
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -187,7 +229,7 @@ mod tests {
             ProstAction::Create,
             ProstObject::SchemaId(schema.id()),
         )];
-        assert!(check_privileges(&session, &check_items).is_ok());
+        assert!(&session.check_privileges(&check_items).is_ok());
 
         frontend
             .run_sql(
@@ -206,12 +248,12 @@ mod tests {
                 .id
         };
         let session = frontend.session_user_ref(database, user_name, user_id);
-        assert!(check_privileges(&session, &check_items).is_err());
+        assert!(&session.check_privileges(&check_items).is_err());
 
         frontend
             .run_sql("GRANT CREATE ON SCHEMA schema TO user")
             .await
             .unwrap();
-        assert!(check_privileges(&session, &check_items).is_ok());
+        assert!(&session.check_privileges(&check_items).is_ok());
     }
 }

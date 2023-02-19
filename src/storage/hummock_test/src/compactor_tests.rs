@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ pub(crate) mod tests {
     use itertools::Itertools;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
-    use risingwave_common::config::StorageConfig;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
+    use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::filter_key_extractor::{
@@ -34,33 +34,32 @@ pub(crate) mod tests {
         FullKeyFilterKeyExtractor,
     };
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
-    use risingwave_meta::hummock::compaction::ManualCompactionOption;
+    use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
         unregister_table_ids_from_compaction_group,
     };
     use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
-    use risingwave_meta::storage::{MemStore, MetaStore};
+    use risingwave_meta::storage::MetaStore;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::hummock::compactor::{
-        CompactionExecutor, Compactor, CompactorContext, Context,
-    };
+    use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        CompactorSstableStore, HummockStorage as GlobalHummockStorage, MemoryLimiter,
-        SstableIdManager,
+        HummockStorage as GlobalHummockStorage, MemoryLimiter, SstableIdManager,
     };
-    use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
+    use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
+    use risingwave_storage::opts::StorageOpts;
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
     };
 
-    use crate::get_test_notification_client;
+    use crate::get_notification_client_for_test;
     use crate::test_utils::{
-        register_test_tables, HummockV2MixedStateStore, HummockV2MixedStateStore as HummockStorage,
+        register_tables_with_id_for_test, HummockV2MixedStateStore,
+        HummockV2MixedStateStore as HummockStorage,
     };
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
@@ -70,11 +69,11 @@ pub(crate) mod tests {
         table_id: TableId,
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
-        let options = Arc::new(StorageConfig {
+        let options = Arc::new(StorageOpts {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
@@ -89,7 +88,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        register_test_tables(
+        register_tables_with_id_for_test(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
             &[table_id.table_id()],
@@ -104,11 +103,11 @@ pub(crate) mod tests {
         notification_client: impl NotificationClient,
     ) -> GlobalHummockStorage {
         let remote_dir = "hummock_001_test".to_string();
-        let options = Arc::new(StorageConfig {
+        let options = Arc::new(StorageOpts {
             sstable_size_mb: 1,
             block_size_kb: 1,
             bloom_false_positive: 0.1,
-            data_directory: remote_dir,
+            data_directory: remote_dir.clone(),
             write_conflict_detection_enabled: true,
             ..Default::default()
         });
@@ -162,7 +161,7 @@ pub(crate) mod tests {
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
         get_compactor_context_with_filter_key_extractor_manager_impl(
-            storage.options().clone(),
+            storage.storage_opts().clone(),
             storage.sstable_store(),
             hummock_meta_client,
             filter_key_extractor_manager,
@@ -170,16 +169,16 @@ pub(crate) mod tests {
     }
 
     fn get_compactor_context_with_filter_key_extractor_manager_impl(
-        options: Arc<StorageConfig>,
+        options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
-        let context = Arc::new(Context {
-            options: options.clone(),
+        CompactorContext {
+            storage_opts: options.clone(),
             sstable_store,
             hummock_meta_client: hummock_meta_client.clone(),
-            stats: Arc::new(StateStoreMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             read_memory_limiter: MemoryLimiter::unlimit(),
@@ -189,14 +188,10 @@ pub(crate) mod tests {
                 options.sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
-        });
-        CompactorContext::new(
-            context.clone(),
-            Arc::new(CompactorSstableStore::new(
-                context.sstable_store.clone(),
-                context.read_memory_limiter.clone(),
+            compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
+                CompactorRuntimeConfig::default(),
             )),
-        )
+        }
     }
 
     #[tokio::test]
@@ -213,7 +208,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             Default::default(),
         )
@@ -229,13 +224,16 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 10,
-            (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
+            (1..129).map(|v| (v * 1000) << 16).collect_vec(),
         )
         .await;
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -298,7 +296,7 @@ pub(crate) mod tests {
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -317,8 +315,7 @@ pub(crate) mod tests {
                 (31 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: None,
+                    prefix_hint: Some(key.clone()),
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
@@ -339,7 +336,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             Default::default(),
         )
@@ -359,13 +356,16 @@ pub(crate) mod tests {
             &hummock_meta_client,
             &key,
             1 << 20,
-            (1..129).into_iter().collect_vec(),
+            (1..129).collect_vec(),
         )
         .await;
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -412,7 +412,7 @@ pub(crate) mod tests {
             .sstable(output_table, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        let target_table_size = storage.options().sstable_size_mb * (1 << 20);
+        let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
 
         assert!(
             table.value().meta.estimated_size > target_table_size,
@@ -429,7 +429,7 @@ pub(crate) mod tests {
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -444,7 +444,10 @@ pub(crate) mod tests {
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap();
 
@@ -494,10 +497,9 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) async fn prepare_compactor_and_filter(
+    pub(crate) fn prepare_compactor_and_filter(
         storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
-        hummock_manager_ref: HummockManagerRef<MemStore>,
         existing_table_id: u32,
     ) -> CompactorContext {
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
@@ -508,21 +510,11 @@ pub(crate) mod tests {
             )),
         );
 
-        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
+        get_compactor_context_with_filter_key_extractor_manager(
             storage,
             hummock_meta_client,
-            filter_key_extractor_manager.clone(),
-        );
-
-        let existing_table_id: u32 = 1;
-        // Only registered table_ids are accepted in commit_epoch
-        register_table_ids_to_compaction_group(
-            &hummock_manager_ref,
-            &[existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
+            filter_key_extractor_manager,
         )
-        .await;
-        compact_ctx
     }
 
     #[tokio::test]
@@ -537,7 +529,7 @@ pub(crate) mod tests {
         let existing_table_id: u32 = 1;
         let storage_existing_table_id = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
@@ -546,10 +538,8 @@ pub(crate) mod tests {
         let compact_ctx_existing_table_id = prepare_compactor_and_filter(
             &storage_existing_table_id,
             &hummock_meta_client,
-            hummock_manager_ref.clone(),
             existing_table_id,
-        )
-        .await;
+        );
 
         prepare_data(
             hummock_meta_client.clone(),
@@ -610,7 +600,10 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap();
 
@@ -628,7 +621,7 @@ pub(crate) mod tests {
 
         let global_storage = get_global_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         )
         .await;
 
@@ -655,7 +648,7 @@ pub(crate) mod tests {
         );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
-            global_storage.options().clone(),
+            global_storage.storage_opts().clone(),
             global_storage.sstable_store(),
             &hummock_meta_client,
             filter_key_extractor_manager.clone(),
@@ -668,18 +661,18 @@ pub(crate) mod tests {
         let existing_table_ids = 2;
         let kv_count: usize = 128;
         let mut epoch: u64 = 1;
+        register_table_ids_to_compaction_group(
+            &hummock_manager_ref,
+            &[drop_table_id, existing_table_ids],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         for index in 0..kv_count {
             let (table_id, storage) = if index % 2 == 0 {
-                (drop_table_id, storage_1.clone())
+                (drop_table_id, &storage_1)
             } else {
-                (existing_table_ids, storage_2.clone())
+                (existing_table_ids, &storage_2)
             };
-            register_table_ids_to_compaction_group(
-                &hummock_manager_ref,
-                &[table_id],
-                StaticCompactionGroupId::StateDefault.into(),
-            )
-            .await;
             epoch += 1;
             let mut local = storage.start_write_batch(WriteOptions {
                 epoch,
@@ -765,7 +758,10 @@ pub(crate) mod tests {
 
         // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -782,7 +778,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
@@ -809,11 +805,12 @@ pub(crate) mod tests {
             worker_node.id,
         ));
 
+        let existing_table_id = 2;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
-            TableId::from(2),
+            TableId::from(existing_table_id),
         )
         .await;
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
@@ -832,18 +829,11 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
-        let existing_table_id = 2;
         let kv_count = 11;
         // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
-        register_table_ids_to_compaction_group(
-            &hummock_manager_ref,
-            &[existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         let mut epoch_set = BTreeSet::new();
         for _ in 0..kv_count {
             epoch += millisec_interval_epoch;
@@ -938,7 +928,10 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -955,7 +948,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
@@ -987,7 +980,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
@@ -1102,7 +1095,10 @@ pub(crate) mod tests {
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
-            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .get_compact_task(
+                StaticCompactionGroupId::StateDefault.into(),
+                &mut default_level_selector(),
+            )
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1129,8 +1125,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: Some(bloom_filter_key),
+                    prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
@@ -1159,18 +1154,13 @@ pub(crate) mod tests {
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
         .await;
-        let compact_ctx = prepare_compactor_and_filter(
-            &storage,
-            &hummock_meta_client,
-            hummock_manager_ref.clone(),
-            existing_table_id,
-        )
-        .await;
+        let compact_ctx =
+            prepare_compactor_and_filter(&storage, &hummock_meta_client, existing_table_id);
 
         prepare_data(hummock_meta_client.clone(), &storage, existing_table_id, 2).await;
         let mut local = storage.start_write_batch(WriteOptions {

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,6 +101,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
 
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,
+        DataType::Jsonb => HashKeySize::Variable,
         DataType::Struct { .. } => HashKeySize::Variable,
         DataType::List { .. } => HashKeySize::Variable,
     }

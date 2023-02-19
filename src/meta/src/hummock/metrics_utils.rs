@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ pub fn trigger_version_stat(
         .set(current_version.encoded_len() as i64);
     metrics.safe_epoch.set(current_version.safe_epoch as i64);
     metrics.current_version_id.set(current_version.id as i64);
+    metrics.version_stats.reset();
     for (table_id, stats) in &version_stats.table_stats {
         let table_id = format!("{}", table_id);
         metrics
@@ -65,15 +66,21 @@ pub fn trigger_sst_stat(
 ) {
     let level_sst_cnt = |level_idx: usize| {
         let mut sst_num = 0;
-        current_version.map_level(compaction_group_id, level_idx, |level| {
-            sst_num += level.table_infos.len();
+        current_version.level_iter(compaction_group_id, |level| {
+            if level.level_idx == level_idx as u32 {
+                sst_num += level.table_infos.len();
+            }
+            true
         });
         sst_num
     };
     let level_sst_size = |level_idx: usize| {
         let mut level_sst_size = 0;
-        current_version.map_level(compaction_group_id, level_idx, |level| {
-            level_sst_size += level.total_file_size;
+        current_version.level_iter(compaction_group_id, |level| {
+            if level.level_idx == level_idx as u32 {
+                level_sst_size += level.total_file_size;
+            }
+            true
         });
         level_sst_size / 1024
     };
@@ -210,4 +217,8 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
             .min_safepoint_version_id
             .set(HummockVersionId::MAX as _);
     }
+}
+
+pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
+    metrics.stale_ssts_count.set(total_number as _);
 }

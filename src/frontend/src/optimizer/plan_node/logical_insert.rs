@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::{
@@ -36,55 +36,74 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
     pub base: PlanBase,
-    table_source_name: String, // explain-only
+    table_name: String, // explain-only
     table_id: TableId,
     input: PlanRef,
     column_indices: Vec<usize>, // columns in which to insert
     row_id_index: Option<usize>,
+    returning: bool,
 }
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
     pub fn new(
         input: PlanRef,
-        table_source_name: String,
+        table_name: String,
         table_id: TableId,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Self {
         let ctx = input.ctx();
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
             base,
-            table_source_name,
+            table_name,
             table_id,
             input,
             column_indices,
             row_id_index,
+            returning,
         }
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
     pub fn create(
         input: PlanRef,
-        table_source_name: String,
+        table_name: String,
         table_id: TableId,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
-            table_source_name,
+            table_name,
             table_id,
             column_indices,
             row_id_index,
+            returning,
         ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ table: {} }}", name, self.table_source_name)
+        write!(
+            f,
+            "{} {{ table: {}{} }}",
+            name,
+            self.table_name,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
+        )
     }
 
     // Get the column indexes in which to insert to
@@ -102,6 +121,10 @@ impl LogicalInsert {
     pub fn row_id_index(&self) -> Option<usize> {
         self.row_id_index
     }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
@@ -112,10 +135,11 @@ impl PlanTreeNodeUnary for LogicalInsert {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             input,
-            self.table_source_name.clone(),
+            self.table_name.clone(),
             self.table_id,
             self.column_indices.clone(),
             self.row_id_index,
+            self.returning,
         )
     }
 }
@@ -135,6 +159,8 @@ impl ColPrunable for LogicalInsert {
             .into()
     }
 }
+
+impl ExprRewritable for LogicalInsert {}
 
 impl PredicatePushdown for LogicalInsert {
     fn predicate_pushdown(

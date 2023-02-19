@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::BitAnd;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::UnionNode;
 
-use super::PlanRef;
+use super::{ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -33,20 +35,26 @@ impl StreamUnion {
     pub fn new(logical: LogicalUnion) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let inputs = logical.inputs();
         let dist = inputs[0].distribution().clone();
         assert!(logical
             .inputs()
             .iter()
             .all(|input| *input.distribution() == dist));
+        let watermark_columns = inputs.iter().fold(
+            FixedBitSet::with_capacity(schema.len()),
+            |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
+        );
 
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             dist,
             logical.inputs().iter().all(|x| x.append_only()),
+            watermark_columns,
         );
         StreamUnion { base, logical }
     }
@@ -80,3 +88,5 @@ impl StreamNode for StreamUnion {
         ProstStreamNode::Union(UnionNode {})
     }
 }
+
+impl ExprRewritable for StreamUnion {}

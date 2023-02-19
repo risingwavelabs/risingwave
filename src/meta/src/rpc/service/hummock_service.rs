@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
+use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
@@ -84,16 +85,6 @@ where
         Ok(Response::new(GetCurrentVersionResponse {
             status: None,
             current_version: Some(current_version),
-        }))
-    }
-
-    async fn reset_current_version(
-        &self,
-        _request: Request<ResetCurrentVersionRequest>,
-    ) -> Result<Response<ResetCurrentVersionResponse>, Status> {
-        let old_version = self.hummock_manager.reset_current_version().await?;
-        Ok(Response::new(ResetCurrentVersionResponse {
-            old_version: Some(old_version),
         }))
     }
 
@@ -253,7 +244,8 @@ where
             .add_compactor(context_id, req.max_concurrent_task_number);
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
-            self.hummock_manager.try_send_compaction_request(cg_id);
+            self.hummock_manager
+                .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
         self.hummock_manager
             .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
@@ -282,23 +274,6 @@ where
         }
         sync_point::sync_point!("AFTER_REPORT_VACUUM");
         Ok(Response::new(ReportVacuumTaskResponse { status: None }))
-    }
-
-    async fn get_compaction_groups(
-        &self,
-        _request: Request<GetCompactionGroupsRequest>,
-    ) -> Result<Response<GetCompactionGroupsResponse>, Status> {
-        let resp = GetCompactionGroupsResponse {
-            status: None,
-            compaction_groups: self
-                .hummock_manager
-                .compaction_groups()
-                .await
-                .iter()
-                .map(|cg| cg.into())
-                .collect(),
-        };
-        Ok(Response::new(resp))
     }
 
     async fn trigger_manual_compaction(
@@ -453,13 +428,7 @@ where
         &self,
         _request: Request<RiseCtlListCompactionGroupRequest>,
     ) -> Result<Response<RiseCtlListCompactionGroupResponse>, Status> {
-        let compaction_groups = self
-            .hummock_manager
-            .compaction_groups()
-            .await
-            .iter()
-            .map(|cg| cg.into())
-            .collect_vec();
+        let compaction_groups = self.hummock_manager.list_compaction_group().await;
         Ok(Response::new(RiseCtlListCompactionGroupResponse {
             status: None,
             compaction_groups,
@@ -499,7 +468,7 @@ where
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_replay(tables, compaction_groups)
+            .init_metadata_for_version_replay(tables, compaction_groups)
             .await?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
@@ -512,5 +481,21 @@ where
         self.compactor_manager
             .set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
+    }
+
+    async fn pin_version(
+        &self,
+        request: Request<PinVersionRequest>,
+    ) -> Result<Response<PinVersionResponse>, Status> {
+        let req = request.into_inner();
+        let payload = self.hummock_manager.pin_version(req.context_id).await?;
+        match payload {
+            Payload::PinnedVersion(version) => Ok(Response::new(PinVersionResponse {
+                pinned_version: Some(version),
+            })),
+            Payload::VersionDeltas(_) => {
+                unreachable!("pin_version should not return version delta")
+            }
+        }
     }
 }

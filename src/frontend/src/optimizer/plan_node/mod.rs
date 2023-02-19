@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
@@ -59,6 +60,7 @@ pub trait PlanNode:
     + Display
     + Downcast
     + ColPrunable
+    + ExprRewritable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -84,12 +86,34 @@ pub enum Convention {
     Stream,
 }
 
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
+}
+
+impl RewriteExprsRecursive for PlanRef {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+}
+
 impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
             // column pruning.
             if let Some((new_share, merge_required_cols)) = ctx.get_share_cache(self.id()) {
+                // Piggyback share remove if its has only one parent.
+                if ctx.get_parent_num(logical_share) == 1 {
+                    let input: PlanRef = logical_share.input();
+                    return input.prune_col(required_cols, ctx);
+                }
+
                 // If it is the first visit, recursively call `prune_col` for its input and
                 // replace it.
                 if ctx.visit_share_at_second_round(self.id()) {
@@ -174,6 +198,12 @@ impl PredicatePushdown for PlanRef {
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
+            // Piggyback share remove if its has only one parent.
+            if ctx.get_parent_num(logical_share) == 1 {
+                let input: PlanRef = logical_share.input();
+                return input.predicate_pushdown(predicate, ctx);
+            }
+
             // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
             // here.
             // Basically, we need to wait for all parents of `LogicalShare` to push down the
@@ -211,6 +241,11 @@ impl PlanTreeNode for PlanRef {
             assert_eq!(inputs.len(), 1);
             // We can't clone `LogicalShare`, but only can replace input instead.
             logical_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else if let Some(stream_share) = self.clone().as_stream_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `StreamShare`, but only can replace input instead.
+            stream_share.replace_input(inputs[0].clone());
             self.clone()
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
@@ -322,6 +357,10 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
+    pub fn watermark_columns(&self) -> &FixedBitSet {
+        &self.plan_base().watermark_columns
+    }
+
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
@@ -390,6 +429,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod expr_rewritable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -439,6 +480,7 @@ mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
+mod logical_now;
 mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
@@ -472,6 +514,7 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_watermark_filter;
 
 mod stream_share;
 mod stream_union;
@@ -511,6 +554,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
+pub use logical_now::LogicalNow;
 pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
@@ -546,8 +590,9 @@ pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
@@ -589,6 +634,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Union }
             , { Logical, OverAgg }
             , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -638,6 +684,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }
@@ -668,6 +715,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Union }
             , { Logical, OverAgg }
             , { Logical, Share }
+            , { Logical, Now }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -736,6 +784,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }

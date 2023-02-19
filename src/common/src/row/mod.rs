@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,26 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod chain;
-mod compacted_row;
-mod empty;
-mod once;
-mod owned_row;
-mod project;
-mod repeat_n;
-
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
-use bytes::BufMut;
-pub use chain::Chain;
-pub use compacted_row::CompactedRow;
-pub use empty::{empty, Empty};
-pub use once::{once, Once};
-pub use owned_row::{OwnedRow, RowDeserializer};
-pub use project::Project;
-pub use repeat_n::{repeat_n, RepeatN};
+use bytes::{BufMut, Bytes, BytesMut};
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
@@ -96,6 +80,14 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         buf
     }
 
+    /// Serializes the row with value encoding and returns the bytes.
+    #[inline]
+    fn value_serialize_bytes(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(self.len()); // each datum is at least 1 byte
+        self.value_serialize_into(&mut buf);
+        buf.freeze()
+    }
+
     /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have
     /// different order type, a `serde` should be provided.
     #[inline]
@@ -126,29 +118,6 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     #[inline]
     fn eq(this: &Self, other: impl Row) -> bool {
         this.iter().eq(other.iter())
-    }
-
-    /// Lexicographically compares the datums of this row with those of another with the same
-    /// length.
-    ///
-    /// # Panics
-    /// Panics if the lengths of the two rows are not equal. For this case, use
-    /// [`Row::cmp_ignore_len`] instead.
-    #[inline]
-    fn cmp(this: &Self, other: impl Row) -> Ordering {
-        assert_eq!(
-            this.len(),
-            other.len(),
-            "cannot compare rows of different lengths, use `cmp_ignore_len` instead"
-        );
-        Self::cmp_ignore_len(this, other)
-    }
-
-    /// Lexicographically compares the datums of this row with those of another, without checking
-    /// the equality of the lengths.
-    #[inline]
-    fn cmp_ignore_len(this: &Self, other: impl Row) -> Ordering {
-        this.iter().cmp(other.iter())
     }
 }
 
@@ -207,7 +176,7 @@ macro_rules! deref_forward_row {
             (**self).to_owned_row()
         }
 
-        fn value_serialize_into(&self, buf: impl BufMut) {
+        fn value_serialize_into(&self, buf: impl bytes::BufMut) {
             (**self).value_serialize_into(buf)
         }
 
@@ -215,24 +184,24 @@ macro_rules! deref_forward_row {
             (**self).value_serialize()
         }
 
-        fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        fn memcmp_serialize_into(
+            &self,
+            serde: &$crate::util::ordered::OrderedRowSerde,
+            buf: impl bytes::BufMut,
+        ) {
             (**self).memcmp_serialize_into(serde, buf)
         }
 
-        fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+        fn memcmp_serialize(&self, serde: &$crate::util::ordered::OrderedRowSerde) -> Vec<u8> {
             (**self).memcmp_serialize(serde)
         }
 
-        fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode {
             (**self).hash(hash_builder)
         }
 
         fn eq(this: &Self, other: impl Row) -> bool {
             Row::eq(&(**this), other)
-        }
-
-        fn cmp(this: &Self, other: impl Row) -> Ordering {
-            Row::cmp(&(**this), other)
         }
     };
 }
@@ -375,3 +344,18 @@ impl<R: Row> Row for Option<R> {
         }
     }
 }
+
+mod chain;
+mod compacted_row;
+mod empty;
+mod once;
+mod owned_row;
+mod project;
+mod repeat_n;
+pub use chain::Chain;
+pub use compacted_row::CompactedRow;
+pub use empty::{empty, Empty};
+pub use once::{once, Once};
+pub use owned_row::{AscentOwnedRow, OwnedRow, RowDeserializer};
+pub use project::Project;
+pub use repeat_n::{repeat_n, RepeatN};

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,9 +67,18 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             .iter_table()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::InternalTable { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_internal_table()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
-        // If not include schema name, use default schema name
+        ShowObject::View { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_view()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()
@@ -78,11 +87,6 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
         ShowObject::Source { schema } => catalog_reader
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
-            .map(|t| t.name.clone())
-            .collect(),
-        ShowObject::MaterializedSource { schema } => catalog_reader
-            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
-            .iter_materialized_source()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
@@ -210,25 +214,9 @@ mod tests {
         ROW FORMAT JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = r#"CREATE MATERIALIZED SOURCE t2
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT JSON"#;
-        frontend.run_sql(sql).await.unwrap();
-
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
         rows.sort();
-        assert_eq!(
-            rows,
-            vec![
-                "Row([Some(b\"t1\")])".to_string(),
-                "Row([Some(b\"t2\")])".to_string()
-            ]
-        );
-
-        let rows = frontend
-            .query_formatted_result("SHOW MATERIALIZED SOURCES")
-            .await;
-        assert_eq!(rows, vec!["Row([Some(b\"t2\")])".to_string()]);
+        assert_eq!(rows, vec!["Row([Some(b\"t1\")])".to_string(),]);
     }
 
     #[tokio::test]

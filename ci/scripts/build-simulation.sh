@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -19,3 +19,6 @@ mv target/sim/ci-sim/risingwave_simulation ./risingwave_simulation
 
 artifacts=(risingwave_simulation scale-test.tar.zst)
 echo -n "${artifacts[*]}" | parallel -d ' ' "buildkite-agent artifact upload ./{}"
+
+echo "--- Show sccache stats"
+sccache --show-stats

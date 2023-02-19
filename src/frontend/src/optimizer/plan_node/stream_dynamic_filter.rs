@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,21 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::generic;
 use super::utils::IndicesDisplay;
+use super::{generic, ExprRewritable};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{Condition, ConditionDisplay};
+use crate::utils::ConditionDisplay;
 
 #[derive(Clone, Debug)]
 pub struct StreamDynamicFilter {
@@ -34,7 +37,22 @@ pub struct StreamDynamicFilter {
 }
 
 impl StreamDynamicFilter {
-    pub fn new(left_index: usize, predicate: Condition, left: PlanRef, right: PlanRef) -> Self {
+    pub fn new(left_index: usize, comparator: ExprType, left: PlanRef, right: PlanRef) -> Self {
+        assert_eq!(right.schema().len(), 1);
+
+        let watermark_columns = {
+            let mut watermark_columns = FixedBitSet::with_capacity(left.schema().len());
+            if right.watermark_columns()[0] {
+                match comparator {
+                    ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                        watermark_columns.set(left_index, true)
+                    }
+                    _ => {}
+                }
+            }
+            watermark_columns
+        };
+
         // TODO: derive from input
         let base = PlanBase::new_stream(
             left.ctx(),
@@ -44,14 +62,19 @@ impl StreamDynamicFilter {
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
+            watermark_columns,
         );
         let core = generic::DynamicFilter {
-            predicate,
+            comparator,
             left_index,
             left,
             right,
         };
         Self { base, core }
+    }
+
+    pub fn left_index(&self) -> usize {
+        self.core.left_index
     }
 }
 
@@ -64,10 +87,12 @@ impl fmt::Display for StreamDynamicFilter {
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
 
+        let predicate = self.core.predicate();
+
         builder.field(
             "predicate",
             &ConditionDisplay {
-                condition: &self.core.predicate,
+                condition: &predicate,
                 input_schema: &concat_schema,
             },
         );
@@ -97,12 +122,7 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(
-            self.core.left_index,
-            self.core.predicate.clone(),
-            left,
-            right,
-        )
+        Self::new(self.core.left_index, self.core.comparator, left, right)
     }
 }
 
@@ -113,7 +133,7 @@ impl StreamNode for StreamDynamicFilter {
         use generic::dynamic_filter::*;
         let condition = self
             .core
-            .predicate
+            .predicate()
             .as_expr_unless_true()
             .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index;
@@ -130,3 +150,5 @@ impl StreamNode for StreamDynamicFilter {
         })
     }
 }
+
+impl ExprRewritable for StreamDynamicFilter {}

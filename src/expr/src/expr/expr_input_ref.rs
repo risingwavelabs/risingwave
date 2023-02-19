@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
-/// `InputRefExpression` references to a column in input relation
+/// A reference to a column in input relation.
 #[derive(Debug, Clone)]
 pub struct InputRefExpression {
     return_type: DataType,

@@ -8,6 +8,7 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
@@ -23,6 +24,12 @@ message RowSeqScanNode {
   common.Buffer vnode_bitmap = 4;
   // Whether the order on output columns should be preserved.
   bool ordered = 5;
+
+  message ChunkSize {
+    uint32 chunk_size = 1;
+  }
+  // If along with `batch_limit`, `chunk_size` will be set.
+  ChunkSize chunk_size = 6;
 }
 
 message SysRowSeqScanNode {
@@ -70,22 +77,31 @@ message FilterNode {
 message InsertNode {
   // Id of the table to perform inserting.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 5;
   repeated uint32 column_indices = 2;
   // An optional field and will be `None` for tables without user-defined pk.
   // The `BatchInsertExecutor` should add a column with NULL value which will
   // be filled in streaming.
   catalog.ColumnIndex row_id_index = 3;
+  bool returning = 4;
 }
 
 message DeleteNode {
   // Id of the table to perform deleting.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
+  bool returning = 2;
 }
 
 message UpdateNode {
   // Id of the table to perform updating.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 4;
   repeated expr.ExprNode exprs = 2;
+  bool returning = 3;
 }
 
 message ValuesNode {
@@ -252,6 +268,8 @@ message UnionNode {}
 
 message PlanNode {
   repeated PlanNode children = 1;
+  reserved 22;
+  reserved "sort_merge_join";
   oneof node_body {
     InsertNode insert = 2;
     DeleteNode delete = 3;
@@ -269,7 +287,6 @@ message PlanNode {
     ValuesNode values = 18;
     HashJoinNode hash_join = 19;
     MergeSortExchangeNode merge_sort_exchange = 21;
-    SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;

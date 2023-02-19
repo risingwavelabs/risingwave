@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,12 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::{LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -30,7 +31,10 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: LogicalExpand) -> Self {
-        let dist = match logical.input().distribution() {
+        let input = logical.input();
+        let schema = logical.schema().clone();
+
+        let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
@@ -38,13 +42,22 @@ impl StreamExpand {
             Distribution::Broadcast => unreachable!(),
         };
 
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        watermark_columns.extend(
+            input
+                .watermark_columns()
+                .ones()
+                .map(|idx| idx + input.schema().len()),
+        );
+
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
-            logical.schema().clone(),
+            schema,
             logical.base.logical_pk.to_vec(),
             logical.functional_dependency().clone(),
             dist,
-            logical.input().append_only(),
+            input.append_only(),
+            watermark_columns,
         );
         StreamExpand { base, logical }
     }
@@ -88,3 +101,5 @@ fn subset_to_protobuf(subset: &[usize]) -> Subset {
     let column_indices = subset.iter().map(|key| *key as u32).collect();
     Subset { column_indices }
 }
+
+impl ExprRewritable for StreamExpand {}

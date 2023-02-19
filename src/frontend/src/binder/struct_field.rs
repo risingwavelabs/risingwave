@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,41 +32,8 @@ impl Binder {
         expr: Expr,
         field_idents: Vec<Ident>,
     ) -> Result<(ExprImpl, Vec<Ident>)> {
-        match expr {
-            Expr::CompoundIdentifier(idents) => {
-                self.extract_struct_column_inner(idents, field_idents)
-            }
-            Expr::Identifier(ident) => self.extract_struct_column_inner(vec![ident], field_idents),
-            Expr::Cast { expr, data_type } => {
-                let cast = self.bind_cast(*expr, data_type)?;
-                Ok((cast, field_idents))
-            }
-            _ => unreachable!("{expr:?}"),
-        }
-    }
-
-    fn extract_struct_column_inner(
-        &mut self,
-        mut expr_idents: Vec<Ident>,
-        mut field_idents: Vec<Ident>,
-    ) -> Result<(ExprImpl, Vec<Ident>)> {
-        match self.bind_column(&expr_idents) {
-            // `(table.struct_col).field` or `(struct_col).field`
-            Ok(expr) => Ok((expr, field_idents)),
-            Err(err) => {
-                if field_idents.is_empty() {
-                    Err(err)
-                } else {
-                    // Try `(table).struct_col.field`.
-                    // If still failed, give the old error.
-                    expr_idents.push(field_idents.remove(0));
-                    match self.bind_column(&expr_idents) {
-                        Ok(expr) => Ok((expr, field_idents)),
-                        Err(_) => Err(err),
-                    }
-                }
-            }
-        }
+        let d = self.bind_expr(expr)?;
+        Ok((d, field_idents))
     }
 
     /// Binds wildcard field column, e.g. `(table.v1).*` or `(table).v1.*`.

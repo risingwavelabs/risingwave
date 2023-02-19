@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,9 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{
+    new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::StateStore;
@@ -105,9 +106,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             info,
             mut table,
         } = *self;
-
-        // Remove this after we have upsert.
-        table.disable_sanity_check();
 
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
@@ -313,7 +311,9 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_with_distribution(
+
+        // TODO: use consistent operations for watermark filter after we have upsert.
+        StateTable::new_with_distribution_inconsistent_op(
             mem_state,
             TableId::new(table_id),
             column_descs,

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
-use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
+use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
@@ -71,8 +71,7 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-// TODO: directly return `&[u8]` or `Bytes` to user instead of `Vec<u8>`.
-pub type StateStoreIterItem = (FullKey<Vec<u8>>, Bytes);
+pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
@@ -230,8 +229,8 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        MonitoredStateStore::new(self, stats)
+    fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
+        MonitoredStateStore::new(self, storage_metrics)
     }
 
     /// Clears contents in shared buffer.
@@ -241,12 +240,26 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
+
+    /// Validates whether store can serve `epoch` at the moment.
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
+}
+
+pub trait MayExistTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
+
+#[macro_export]
+macro_rules! define_local_state_store_associated_type {
+    () => {
+        type MayExistFuture<'a> = impl MayExistTrait<'a>;
+    };
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
+    type MayExistFuture<'a>: MayExistTrait<'a>;
+
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
         unimplemented!()
@@ -269,6 +282,21 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
     fn advance_write_epoch(&mut self, _new_epoch: u64) -> StorageResult<()> {
         unimplemented!()
     }
+
+    /// Check existence of a given `key_range`.
+    /// It is better to provide `prefix_hint` in `read_options`, which will be used
+    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
+    /// the false positive rate can be significantly higher because bloom filter cannot
+    /// be used.
+    ///
+    /// Returns:
+    /// - false: `key_range` is guaranteed to be absent in storage.
+    /// - true: `key_range` may or may not exist in storage.
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_>;
 }
 
 #[derive(Default, Clone)]
@@ -276,9 +304,8 @@ pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Vec<u8>>,
+    pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
-    pub check_bloom_filter: bool,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,

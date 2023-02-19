@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::ColumnDesc;
+use fixedbitset::FixedBitSet;
+use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Clone, Debug)]
@@ -29,8 +30,16 @@ pub struct StreamDml {
 
 impl StreamDml {
     pub fn new(input: PlanRef, append_only: bool, column_descs: Vec<ColumnDesc>) -> Self {
-        let mut base = PlanBase::derive_stream_plan_base(&input);
-        base.append_only = append_only;
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            input.schema().clone(),
+            input.logical_pk().to_vec(),
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            append_only,
+            FixedBitSet::with_capacity(input.schema().len()), // no watermark if dml is allowed
+        );
+
         Self {
             base,
             input,
@@ -75,7 +84,10 @@ impl StreamNode for StreamDml {
         ProstStreamNode::Dml(DmlNode {
             // Meta will fill this table id.
             table_id: 0,
+            table_version_id: INITIAL_TABLE_VERSION_ID, // TODO: use correct table version id
             column_descs: self.column_descs.iter().map(Into::into).collect(),
         })
     }
 }
+
+impl ExprRewritable for StreamDml {}

@@ -1,4 +1,4 @@
-// Copyright 2023 Singularity Data
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,21 +22,23 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
 use crate::hummock::compactor::task_progress::TaskProgress;
+use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, DeleteRangeTombstone, HummockResult, MemoryLimiter,
-    RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
+    BatchUploadWriter, BloomFilterBuilder, CachePolicy, DeleteRangeTombstone, HummockResult,
+    MemoryLimiter, RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
     SstableWriterOptions,
 };
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::CompactorMetrics;
 
 pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>>;
+    type Filter: FilterBuilder;
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
 }
 
 pub struct SplitTableOutput {
@@ -57,10 +59,10 @@ where
 
     sst_outputs: Vec<SplitTableOutput>,
 
-    current_builder: Option<SstableBuilder<F::Writer>>,
+    current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
 
     /// Statistics.
-    pub stats: Arc<StateStoreMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
@@ -77,7 +79,7 @@ where
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(
         builder_factory: F,
-        stats: Arc<StateStoreMetrics>,
+        compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
@@ -92,7 +94,7 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            stats,
+            compactor_metrics,
             task_progress,
             del_agg,
             last_sealed_key: start_key,
@@ -105,7 +107,7 @@ where
             builder_factory,
             sst_outputs: Vec::new(),
             current_builder: None,
-            stats: Arc::new(StateStoreMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
             last_sealed_key: UserKey::default(),
             del_agg: Arc::new(RangeTombstonesCollector::for_test()),
@@ -174,25 +176,25 @@ where
                 }
 
                 if builder_output.bloom_filter_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_bloom_filter_size
                         .observe(builder_output.bloom_filter_size as _);
                 }
 
                 if builder_output.sst_info.file_size() != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_file_size
                         .observe(builder_output.sst_info.file_size() as _);
                 }
 
                 if builder_output.avg_key_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_avg_key_size
                         .observe(builder_output.avg_key_size as _);
                 }
 
                 if builder_output.avg_value_size != 0 {
-                    self.stats
+                    self.compactor_metrics
                         .sstable_avg_value_size
                         .observe(builder_output.avg_value_size as _);
                 }
@@ -251,9 +253,12 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
+    type Filter = BloomFilterBuilder;
     type Writer = BatchUploadWriter;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<BatchUploadWriter>> {
+    async fn open_builder(
+        &mut self,
+    ) -> HummockResult<SstableBuilder<BatchUploadWriter, BloomFilterBuilder>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {
@@ -401,7 +406,7 @@ mod tests {
         ]);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(CompactorMetrics::unused()),
             None,
             builder.build(0, false),
             KeyRange::inf(),
@@ -451,7 +456,7 @@ mod tests {
         ]);
         let builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(CompactorMetrics::unused()),
             None,
             builder.build(0, false),
             KeyRange::inf(),
