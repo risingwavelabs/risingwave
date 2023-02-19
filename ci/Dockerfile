@@ -26,6 +26,8 @@ ENV PATH /root/.cargo/bin/:$PATH
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
 
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
 # install build tools
 RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache sccache \
     && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev dbadddb --bin sqllogictest --locked \
