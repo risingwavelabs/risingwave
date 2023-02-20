@@ -74,7 +74,7 @@ async fn populate_tables<R: Rng>(
 ) -> String {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
-        tracing::info!("[EXECUTING POPULATION] {}", insert);
+        tracing::info!("[EXECUTING POPULATION]: {}", insert);
         client.query(insert, &[]).await.unwrap();
     }
     inserts.into_iter().map(|i| format!("{};\n", i)).collect()
