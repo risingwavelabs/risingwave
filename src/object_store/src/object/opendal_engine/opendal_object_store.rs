@@ -149,9 +149,7 @@ impl ObjectStore for OpendalObjectStore {
     /// Deletes the objects with the given paths permanently from the storage. If an object
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        for path in paths {
-            self.op.object(path).delete().await?;
-        }
+        self.op.batch().remove(paths.to_vec()).await?;
         Ok(())
     }
 
