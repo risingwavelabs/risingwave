@@ -13,6 +13,8 @@
 // limitations under the License.
 
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::time::Duration;
 
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
@@ -20,6 +22,13 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_pb::common::WorkerType;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
+
+use crate::manager::ClusterManagerRef;
+use crate::rpc::server::ElectionClientRef;
+use crate::storage::MetaStore;
 
 pub struct MetaMetrics {
     registry: Registry,
@@ -297,4 +306,43 @@ impl Default for MetaMetrics {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub async fn start_worker_num_monitor<S: MetaStore>(
+    cluster_manager: ClusterManagerRef<S>,
+    election_client: Option<ElectionClientRef>,
+    interval: Duration,
+    meta_metrics: Arc<MetaMetrics>,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut monitor_interval = tokio::time::interval(interval);
+        monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = monitor_interval.tick() => {},
+                // Shutdown monitor
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Worker number monitor is stopped");
+                    return;
+                }
+            }
+
+            for (worker_type, worker_num) in cluster_manager.count_worker_node().await {
+                meta_metrics
+                    .worker_num
+                    .with_label_values(&[(worker_type.as_str_name())])
+                    .set(worker_num as i64);
+            }
+            if let Some(client) = &election_client && let Ok(meta_members) = client.get_members().await {
+                meta_metrics
+                    .worker_num
+                    .with_label_values(&[WorkerType::Meta.as_str_name()])
+                    .set(meta_members.len() as i64);
+            }
+        }
+    });
+
+    (join_handle, shutdown_tx)
 }
