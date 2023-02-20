@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -96,7 +96,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &HashMap<usize, usize>,
+        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         chain_type: ChainType,
     ) -> StreamIndexScan {
         StreamIndexScan::new(

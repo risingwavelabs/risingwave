@@ -52,8 +52,8 @@ impl WithOptions {
     }
 
     /// Get the reference of the inner map.
-    pub fn inner(&self) -> &HashMap<String, String> {
-        &self.inner.clone().into_iter().collect()
+    pub fn inner(&self) -> &BTreeMap<String, String> {
+        &self.inner
     }
 
     /// Take the value of the inner map.

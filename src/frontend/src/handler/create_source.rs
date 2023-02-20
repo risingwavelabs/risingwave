@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -109,7 +109,7 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+pub(crate) fn is_kafka_source(with_properties: &BTreeMap<String, String>) -> bool {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
         .unwrap_or(&"".to_string())
@@ -120,7 +120,7 @@ pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool
 pub(crate) async fn resolve_source_schema(
     source_schema: SourceSchema,
     columns: &mut Vec<ColumnCatalog>,
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     row_id_index: Option<usize>,
     pk_column_ids: &[ColumnId],
     is_materialized: bool,
@@ -163,7 +163,11 @@ pub(crate) async fn resolve_source_schema(
 
             columns_extend(
                 columns,
-                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+                extract_protobuf_table_schema(
+                    protobuf_schema,
+                    with_properties.clone().into_iter().collect(),
+                )
+                .await?,
             );
 
             StreamSourceInfo {
@@ -193,7 +197,11 @@ pub(crate) async fn resolve_source_schema(
 
             columns_extend(
                 columns,
-                extract_avro_table_schema(avro_schema, with_properties.clone()).await?,
+                extract_avro_table_schema(
+                    avro_schema,
+                    with_properties.clone().into_iter().collect(),
+                )
+                .await?,
             );
 
             StreamSourceInfo {
@@ -284,8 +292,11 @@ pub(crate) async fn resolve_source_schema(
                 )));
             }
 
-            let mut full_columns =
-                extract_debezium_avro_table_schema(avro_schema, with_properties.clone()).await?;
+            let mut full_columns = extract_debezium_avro_table_schema(
+                avro_schema,
+                with_properties.clone().into_iter().collect(),
+            )
+            .await?;
 
             for pk_column in columns.iter() {
                 let index = full_columns
@@ -314,7 +325,7 @@ pub(crate) async fn resolve_source_schema(
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
 fn check_and_add_timestamp_column(
-    with_properties: &HashMap<String, String>,
+    with_properties: &BTreeMap<String, String>,
     column_descs: &mut Vec<ColumnDesc>,
     col_id_gen: &mut ColumnIdGenerator,
 ) {

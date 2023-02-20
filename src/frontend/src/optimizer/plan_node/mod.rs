@@ -95,7 +95,57 @@ impl PartialEq for dyn PlanNode {
 impl Eq for dyn PlanNode {}
 
 impl_downcast!(PlanNode);
-pub type PlanRef = Rc<dyn PlanNode>;
+
+// Using a new type wrapper allows direct function implementation on `PlanRef`,
+// and we currently need a manual implementation of `PartialEq` for `PlanRef`.
+#[derive(Clone, Debug, Eq, Hash)]
+pub struct PlanRef(Rc<dyn PlanNode>);
+
+// Cannot use the derived implementation for now.
+// See https://github.com/rust-lang/rust/issues/31740
+impl PartialEq for PlanRef {
+    fn eq(&self, other: &Self) -> bool {
+        &self.0 == &other.0
+    }
+}
+
+impl Deref for PlanRef {
+    type Target = dyn PlanNode;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
+impl<T: PlanNode> From<T> for PlanRef {
+    fn from(value: T) -> Self {
+        PlanRef(Rc::new(value))
+    }
+}
+
+impl Display for PlanRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Layer for PlanRef {
+    type Sub = Self;
+
+    fn map<F>(self, f: F) -> Self
+    where
+        F: FnMut(Self::Sub) -> Self::Sub,
+    {
+        self.clone_with_inputs(&self.inputs().into_iter().map(f).collect_vec())
+    }
+
+    fn descent<F>(&self, f: F)
+    where
+        F: FnMut(&Self::Sub),
+    {
+        self.inputs().iter().for_each(f);
+    }
+}
 
 #[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
@@ -461,6 +511,7 @@ pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
 mod merge_eq_nodes;
+pub use merge_eq_nodes::*;
 
 pub mod generic;
 pub mod stream;
@@ -617,7 +668,7 @@ pub use stream_watermark_filter::StreamWatermarkFilter;
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash};
+use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Layer};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -847,21 +898,6 @@ macro_rules! impl_plan_node {
 }
 
 for_all_plan_nodes! { impl_plan_node }
-
-/// impl fn `plan_ref` for each node.
-macro_rules! impl_plan_ref {
-    ($( { $convention:ident, $name:ident }),*) => {
-        paste!{
-            $(impl From<[<$convention $name>]> for PlanRef {
-                fn from(plan: [<$convention $name>]) -> Self {
-                    std::rc::Rc::new(plan)
-                }
-            })*
-        }
-    }
-}
-
-for_all_plan_nodes! { impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {

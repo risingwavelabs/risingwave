@@ -70,7 +70,7 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
 ) -> PlanRef {
     let new_input = node.input().predicate_pushdown(pushed_predicate, ctx);
     let new_node = node.clone_with_input(new_input);
-    LogicalFilter::create(Rc::new(new_node), filter_predicate)
+    LogicalFilter::create(new_node.into(), filter_predicate)
 }
 
 #[derive(Debug, Clone)]

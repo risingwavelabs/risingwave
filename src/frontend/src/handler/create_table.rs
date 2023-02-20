@@ -391,7 +391,7 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: context.with_options().inner().clone(),
+        properties: context.with_options().inner().clone().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: vec![],

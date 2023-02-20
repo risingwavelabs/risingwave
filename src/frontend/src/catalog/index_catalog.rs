@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -126,21 +126,13 @@ impl IndexCatalog {
     }
 
     /// a mapping maps column index of secondary index to column index of primary table
-    pub fn secondary_to_primary_mapping(&self) -> &HashMap<usize, usize> {
-        &self
-            .secondary_to_primary_mapping
-            .clone()
-            .into_iter()
-            .collect()
+    pub fn secondary_to_primary_mapping(&self) -> &BTreeMap<usize, usize> {
+        &self.secondary_to_primary_mapping
     }
 
     /// a mapping maps column index of primary table to column index of secondary index
-    pub fn primary_to_secondary_mapping(&self) -> &HashMap<usize, usize> {
-        &self
-            .primary_to_secondary_mapping
-            .clone()
-            .into_iter()
-            .collect()
+    pub fn primary_to_secondary_mapping(&self) -> &BTreeMap<usize, usize> {
+        &self.primary_to_secondary_mapping
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstIndex {

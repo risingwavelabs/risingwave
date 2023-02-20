@@ -1234,8 +1234,6 @@ impl ToStream for LogicalAgg {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -1256,7 +1254,7 @@ mod tests {
             Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
-        let input = Rc::new(values);
+        let input = PlanRef::from(values);
         let input_ref_1 = InputRef::new(0, ty.clone());
         let input_ref_2 = InputRef::new(1, ty.clone());
         let input_ref_3 = InputRef::new(2, ty.clone());

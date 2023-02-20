@@ -48,6 +48,56 @@ impl ExprRewriter for Substitute {
     }
 }
 
+pub trait Layer: Sized {
+    type Sub;
+
+    fn map<F>(self, f: F) -> Self
+    where
+        F: FnMut(Self::Sub) -> Self::Sub;
+
+    fn descent<F>(&self, f: F)
+    where
+        F: FnMut(&Self::Sub);
+}
+
+pub trait Tree = Layer<Sub = Self>;
+
+pub trait Endo<T: Tree> {
+    fn pre(&mut self, t: T) -> T {
+        t
+    }
+
+    fn post(&mut self, t: T) -> T {
+        t
+    }
+
+    fn apply(&mut self, t: T) -> T {
+        let t = self.pre(t).map(|s| self.apply(s));
+        self.post(t)
+    }
+}
+
+#[allow(unused_variables)]
+pub trait Visit<T: Tree> {
+    fn pre(&mut self, t: &T) {}
+
+    fn post(&mut self, t: &T) {}
+
+    fn visit(&mut self, t: &T) {
+        self.pre(t);
+        t.descent(|i| self.visit(i));
+        self.post(t);
+    }
+}
+
+// Traits for easily transform and visit recursive structures
+
+pub trait Fold<R> {
+    fn fold<F>(&self, f: F) -> R
+    where
+        F: FnMut(Vec<R>) -> R;
+}
+
 // Workaround object safety rules for Eq and Hash, adopted from
 // https://github.com/bevyengine/bevy/blob/f7fbfaf9c72035e98c6b6cec0c7d26ff9f5b1c82/crates/bevy_utils/src/label.rs
 

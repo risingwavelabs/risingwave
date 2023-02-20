@@ -286,7 +286,7 @@ impl TableCatalog {
         use risingwave_common::catalog::TableOption;
 
         let table_options =
-            TableOption::build_table_option(&self.properties.clone().into_iter().collect());
+            TableOption::build_table_option(&self.properties.inner().clone().into_iter().collect());
 
         TableDesc {
             table_id: self.id,
@@ -352,7 +352,7 @@ impl TableCatalog {
                 .collect_vec(),
             append_only: self.append_only,
             owner: self.owner,
-            properties: self.properties.inner().clone(),
+            properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
             vnode_col_index: self
                 .vnode_col_index
