@@ -42,7 +42,7 @@ impl FilterBuilder for XorFilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        self.key_hash_entries.len() * 5
+        self.key_hash_entries.len() * 4
     }
 
     fn finish(&mut self) -> Vec<u8> {
@@ -58,6 +58,8 @@ impl FilterBuilder for XorFilterBuilder {
             .fingerprints
             .iter()
             .for_each(|x| buf.put_u16_le(*x));
+        // We add an extra byte so we can distinguish bloom filter and xor filter by the last
+        // byte(255 indicates a xor filter and others indicate a bloom filter).
         buf.put_u8(255);
         buf
     }
