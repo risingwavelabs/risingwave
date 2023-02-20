@@ -110,7 +110,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Some((left_column.clone(), right_column.clone()))
     }
 
-    /// Generates `t JOIN t2 ON ...` expression.
+    /// Generates the `ON` clause in `t JOIN t2 ON ...`
     /// It will generate at least one equi join condition
     /// This will reduce chance of nested loop join from being generated.
     /// TODO: Generate equi-join on different types.
@@ -159,6 +159,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Some(JoinConstraint::On(expr))
     }
 
+    /// Generates t1 JOIN t2 ON ...
     fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
         let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
         let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
