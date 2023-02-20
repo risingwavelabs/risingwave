@@ -1534,6 +1534,61 @@ def section_frontend(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_query_per_sec(
+                    "Query Per second in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('distributed_completed_query_counter')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Running query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_running_query_num')}",
+                            "The number of running query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Rejected query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_rejected_query_counter')}",
+                            "The number of rejected query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Completed query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_completed_query_counter')}",
+                            "The number of completed query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Query Latency in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p50 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p90 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p99 - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_latency(
                     "Query Latency in Local Execution Mode",
                     "",

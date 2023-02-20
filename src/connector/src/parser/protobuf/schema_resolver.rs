@@ -85,7 +85,7 @@ pub(super) async fn compile_file_descriptor_from_schema_registry(
     for subject in iter::once(&primary_subject).chain(dependency_subjects.iter()) {
         source_tree.as_mut().add_file(
             Path::new(&subject.name),
-            subject.schema.raw.as_bytes().to_vec(),
+            subject.schema.content.as_bytes().to_vec(),
         );
     }
     let mut db = SourceTreeDescriptorDatabase::new(source_tree.as_mut());
