@@ -39,7 +39,7 @@ echo "--- Rust format check"
 cargo fmt --all -- --check
 
 echo "--- Build Rust components"
-cargo build \
+cargo build -v \
     -p risingwave_cmd_all \
     -p risedev \
     -p risingwave_regress_test \
