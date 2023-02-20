@@ -231,9 +231,9 @@ fn build_fragment(
     match stream_node.get_node_body()? {
         NodeBody::Source(src) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
-            // Note: For creating table with connector, the source id is left with zero and should
-            // not be recorded in dependent table ids.
-            if let Some(inner) = &src.source_inner && inner.source_id != 0 {
+            // Note: For creating table with connector, the source id is left with placeholder and
+            // should not be recorded in dependent relation ids.
+            if let Some(inner) = &src.source_inner && inner.source_id != TableId::placeholder().table_id {
                 state.dependent_relation_ids.insert(TableId::new(inner.source_id));
             }
         }
