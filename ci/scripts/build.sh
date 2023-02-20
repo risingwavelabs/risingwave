@@ -27,6 +27,7 @@ shift $((OPTIND -1))
 echo "--- sccache"
 echo $RUSTC_WRAPPER
 echo $SCCACHE_BUCKET
+export SCCACHE_IDLE_TIMEOUT=0
 
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace
@@ -39,7 +40,7 @@ echo "--- Rust format check"
 cargo fmt --all -- --check
 
 echo "--- Build Rust components"
-cargo build -v \
+cargo build \
     -p risingwave_cmd_all \
     -p risedev \
     -p risingwave_regress_test \
