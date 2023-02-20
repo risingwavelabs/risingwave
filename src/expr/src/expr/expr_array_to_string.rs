@@ -52,6 +52,11 @@ use crate::{bail, ensure, ExprError, Result};
 /// *,foo,*
 ///
 /// query T
+/// select array_to_string(array['2023-02-20 17:35:25'::timestamp, null,'2023-02-19 13:01:30'::timestamp], ',', '*');
+/// ----
+/// 2023-02-20 17:35:25,*,2023-02-19 13:01:30
+///
+/// query T
 /// with t as (
 ///   select array[1,null,2,3] as arr, ',' as d union all
 ///   select array[4,5,6,null,7] as arr, '|')
@@ -74,9 +79,10 @@ use crate::{bail, ensure, ExprError, Result};
 /// ```
 #[derive(Debug)]
 pub struct ArrayToStringExpression {
-    pub array: Box<dyn Expression>,
-    pub delimiter: Box<dyn Expression>,
-    pub null_string: Option<Box<dyn Expression>>,
+    array: Box<dyn Expression>,
+    element_data_type: DataType,
+    delimiter: Box<dyn Expression>,
+    null_string: Option<Box<dyn Expression>>,
 }
 
 impl<'a> TryFrom<&'a ExprNode> for ArrayToStringExpression {
@@ -93,6 +99,11 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayToStringExpression {
         };
         let array = build_from_prost(array_node)?;
 
+        let element_data_type = match array.return_type() {
+            DataType::List { datatype } => *datatype,
+            _ => bail!("Expected argument 'array' to be of type List"),
+        };
+
         let Some(delim_node) = children.next() else {
             bail!("Expected argument 'delimiter'");
         };
@@ -106,6 +117,7 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayToStringExpression {
 
         Ok(Self {
             array,
+            element_data_type,
             delimiter,
             null_string,
         })
@@ -150,9 +162,9 @@ impl Expression for ArrayToStringExpression {
             if let Some(array) = array && let Some(delim) = delim {
                 let mut writer = output.writer().begin();
                 if let Some(null_string) = null_string {
-                    evaluate_with_nulls(array, delim, null_string, &mut writer);
+                    self.evaluate_with_nulls(array, delim, null_string, &mut writer);
                 } else {
-                    evaluate(array, delim, &mut writer);
+                    self.evaluate(array, delim, &mut writer);
                 }
                 writer.finish();
             } else {
@@ -170,9 +182,9 @@ impl Expression for ArrayToStringExpression {
             let null_string = e.eval_row(input)?;
             let mut writer = String::new();
             if let Some(null_string) = null_string {
-                evaluate_with_nulls(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), null_string.as_utf8(), &mut writer);
+                self.evaluate_with_nulls(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), null_string.as_utf8(), &mut writer);
             } else {
-                evaluate(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), &mut writer);
+                self.evaluate(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), &mut writer);
             }
             Some(writer)
         } else {
@@ -182,34 +194,41 @@ impl Expression for ArrayToStringExpression {
     }
 }
 
-fn evaluate(array: ListRef<'_>, delimiter: &str, mut writer: &mut dyn Write) {
-    let mut first = true;
-    for element in array.values_ref().iter().flat_map(|f| f.iter()) {
-        if !first {
-            write!(writer, "{}", delimiter).unwrap();
-        } else {
-            first = false;
+impl ArrayToStringExpression {
+    fn evaluate(&self, array: ListRef<'_>, delimiter: &str, mut writer: &mut dyn Write) {
+        let mut first = true;
+        for element in array.values_ref().iter().flat_map(|f| f.iter()) {
+            if !first {
+                write!(writer, "{}", delimiter).unwrap();
+            } else {
+                first = false;
+            }
+            element
+                .write_with_type(&self.element_data_type, &mut writer)
+                .unwrap();
         }
-        element.write(&mut writer).unwrap();
     }
-}
 
-fn evaluate_with_nulls(
-    array: ListRef<'_>,
-    delimiter: &str,
-    null_string: &str,
-    mut writer: &mut dyn Write,
-) {
-    let mut first = true;
-    for element in array.values_ref() {
-        if !first {
-            write!(writer, "{}", delimiter).unwrap();
-        } else {
-            first = false;
-        }
-        match element {
-            Some(s) => s.write(&mut writer).unwrap(),
-            None => write!(writer, "{}", null_string).unwrap(),
+    fn evaluate_with_nulls(
+        &self,
+        array: ListRef<'_>,
+        delimiter: &str,
+        null_string: &str,
+        mut writer: &mut dyn Write,
+    ) {
+        let mut first = true;
+        for element in array.values_ref() {
+            if !first {
+                write!(writer, "{}", delimiter).unwrap();
+            } else {
+                first = false;
+            }
+            match element {
+                Some(s) => s
+                    .write_with_type(&self.element_data_type, &mut writer)
+                    .unwrap(),
+                None => write!(writer, "{}", null_string).unwrap(),
+            }
         }
     }
 }
