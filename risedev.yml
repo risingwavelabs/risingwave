@@ -137,7 +137,7 @@ profile:
       # If you want to use google cloud stoage as storage backend, configure hdfs namenode and root path:
       - use: opendal
         engine: gcs
-        bucket: "bucket name"
+        bucket: bucket-name
         root: risingwave
       - use: compactor
       # - use: prometheus
