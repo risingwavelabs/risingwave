@@ -847,7 +847,10 @@ where
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let stream_job = &*stream_job;
 
-        // TODO: 4. Mark current relation as "updating".
+        // 4. Mark current relation as "updating".
+        self.catalog_manager
+            .start_replace_table_procedure(stream_job.table().unwrap())
+            .await?;
 
         // 5. Resolve the downstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
@@ -875,11 +878,19 @@ where
             .await?;
         assert!(dispatchers.is_empty());
 
-        // 7. Build the table fragments structure that will be persisted in the stream manager, and
+        // 7. Assign a new dummy ID for the new table fragments.
+        // TODO
+        let dummy_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+
+        // 8. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let table_fragments =
-            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+        let table_fragments = TableFragments::new(
+            dummy_id.into(),
+            graph,
+            &building_locations.actor_locations,
+            env,
+        );
 
         let ctx = ReplaceTableContext {
             merge_updates,
