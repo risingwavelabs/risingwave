@@ -30,7 +30,6 @@ impl Rule for UnionInputValuesMergeRule {
             rows.extend_from_slice(v.as_logical_values()?.rows());
         }
         Some(LogicalValues::new(rows, union.schema().clone(), union.ctx()).into())
-    
     }
 }
 
