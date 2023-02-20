@@ -54,7 +54,7 @@ impl ExprRewriter for Substitute {
 /// We usually use `Layer` to represents one layer of a tree-like structure,
 /// where the subcomponents are the recursive subtrees.
 /// But in general, the subcomponent can be of different type than the `Layer`.
-/// Such structual relation between `Sub` and `Layer`
+/// Such structural relation between `Sub` and `Layer`
 /// allows us to lift transformation on `Sub` to that on `Layer.`
 /// A related and even more general notion is `Functor`,
 /// which might also be helpful to define in the future.
@@ -85,7 +85,7 @@ pub trait Tree = Layer<Sub = Self>;
 /// Specifically, the derived transformation `apply : T -> T` first applies `pre`,
 /// then maps itself over the subtrees, and finally applies `post`.
 /// This allows us to obtain a global transformation acting recursively on all levels
-/// by specifying simplier transformations at acts locally.
+/// by specifying simpler transformations at acts locally.
 pub trait Endo<T: Tree> {
     fn pre(&mut self, t: T) -> T {
         t

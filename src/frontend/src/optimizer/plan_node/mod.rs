@@ -157,7 +157,7 @@ pub struct PlanNodeId(pub i32);
 /// and the `dag_apply` function will take care to only transform every `LogicalShare` nodes once.
 ///
 /// Note: Due to the way super trait is designed in rust,
-/// one need to have seperate implementation blocks of `Endo<PlanRef>` and `EndoPlan`.
+/// one need to have separate implementation blocks of `Endo<PlanRef>` and `EndoPlan`.
 /// And conventionally the real transformation `apply` is under `Endo<PlanRef>`,
 /// although one can refer to `dag_apply` in the implementation of `apply`.
 pub trait EndoPlan: Endo<PlanRef> {
