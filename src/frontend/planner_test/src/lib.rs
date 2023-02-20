@@ -32,7 +32,7 @@ use risingwave_frontend::handler::{
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, Explainable, FrontendOpts, OptimizerContext,
+    build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};

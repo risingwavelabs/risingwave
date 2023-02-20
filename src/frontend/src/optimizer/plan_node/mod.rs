@@ -279,7 +279,7 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
-pub trait Explainable {
+pub trait Explain {
     /// Write explain the whole plan tree.
     fn explain(
         &self,
@@ -292,7 +292,7 @@ pub trait Explainable {
     fn explain_to_string(&self) -> Result<String>;
 }
 
-impl Explainable for PlanRef {
+impl Explain for PlanRef {
     /// Write explain the whole plan tree.
     fn explain(
         &self,
