@@ -87,6 +87,8 @@ mod stream;
 pub use stream::filter_with_now_to_join_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
+mod union_input_values_merge_rule;
+pub use union_input_values_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -121,6 +123,7 @@ macro_rules! for_all_rules {
             ,{FilterWithNowToJoinRule}
             ,{TopNOnIndexRule}
             ,{TrivialProjectToValuesRule}
+            ,{UnionInputValuesMergeRule}
         }
     };
 }

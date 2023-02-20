@@ -408,6 +408,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
                 // project-join merge should be applied after merge
                 // eliminate and to values
                 ProjectJoinMergeRule::create(),
@@ -424,6 +425,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
             ],
             ApplyOrder::TopDown,
         );
