@@ -61,6 +61,58 @@ select exp(0::smallint);
 1
 
 query R
+select 2.0 ^ 3.0
+----
+8
+
+query R
+select 2.0::decimal ^ 3.0::decimal
+----
+8
+
+query R
+select 2.0::double ^ 3.0::double
+----
+8
+
+query R
+select 2.0::smallint ^ 3.0::smallint
+----
+8
+
+query R
+select 2.0::bigint ^ 3.0::bigint
+----
+8
+
+query R
+select 2.0 ^ -2;
+----
+0.25
+
+query R
+select 2.23 ^ -2.33;
+----
+0.15432975583772085
+
+query R
+select 100000 ^ 0;
+----
+1
+
+query R
+select 100000 ^ -200000000000000;
+----
+0
+
+statement error QueryError: Expr error: Numeric out of range
+select 100000 ^ 200000000000000;
+
+
+statement error QueryError: Expr error: Numeric out of range
+select -100000 ^ 200000000000001;
+
+query R
 select exp(0.0);
 ----
 1
