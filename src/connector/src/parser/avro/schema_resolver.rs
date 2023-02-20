@@ -91,8 +91,8 @@ pub struct ConfluentSchemaResolver {
 impl ConfluentSchemaResolver {
     // return the reader schema and a new `SchemaResolver`
     pub async fn new(subject_name: &str, client: Client) -> Result<(Schema, Self)> {
-        let cf_schema = client.get_schema_by_subject(subject_name).await?;
-        let schema = Schema::parse_str(&cf_schema.raw)
+        let raw_schema = client.get_schema_by_subject(subject_name).await?;
+        let schema = Schema::parse_str(&raw_schema.content)
             .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
         let resolver = ConfluentSchemaResolver {
             writer_schemas: Cache::new(u64::MAX),
@@ -100,7 +100,7 @@ impl ConfluentSchemaResolver {
         };
         resolver
             .writer_schemas
-            .insert(cf_schema.id, Arc::new(schema.clone()))
+            .insert(raw_schema.id, Arc::new(schema.clone()))
             .await;
         Ok((schema, resolver))
     }
@@ -110,9 +110,9 @@ impl ConfluentSchemaResolver {
         if let Some(schema) = self.writer_schemas.get(&schema_id) {
             Ok(schema)
         } else {
-            let cf_schema = self.confluent_client.get_schema_by_id(schema_id).await?;
+            let raw_schema = self.confluent_client.get_schema_by_id(schema_id).await?;
 
-            let schema = Schema::parse_str(&cf_schema.raw).map_err(|e| {
+            let schema = Schema::parse_str(&raw_schema.content).map_err(|e| {
                 RwError::from(ProtocolError(format!("Avro schema parse error {}", e)))
             })?;
             let schema = Arc::new(schema);
