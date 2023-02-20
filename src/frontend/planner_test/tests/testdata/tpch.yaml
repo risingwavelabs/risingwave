@@ -2534,12 +2534,12 @@
     LogicalJoin { type: Inner, on: (sum($expr1) = max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
     ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = lineitem.l_suppkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
     | ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone] }
-    | └─LogicalShare { id = 287 }
+    | └─LogicalShare { id = 281 }
     |   └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
     |     └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1] }
     |       └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
     └─LogicalAgg { aggs: [max(sum($expr1))] }
-      └─LogicalShare { id = 287 }
+      └─LogicalShare { id = 281 }
         └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
           └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1] }
             └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
@@ -2573,7 +2573,7 @@
       |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
       |   └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-      |     └─StreamShare { id = 1006 }
+      |     └─StreamShare { id = 988 }
       |       └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
       |         └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr1)] }
       |           └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
@@ -2587,7 +2587,7 @@
               └─StreamHashAgg { group_key: [$expr2], aggs: [count, max(sum($expr1))] }
                 └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as $expr2] }
                   └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-                    └─StreamShare { id = 1006 }
+                    └─StreamShare { id = 988 }
                       └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
                         └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr1)] }
                           └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
