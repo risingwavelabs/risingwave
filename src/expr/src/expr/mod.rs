@@ -33,6 +33,7 @@
 
 // These modules define concrete expression structures.
 mod expr_array_concat;
+mod expr_array_to_string;
 mod expr_binary_bytes;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
@@ -56,7 +57,6 @@ mod expr_unary;
 mod expr_vnode;
 
 mod agg;
-mod array;
 mod build_expr_from_prost;
 pub(crate) mod data_types;
 mod template;

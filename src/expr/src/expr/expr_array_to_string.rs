@@ -130,32 +130,33 @@ impl Expression for ArrayToStringExpression {
         } else {
             None
         };
+        let null_string_array = null_string_array.as_ref().map(|a| a.as_utf8());
 
         let mut output = Utf8ArrayBuilder::with_meta(input.capacity(), ArrayMeta::Simple);
 
         for (i, vis) in input.vis().iter().enumerate() {
             if !vis {
                 output.append_null();
+                continue;
+            }
+            let array = list_array.value_at(i);
+            let delim = delim_array.value_at(i);
+            let null_string = if let Some(a) = null_string_array {
+                a.value_at(i)
             } else {
-                let array = list_array.value_at(i);
-                let delim = delim_array.value_at(i);
-                let null_string = if let Some(a) = &null_string_array {
-                    a.as_utf8().value_at(i)
-                } else {
-                    None
-                };
+                None
+            };
 
-                if let Some(array) = array && let Some(delim) = delim {
-                    let mut writer = output.writer().begin();
-                    if let Some(null_string) = null_string {
-                        evaluate_with_nulls(array, delim, null_string, &mut writer);
-                    } else {
-                        evaluate(array, delim, &mut writer);
-                    }
-                    writer.finish();
+            if let Some(array) = array && let Some(delim) = delim {
+                let mut writer = output.writer().begin();
+                if let Some(null_string) = null_string {
+                    evaluate_with_nulls(array, delim, null_string, &mut writer);
                 } else {
-                    output.append_null();
+                    evaluate(array, delim, &mut writer);
                 }
+                writer.finish();
+            } else {
+                output.append_null();
             }
         }
         Ok(Arc::new(output.finish().into()))
