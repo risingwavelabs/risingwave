@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod plan_node;
-pub use plan_node::PlanRef;
+pub use plan_node::{Explain, PlanRef};
 pub mod property;
 
 mod delta_join_solver;
@@ -232,6 +232,13 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Rewrite Like Expr".to_string(),
+            vec![RewriteLikeExprRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         // Simple Unnesting.
         plan = self.optimize_by_rules(
             plan,
@@ -411,6 +418,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
                 // project-join merge should be applied after merge
                 // eliminate and to values
                 ProjectJoinMergeRule::create(),
@@ -427,6 +435,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
             ],
             ApplyOrder::TopDown,
         );
@@ -449,7 +458,9 @@ impl PlanRoot {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        ctx.store_logical(plan.explain_to_string().unwrap());
+        if ctx.is_explain_logical() {
+            ctx.store_logical(plan.explain_to_string().unwrap());
+        }
 
         Ok(plan)
     }

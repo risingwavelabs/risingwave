@@ -28,6 +28,7 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
+#![feature(slice_internals)]
 #![feature(min_specialization)]
 #![feature(is_some_and)]
 #![recursion_limit = "256"]
@@ -42,7 +43,7 @@ pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
-pub use optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
 #[expect(dead_code)]

@@ -53,7 +53,7 @@
     select -generate_series(x,x,x) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Neg(Generate($0, $0, $0)) as $expr26] }
+    └─BatchProject { exprs: [Neg(Generate($0, $0, $0)) as $expr1] }
       └─BatchProjectSet { select_list: [$0, $1, Generate($0, $0, $0)] }
         └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - name: table functions as parameters of usual functions
@@ -138,13 +138,13 @@
     └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id, Unnest($0)] }
       ├─StreamExchange { dist: HashShard(Unnest($0)) }
       | └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-      |   └─StreamShare { id = 375 }
+      |   └─StreamShare { id = 415 }
       |     └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
       |       └─StreamProjectSet { select_list: [Unnest($0), $1] }
       |         └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(Unnest($0)) }
         └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-          └─StreamShare { id = 375 }
+          └─StreamShare { id = 415 }
             └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
               └─StreamProjectSet { select_list: [Unnest($0), $1] }
                 └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

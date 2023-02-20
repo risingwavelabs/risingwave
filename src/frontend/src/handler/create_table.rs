@@ -287,9 +287,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = context.with_options().inner();
+    let properties = context.with_options().inner().clone().into_iter().collect();
 
-    let (mut columns, pk_column_ids, row_id_index) =
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     let definition = context.normalized_sql().to_owned();
@@ -297,9 +297,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        properties,
-        row_id_index,
-        &pk_column_ids,
+        &properties,
+        &mut row_id_index,
+        &mut pk_column_ids,
         true,
     )
     .await?;

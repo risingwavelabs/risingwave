@@ -393,9 +393,22 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
-impl dyn PlanNode {
+pub trait Explain {
     /// Write explain the whole plan tree.
-    pub fn explain(
+    fn explain(
+        &self,
+        is_last: &mut Vec<bool>,
+        level: usize,
+        f: &mut impl std::fmt::Write,
+    ) -> std::fmt::Result;
+
+    /// Explain the plan node and return a string.
+    fn explain_to_string(&self) -> Result<String>;
+}
+
+impl Explain for PlanRef {
+    /// Write explain the whole plan tree.
+    fn explain(
         &self,
         is_last: &mut Vec<bool>,
         level: usize,
@@ -432,13 +445,25 @@ impl dyn PlanNode {
     }
 
     /// Explain the plan node and return a string.
-    pub fn explain_to_string(&self) -> Result<String> {
+    fn explain_to_string(&self) -> Result<String> {
+        // In order to let expression display id started from 1 for explaining.
+        // We will reset expression display id to 0 and clone the whole plan to reset the schema.
+        let plan = {
+            let old_expr_display_id = self.ctx().get_expr_display_id();
+            self.ctx().set_expr_display_id(0);
+            let plan = PlanCloner::clone_whole_plan(self.clone());
+            self.ctx().set_expr_display_id(old_expr_display_id);
+            plan
+        };
+
         let mut output = String::new();
-        self.explain(&mut vec![], 0, &mut output)
+        plan.explain(&mut vec![], 0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
     }
+}
 
+impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
         self.plan_base().id
     }
@@ -710,6 +735,7 @@ pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 

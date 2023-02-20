@@ -19,7 +19,7 @@
     └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Array(1:Int32, t.v1) as $expr25] }
+    └─BatchProject { exprs: [Array(1:Int32, t.v1) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - sql: |
     select ARRAY[null];
