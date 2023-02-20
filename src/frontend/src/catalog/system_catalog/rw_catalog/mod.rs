@@ -12,5 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod rw_ddl_progress;
 mod rw_meta_snapshot;
+
+pub use rw_ddl_progress::*;
 pub use rw_meta_snapshot::*;

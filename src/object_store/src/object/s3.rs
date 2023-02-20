@@ -116,7 +116,7 @@ impl S3StreamingUploader {
                 .key(&self.key)
                 .send()
                 .await?;
-            self.upload_id = Some(resp.upload_id().unwrap().into());
+            self.upload_id = Some(resp.upload_id.unwrap());
         }
 
         // Get the data to upload for the next part.
@@ -187,7 +187,7 @@ impl S3StreamingUploader {
                 .iter()
                 .map(|(part_id, output)| {
                     CompletedPart::builder()
-                        .set_e_tag(output.e_tag().map(|s| s.into()))
+                        .set_e_tag(output.e_tag.clone())
                         .set_part_number(Some(*part_id))
                         .build()
                 })
@@ -389,7 +389,7 @@ impl ObjectStore for S3ObjectStore {
                 .last_modified()
                 .expect("last_modified required")
                 .as_secs_f64(),
-            total_size: resp.content_length() as usize,
+            total_size: resp.content_length as usize,
         })
     }
 
@@ -484,7 +484,7 @@ impl ObjectStore for S3ObjectStore {
                 request = request.continuation_token(continuation_token);
             }
             let result = request.send().await?;
-            let is_truncated = result.is_truncated();
+            let is_truncated = result.is_truncated;
             ret.append(
                 &mut result
                     .contents()
@@ -500,7 +500,7 @@ impl ObjectStore for S3ObjectStore {
                     })
                     .collect_vec(),
             );
-            next_continuation_token = result.next_continuation_token().map(|s| s.to_string());
+            next_continuation_token = result.next_continuation_token;
             if !is_truncated {
                 break;
             }
@@ -731,10 +731,10 @@ impl S3ObjectStore {
                 .is_ok()
             {
                 tracing::info!(
-                        "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
-                        bucket,
-                        S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
-                    );
+                    "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
+                    bucket,
+                    S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+                );
             } else {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
