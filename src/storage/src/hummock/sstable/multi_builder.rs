@@ -152,22 +152,22 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        if let Some(builder) = self.current_builder.as_ref() {
-            let mut switch_builder = is_new_user_key && builder.reach_capacity();
-            if self.split_by_table {
-                if full_key.user_key.table_id.table_id != self.last_table_id {
-                    self.last_table_id = full_key.user_key.table_id.table_id;
-                    self.last_vnode_id = full_key.user_key.get_vnode_id();
+        let mut switch_builder = false;
+        if self.split_by_table {
+            if full_key.user_key.table_id.table_id != self.last_table_id {
+                self.last_table_id = full_key.user_key.table_id.table_id;
+                self.last_vnode_id = full_key.user_key.get_vnode_id();
+                switch_builder = true;
+            } else if self.split_by_vnode_count > 0 {
+                let vnode_id = full_key.user_key.get_vnode_id();
+                if vnode_id != self.last_vnode_id && vnode_id % self.split_by_vnode_count == 0 {
                     switch_builder = true;
-                } else if self.split_by_vnode_count > 0 {
-                    let vnode_id = full_key.user_key.get_vnode_id();
-                    if vnode_id != self.last_vnode_id && vnode_id % self.split_by_vnode_count == 0 {
-                        switch_builder = true;
-                    }
-                    self.last_vnode_id = vnode_id;
                 }
+                self.last_vnode_id = vnode_id;
             }
-            if switch_builder {
+        }
+        if let Some(builder) = self.current_builder.as_ref() {
+            if is_new_user_key && (switch_builder || builder.reach_capacity()) {
                 let delete_ranges = self
                     .del_agg
                     .get_tombstone_between(&self.last_sealed_key.as_ref(), &full_key.user_key);

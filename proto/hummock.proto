@@ -38,6 +38,7 @@ message Level {
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
+  uint32 split_by_vnode = 6;
 }
 
 message InputLevel {
@@ -268,7 +269,6 @@ message CompactTask {
   TaskType task_type = 20;
   // 0 represent do not enable compact guard.
   uint32 compact_guard_vnode_size = 21;
-  bool enable_split_by_table = 22;
 }
 
 message LevelHandler {

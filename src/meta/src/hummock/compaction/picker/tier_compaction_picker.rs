@@ -78,7 +78,6 @@ impl TierCompactionPicker {
                     compaction_bytes += sst.file_size;
                 }
             }
-            let mut max_level_size = compaction_bytes;
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
                 self.config.sub_level_max_compaction_bytes,
@@ -149,6 +148,9 @@ impl TierCompactionPicker {
                 stats.skip_by_write_amp_limit += 1;
                 continue;
             }
+            if select_level_inputs.len() == 1 {
+                continue;
+            }
 
             select_level_inputs.reverse();
 
@@ -211,7 +213,6 @@ impl TierCompactionPicker {
 
                 compaction_bytes += other.total_file_size;
                 compact_file_count += other.table_infos.len();
-                max_level_size = std::cmp::max(max_level_size, other.total_file_size);
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
                     level_type: other.level_type,
