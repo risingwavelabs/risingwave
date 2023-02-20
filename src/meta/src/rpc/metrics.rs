@@ -269,7 +269,7 @@ impl MetaMetrics {
         .unwrap();
 
         let meta_type = register_int_gauge_vec_with_registry!(
-            "meta_cluster",
+            "meta_num",
             "role of meta nodes in the cluster",
             &["worker_addr", "role"],
             registry,
