@@ -273,7 +273,7 @@ where
 
         let mut table_fragments = BTreeMapTransaction::new(map);
 
-        let _old_table_fragment = table_fragments
+        let old_table_fragment = table_fragments
             .remove(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
@@ -289,7 +289,10 @@ where
         table_fragments.insert(table_id, table_fragment.clone());
 
         commit_meta!(self, table_fragments)?;
-        self.notify_fragment_mapping(&table_fragment, Operation::Update)
+
+        self.notify_fragment_mapping(&old_table_fragment, Operation::Delete)
+            .await;
+        self.notify_fragment_mapping(&table_fragment, Operation::Add)
             .await;
 
         // TODO: should update merge executors.

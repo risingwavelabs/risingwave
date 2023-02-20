@@ -132,6 +132,7 @@ impl BuildingFragment {
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
+                dml_node.table_version_id = job.table_version_id().unwrap();
             }
             _ => {}
         });
@@ -465,16 +466,15 @@ impl CompleteStreamFragmentGraph {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
 
-        let original_table_fragment_id = GlobalFragmentId::new(
-            downstream_fragments
-                .iter()
-                .flat_map(|f| f.upstream_fragment_ids.iter().copied())
-                .unique()
-                .exactly_one()
-                .map_err(|_| {
-                    anyhow!("downstream fragments must have exactly one upstream fragment")
-                })?,
-        );
+        let original_table_fragment_id = downstream_fragments
+            .iter()
+            .flat_map(|f| f.upstream_fragment_ids.iter().copied())
+            .unique()
+            .at_most_one()
+            .map_err(|_| {
+                anyhow!("downstream fragments must have exactly at most one upstream fragment")
+            })?
+            .map(GlobalFragmentId::new);
 
         let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
@@ -485,7 +485,7 @@ impl CompleteStreamFragmentGraph {
 
             let edge = StreamFragmentEdge {
                 id: EdgeId::DownstreamExternal {
-                    original_upstream_fragment_id: original_table_fragment_id,
+                    original_upstream_fragment_id: original_table_fragment_id.unwrap(),
                     downstream_fragment_id: id,
                 },
                 // We always use `NoShuffle` for the exchange between the upstream `Materialize`

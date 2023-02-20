@@ -133,12 +133,12 @@ pub async fn handle_add_column(
         let catalog_writer = session.env().catalog_writer();
 
         // TODO: call replace_table RPC
-        // catalog_writer.replace_table(table, graph).await?;
+        catalog_writer.replace_table(table, graph).await?;
 
-        catalog_writer
-            .drop_table(None, original_catalog.id())
-            .await?;
-        catalog_writer.create_table(None, table, graph).await?;
+        // catalog_writer
+        //     .drop_table(None, original_catalog.id())
+        //     .await?;
+        // catalog_writer.create_table(None, table, graph).await?;
 
         Ok(PgResponse::empty_result_with_notice(
             StatementType::ALTER_TABLE,

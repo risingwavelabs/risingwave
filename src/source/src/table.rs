@@ -123,6 +123,10 @@ impl TableDmlHandle {
             }
         }
     }
+
+    pub fn column_descs(&self) -> &[ColumnDesc] {
+        self.column_descs.as_ref()
+    }
 }
 
 #[easy_ext::ext(TableDmlHandleTestExt)]
