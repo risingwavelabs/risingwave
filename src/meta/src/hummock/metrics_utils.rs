@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
+    CompactTask, CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
     HummockVersionStats,
 };
 
@@ -230,10 +230,11 @@ pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
 // Triggers a report on compact_pending_bytes_needed
 pub fn trigger_lsm_stat(
     metrics: &MetaMetrics,
-    group_label: String,
     compaction_config: Arc<CompactionConfig>,
     levels: &Levels,
+    compact_task: &mut CompactTask,
 ) {
+    let group_label = compact_task.compaction_group_id.to_string();
     {
         // compact_pending_bytes
         let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config);
@@ -262,9 +263,28 @@ pub fn trigger_lsm_stat(
             .collect_vec();
 
         for (level_index, compression_ratio) in level_compression_ratio {
+            let compression_algorithm_label = if level_index == compact_task.target_level {
+                match compact_task.compression_algorithm {
+                    1 => "Lz4",
+                    2 => "Zstd",
+                    _ => "",
+                }
+            } else {
+                ""
+            };
+
+            println!(
+                "level_index {} compression_algorithm {} compression_algorithm_label {} compression_ratio {} target_level {}",
+                level_index, compact_task.compression_algorithm, compression_algorithm_label, compression_ratio, compact_task.target_level
+            );
+
             metrics
                 .compact_level_compression_ratio
-                .with_label_values(&[&group_label, &level_index.to_string()])
+                .with_label_values(&[
+                    &group_label,
+                    &level_index.to_string(),
+                    compression_algorithm_label,
+                ])
                 .set(compression_ratio);
         }
     }

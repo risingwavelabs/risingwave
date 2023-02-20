@@ -1177,11 +1177,12 @@ where
 
                     trigger_lsm_stat(
                         &self.metrics,
-                        compact_task.compaction_group_id.to_string(),
+                        // compact_task.compaction_group_id.to_string(),
                         group_config.compaction_config(),
                         versioning
                             .current_version
                             .get_compaction_group_levels(compact_task.compaction_group_id),
+                        compact_task,
                     );
                 }
 

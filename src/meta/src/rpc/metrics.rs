@@ -273,7 +273,7 @@ impl MetaMetrics {
         let compact_level_compression_ratio = register_gauge_vec_with_registry!(
             "storage_compact_level_compression_ratio",
             "compression ratio of each level of the lsm tree",
-            &["group", "level"],
+            &["group", "level", "algorithm"],
             registry
         )
         .unwrap();
