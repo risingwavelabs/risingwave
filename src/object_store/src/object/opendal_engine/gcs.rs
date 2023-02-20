@@ -12,13 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Distributed execution for batch query.
+use opendal::services::Gcs;
+use opendal::Operator;
 
-mod query;
-pub use query::*;
-mod stage;
-use stage::*;
-mod query_manager;
-pub use query_manager::*;
-mod stats;
-pub use stats::*;
+use super::{EngineType, OpendalObjectStore};
+use crate::object::ObjectResult;
+impl OpendalObjectStore {
+    /// create opendal gcs engine.
+    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+        // Create gcs backend builder.
+        let mut builder = Gcs::default();
+
+        builder.bucket(&bucket);
+
+        builder.root(&root);
+
+        let op: Operator = Operator::create(builder)?.finish();
+        Ok(Self {
+            op,
+            engine_type: EngineType::Gcs,
+        })
+    }
+}
