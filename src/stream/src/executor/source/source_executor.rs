@@ -286,17 +286,15 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
-
+        let mut self_paused = false;
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
         if barrier.is_update() {
             stream.pause_source();
+            self_paused = true;
         }
-
         yield Message::Barrier(barrier);
 
-        // Whether the source is paused.
-        let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
