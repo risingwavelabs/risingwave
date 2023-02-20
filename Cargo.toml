@@ -69,7 +69,6 @@ lto = 'off'
 
 [profile.release]
 debug = true
-lto = 'thin'
 
 [profile.bench]
 opt-level = 3
