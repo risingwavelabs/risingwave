@@ -802,6 +802,20 @@ impl Session<PgResponseStream> for SessionImpl {
                     )]
                 }
             },
+            Statement::ShowCreateObject { .. } => {
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Create Sql".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                ]
+            }
             Statement::ShowVariable { variable } => {
                 let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
