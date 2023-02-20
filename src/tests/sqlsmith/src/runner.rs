@@ -13,12 +13,13 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
-use std::collections::HashMap;
+
+
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
-use tokio_postgres::Error;
 use tokio_postgres::error::Error as PgError;
-use tracing::error;
+use tokio_postgres::Error;
+
 
 use crate::validation::is_permissible_error;
 use crate::{
@@ -271,8 +272,8 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
 }
 
 fn format_fail_reason(setup_sql: &str, query: &str, e: &Error) -> String {
-                format!(
-                "
+    format!(
+        "
 Query failed:
 ---- START
 -- Setup
@@ -284,8 +285,8 @@ Query failed:
 Reason:
 {}
 ",
-                setup_sql, query, e
-            );
+        setup_sql, query, e
+    )
 }
 
 /// Validate client responses, returning a count of skipped queries.
@@ -300,6 +301,7 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, 
                 return 1;
             }
             // consolidate error reason for deterministic test
+            let error_msg = format_fail_reason(setup_sql, query, &e);
             tracing::info!(error_msg);
             panic!("{}", error_msg);
         }
