@@ -248,6 +248,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
+                throttle_l0_sub_level_number: config.meta.throttle_l0_sub_level_number,
             },
         )
         .await

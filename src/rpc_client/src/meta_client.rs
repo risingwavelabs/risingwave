@@ -1011,6 +1011,10 @@ impl SystemParamsReader {
         self.prost.backup_storage_directory.as_ref().unwrap()
     }
 
+    pub fn throttle_l0_sub_level_number(&self) -> u32 {
+        self.prost.throttle_l0_sub_level_number.unwrap()
+    }
+
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

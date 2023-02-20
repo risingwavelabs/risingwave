@@ -566,6 +566,7 @@ export interface SystemParams {
   dataDirectory?: string | undefined;
   backupStorageUrl?: string | undefined;
   backupStorageDirectory?: string | undefined;
+  throttleL0SubLevelNumber?: number | undefined;
 }
 
 export interface GetSystemParamsRequest {
@@ -2459,6 +2460,7 @@ function createBaseSystemParams(): SystemParams {
     dataDirectory: undefined,
     backupStorageUrl: undefined,
     backupStorageDirectory: undefined,
+    throttleL0SubLevelNumber: undefined,
   };
 }
 
@@ -2474,6 +2476,9 @@ export const SystemParams = {
       dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
       backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
       backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+      throttleL0SubLevelNumber: isSet(object.throttleL0SubLevelNumber)
+        ? Number(object.throttleL0SubLevelNumber)
+        : undefined,
     };
   },
 
@@ -2488,6 +2493,8 @@ export const SystemParams = {
     message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
     message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
     message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    message.throttleL0SubLevelNumber !== undefined &&
+      (obj.throttleL0SubLevelNumber = Math.round(message.throttleL0SubLevelNumber));
     return obj;
   },
 
@@ -2502,6 +2509,7 @@ export const SystemParams = {
     message.dataDirectory = object.dataDirectory ?? undefined;
     message.backupStorageUrl = object.backupStorageUrl ?? undefined;
     message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    message.throttleL0SubLevelNumber = object.throttleL0SubLevelNumber ?? undefined;
     return message;
   },
 };

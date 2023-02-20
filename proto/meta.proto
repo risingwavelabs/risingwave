@@ -339,6 +339,7 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
+  optional uint32 throttle_l0_sub_level_number = 10;
 }
 
 message GetSystemParamsRequest {}

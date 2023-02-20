@@ -113,6 +113,9 @@ pub struct MetaOpts {
 
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Storage needs to throttle write when l0 sub level number is greater than this.
+    pub throttle_l0_sub_level_number: u32,
 }
 
 impl MetaOpts {
@@ -141,6 +144,7 @@ impl MetaOpts {
             state_store: None,
             data_directory: "hummock_001".to_string(),
             periodic_space_reclaim_compaction_interval_sec: 60,
+            throttle_l0_sub_level_number: 10000,
         }
     }
 
@@ -157,6 +161,7 @@ impl MetaOpts {
             data_directory: Some(self.data_directory.clone()),
             backup_storage_url: Some(self.backup_storage_url.clone()),
             backup_storage_directory: Some(self.backup_storage_directory.clone()),
+            throttle_l0_sub_level_number: Some(self.throttle_l0_sub_level_number),
         }
     }
 }

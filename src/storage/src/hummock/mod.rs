@@ -142,6 +142,8 @@ pub struct HummockStorage {
 
     /// current_epoch < min_current_epoch cannot be read.
     min_current_epoch: Arc<AtomicU64>,
+
+    options: Arc<StorageOpts>,
 }
 
 impl HummockStorage {
@@ -225,6 +227,7 @@ impl HummockStorage {
             tracing,
             backup_reader,
             min_current_epoch,
+            options,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -273,14 +276,15 @@ impl HummockStorage {
     }
 
     pub fn need_write_throttling(&self) -> bool {
-        // TODO #7997 make it configurable
-        const MAX_L0_SUB_LEVEL_NUMBER: usize = 1000;
         self.pinned_version
             .load()
             .version_ref()
             .levels
             .values()
-            .any(|levels| levels.l0.as_ref().unwrap().sub_levels.len() > MAX_L0_SUB_LEVEL_NUMBER)
+            .any(|levels| {
+                levels.l0.as_ref().unwrap().sub_levels.len()
+                    > self.options.throttle_l0_sub_level_number as usize
+            })
     }
 }
 

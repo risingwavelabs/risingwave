@@ -159,6 +159,10 @@ pub struct MetaConfig {
     /// Schedule space_reclaim compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Storage needs to throttle write when l0 sub level number is greater than this.
+    #[serde(default = "default::meta::throttle_l0_sub_level_number")]
+    pub throttle_l0_sub_level_number: u32,
 }
 
 impl Default for MetaConfig {
@@ -503,6 +507,10 @@ mod default {
 
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
             3600 // 60min
+        }
+
+        pub fn throttle_l0_sub_level_number() -> u32 {
+            1000
         }
     }
 
