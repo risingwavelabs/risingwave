@@ -302,7 +302,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e java-binding test (at release)"
-    command: "cargo make run-java-binding-demo"
+    command: "ci/scripts/java-binding-test.sh -p ci-release"
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
