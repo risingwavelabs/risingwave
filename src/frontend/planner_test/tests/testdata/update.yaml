@@ -55,7 +55,7 @@
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.v1, t.v2, (t.v2 + 1:Int32) as $expr45, (t.v1 - 1:Int32) as $expr46] }
+    └─BatchProject { exprs: [t.v1, t.v2, (t.v2 + 1:Int32) as $expr1, (t.v1 - 1:Int32) as $expr2] }
       └─BatchUpdate { table: t, exprs: [($1 + 1:Int32), ($0 - 1:Int32), $2], returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchFilter { predicate: (t.v1 <> t.v2) }

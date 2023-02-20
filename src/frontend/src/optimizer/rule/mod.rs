@@ -89,41 +89,44 @@ mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
 mod union_input_values_merge_rule;
 pub use union_input_values_merge_rule::*;
+mod rewrite_like_expr_rule;
+pub use rewrite_like_expr_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
     ($macro:ident) => {
         $macro! {
-             {ApplyAggTransposeRule}
-            ,{ApplyFilterTransposeRule}
-            ,{ApplyProjectTransposeRule}
-            ,{ApplyScanRule}
-            ,{ApplyJoinTransposeRule}
-            ,{ApplyShareEliminateRule}
-            ,{ApplyToJoinRule}
-            ,{MaxOneRowEliminateRule}
-            ,{DistinctAggRule}
-            ,{IndexDeltaJoinRule}
-            ,{MergeMultiJoinRule}
-            ,{ProjectEliminateRule}
-            ,{ProjectJoinMergeRule}
-            ,{ProjectMergeRule}
-            ,{PullUpCorrelatedPredicateRule}
-            ,{ReorderMultiJoinRule}
-            ,{TranslateApplyRule}
-            ,{PushCalculationOfJoinRule}
-            ,{IndexSelectionRule}
-            ,{OverAggToTopNRule}
-            ,{JoinCommuteRule}
-            ,{UnionToDistinctRule}
-            ,{AggProjectMergeRule}
-            ,{UnionMergeRule}
-            ,{DagToTreeRule}
-            ,{AggDedupGroupKeyRule}
-            ,{FilterWithNowToJoinRule}
-            ,{TopNOnIndexRule}
-            ,{TrivialProjectToValuesRule}
-            ,{UnionInputValuesMergeRule}
+              { ApplyAggTransposeRule }
+            , { ApplyFilterTransposeRule }
+            , { ApplyProjectTransposeRule }
+            , { ApplyScanRule }
+            , { ApplyJoinTransposeRule }
+            , { ApplyShareEliminateRule }
+            , { ApplyToJoinRule }
+            , { MaxOneRowEliminateRule }
+            , { DistinctAggRule }
+            , { IndexDeltaJoinRule }
+            , { MergeMultiJoinRule }
+            , { ProjectEliminateRule }
+            , { ProjectJoinMergeRule }
+            , { ProjectMergeRule }
+            , { PullUpCorrelatedPredicateRule }
+            , { ReorderMultiJoinRule }
+            , { TranslateApplyRule }
+            , { PushCalculationOfJoinRule }
+            , { IndexSelectionRule }
+            , { OverAggToTopNRule }
+            , { JoinCommuteRule }
+            , { UnionToDistinctRule }
+            , { AggProjectMergeRule }
+            , { UnionMergeRule }
+            , { DagToTreeRule }
+            , { AggDedupGroupKeyRule }
+            , { FilterWithNowToJoinRule }
+            , { TopNOnIndexRule }
+            , { TrivialProjectToValuesRule }
+            , { UnionInputValuesMergeRule }
+            , { RewriteLikeExprRule }
         }
     };
 }
