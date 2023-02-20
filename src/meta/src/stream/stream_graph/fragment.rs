@@ -280,7 +280,7 @@ impl StreamFragmentGraph {
         // frontend), instead of visiting the graph ourselves. Note that for creating table with a
         // connector, the source itself is NOT INCLUDED in this list.
         let dependent_relations = proto
-            .dependent_table_ids
+            .dependent_relation_ids
             .iter()
             .map(TableId::from)
             .collect();
