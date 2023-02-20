@@ -80,19 +80,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (relation, vec![table])
     }
 
-    /// Both window slide, window size must be positive.
-    /// It has to be short also.
-    /// otherwise window is too large.
     fn gen_secs(&mut self) -> u64 {
-        // let minute = 60;
-        // let hour = 60 * minute;
-        // let day = 24 * hour;
-        // let week = 7 * day;
-        // let rand_secs = self.rng.gen_range(1..week) as u64;
-        // let choices = [1, minute, hour, day, week, rand_secs];
-        // let secs = choices.choose(&mut self.rng).unwrap();
-        // *secs
-        self.rng.gen_range(1..100)
+        let minute = 60;
+        let hour = 60 * minute;
+        let day = 24 * hour;
+        let week = 7 * day;
+        let rand_secs = self.rng.gen_range(1..week) as u64;
+        let choices = [1, minute, hour, day, week, rand_secs];
+        let secs = choices.choose(&mut self.rng).unwrap();
+        *secs
     }
 
     fn secs_to_interval_expr(i: u64) -> Expr {
@@ -108,8 +104,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (slide_secs, expr)
     }
 
+    /// Size must be divisible by slide.
+    /// i.e.
+    /// size_secs = k * slide_secs.
+    /// k cannot be too large, to avoid overflow.
     fn gen_size(&mut self, slide_secs: u64) -> Expr {
-        let size_secs = self.gen_secs() * slide_secs;
+        let k = self.rng.gen_range(0..100);
+        let size_secs = k * slide_secs;
         Self::secs_to_interval_expr(size_secs)
     }
 }
