@@ -207,8 +207,10 @@
     select 1 union all select 1
   optimized_logical_plan: |
     LogicalUnion { all: true }
-    ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
-    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    ├─LogicalShare { id = 47 }
+    | └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    └─LogicalShare { id = 47 }
+      └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchUnion { all: true }
     ├─BatchValues { rows: [[1:Int32]] }

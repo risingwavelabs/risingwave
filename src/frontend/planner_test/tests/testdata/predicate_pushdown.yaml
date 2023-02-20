@@ -108,7 +108,7 @@
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr1, (t.v3 * t.v4) as $expr2] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr39, (t.v3 * t.v4) as $expr40] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr43, (t.v3 * t.v4) as $expr44] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4], predicate: ((t.v1 + t.v2) > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND ((t.v1 + t.v2) > (t.v3 * t.v4)) AND ((t.v1 + t.v2) > t.v1) }
 - name: filter agg transpose
   sql: |
