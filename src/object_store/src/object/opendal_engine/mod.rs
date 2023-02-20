@@ -22,3 +22,5 @@ pub use hdfs::*;
 
 pub mod gcs;
 pub use gcs::*;
+pub mod oss;
+pub use oss::*;

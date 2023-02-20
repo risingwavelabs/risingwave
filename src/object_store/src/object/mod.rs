@@ -838,6 +838,16 @@ pub async fn parse_remote_object_store(
                     .monitored(metrics),
             )
         }
+
+        oss if oss.starts_with("oss://") => {
+            let oss = oss.strip_prefix("oss://").unwrap();
+            let (bucket, root) = oss.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             ObjectStoreImpl::S3Compatible(
                 S3ObjectStore::new_s3_compatible(
