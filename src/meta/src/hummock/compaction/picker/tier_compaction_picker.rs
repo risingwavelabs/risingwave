@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
-use risingwave_common::catalog::TableId;
-use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::key_range::KeyRange;
 
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker, SPLIT_VNODE_LIMIT};
+use crate::hummock::compaction::{
+    CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
+};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -44,7 +41,7 @@ impl TierCompactionPicker {
 }
 
 impl TierCompactionPicker {
-    fn pick_whole_level(
+    fn pick_table_same_files(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
@@ -53,9 +50,127 @@ impl TierCompactionPicker {
         // do not pick the first sub-level because we do not want to block the level compaction.
         let non_overlapping_type = LevelType::Nonoverlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type == non_overlapping_type
-                && level.total_file_size > self.config.sub_level_max_compaction_bytes
+            if level.level_type != non_overlapping_type {
+                continue;
+            }
+
+            let mut table_id = 0;
+            for sst in &level.table_infos {
+                assert_eq!(sst.table_ids.len(), 1);
+                if level_handler.is_pending_compact(&sst.id) {
+                    continue;
+                }
+                table_id = sst.table_ids[0];
+            }
+            if table_id == 0 {
+                continue;
+            }
+            let mut select_level = InputLevel {
+                level_idx: 0,
+                level_type: level.level_type,
+                table_infos: vec![],
+            };
+            let mut compaction_bytes = 0;
+            for sst in &level.table_infos {
+                assert_eq!(sst.table_ids.len(), 1);
+                if table_id == sst.table_ids[0] {
+                    select_level.table_infos.push(sst.clone());
+                    compaction_bytes += sst.file_size;
+                }
+            }
+            let mut max_level_size = compaction_bytes;
+            let max_compaction_bytes = std::cmp::min(
+                self.config.max_compaction_bytes,
+                self.config.sub_level_max_compaction_bytes,
+            );
+
+            let mut compact_file_count = select_level.table_infos.len();
+            let mut waiting_enough_files = true;
+            let mut select_level_inputs = vec![select_level];
+            for other in &l0.sub_levels[idx + 1..] {
+                if compaction_bytes >= max_compaction_bytes {
+                    waiting_enough_files = false;
+                    break;
+                }
+
+                if other.level_type != non_overlapping_type {
+                    break;
+                }
+
+                let mut pending_compact = false;
+                let mut cur_level = InputLevel {
+                    level_idx: 0,
+                    level_type: other.level_type,
+                    table_infos: vec![],
+                };
+                let mut cur_level_size = 0;
+                for sst in &other.table_infos {
+                    assert_eq!(sst.table_ids.len(), 1);
+                    if table_id == sst.table_ids[0] {
+                        if level_handler.is_pending_compact(&sst.id) {
+                            pending_compact = true;
+                            break;
+                        }
+                        cur_level.table_infos.push(sst.clone());
+                        cur_level_size += sst.file_size;
+                    }
+                }
+                if pending_compact {
+                    break;
+                }
+
+                compaction_bytes += cur_level_size;
+                compact_file_count += cur_level.table_infos.len();
+                max_level_size = std::cmp::max(max_level_size, cur_level_size);
+                select_level_inputs.push(cur_level);
+            }
+
+            if compact_file_count < self.config.level0_tier_compact_file_number as usize
+                && waiting_enough_files
             {
+                stats.skip_by_count_limit += 1;
+                continue;
+            }
+
+            // This limitation would keep our write-amplification no more than
+            // ln(max_compaction_bytes/flush_level_bytes) /
+            // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
+            // of level0_tier_compact_file_number just for convenient.
+            let is_write_amp_large =
+                max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
+
+            // do not pick a compact task with large write amplification. But if the total bytes is
+            // too large,  we can not check write amplification because it may cause
+            // compact task never be trigger.
+            if level.level_type == non_overlapping_type
+                && is_write_amp_large
+                && waiting_enough_files
+            {
+                stats.skip_by_write_amp_limit += 1;
+                continue;
+            }
+
+            select_level_inputs.reverse();
+
+            return Some(CompactionInput {
+                input_levels: select_level_inputs,
+                target_level: 0,
+                target_sub_level_id: level.sub_level_id,
+            });
+        }
+        None
+    }
+
+    fn pick_overlapping_level(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        // do not pick the first sub-level because we do not want to block the level compaction.
+        let overlapping_type = LevelType::Overlapping as i32;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.level_type != overlapping_type {
                 continue;
             }
 
@@ -85,9 +200,7 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if other.level_type == non_overlapping_type
-                    && other.total_file_size > self.config.sub_level_max_compaction_bytes
-                {
+                if other.level_type != overlapping_type {
                     waiting_enough_files = false;
                     break;
                 }
@@ -110,24 +223,6 @@ impl TierCompactionPicker {
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
-                continue;
-            }
-
-            // This limitation would keep our write-amplification no more than
-            // ln(max_compaction_bytes/flush_level_bytes) /
-            // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
-            // of level0_tier_compact_file_number just for convenient.
-            let is_write_amp_large =
-                max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
-
-            // do not pick a compact task with large write amplification. But if the total bytes is
-            // too large,  we can not check write amplification because it may cause
-            // compact task never be trigger.
-            if level.level_type == non_overlapping_type
-                && is_write_amp_large
-                && waiting_enough_files
-            {
-                stats.skip_by_write_amp_limit += 1;
                 continue;
             }
 
@@ -194,41 +289,6 @@ impl TierCompactionPicker {
         }
         None
     }
-
-    fn pick_files_in_one_table(
-        &self,
-        l0: &OverlappingLevel,
-        level_handler: &LevelHandler,
-    ) -> Option<CompactionInput> {
-        let non_overlapping_type = LevelType::Nonoverlapping as i32;
-        let mut table_ids = HashSet::new();
-        for  level in l0.sub_levels.iter() {
-            if level.level_type != non_overlapping_type {
-                continue;
-            }
-            for sst in &level.table_infos {
-                table_ids.extend(sst.table_ids.clone());
-            }
-        }
-        for table_id in table_ids {
-            for idx in 0..VirtualNode::COUNT / SPLIT_VNODE_LIMIT {
-                let left_vnode = idx * SPLIT_VNODE_LIMIT;
-                let right_vnode = (idx + 1) * SPLIT_VNODE_LIMIT;
-                let left_key = FullKey::new(TableId::new(table_id),
-                                                 TableKey(VirtualNode::from_index(left_vnode).to_be_bytes().to_vec()),
-                    0
-                );
-                let right_key = FullKey::new(TableId::new(table_id),
-                                                  TableKey(VirtualNode::from_index(left_vnode).to_be_bytes().to_vec()), 0);
-                let mock_sst = SstableInfo {
-
-                };
-                let overlapinfo = self.overlap_strategy.create_overlap_info();
-                let range = KeyRange::new()
-            }
-        }
-        None
-    }
 }
 
 impl CompactionPicker for TierCompactionPicker {
@@ -247,10 +307,10 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(ret);
         }
 
-        if let Some(ret) = self.pick_whole_level(l0, &level_handlers[0], stats) {
+        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
             return Some(ret);
         }
-        self.pick_files_in_one_table(l0, &level_handlers[0])
+        self.pick_table_same_files(l0, &level_handlers[0], stats)
     }
 }
 

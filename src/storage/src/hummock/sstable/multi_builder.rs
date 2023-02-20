@@ -72,7 +72,7 @@ where
     key_range: KeyRange,
     last_table_id: u32,
     last_vnode_id: usize,
-    min_split_table_limit: u64,
+    split_by_table: bool,
     split_by_vnode_count: usize,
 }
 
@@ -87,7 +87,7 @@ where
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
-        min_split_table_limit: u64,
+        split_by_table: bool,
         split_by_vnode_count: usize,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
@@ -106,7 +106,7 @@ where
             last_sealed_key: start_key,
             key_range,
             last_table_id: 0,
-            min_split_table_limit,
+            split_by_table,
             split_by_vnode_count,
             last_vnode_id: 0,
         }
@@ -123,7 +123,7 @@ where
             del_agg: Arc::new(RangeTombstonesCollector::for_test()),
             key_range: KeyRange::inf(),
             last_table_id: 0,
-            min_split_table_limit: u64::MAX,
+            split_by_table: false,
             split_by_vnode_count: 0,
             last_vnode_id: 0,
         }
@@ -154,18 +154,18 @@ where
     ) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_ref() {
             let mut switch_builder = is_new_user_key && builder.reach_capacity();
-            if full_key.user_key.table_id.table_id != self.last_table_id {
-                self.last_table_id = full_key.user_key.table_id.table_id;
-                self.last_vnode_id = full_key.user_key.get_vnode_id();
-                if builder.approximate_len() > self.min_split_table_limit as usize {
+            if self.split_by_table {
+                if full_key.user_key.table_id.table_id != self.last_table_id {
+                    self.last_table_id = full_key.user_key.table_id.table_id;
+                    self.last_vnode_id = full_key.user_key.get_vnode_id();
                     switch_builder = true;
+                } else if self.split_by_vnode_count > 0 {
+                    let vnode_id = full_key.user_key.get_vnode_id();
+                    if vnode_id != self.last_vnode_id && vnode_id % self.split_by_vnode_count == 0 {
+                        switch_builder = true;
+                    }
+                    self.last_vnode_id = vnode_id;
                 }
-            } else if self.split_by_vnode_count > 0 && self.min_split_table_limit < u64::MAX {
-                let vnode_id = full_key.user_key.get_vnode_id();
-                if vnode_id != self.last_vnode_id && vnode_id % self.split_by_vnode_count == 0 {
-                    switch_builder = true;
-                }
-                self.last_vnode_id = vnode_id;
             }
             if switch_builder {
                 let delete_ranges = self

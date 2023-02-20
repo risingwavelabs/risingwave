@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -93,64 +95,90 @@ impl CompactionPicker for LevelCompactionPicker {
             / cal_file_size(&input_levels[0].table_infos);
 
         // Pick the whole level to reduce write amplification.
-        if write_amplification > MAX_WRITE_AMPLIFICATION {
-            // If there is any pending compact file in sub-level 0 or target level,
-            //  we can not pick the whole level to compact.
-            if is_l0_pending_compact
-                || level_handlers[self.target_level].get_pending_file_count() > 0
-            {
-                stats.skip_by_pending_files += 1;
-                return None;
-            }
-            input_levels.clear();
-            input_levels.push(InputLevel {
-                level_idx: 0,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: l0.sub_levels[0].table_infos.clone(),
+        if write_amplification <= MAX_WRITE_AMPLIFICATION {
+            return Some(CompactionInput {
+                input_levels,
+                target_level: self.target_level,
+                target_sub_level_id: 0,
             });
-
-            let mut l0_total_file_size = l0.sub_levels[0].total_file_size;
-            for level in l0.sub_levels[1..].iter() {
-                if l0_total_file_size >= self.config.max_compaction_bytes {
-                    break;
-                }
-                if level_handlers[0].is_level_pending_compact(level) {
-                    break;
-                }
+        }
+        let mut table_ids: HashSet<u32> = HashSet::default();
+        for sst in &l0.sub_levels[0].table_infos {
+            table_ids.extend(sst.table_ids.clone());
+        }
+        for table_id in table_ids {
+            let mut l0_total_file_size = 0;
+            input_levels.clear();
+            for level in &l0.sub_levels {
                 // This break is optional. We can include overlapping sub-level actually.
                 if level.level_type() != LevelType::Nonoverlapping {
                     break;
                 }
-                l0_total_file_size += level.total_file_size;
-                input_levels.push(InputLevel {
+                if l0_total_file_size >= self.config.max_compaction_bytes {
+                    break;
+                }
+
+                let mut pending_compact = false;
+                let mut cur_level_size = 0;
+                let mut select_level = InputLevel {
                     level_idx: 0,
                     level_type: level.level_type,
-                    table_infos: level.table_infos.clone(),
-                });
+                    table_infos: vec![],
+                };
+                for sst in &level.table_infos {
+                    if sst.table_ids[0] != table_id {
+                        continue;
+                    }
+                    if level_handlers[0].is_pending_compact(&sst.id) {
+                        pending_compact = true;
+                        break;
+                    }
+                    cur_level_size += sst.file_size;
+                    select_level.table_infos.push(sst.clone());
+                }
+                if pending_compact {
+                    break;
+                }
+
+                l0_total_file_size += cur_level_size;
+                input_levels.push(select_level);
+            }
+            if l0_total_file_size == 0 {
+                continue;
             }
 
-            let all_level_amplification =
-                levels.get_level(self.target_level).total_file_size * 100 / l0_total_file_size;
-            if all_level_amplification > MAX_WRITE_AMPLIFICATION
+            let target_level_files = levels
+                .get_level(self.target_level)
+                .table_infos
+                .iter()
+                .filter(|sst| sst.table_ids[0] == table_id);
+            let mut pending_compact = false;
+            let mut target_level_size = 0;
+            for sst in target_level_files.clone() {
+                if level_handlers[0].is_pending_compact(&sst.id) {
+                    pending_compact = true;
+                    break;
+                }
+                target_level_size += sst.file_size;
+            }
+            if pending_compact {
+                continue;
+            }
+
+            if target_level_size * 100 > MAX_WRITE_AMPLIFICATION * l0_total_file_size
                 && l0_total_file_size < self.config.max_compaction_bytes
             {
-                stats.skip_by_write_amp_limit += 1;
-                return None;
+                continue;
             }
             // reverse because the ix of low sub-level is smaller.
             input_levels.reverse();
             input_levels.push(InputLevel {
                 level_idx: target_level,
                 level_type: LevelType::Nonoverlapping as i32,
-                table_infos: levels.get_level(self.target_level).table_infos.clone(),
+                table_infos: target_level_files.cloned().collect_vec(),
             });
         }
-
-        Some(CompactionInput {
-            input_levels,
-            target_level: self.target_level,
-            target_sub_level_id: 0,
-        })
+        None
     }
 }
 
@@ -327,8 +355,7 @@ pub mod tests {
                 generate_table(4, 1, 150, 200, 1),
                 generate_table(5, 1, 250, 300, 1),
             ],
-            total_file_size: 0,
-            sub_level_id: 0,
+            ..Default::default()
         }];
         let mut levels = Levels {
             levels,

@@ -309,7 +309,7 @@ impl SharedBufferCompactRunner {
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
-                min_split_sst_file_limit: u64::MAX,
+                split_by_table: false,
                 split_by_vnode_count: 0,
             },
         );

@@ -73,10 +73,11 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB, delete_ratio={:?}%",
+            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
             sstable_info.id,
             left_str,
             right_str,
+            sstable_info.table_ids,
             sstable_info.file_size / 1024,
             ratio,
         )
@@ -84,10 +85,11 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     } else {
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB",
+            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
             sstable_info.id,
             left_str,
             right_str,
+            sstable_info.table_ids,
             sstable_info.file_size / 1024,
         )
         .unwrap();

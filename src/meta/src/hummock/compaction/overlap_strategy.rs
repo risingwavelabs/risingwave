@@ -106,7 +106,6 @@ impl OverlapInfo for RangeOverlapInfo {
         }
     }
 
-
     fn update_range(&mut self, other: &KeyRange) {
         if let Some(range) = self.target_range.as_mut() {
             range.full_key_extend(other);

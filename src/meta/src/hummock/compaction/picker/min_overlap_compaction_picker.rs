@@ -61,6 +61,9 @@ impl MinOverlappingPicker {
                 if level_handlers[self.level].is_pending_compact(&table.id) {
                     break;
                 }
+                if table.table_ids != select_tables[left].table_ids {
+                    break;
+                }
                 if select_file_size > self.max_select_bytes {
                     break;
                 }
