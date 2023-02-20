@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod plan_node;
-pub use plan_node::PlanRef;
+pub use plan_node::{Explain, PlanRef};
 pub mod property;
 
 mod delta_join_solver;
@@ -228,6 +228,13 @@ impl PlanRoot {
             ctx.trace("Share Source:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Rewrite Like Expr".to_string(),
+            vec![RewriteLikeExprRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         // Simple Unnesting.
         plan = self.optimize_by_rules(
