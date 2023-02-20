@@ -55,7 +55,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 22,
+            "plan_node_id": 29,
             "plan_node_type": "BatchValues",
             "schema": [
               {
