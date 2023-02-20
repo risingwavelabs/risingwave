@@ -147,10 +147,12 @@ impl MergeExecutor {
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
-                        let new_upstream_fragment_id = update.new_upstream_fragment_id;
+                        let new_upstream_fragment_id = update
+                            .new_upstream_fragment_id
+                            .unwrap_or(self.upstream_fragment_id);
                         let added_upstream_actor_id = update.added_upstream_actor_id.clone();
                         let removed_upstream_actor_id: HashSet<_> =
-                            if new_upstream_fragment_id.is_some() {
+                            if update.new_upstream_fragment_id.is_some() {
                                 select_all.upstream_actor_ids().iter().copied().collect()
                             } else {
                                 update.removed_upstream_actor_id.iter().copied().collect()
@@ -173,7 +175,7 @@ impl MergeExecutor {
                                         self.actor_context.id,
                                         self.fragment_id,
                                         upstream_actor_id,
-                                        self.upstream_fragment_id,
+                                        new_upstream_fragment_id,
                                     )
                                 })
                                 .try_collect()
@@ -209,10 +211,8 @@ impl MergeExecutor {
                             }
                         }
 
-                        if let Some(upstream_fragment_id) = new_upstream_fragment_id {
-                            self.upstream_fragment_id = upstream_fragment_id;
-                            upstream_fragment_id_str = upstream_fragment_id.to_string();
-                        }
+                        self.upstream_fragment_id = new_upstream_fragment_id;
+                        upstream_fragment_id_str = new_upstream_fragment_id.to_string();
 
                         select_all.update_actor_ids();
                     }
