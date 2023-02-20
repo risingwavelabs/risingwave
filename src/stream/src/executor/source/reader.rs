@@ -114,13 +114,11 @@ impl SourceReaderStream {
 
     /// Pause the source stream.
     pub fn pause_source(&mut self) {
-        assert!(!self.paused, "already paused");
         self.paused = true;
     }
 
     /// Resume the source stream, panic if the source is not paused before.
     pub fn resume_source(&mut self) {
-        assert!(self.paused, "not paused");
         self.paused = false;
     }
 

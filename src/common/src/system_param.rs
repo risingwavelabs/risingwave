@@ -231,6 +231,7 @@ mod tests {
             (DATA_DIRECTORY_KEY, "a"),
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
+            (THROTTLE_L0_SUB_LEVEL_NUMBER_KEY, "1"),
         ];
 
         // To kv - missing field.
