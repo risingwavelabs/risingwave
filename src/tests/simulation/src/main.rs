@@ -170,10 +170,7 @@ async fn main() {
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
-                let seed = env::var("MADSIM_TEST_SEED")
-                    .unwrap()
-                    .parse::<u64>()
-                    .unwrap();
+                let seed = madsim::runtime::Handle::current().seed();
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
