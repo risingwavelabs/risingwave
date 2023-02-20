@@ -105,7 +105,7 @@ macro_rules! impl_split {
 #[macro_export]
 macro_rules! impl_split_reader {
     ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderV2Impl {
+        impl SplitReaderImpl {
             pub fn into_stream(self) -> BoxSourceWithStateStream {
                 match self {
                     $( Self::$variant_name(inner) => inner.into_stream(), )*                 }

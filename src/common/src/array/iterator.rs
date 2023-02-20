@@ -27,8 +27,6 @@ impl<'a, A: Array> ArrayIterator<'a, A> {
     }
 }
 
-unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
-
 impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     type Item = Option<A::RefItem<'a>>;
 
@@ -47,6 +45,9 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
         (size, Some(size))
     }
 }
+
+impl<'a, A: Array> ExactSizeIterator for ArrayIterator<'a, A> {}
+unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
 
 #[cfg(test)]
 mod tests {

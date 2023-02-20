@@ -25,7 +25,7 @@ use itertools::Itertools;
 use postgres_types::{FromSql, Type};
 use regex::Regex;
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
@@ -394,7 +394,7 @@ impl PreparedStatement {
         for ((type_oid, raw_param), param_format) in type_description
             .iter()
             .zip_eq_fast(raw_params.iter())
-            .zip_eq_debug(format_iter)
+            .zip_eq_fast(format_iter)
         {
             let str = match type_oid {
                 DataType::Varchar | DataType::Bytea => {
@@ -492,6 +492,20 @@ impl PreparedStatement {
                     };
                     format!("'{}'::INTERVAL", tmp)
                 }
+                DataType::Jsonb => {
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            use risingwave_common::types::to_text::ToText as _;
+                            use risingwave_common::types::Scalar as _;
+                            risingwave_common::array::JsonbVal::value_deserialize(raw_param)
+                                .unwrap()
+                                .as_scalar_ref()
+                                .to_text_with_type(&DataType::Jsonb)
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                    };
+                    format!("'{}'::JSONB", tmp)
+                }
                 DataType::Struct(_) | DataType::List { .. } => {
                     return Err(PsqlError::Internal(anyhow!(
                         "Unsupported param type {:?}",
@@ -527,6 +541,7 @@ impl PreparedStatement {
                     params.push("'2022-10-01 12:00:00+01:00'::timestamptz".to_string())
                 }
                 DataType::Interval => params.push("'2 months ago'::interval".to_string()),
+                DataType::Jsonb => params.push("'null'::JSONB".to_string()),
                 DataType::Struct(_) | DataType::List { .. } => {
                     return Err(PsqlError::Internal(anyhow!(
                         "Unsupported param type {:?}",
