@@ -13,20 +13,6 @@ class UserDefinedFunction:
     _input_types: List[pa.DataType]
     _result_type: pa.DataType
 
-    def open(self):
-        """
-        Initialization method for the function. It is called before the actual working methods
-        and thus suitable for one time setup work.
-        """
-        pass
-
-    def close(self):
-        """
-        Tear-down method for the user code. It is called after the last call to the main
-        working methods.
-        """
-        pass
-
     def full_name(self) -> str:
         """
         A unique name for the function. Composed by function name and input types.
@@ -40,7 +26,10 @@ class UserDefinedFunction:
         """
         return pa.schema([('', self._result_type)])
 
-    def eval_batch(self, batch: pa.RecordBatch) -> pa.Table:
+    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        """
+        Apply the function on a batch of inputs.
+        """
         pass
 
 

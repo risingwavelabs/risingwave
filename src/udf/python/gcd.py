@@ -1,5 +1,11 @@
 from risingwave.udf import udf, UdfServer, ScalarFunction
 import pyarrow as pa
+import random
+
+
+@udf(input_types=[], result_type=pa.int32())
+def random_int() -> int:
+    return random.randint(0, 100)
 
 
 @udf(input_types=[pa.int32(), pa.int32()], result_type=pa.int32())
@@ -20,6 +26,7 @@ class GCD3(ScalarFunction):
 
 if __name__ == '__main__':
     server = UdfServer()
+    server.add_function(random_int)
     server.add_function(gcd)
     server.add_function(GCD3())
     server.serve()
