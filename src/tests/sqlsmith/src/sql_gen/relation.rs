@@ -110,6 +110,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Some((left_column.clone(), right_column.clone()))
     }
 
+    /// Generates `t JOIN t2 ON ...` expression.
+    /// It will generate at least one equi join condition
+    /// This will reduce chance of nested loop join from being generated.
+    /// TODO: Generate equi-join on different types.
     fn gen_join_on_expr(
         &mut self,
         left_columns: Vec<Column>,
@@ -130,8 +134,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
             self.restore_context(old_context);
             // FIXME(noel): Hack to reduce streaming nested loop join occurrences.
-            // ... JOIN ON x=y AND false.
-            if expr != Expr::Value(Value::Boolean(false)) {
+            // ... JOIN ON x=y AND false => ... JOIN ON x=y
+            // We can use const folding, then remove the right expression,
+            // if it evaluates to `false` after const folding.
+            if expr == Expr::Value(Value::Boolean(false)) {
                 join_on_expr = Expr::BinaryOp {
                     left: Box::new(join_on_expr),
                     op: BinaryOperator::And,
