@@ -115,15 +115,6 @@ async fn test_sqlsmith<R: Rng>(
     }
 }
 
-/// `SET QUERY_MODE TO DISTRIBUTED`.
-/// Panics if it fails.
-async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
-    client
-        .simple_query("SET query_mode TO distributed;")
-        .await
-        .unwrap();
-}
-
 async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &str) -> String {
     let s = format!("SET {variable} TO {value};");
     client.simple_query(&s).await.unwrap();
