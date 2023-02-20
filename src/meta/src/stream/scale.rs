@@ -904,7 +904,7 @@ where
         }
 
         self.create_actors_on_compute_node(
-            &ctx,
+            &ctx.worker_nodes,
             actor_infos_to_broadcast,
             node_actors_to_create,
             broadcast_worker_ids,
@@ -1141,13 +1141,13 @@ where
 
     async fn create_actors_on_compute_node(
         &self,
-        ctx: &RescheduleContext,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_infos_to_broadcast: BTreeMap<u32, ActorInfo>,
         node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
         broadcast_worker_ids: HashSet<u32>,
     ) -> MetaResult<()> {
         for worker_id in &broadcast_worker_ids {
-            let node = ctx.worker_nodes.get(worker_id).unwrap();
+            let node = worker_nodes.get(worker_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
 
             let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
@@ -1161,7 +1161,7 @@ where
         }
 
         for (node_id, stream_actors) in &node_actors_to_create {
-            let node = ctx.worker_nodes.get(node_id).unwrap();
+            let node = worker_nodes.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             let request = UpdateActorsRequest {
@@ -1173,7 +1173,7 @@ where
         }
 
         for (node_id, stream_actors) in node_actors_to_create {
-            let node = ctx.worker_nodes.get(&node_id).unwrap();
+            let node = worker_nodes.get(&node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 

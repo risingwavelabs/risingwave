@@ -120,6 +120,8 @@ impl SharedContext {
         self.barrier_manager.lock()
     }
 
+    /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one
+    /// with the configured permits.
     fn get_or_insert_channels(
         &self,
         ids: UpDownActorIds,
@@ -135,7 +137,6 @@ impl SharedContext {
         })
     }
 
-    #[inline]
     pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
         self.get_or_insert_channels(*ids)
             .0
@@ -143,7 +144,6 @@ impl SharedContext {
             .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
     }
 
-    #[inline]
     pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver> {
         self.get_or_insert_channels(*ids)
             .1
