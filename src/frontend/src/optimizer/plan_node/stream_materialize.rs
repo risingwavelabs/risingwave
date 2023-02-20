@@ -19,6 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::derive::derive_columns;
@@ -245,7 +246,16 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
-        assert_eq!(new.plan_base().schema, self.plan_base().schema);
+        new.base
+            .schema
+            .fields
+            .iter()
+            .zip_eq_fast(self.base.schema.fields.iter())
+            .for_each(|(a, b)| {
+                assert_eq!(a.data_type, b.data_type);
+                assert_eq!(a.type_name, b.type_name);
+                assert_eq!(a.sub_fields, b.sub_fields);
+            });
         assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
         new
     }
