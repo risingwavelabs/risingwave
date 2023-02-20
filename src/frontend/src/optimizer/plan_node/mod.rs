@@ -28,6 +28,7 @@
 //! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
+use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::Deref;
@@ -149,6 +150,48 @@ impl Layer for PlanRef {
 
 #[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
+
+/// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
+/// In addition to `Endo`, one have to specify the `cache` hash map
+/// to store transformed `LogicalShare` and their results,
+/// and the `dag_apply` function will take care to only transform every `LogicalShare` nodes once.
+///
+/// Note: Due to the way super trait is designed in rust,
+/// one need to have seperate implementation blocks of `Endo<PlanRef>` and `EndoPlan`.
+/// And conventionally the real transformation `apply` is under `Endo<PlanRef>`,
+/// although one can refer to `dag_apply` in the implementation of `apply`.
+pub trait EndoPlan: Endo<PlanRef> {
+    fn cache(&mut self) -> &mut HashMap<PlanRef, PlanRef>;
+
+    fn dag_apply(&mut self, plan: PlanRef) -> PlanRef {
+        match plan.as_logical_share() {
+            Some(_) => self.cache().get(&plan).cloned().unwrap_or_else(|| {
+                let res = self.tree_apply(plan.clone());
+                self.cache().entry(plan).or_insert(res).clone()
+            }),
+            None => self.tree_apply(plan),
+        }
+    }
+}
+
+/// A more sophisticated `Visit` taking into account of the DAG structure of `PlanRef`.
+/// In addition to `Visit`, one have to specify `visited` to mark visited `LogicalShare` nodes,
+/// and the `dag_visit` function will take care to only visit every `LogicalShare` nodes once.
+/// See also `EndoPlan`.
+pub trait VisitPlan: Visit<PlanRef> {
+    fn visited(&self, plan: &PlanRef) -> bool;
+
+    fn dag_visit(&mut self, plan: &PlanRef) {
+        match plan.as_logical_share() {
+            Some(_) if self.visited(plan) => (),
+            _ => {
+                self.pre(plan);
+                plan.descent(|i| self.visit(i));
+                self.post(plan);
+            }
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Convention {
@@ -668,7 +711,7 @@ pub use stream_watermark_filter::StreamWatermarkFilter;
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Layer};
+use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`

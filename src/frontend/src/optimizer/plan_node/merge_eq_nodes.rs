@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use super::{LogicalShare, PlanNodeId, PlanRef, PlanTreeNodeUnary};
+use super::{EndoPlan, LogicalShare, PlanNodeId, PlanRef, PlanTreeNodeUnary, VisitPlan};
 use crate::utils::{Endo, Layer, Visit};
 
 pub trait Semantics<V: Hash + Eq> {
@@ -53,7 +53,7 @@ impl PlanRef {
     pub fn prune_share(&self) -> PlanRef {
         let mut counter = Counter::default();
         counter.visit(self);
-        counter.apply(self.clone())
+        counter.to_pruner().apply(self.clone())
     }
 }
 
@@ -62,22 +62,57 @@ struct Counter {
     counts: HashMap<PlanNodeId, u64>,
 }
 
-impl Visit<PlanRef> for Counter {
-    fn pre(&mut self, t: &PlanRef) {
-        t.as_logical_share().map(|s| {
-            self.counts
-                .entry(s.id())
-                .and_modify(|c| *c += 1)
-                .or_insert(1)
-        });
+impl Counter {
+    fn to_pruner<'a>(&'a self) -> Pruner<'a> {
+        Pruner {
+            counts: &self.counts,
+            cache: HashMap::new(),
+        }
     }
 }
 
-impl Endo<PlanRef> for Counter {
-    fn pre(&mut self, t: PlanRef) -> PlanRef {
-        match t.as_logical_share() {
-            Some(s) if *self.counts.get(&s.id()).unwrap() == 1 => s.input(),
-            _ => t,
+impl VisitPlan for Counter {
+    fn visited(&self, t: &PlanRef) -> bool {
+        self.counts.get(&t.id()).is_some_and(|c| *c > 1)
+    }
+}
+
+impl Visit<PlanRef> for Counter {
+    fn visit(&mut self, t: &PlanRef) {
+        if let Some(s) = t.as_logical_share() {
+            self.counts
+                .entry(s.id())
+                .and_modify(|c| *c += 1)
+                .or_insert(1);
         }
+        self.dag_visit(t);
+    }
+}
+
+struct Pruner<'a> {
+    counts: &'a HashMap<PlanNodeId, u64>,
+    cache: HashMap<PlanRef, PlanRef>,
+}
+
+impl EndoPlan for Pruner<'_> {
+    fn cache(&mut self) -> &mut HashMap<PlanRef, PlanRef> {
+        &mut self.cache
+    }
+}
+
+impl Endo<PlanRef> for Pruner<'_> {
+    fn pre(&mut self, t: PlanRef) -> PlanRef {
+        let prunable = |s: &LogicalShare| {
+            *self.counts.get(&s.id()).expect("Unprocessed shared node.") == 1
+                || s.input().as_logical_scan().is_some()
+        };
+        t.as_logical_share()
+            .cloned()
+            .filter(prunable)
+            .map_or(t, |s| s.input())
+    }
+
+    fn apply(&mut self, t: PlanRef) -> PlanRef {
+        self.dag_apply(t)
     }
 }

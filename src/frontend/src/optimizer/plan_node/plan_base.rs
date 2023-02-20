@@ -38,13 +38,9 @@ pub struct PlanBase {
     pub logical_pk: Vec<usize>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
     pub order: Order,
     /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
     /// will not affect correctness, but insert unnecessary exchange in plan
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
     pub dist: Distribution,
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.

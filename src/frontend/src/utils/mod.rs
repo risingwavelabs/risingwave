@@ -48,20 +48,44 @@ impl ExprRewriter for Substitute {
     }
 }
 
+// Traits for easy manipulation of recursive structures
+
+/// A `Layer` is a container with subcomponents of type `Sub`.
+/// We usually use `Layer` to represents one layer of a tree-like structure,
+/// where the subcomponents are the recursive subtrees.
+/// But in general, the subcomponent can be of different type than the `Layer`.
+/// Such structual relation between `Sub` and `Layer`
+/// allows us to lift transformation on `Sub` to that on `Layer.`
+/// A related and even more general notion is `Functor`,
+/// which might also be helpful to define in the future.
 pub trait Layer: Sized {
     type Sub;
 
+    /// Given a transformation `f : Sub -> Sub`,
+    /// we can derive a transformation on the entire `Layer` by acting `f` on all subcomponents.
     fn map<F>(self, f: F) -> Self
     where
         F: FnMut(Self::Sub) -> Self::Sub;
 
+    /// Given a traversal `f : Sub -> ()`,
+    /// we can derive a traversal on the entire `Layer`
+    /// by sequentially visiting the subcomponents with `f`.
     fn descent<F>(&self, f: F)
     where
         F: FnMut(&Self::Sub);
 }
 
+/// A tree-like structure is a `Layer` where the subcomponents are recursively trees.
 pub trait Tree = Layer<Sub = Self>;
 
+/// Given a tree-like structure `T`,
+/// we usually can specify a transformation `T -> T`
+/// by providing a pre-order transformation `pre : T -> T`
+/// and a post-order transformation `post : T -> T`.
+/// Specifically, the derived transformation `apply : T -> T` first applies `pre`,
+/// then maps itself over the subtrees, and finally applies `post`.
+/// This allows us to obtain a global transformation acting recursively on all levels
+/// by specifying simplier transformations at acts locally.
 pub trait Endo<T: Tree> {
     fn pre(&mut self, t: T) -> T {
         t
@@ -71,31 +95,35 @@ pub trait Endo<T: Tree> {
         t
     }
 
-    fn apply(&mut self, t: T) -> T {
+    /// The real application function is left undefined.
+    /// If we want the derived transformation
+    /// we can simply call `tree_apply` in the implementation.
+    /// But for more complicated requirements,
+    /// e.g. skipping over certain subtrees, custom logic can be added.
+    fn apply(&mut self, t: T) -> T;
+
+    /// The derived transformation based on `pre` and `post`.
+    fn tree_apply(&mut self, t: T) -> T {
         let t = self.pre(t).map(|s| self.apply(s));
         self.post(t)
     }
 }
 
+/// A similar trait to generate traversal over tree-like structure.
+/// See `Endo` for more details.
 #[allow(unused_variables)]
 pub trait Visit<T: Tree> {
     fn pre(&mut self, t: &T) {}
 
     fn post(&mut self, t: &T) {}
 
-    fn visit(&mut self, t: &T) {
+    fn visit(&mut self, t: &T);
+
+    fn tree_visit(&mut self, t: &T) {
         self.pre(t);
         t.descent(|i| self.visit(i));
         self.post(t);
     }
-}
-
-// Traits for easily transform and visit recursive structures
-
-pub trait Fold<R> {
-    fn fold<F>(&self, f: F) -> R
-    where
-        F: FnMut(Vec<R>) -> R;
 }
 
 // Workaround object safety rules for Eq and Hash, adopted from
