@@ -128,9 +128,7 @@ impl OptimizerContext {
 
     pub fn trace(&self, str: impl Into<String>) {
         // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.is_explain_logical()
-            && self.logical_explain.borrow().is_some()
-        {
+        if self.is_explain_logical() && self.logical_explain.borrow().is_some() {
             return;
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
