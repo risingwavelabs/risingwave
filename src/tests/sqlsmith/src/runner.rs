@@ -14,12 +14,10 @@
 
 //! Provides E2E Test runner functionality.
 
-
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Error;
-
 
 use crate::validation::is_permissible_error;
 use crate::{
