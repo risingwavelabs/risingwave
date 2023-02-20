@@ -313,6 +313,15 @@ where
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
         let range_bounds = if let Some(current_pos) = current_pos {
+            // If `current_pos` is an empty row which means upstream mv contains only one row and it
+            // has been consumed. The iter interface doesn't support
+            // `Excluded(empty_row)` range bound, so we can simply return `None`.
+            if current_pos.is_empty() {
+                assert!(table.pk_indices().is_empty());
+                yield None;
+                return Ok(());
+            }
+
             (Bound::Excluded(current_pos), Bound::Unbounded)
         } else {
             (Bound::Unbounded, Bound::Unbounded)

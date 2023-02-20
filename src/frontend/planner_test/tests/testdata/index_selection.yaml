@@ -608,13 +608,25 @@
     └─BatchExchange { order: [idx1.a DESC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
+- name: topn on pk streaming case, should NOT optimized
+  sql: |
+    create table t1 (a int primary key);
+    select * from t1 order by a limit 1;
+  stream_plan: |
+    StreamMaterialize { columns: [a], pk_columns: [a] }
+    └─StreamProject { exprs: [t1.a] }
+      └─StreamTopN { order: "[t1.a ASC]", limit: 1, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: "[t1.a ASC]", limit: 1, offset: 0, group_key: [1] }
+            └─StreamProject { exprs: [t1.a, Vnode(t1.a) as $expr1] }
+              └─StreamTableScan { table: t1, columns: [t1.a], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);
     select * from t1 where a like 'ABC%'
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a <= Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+    └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a < Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);
@@ -622,7 +634,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: Like(idx.a, 'ABC%E':Varchar) }
-      └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a <= Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+      └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a < Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);
@@ -630,7 +642,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: Like(idx.a, 'ABC_E':Varchar) }
-      └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a <= Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
+      └─BatchScan { table: idx, columns: [idx.a, idx.b, idx.c, idx.d], scan_ranges: [idx.a >= Utf8("ABC") AND idx.a < Utf8("ABD")], distribution: UpstreamHashShard(idx.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);
     create index idx on t1(a);

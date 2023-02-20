@@ -229,6 +229,7 @@ pub struct OpendalConfig {
     pub id: String,
     pub engine: String,
     pub namenode: String,
+    pub bucket: String,
     pub root: String,
 }
 

@@ -26,8 +26,8 @@ use crate::optimizer::PlanRef;
 
 /// `RewriteLikeExprRule` rewrites like expression, so that it can benefit from index selection.
 /// col like 'ABC' => col = 'ABC'
-/// col like 'ABC%' => col >= 'ABC' and col <= 'ABD'
-/// col like 'ABC%E' => col >= 'ABC' and col <= 'ABD' and col like 'ABC%E'
+/// col like 'ABC%' => col >= 'ABC' and col < 'ABD'
+/// col like 'ABC%E' => col >= 'ABC' and col < 'ABD' and col like 'ABC%E'
 pub struct RewriteLikeExprRule {}
 impl Rule for RewriteLikeExprRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -145,7 +145,7 @@ impl ExprRewriter for LikeExprRewriter {
                 )
                 .into(),
                 FunctionCall::new_unchecked(
-                    ExprType::LessThanOrEqual,
+                    ExprType::LessThan,
                     vec![
                         ExprImpl::InputRef(x),
                         ExprImpl::Literal(

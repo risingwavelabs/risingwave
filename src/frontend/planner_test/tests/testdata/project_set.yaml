@@ -53,7 +53,7 @@
     select -generate_series(x,x,x) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Neg(Generate($0, $0, $0)) as $expr25] }
+    └─BatchProject { exprs: [Neg(Generate($0, $0, $0)) as $expr1] }
       └─BatchProjectSet { select_list: [$0, $1, Generate($0, $0, $0)] }
         └─BatchScan { table: t, columns: [t.x, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - name: table functions as parameters of usual functions
