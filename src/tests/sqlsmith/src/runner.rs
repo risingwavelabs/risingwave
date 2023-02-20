@@ -32,7 +32,8 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     } else {
         rand::rngs::SmallRng::from_entropy()
     };
-    let (tables, base_tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+    let (tables, base_tables, mviews, mut setup_sql) =
+        create_tables(&mut rng, testdata, client).await;
     tracing::info!("Created tables");
 
     let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
