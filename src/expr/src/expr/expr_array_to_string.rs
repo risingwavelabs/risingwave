@@ -71,11 +71,8 @@ use crate::{bail, ensure, ExprError, Result};
 /// ----
 /// NULL
 ///
-/// # FIXME: this query will panic in binder
-/// # query T
-/// # select array_to_string(NULL, ',');
-/// # ----
-/// # NULL
+/// query error polymorphic type
+/// select array_to_string(null, ',');
 /// ```
 #[derive(Debug)]
 pub struct ArrayToStringExpression {
