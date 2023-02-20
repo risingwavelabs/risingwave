@@ -16,9 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 
-use crate::optimizer::plan_node::{
-    LogicalShare, PlanNodeId, PlanTreeNode, StreamShare,
-};
+use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNode, StreamShare};
 use crate::optimizer::PlanRewriter;
 use crate::PlanRef;
 
