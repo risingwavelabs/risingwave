@@ -141,7 +141,7 @@ mod tests {
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
 
-        let parser = MaxwellParser::new(descs.clone()).unwrap();
+        let parser = MaxwellParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         let payloads = vec![

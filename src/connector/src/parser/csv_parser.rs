@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
-
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -29,7 +28,6 @@ use crate::parser::{
     BoxSourceWithStateStream, ByteStreamSourceParser, SourceColumnDesc, SourceStreamChunkBuilder,
     SourceStreamChunkRowWriter, StreamChunkWithState, WriteGuard,
 };
-
 use crate::source::{BoxSourceStream, ErrorReportingContext, SplitId};
 
 macro_rules! to_rust_type {

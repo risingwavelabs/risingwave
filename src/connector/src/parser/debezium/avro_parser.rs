@@ -394,7 +394,8 @@ mod tests {
             .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
 
-        let parser = DebeziumAvroParser::new(columns.clone(), config)?;
+        let parser =
+            DebeziumAvroParser::new(columns.clone(), config, ErrorReportingContext::for_test())?;
         let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA)
             .await
             .try_into()
