@@ -708,17 +708,6 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_like(&self) -> Option<(InputRef, ExprImpl)> {
-        if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.get_expr_type() == ExprType::Like
-            && let (_, ExprImpl::InputRef(x), y) = function_call.clone().decompose_as_binary()
-            && y.is_const() {
-                Some((*x, y))
-        } else {
-            None
-        }
-    }
-
     pub fn as_or_disjunctions(&self) -> Option<Vec<ExprImpl>> {
         if let ExprImpl::FunctionCall(function_call) = self &&
             function_call.get_expr_type() == ExprType::Or {
