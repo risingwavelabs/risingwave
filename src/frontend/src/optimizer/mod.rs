@@ -408,6 +408,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
                 // project-join merge should be applied after merge
                 // eliminate and to values
                 ProjectJoinMergeRule::create(),
@@ -424,6 +425,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
             ],
             ApplyOrder::TopDown,
         );
@@ -443,17 +445,12 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        plan = self.optimize_by_rules(
-            plan,
-            "Agg on Index".to_string(),
-            vec![TopNOnIndexRule::create()],
-            ApplyOrder::TopDown,
-        );
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        ctx.store_logical(plan.explain_to_string().unwrap());
+        if ctx.is_explain_logical() {
+            ctx.store_logical(plan.explain_to_string().unwrap());
+        }
 
         Ok(plan)
     }
@@ -468,6 +465,13 @@ impl PlanRoot {
             plan,
             "DAG To Tree".to_string(),
             vec![DagToTreeRule::create()],
+            ApplyOrder::TopDown,
+        );
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Agg on Index".to_string(),
+            vec![TopNOnIndexRule::create()],
             ApplyOrder::TopDown,
         );
 
