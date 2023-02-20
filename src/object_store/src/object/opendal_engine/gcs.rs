@@ -12,15 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod opendal_object_store;
-pub use opendal_object_store::*;
+use opendal::services::Gcs;
+use opendal::Operator;
 
-#[cfg(feature = "hdfs-backend")]
-pub mod hdfs;
-#[cfg(feature = "hdfs-backend")]
-pub use hdfs::*;
+use super::{EngineType, OpendalObjectStore};
+use crate::object::ObjectResult;
+impl OpendalObjectStore {
+    /// create opendal gcs engine.
+    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+        // Create gcs backend builder.
+        let mut builder = Gcs::default();
 
-pub mod gcs;
-pub use gcs::*;
-pub mod oss;
-pub use oss::*;
+        builder.bucket(&bucket);
+
+        builder.root(&root);
+
+        let op: Operator = Operator::create(builder)?.finish();
+        Ok(Self {
+            op,
+            engine_type: EngineType::Gcs,
+        })
+    }
+}
