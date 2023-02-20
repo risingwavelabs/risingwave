@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
 use std::sync::Arc;
 
 use risingwave_common::array::*;
@@ -145,13 +146,13 @@ impl Expression for ArrayToStringExpression {
                 };
 
                 if let Some(array) = array && let Some(delim) = delim {
-                    let result =
+                    let mut writer = output.writer().begin();
                     if let Some(null_string) = null_string {
-                    Self::evaluate_with_nulls(array, delim, null_string)
+                        evaluate_with_nulls(array, delim, null_string, &mut writer);
                     } else {
-                        Self::evaluate(array, delim)
-                    };
-                    output.append(Some(&result));
+                        evaluate(array, delim, &mut writer);
+                    }
+                    writer.finish();
                 } else {
                     output.append_null();
                 }
@@ -164,47 +165,50 @@ impl Expression for ArrayToStringExpression {
         let array = self.array.eval_row(input)?;
         let delimiter = self.delimiter.eval_row(input)?;
 
-        let result = if let Some(array) = array && let Some(delimiter) = delimiter {
-            if let Some(e) = &self.null_string {
-                let null_string = e.eval_row(input)?;
-                if let Some(null_string) = null_string {
-                    Some(Self::evaluate_with_nulls(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), null_string.as_utf8()))
-                } else {
-                    Some(Self::evaluate(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8()))
-                }
+        let result = if let Some(array) = array && let Some(delimiter) = delimiter && let Some(e) = &self.null_string {
+            let null_string = e.eval_row(input)?;
+            let mut writer = String::new();
+            if let Some(null_string) = null_string {
+                evaluate_with_nulls(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), null_string.as_utf8(), &mut writer);
             } else {
-            None
+                evaluate(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), &mut writer);
             }
-        } else{
+            Some(writer)
+        } else {
             None
         };
         Ok(result.map(|r| r.into()))
     }
 }
 
-impl ArrayToStringExpression {
-    fn evaluate(array: ListRef<'_>, delimiter: &str) -> String {
-        let mut buf = String::new();
-        for element in array.values_ref().iter().flat_map(|f| f.iter()) {
-            if !buf.is_empty() {
-                buf.push_str(delimiter);
-            }
-            element.write(&mut buf).unwrap();
+fn evaluate(array: ListRef<'_>, delimiter: &str, mut writer: &mut dyn Write) {
+    let mut first = true;
+    for element in array.values_ref().iter().flat_map(|f| f.iter()) {
+        if !first {
+            write!(writer, "{}", delimiter).unwrap();
+        } else {
+            first = false;
         }
-        buf
+        element.write(&mut writer).unwrap();
     }
+}
 
-    fn evaluate_with_nulls(array: ListRef<'_>, delimiter: &str, null_string: &str) -> String {
-        let mut buf = String::new();
-        for element in array.values_ref() {
-            if !buf.is_empty() {
-                buf.push_str(delimiter);
-            }
-            match element {
-                Some(s) => s.write(&mut buf).unwrap(),
-                None => buf.push_str(null_string),
-            }
+fn evaluate_with_nulls(
+    array: ListRef<'_>,
+    delimiter: &str,
+    null_string: &str,
+    mut writer: &mut dyn Write,
+) {
+    let mut first = true;
+    for element in array.values_ref() {
+        if !first {
+            write!(writer, "{}", delimiter).unwrap();
+        } else {
+            first = false;
         }
-        buf
+        match element {
+            Some(s) => s.write(&mut writer).unwrap(),
+            None => write!(writer, "{}", null_string).unwrap(),
+        }
     }
 }
