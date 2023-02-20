@@ -85,7 +85,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        let rand_secs = self.rng.gen_range(1..week) as u64;
+        let rand_secs = self.rng.gen_range(1..week);
         let choices = [1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
         *secs
@@ -106,7 +106,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Size must be divisible by slide.
     /// i.e.
-    /// size_secs = k * slide_secs.
+    /// `size_secs` = k * `slide_secs`.
     /// k cannot be too large, to avoid overflow.
     fn gen_size(&mut self, slide_secs: u64) -> Expr {
         let k = self.rng.gen_range(0..100);
