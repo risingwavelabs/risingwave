@@ -20,7 +20,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
@@ -118,6 +118,8 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     filter_builder: F,
 }
 
+const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
+
 impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
@@ -187,6 +189,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         is_new_user_key: bool,
     ) -> HummockResult<()> {
         let mut is_new_table = false;
+
+        let table_key_len = full_key.user_key.table_key.as_ref().len();
+        if table_key_len >= LARGE_KEY_LEN {
+            let table_id = full_key.user_key.table_id.table_id();
+            tracing::warn!(
+                "A large key (table_id={}, len={}, epoch={}) is added to block",
+                table_id,
+                table_key_len,
+                full_key.epoch
+            );
+        }
 
         // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
