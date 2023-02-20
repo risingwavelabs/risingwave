@@ -21,5 +21,6 @@ pub mod source_executor;
 
 mod reader;
 pub mod state_table_handler;
+pub mod throttler;
 
 pub use state_table_handler::*;

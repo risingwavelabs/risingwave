@@ -155,6 +155,10 @@ impl PinnedVersion {
     pub fn version(&self) -> HummockVersion {
         self.version.deref().clone()
     }
+
+    pub fn version_ref(&self) -> &HummockVersion {
+        self.version.deref()
+    }
 }
 
 pub(crate) async fn start_pinned_version_worker(

@@ -271,6 +271,17 @@ impl HummockStorage {
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.pinned_version.load().deref().deref().clone()
     }
+
+    pub fn need_write_throttling(&self) -> bool {
+        // TODO #7997 make it configurable
+        const MAX_L0_SUB_LEVEL_NUMBER: usize = 1000;
+        self.pinned_version
+            .load()
+            .version_ref()
+            .levels
+            .values()
+            .any(|levels| levels.l0.as_ref().unwrap().sub_levels.len() > MAX_L0_SUB_LEVEL_NUMBER)
+    }
 }
 
 #[cfg(any(test, feature = "test"))]

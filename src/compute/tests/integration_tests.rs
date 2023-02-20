@@ -172,7 +172,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
-        u64::MAX,
+        vec![],
         1,
     );
 

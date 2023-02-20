@@ -23,6 +23,7 @@ use super::*;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
+use crate::executor::throttler::{MaxWaitBarrierThrottler, SourceThrottlerImpl};
 use crate::executor::FsSourceExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
@@ -44,6 +45,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
 
+        let mut throttlers = vec![];
+        throttlers.push(SourceThrottlerImpl::MaxWaitBarrier(
+            MaxWaitBarrierThrottler::new(stream.config.barrier_interval_ms as u128),
+        ));
+        throttlers.push(SourceThrottlerImpl::StateStore(stream.state_store.clone()));
         if let Some(source) = &node.source_inner {
             let source_id = TableId::new(source.source_id);
             let source_name = source.source_name.clone();
@@ -108,7 +114,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     stream_source_core,
                     params.executor_stats,
                     barrier_receiver,
-                    stream.config.barrier_interval_ms as u64,
+                    throttlers,
                     params.executor_id,
                 )?))
             } else {
@@ -119,7 +125,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     Some(stream_source_core),
                     params.executor_stats,
                     barrier_receiver,
-                    stream.config.barrier_interval_ms as u64,
+                    throttlers,
                     params.executor_id,
                 )))
             }
@@ -133,7 +139,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 None,
                 params.executor_stats,
                 barrier_receiver,
-                stream.config.barrier_interval_ms as u64,
+                throttlers,
                 params.executor_id,
             )))
         }

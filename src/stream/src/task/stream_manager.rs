@@ -74,7 +74,7 @@ pub struct LocalStreamManagerCore {
     actor_monitor_tasks: HashMap<ActorId, ActorHandle>,
 
     /// The state store implement
-    state_store: StateStoreImpl,
+    pub(crate) state_store: StateStoreImpl,
 
     /// Metrics of the stream manager
     pub(crate) streaming_metrics: Arc<StreamingMetrics>,

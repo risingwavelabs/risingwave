@@ -24,16 +24,12 @@ use risingwave_connector::source::{
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::reader::SourceReaderStream;
+use crate::executor::throttler::SourceThrottlerImpl;
 use crate::executor::*;
-
-/// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
-/// some latencies in network and cost in meta.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -53,8 +49,7 @@ pub struct SourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    /// Expected barrier latency.
-    expected_barrier_latency_ms: u64,
+    throttlers: Vec<SourceThrottlerImpl>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -66,7 +61,7 @@ impl<S: StateStore> SourceExecutor<S> {
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        expected_barrier_latency_ms: u64,
+        throttlers: Vec<SourceThrottlerImpl>,
         executor_id: u64,
     ) -> Self {
         Self {
@@ -77,7 +72,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
-            expected_barrier_latency_ms,
+            throttlers,
         }
     }
 
@@ -300,19 +295,17 @@ impl<S: StateStore> SourceExecutor<S> {
 
         yield Message::Barrier(barrier);
 
-        // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
-        // milliseconds, considering some other latencies like network and cost in Meta.
-        let max_wait_barrier_time_ms =
-            self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
-        let mut last_barrier_time = Instant::now();
+        // Whether the source is paused.
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
-                    last_barrier_time = Instant::now();
-                    if self_paused {
+                    for throttler in &mut self.throttlers {
+                        throttler.on_barrier();
+                    }
+                    if self_paused && self.throttlers.iter().all(|t| !t.should_pause()) {
                         stream.resume_source();
                         self_paused = false;
                     }
@@ -356,10 +349,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     chunk,
                     split_offset_mapping,
                 }) => {
-                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                        // Exceeds the max wait barrier time, the source will be paused. Currently
-                        // we can guarantee the source is not paused since it received stream
-                        // chunks.
+                    if !self_paused && self.throttlers.iter().any(|t| t.should_pause()) {
                         self_paused = true;
                         stream.pause_source();
                     }
@@ -551,7 +541,7 @@ mod tests {
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
-            u64::MAX,
+            vec![],
             1,
         );
         let mut executor = Box::new(executor).execute();
@@ -643,7 +633,7 @@ mod tests {
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
-            u64::MAX,
+            vec![],
             1,
         );
 
