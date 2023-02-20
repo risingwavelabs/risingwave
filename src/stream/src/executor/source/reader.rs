@@ -123,6 +123,10 @@ impl SourceReaderStream {
         assert!(self.paused, "not paused");
         self.paused = false;
     }
+
+    pub fn paused(&self) -> bool {
+        self.paused
+    }
 }
 
 impl Stream for SourceReaderStream {

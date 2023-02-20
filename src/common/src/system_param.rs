@@ -37,6 +37,7 @@ macro_rules! for_all_undeprecated_params {
             { data_directory, String, "hummock_001".to_string() },
             { backup_storage_url, String, "memory".to_string() },
             { backup_storage_directory, String, "backup".to_string() },
+            { throttle_l0_sub_level_number, u32, 1000 },
         }
     };
 }

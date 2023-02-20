@@ -330,10 +330,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
-        let mut self_paused = false;
+        // If `explicit_pause`, throttlers shouldn't resume source.
+        let mut explicit_pause = false;
         if start_with_paused {
             stream.pause_source();
-            self_paused = true;
+            explicit_pause = true;
         }
         yield Message::Barrier(barrier);
 
@@ -345,9 +346,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     for throttler in &mut self.throttlers {
                         throttler.on_barrier();
                     }
-                    if self_paused && self.throttlers.iter().all(|t| !t.should_pause()) {
+                    if !explicit_pause
+                        && stream.paused()
+                        && self.throttlers.iter().all(|t| !t.should_pause())
+                    {
                         stream.resume_source();
-                        self_paused = false;
                     }
                     let epoch = barrier.epoch;
 
@@ -357,8 +360,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                     .await?
                             }
-                            Mutation::Pause => stream.pause_source(),
-                            Mutation::Resume => stream.resume_source(),
+                            Mutation::Pause => {
+                                stream.pause_source();
+                                explicit_pause = true;
+                            }
+                            Mutation::Resume => {
+                                stream.resume_source();
+                                explicit_pause = false;
+                            }
                             Mutation::Update { actor_splits, .. } => {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                     .await?;
@@ -384,8 +393,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     chunk,
                     split_offset_mapping,
                 }) => {
-                    if !self_paused && self.throttlers.iter().any(|t| t.should_pause()) {
-                        self_paused = true;
+                    if !stream.paused() && self.throttlers.iter().any(|t| t.should_pause()) {
                         stream.pause_source();
                     }
                     // update split offset

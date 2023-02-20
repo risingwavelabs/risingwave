@@ -144,7 +144,7 @@ impl MetaOpts {
             state_store: None,
             data_directory: "hummock_001".to_string(),
             periodic_space_reclaim_compaction_interval_sec: 60,
-            throttle_l0_sub_level_number: 10000,
+            throttle_l0_sub_level_number: 1000,
         }
     }
 
