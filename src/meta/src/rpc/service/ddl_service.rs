@@ -499,13 +499,26 @@ where
         let mut stream_job = StreamingJob::Table(None, req.table.unwrap());
         let fragment_graph = req.fragment_graph.unwrap();
 
-        let (_ctx, _table_fragments) = self
+        let (ctx, table_fragments) = self
             .prepare_replace_table(&mut stream_job, fragment_graph)
             .await?;
 
-        Err(Status::unimplemented(
-            "replace table plan is not implemented yet",
-        ))
+        let version = match self
+            .stream_manager
+            .replace_table(table_fragments, ctx)
+            .await
+        {
+            Ok(_) => self.finish_replace_table(&stream_job).await,
+            Err(err) => {
+                self.cancel_replace_table(&stream_job).await?;
+                Err(err)
+            }
+        }?;
+
+        Ok(Response::new(ReplaceTablePlanResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn get_table(
@@ -900,6 +913,29 @@ where
         };
 
         Ok((ctx, table_fragments))
+    }
+
+    async fn finish_replace_table(
+        &self,
+        stream_job: &StreamingJob,
+    ) -> MetaResult<NotificationVersion> {
+        let StreamingJob::Table(None, table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
+
+        self.catalog_manager
+            .finish_replace_table_procedure(table)
+            .await
+    }
+
+    async fn cancel_replace_table(&self, stream_job: &StreamingJob) -> MetaResult<()> {
+        let StreamingJob::Table(None, table) = stream_job else {
+            unreachable!("unexpected job: {stream_job:?}")
+        };
+
+        self.catalog_manager
+            .cancel_replace_table_procedure(table)
+            .await
     }
 
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
