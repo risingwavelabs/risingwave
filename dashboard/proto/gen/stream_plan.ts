@@ -269,6 +269,14 @@ export interface UpdateMutation_MergeUpdate {
   /** Merge executor can be uniquely identified by a combination of actor id and upstream fragment id. */
   actorId: number;
   upstreamFragmentId: number;
+  /**
+   * - For scaling, this is always `None`.
+   * - For plan change, the upstream fragment will be changed to a new one, and this will be `Some`.
+   *   In this case, all the upstream actors should be removed and replaced by the `new` ones.
+   */
+  newUpstreamFragmentId?:
+    | number
+    | undefined;
   /** Added upstream actors. */
   addedUpstreamActorId: number[];
   /** Removed upstream actors. */
@@ -757,6 +765,8 @@ export interface SortNode {
 export interface DmlNode {
   /** Id of the table on which DML performs. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   /** Column descriptions of the table. */
   columnDescs: ColumnDesc[];
 }
@@ -842,10 +852,7 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as its downstream fragment id.
-   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
-   *   could belong to more than one downstream in DAG.
-   * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
+   * This is exactly the same as its downstream fragment id.
    */
   dispatcherId: number;
   /** Number of downstreams decides how many endpoints a dispatcher should dispatch. */
@@ -1269,7 +1276,13 @@ export const UpdateMutation_DispatcherUpdate = {
 };
 
 function createBaseUpdateMutation_MergeUpdate(): UpdateMutation_MergeUpdate {
-  return { actorId: 0, upstreamFragmentId: 0, addedUpstreamActorId: [], removedUpstreamActorId: [] };
+  return {
+    actorId: 0,
+    upstreamFragmentId: 0,
+    newUpstreamFragmentId: undefined,
+    addedUpstreamActorId: [],
+    removedUpstreamActorId: [],
+  };
 }
 
 export const UpdateMutation_MergeUpdate = {
@@ -1277,6 +1290,7 @@ export const UpdateMutation_MergeUpdate = {
     return {
       actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
       upstreamFragmentId: isSet(object.upstreamFragmentId) ? Number(object.upstreamFragmentId) : 0,
+      newUpstreamFragmentId: isSet(object.newUpstreamFragmentId) ? Number(object.newUpstreamFragmentId) : undefined,
       addedUpstreamActorId: Array.isArray(object?.addedUpstreamActorId)
         ? object.addedUpstreamActorId.map((e: any) => Number(e))
         : [],
@@ -1290,6 +1304,8 @@ export const UpdateMutation_MergeUpdate = {
     const obj: any = {};
     message.actorId !== undefined && (obj.actorId = Math.round(message.actorId));
     message.upstreamFragmentId !== undefined && (obj.upstreamFragmentId = Math.round(message.upstreamFragmentId));
+    message.newUpstreamFragmentId !== undefined &&
+      (obj.newUpstreamFragmentId = Math.round(message.newUpstreamFragmentId));
     if (message.addedUpstreamActorId) {
       obj.addedUpstreamActorId = message.addedUpstreamActorId.map((e) => Math.round(e));
     } else {
@@ -1307,6 +1323,7 @@ export const UpdateMutation_MergeUpdate = {
     const message = createBaseUpdateMutation_MergeUpdate();
     message.actorId = object.actorId ?? 0;
     message.upstreamFragmentId = object.upstreamFragmentId ?? 0;
+    message.newUpstreamFragmentId = object.newUpstreamFragmentId ?? undefined;
     message.addedUpstreamActorId = object.addedUpstreamActorId?.map((e) => e) || [];
     message.removedUpstreamActorId = object.removedUpstreamActorId?.map((e) => e) || [];
     return message;
@@ -3376,13 +3393,14 @@ export const SortNode = {
 };
 
 function createBaseDmlNode(): DmlNode {
-  return { tableId: 0, columnDescs: [] };
+  return { tableId: 0, tableVersionId: 0, columnDescs: [] };
 }
 
 export const DmlNode = {
   fromJSON(object: any): DmlNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
     };
   },
@@ -3390,6 +3408,7 @@ export const DmlNode = {
   toJSON(message: DmlNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.columnDescs) {
       obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
     } else {
@@ -3401,6 +3420,7 @@ export const DmlNode = {
   fromPartial<I extends Exact<DeepPartial<DmlNode>, I>>(object: I): DmlNode {
     const message = createBaseDmlNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     return message;
   },

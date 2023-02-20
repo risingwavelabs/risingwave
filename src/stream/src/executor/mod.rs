@@ -54,6 +54,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
+pub mod agg_common;
 pub mod aggregation;
 mod batch_query;
 mod chain;
