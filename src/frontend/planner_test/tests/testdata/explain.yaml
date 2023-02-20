@@ -42,7 +42,7 @@
 
     LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 
-    Const eval exprs:
+    Inline Session Timezone:
 
     BatchValues { rows: [[1:Int32]] }
 
