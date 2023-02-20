@@ -219,18 +219,35 @@ pub async fn handle_query(
         }
 
         // update some metrics
-        if query_mode == QueryMode::Local {
-            session
-                .env()
-                .frontend_metrics
-                .latency_local_execution
-                .observe(query_start_time.elapsed().as_secs_f64());
+        match query_mode {
+            QueryMode::Local => {
+                session
+                    .env()
+                    .frontend_metrics
+                    .latency_local_execution
+                    .observe(query_start_time.elapsed().as_secs_f64());
 
-            session
-                .env()
-                .frontend_metrics
-                .query_counter_local_execution
-                .inc();
+                session
+                    .env()
+                    .frontend_metrics
+                    .query_counter_local_execution
+                    .inc();
+            }
+            QueryMode::Distributed => {
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .query_latency
+                    .observe(query_start_time.elapsed().as_secs_f64());
+
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .completed_query_counter
+                    .inc();
+            }
         }
 
         Ok(())
