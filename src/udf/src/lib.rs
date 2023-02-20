@@ -36,17 +36,9 @@ impl ArrowFlightUdfClient {
         Ok(Self { client })
     }
 
-    /// Check if the function is available and return the function ID.
-    pub async fn check(&self, name: &str, args: &Schema, returns: &Schema) -> Result<FunctionId> {
-        // path = name/[args,]*
-        let mut path = name.to_string() + "/";
-        for (i, arg) in args.fields.iter().enumerate() {
-            if i != 0 {
-                path += ",";
-            }
-            path += &arg.data_type().to_string().to_lowercase();
-        }
-        let descriptor = FlightDescriptor::new_path(vec![path.clone()]);
+    /// Check if the function is available.
+    pub async fn check(&self, id: &str, args: &Schema, returns: &Schema) -> Result<()> {
+        let descriptor = FlightDescriptor::new_path(vec![id.into()]);
 
         let response = self.client.clone().get_flight_info(descriptor).await?;
 
@@ -57,16 +49,16 @@ impl ArrowFlightUdfClient {
         let actual_types: Vec<_> = schema.fields.iter().map(|f| f.data_type()).collect();
         if expect_types != actual_types {
             return Err(Error::SchemaMismatch {
-                function_name: name.into(),
+                function_id: id.into(),
                 expected: format!("{:?}", expect_types),
                 actual: format!("{:?}", actual_types),
             });
         }
-        Ok(FunctionId(vec![path]))
+        Ok(())
     }
 
     /// Call a function.
-    pub async fn call(&self, id: &FunctionId, input: RecordBatch) -> Result<RecordBatch> {
+    pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
         output_stream.next().await.ok_or(Error::NoReturned)?
     }
@@ -74,10 +66,10 @@ impl ArrowFlightUdfClient {
     /// Call a function with streaming input and output.
     pub async fn call_stream(
         &self,
-        id: &FunctionId,
+        id: &str,
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
-        let descriptor = FlightDescriptor::new_path(id.0.clone());
+        let descriptor = FlightDescriptor::new_path(vec![id.into()]);
         let flight_data_stream =
             FlightDataEncoderBuilder::new()
                 .build(inputs.map(Ok))
@@ -108,35 +100,26 @@ impl ArrowFlightUdfClient {
         panic!("UDF is not supported in simulation yet")
     }
 
-    /// Check if the function is available and return the function ID.
-    pub async fn check(
-        &self,
-        _name: &str,
-        _args: &Schema,
-        _returns: &Schema,
-    ) -> Result<FunctionId> {
+    /// Check if the function is available.
+    pub async fn check(&self, _id: &str, _args: &Schema, _returns: &Schema) -> Result<()> {
         panic!("UDF is not supported in simulation yet")
     }
 
     /// Call a function.
-    pub async fn call(&self, _id: &FunctionId, _input: RecordBatch) -> Result<RecordBatch> {
+    pub async fn call(&self, _id: &str, _input: RecordBatch) -> Result<RecordBatch> {
         panic!("UDF is not supported in simulation yet")
     }
 
     /// Call a function with streaming input and output.
     pub async fn call_stream(
         &self,
-        _id: &FunctionId,
+        _id: &str,
         _inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
         panic!("UDF is not supported in simulation yet");
         Ok(stream::empty())
     }
 }
-
-/// An opaque ID for a function.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FunctionId(Vec<String>);
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -148,9 +131,9 @@ pub enum Error {
     Tonic(#[from] tonic::Status),
     #[error("failed to call UDF: {0}")]
     Flight(#[from] FlightError),
-    #[error("schema mismatch: function {function_name:?}, expected return types {expected}, actual {actual}")]
+    #[error("schema mismatch: function {function_id:?}, expected return types {expected}, actual {actual}")]
     SchemaMismatch {
-        function_name: String,
+        function_id: String,
         expected: String,
         actual: String,
     },

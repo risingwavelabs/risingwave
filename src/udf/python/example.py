@@ -14,7 +14,7 @@ def gcd(x: int, y: int) -> int:
     return x
 
 
-@udf(name='gcd', input_types=['INT', 'INT', 'INT'], result_type='INT')
+@udf(name='gcd3', input_types=['INT', 'INT', 'INT'], result_type='INT')
 def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 

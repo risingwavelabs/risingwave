@@ -12,13 +12,6 @@ class UserDefinedFunction:
     _input_types: List[pa.DataType]
     _result_type: pa.DataType
 
-    def full_name(self) -> str:
-        """
-        A unique name for the function. Composed by function name and input types.
-        Example: "gcd/int32,int32"
-        """
-        return self._name + '/' + ','.join([str(t) for t in self._input_types])
-
     def result_schema(self) -> pa.Schema:
         """
         Returns the schema of the result table.
@@ -104,7 +97,7 @@ class UdfServer(pa.flight.FlightServerBase):
 
     def add_function(self, udf: UserDefinedFunction):
         """Add a function to the server."""
-        name = udf.full_name()
+        name = udf._name
         if name in self._functions:
             raise ValueError('Function already exists: ' + name)
         print('added function:', name)
