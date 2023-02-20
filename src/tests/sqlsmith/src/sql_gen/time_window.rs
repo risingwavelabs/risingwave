@@ -109,7 +109,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// `size_secs` = k * `slide_secs`.
     /// k cannot be too large, to avoid overflow.
     fn gen_size(&mut self, slide_secs: u64) -> Expr {
-        let k = self.rng.gen_range(0..100);
+        let k = self.rng.gen_range(1..100);
         let size_secs = k * slide_secs;
         Self::secs_to_interval_expr(size_secs)
     }
