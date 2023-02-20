@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use smallvec::{smallvec, SmallVec};
@@ -641,7 +641,7 @@ impl Dispatcher for HashDataDispatcher {
                         .iter()
                         .copied()
                         .zip_eq_fast(ops)
-                        .zip_eq_debug(visibility.iter())
+                        .zip_eq_fast(visibility.iter())
                         .for_each(|((vnode, op), visible)| {
                             build_op_vis(vnode, op, visible);
                         });

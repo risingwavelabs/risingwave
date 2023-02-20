@@ -95,7 +95,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.14.0"
-source = "git+https://github.com/risingwavelabs/avro?branch=master#024f422ebda0d33b153e2ceecd2c3d538f90af21"
+source = "git+https://github.com/risingwavelabs/avro?branch=waruto/modify-decimal#99acf32c68d17d1a94caf08b5918848fc5036cdf"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -3497,9 +3497,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.15"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8ec77ebfe5067154eb35baeb03c402e3c57a3db4866e9a1a276d40435c7fb8"
+checksum = "7e3c98b41d46214f4ae435a95e246710ad7fb1100754f809dd7c18606a7607c4"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3525,9 +3525,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.15"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfa6b576864ca304aa1248d800e56a906f5daa6c8a6e6132374648aea7ea86f1"
+checksum = "4eeb7fb1e7d0d15c979ee36d9c44074298ff5662b317a1e122807e350d9b92b6"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -3542,9 +3542,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.15"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b25dd57e0c5b84c838451374177f34be28df7b7885d950f736d46937afc42e96"
+checksum = "bb918383c4f5966f29760ec48820e1c2846739e4ae411c2a8aaa4466ce1421b7"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -4723,6 +4723,8 @@ dependencies = [
  "fallible-iterator",
  "postgres-derive",
  "postgres-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6276,6 +6278,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "criterion",
+ "easy-ext",
  "futures",
  "futures-async-stream",
  "itertools",

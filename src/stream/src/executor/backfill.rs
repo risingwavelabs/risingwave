@@ -153,6 +153,9 @@ where
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
 
+        // Keep track of rows from the upstream and snapshot.
+        let mut processed_rows: u64 = 0;
+
         // Backfill Algorithm:
         //
         //   backfill_stream
@@ -205,6 +208,7 @@ where
                                 // Consume upstream buffer chunk
                                 for chunk in upstream_chunk_buffer.drain(..) {
                                     if let Some(current_pos) = &current_pos {
+                                        processed_rows += chunk.cardinality() as u64;
                                         yield Message::Chunk(Self::mapping_chunk(
                                             Self::mark_chunk(
                                                 chunk,
@@ -222,8 +226,11 @@ where
 
                                 yield Message::Barrier(barrier);
 
-                                self.progress
-                                    .update(snapshot_read_epoch, snapshot_read_epoch);
+                                self.progress.update(
+                                    snapshot_read_epoch,
+                                    snapshot_read_epoch,
+                                    processed_rows,
+                                );
                                 // Break the for loop and start a new snapshot read stream.
                                 break;
                             }
@@ -245,6 +252,7 @@ where
                                 // in the buffer. Here we choose to never mark the chunk.
                                 // Consume with the renaming stream buffer chunk without mark.
                                 for chunk in upstream_chunk_buffer.drain(..) {
+                                    processed_rows += chunk.cardinality() as u64;
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
                                         &upstream_indices,
@@ -267,7 +275,7 @@ where
                                         .project(table_pk_indices)
                                         .into_owned_row(),
                                 );
-
+                                processed_rows += chunk.cardinality() as u64;
                                 yield Message::Chunk(Self::mapping_chunk(chunk, &upstream_indices));
                             }
                         }

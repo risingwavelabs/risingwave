@@ -35,7 +35,7 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
     StreamChunkWithState,
 };
 
@@ -56,7 +56,7 @@ pub struct NexmarkSplitReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for NexmarkSplitReader {
+impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
 
     #[allow(clippy::unused_async)]

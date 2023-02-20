@@ -189,8 +189,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
                     offset
                 )
             })?;
-            let v = R::read(buf.as_slice())?;
-            builder.append(Some(v));
+            R::read(buf.as_slice(), &mut builder)?;
         } else {
             builder.append(None);
         }

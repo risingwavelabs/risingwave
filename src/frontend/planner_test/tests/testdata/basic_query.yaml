@@ -193,3 +193,11 @@
   stream_plan: |
     StreamMaterialize { columns: [a, b, mv.t._row_id(hidden)], pk_columns: [mv.t._row_id] }
     └─StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], pk: [mv.t._row_id], dist: UpstreamHashShard(mv.t._row_id) }
+- sql: |
+    create table t (id int primary key, col int);
+    create index idx on t(col);
+    select id from idx;
+  stream_plan: |
+    StreamMaterialize { columns: [id], pk_columns: [id] }
+    └─StreamExchange { dist: HashShard(idx.id) }
+      └─StreamTableScan { table: idx, columns: [idx.id], pk: [idx.id], dist: SomeShard }

@@ -15,11 +15,16 @@
 use std::assert_matches::assert_matches;
 use std::collections::HashSet;
 use std::fmt;
+use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_connector::sink::catalog::SinkType;
+use risingwave_connector::sink::{
+    SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
@@ -280,8 +285,41 @@ impl StreamMaterialize {
     }
 
     /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
-    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
-        StreamSink::new(self.input, self.table.to_sink_desc(properties))
+    pub fn rewrite_into_sink(self, properties: WithOptions) -> Result<StreamSink> {
+        let frontend_derived_append_only = self.table.append_only;
+        let user_defined_append_only =
+            properties.value_eq_ignore_case(SINK_FORMAT_OPTION, SINK_FORMAT_APPEND_ONLY);
+        let user_force_append_only =
+            properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true");
+
+        let sink_type = match (
+            frontend_derived_append_only,
+            user_defined_append_only,
+            user_force_append_only,
+        ) {
+            (true, true, _) => SinkType::AppendOnly,
+            (false, true, true) => SinkType::ForceAppendOnly,
+            (_, false, false) => SinkType::Upsert,
+            (false, true, false) => {
+                return Err(ErrorCode::SinkError(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in WITH options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
+                )))
+                .into());
+            }
+            (_, false, true) => {
+                return Err(ErrorCode::SinkError(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Cannot force the sink to be append-only without \"format='append_only'\"in WITH options",
+                )))
+                .into());
+            }
+        };
+
+        Ok(StreamSink::new(
+            self.input,
+            self.table.to_sink_desc(properties, sink_type),
+        ))
     }
 }
 

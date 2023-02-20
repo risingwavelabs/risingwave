@@ -22,6 +22,7 @@ mod shared_buffer_compact;
 pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -62,8 +63,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, DeleteRangeAggregator, HummockError,
-    RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, BloomFilterBuilder, DeleteRangeAggregator,
+    HummockError, RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -728,7 +729,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
-        let builder_factory = RemoteBuilderFactory {
+        let builder_factory = RemoteBuilderFactory::<F, BloomFilterBuilder> {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),
@@ -736,6 +737,7 @@ impl Compactor {
             remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
             sstable_writer_factory: writer_factory,
+            _phantom: PhantomData,
         };
 
         let mut sst_builder = CapacitySplitTableBuilder::new(

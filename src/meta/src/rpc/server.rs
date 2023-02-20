@@ -33,6 +33,7 @@ use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
@@ -59,6 +60,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
@@ -270,14 +272,14 @@ pub async fn start_service_as_election_follower(
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() =>  {
+                res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown sender dropped")
                     }
                 },
                 // shutdown service if follower becomes leader
-                res = follower_shutdown_rx =>  {
+                res = follower_shutdown_rx => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down follower services"),
                         Err(_) => tracing::error!("Follower service shutdown sender dropped")
@@ -305,7 +307,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let init_system_param = opts.init_system_params();
+    let init_system_params = opts.init_system_params();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -440,8 +442,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
-    let system_param_manager =
-        Arc::new(SystemParamManager::new(env.clone(), init_system_param).await?);
+    let system_params_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -464,10 +466,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         stream_manager.clone(),
     );
 
-    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone(), system_param_manager);
+    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),
+        stream_manager.clone(),
+        catalog_manager.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
@@ -486,6 +490,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
+    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -527,11 +532,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();
-    let abort_notification_handler = tokio::spawn(async move {
+    let stream_abort_handler = tokio::spawn(async move {
         abort_recv.await.unwrap();
         notification_mgr.abort_all().await;
+        compactor_manager.abort_all_compactors();
     });
-    sub_tasks.push((abort_notification_handler, abort_sender));
+    sub_tasks.push((stream_abort_handler, abort_sender));
 
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
@@ -565,6 +571,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(ScaleServiceServer::new(scale_srv))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(SystemParamsServiceServer::new(system_params_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {

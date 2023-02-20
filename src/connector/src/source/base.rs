@@ -102,6 +102,7 @@ pub enum SourceFormat {
     CanalJson,
     Csv,
     Native,
+    DebeziumAvro,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
@@ -126,11 +127,11 @@ impl From<StreamChunk> for StreamChunkWithState {
     }
 }
 
-/// [`SplitReaderV2`] is a new abstraction of the external connector read interface which is
+/// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReaderV2: Sized {
+pub trait SplitReader: Sized {
     type Properties;
 
     async fn new(
@@ -230,7 +231,7 @@ impl SplitImpl {
     }
 }
 
-pub enum SplitReaderV2Impl {
+pub enum SplitReaderImpl {
     S3(Box<S3FileReader>),
     Dummy(Box<DummySplitReader>),
     Kinesis(Box<KinesisSplitReader>),

@@ -106,6 +106,14 @@ impl PlanVisitor<Option<usize>> for CountRows {
         None
     }
 
+    fn visit_logical_agg(&mut self, plan: &LogicalAgg) -> Option<usize> {
+        if plan.group_key().is_empty() {
+            Some(1)
+        } else {
+            None
+        }
+    }
+
     fn visit_logical_values(&mut self, plan: &LogicalValues) -> Option<usize> {
         Some(plan.rows().len())
     }
