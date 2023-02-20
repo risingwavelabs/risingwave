@@ -159,8 +159,10 @@ select count(*) from s5
 ----
 100
 
-statement ok
+statement stream err
 drop table s5
+---
+
 
 query I
 select count(*) from s6

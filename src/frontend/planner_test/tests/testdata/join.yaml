@@ -186,7 +186,7 @@
     using (x);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Coalesce(i.x, i.x) as $expr23] }
+    └─BatchProject { exprs: [Coalesce(i.x, i.x) as $expr25] }
       └─BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
         ├─BatchExchange { order: [], dist: HashShard(i.x) }
         | └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
@@ -197,7 +197,7 @@
   stream_plan: |
     StreamMaterialize { columns: [x, i.t._row_id(hidden), i.t._row_id#1(hidden), i.x(hidden), i.x#1(hidden), i.t._row_id#2(hidden), i.t._row_id#3(hidden), i.x#2(hidden), i.x#3(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1, i.x, i.x#1, i.t._row_id#2, i.t._row_id#3, i.x#2, i.x#3] }
     └─StreamExchange { dist: HashShard(i.t._row_id, i.t._row_id, i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.x) }
-      └─StreamProject { exprs: [Coalesce(i.x, i.x) as $expr46, i.t._row_id, i.t._row_id, i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.x] }
+      └─StreamProject { exprs: [Coalesce(i.x, i.x) as $expr50, i.t._row_id, i.t._row_id, i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.x] }
         └─StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.t._row_id, i.t._row_id, i.x] }
           ├─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id, i.x] }
           | ├─StreamExchange { dist: HashShard(i.x) }
@@ -488,10 +488,10 @@
           ├─LogicalScan { table: a, columns: [a.x, a._row_id] }
           └─LogicalScan { table: b, columns: [b.x, b._row_id] }
   batch_plan: |
-    BatchProject { exprs: [$expr67, $expr68] }
-    └─BatchExchange { order: [$expr69 ASC], dist: Single }
-      └─BatchSort { order: [$expr69 ASC] }
-        └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr67, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr68, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr69] }
+    BatchProject { exprs: [$expr73, $expr74] }
+    └─BatchExchange { order: [$expr75 ASC], dist: Single }
+      └─BatchSort { order: [$expr75 ASC] }
+        └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr73, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr74, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr75] }
           └─BatchFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
             └─BatchHashJoin { type: FullOuter, predicate: a.x = b.x, output: all }
               ├─BatchExchange { order: [], dist: HashShard(a.x) }
@@ -499,9 +499,9 @@
               └─BatchExchange { order: [], dist: HashShard(b.x) }
                 └─BatchScan { table: b, columns: [b.x], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [y, z, $expr138(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], pk_columns: [a._row_id, b._row_id, a.x, b.x], order_descs: [$expr138, a._row_id, b._row_id, a.x, b.x] }
+    StreamMaterialize { columns: [y, z, $expr150(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], pk_columns: [a._row_id, b._row_id, a.x, b.x], order_descs: [$expr150, a._row_id, b._row_id, a.x, b.x] }
     └─StreamExchange { dist: HashShard(a._row_id, b._row_id, a.x, b.x) }
-      └─StreamProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr136, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr137, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr138, a._row_id, b._row_id, a.x, b.x] }
+      └─StreamProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr148, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr149, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr150, a._row_id, b._row_id, a.x, b.x] }
         └─StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
           └─StreamHashJoin { type: FullOuter, predicate: a.x = b.x, output: [a.x, b.x, a._row_id, b._row_id] }
             ├─StreamExchange { dist: HashShard(a.x) }
@@ -593,17 +593,17 @@
     select * from t1 join t2 on v1 IS NOT DISTINCT FROM v2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: $expr13 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
-      ├─BatchExchange { order: [], dist: HashShard($expr13) }
-      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64 as $expr13] }
+    └─BatchHashJoin { type: Inner, predicate: $expr15 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
+      ├─BatchExchange { order: [], dist: HashShard($expr15) }
+      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64 as $expr15] }
       |   └─BatchScan { table: t1, columns: [t1.v1], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
         └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr25(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr25, v2] }
-    └─StreamHashJoin { type: Inner, predicate: $expr25 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, $expr25, t2._row_id] }
-      ├─StreamExchange { dist: HashShard($expr25) }
-      | └─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr25, t1._row_id] }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr29(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr29, v2] }
+    └─StreamHashJoin { type: Inner, predicate: $expr29 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, $expr29, t2._row_id] }
+      ├─StreamExchange { dist: HashShard($expr29) }
+      | └─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr29, t1._row_id] }
       |   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

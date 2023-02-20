@@ -31,4 +31,4 @@
 - sql: |
     select current_timestamp > now() - interval '10 minutes';
   batch_plan: |
-    BatchValues { rows: [[Now('2021-04-01 00:00:00+00:00':Timestamptz)]] }
+    BatchValues { rows: [[true:Boolean]] }
