@@ -8,6 +8,8 @@
 
 set -euo pipefail
 
+# -x is unset, since it is verbose.
+
 ########## LIBRARY
 
 # Logs are of the form ... [EXECUTING XYZ]: <sql>
@@ -17,7 +19,7 @@ extract_sql() {
 }
 
 extract_sqlsmith_logs() {
-    grep "risingwave_sqlsmith::runner:" < "$1"
+    grep "risingwave_sqlsmith::runner:" < "$LOGPATH"
 }
 
 extract_ddl() {
@@ -25,7 +27,7 @@ extract_ddl() {
 }
 
 extract_dml() {
-    grep "\[EXECUTING POPULATION]" | extract_sql
+    grep "\[EXECUTING POPULATION]" | extract_sql || true
 }
 
 # assumes it is last
@@ -45,7 +47,7 @@ else
     PRETTY=0
 fi
 
-FULL="$(extract_sqlsmith_logs "$LOGPATH")"
+FULL="$(extract_sqlsmith_logs)"
 # echo "$FULL"
 DDL="$(echo "$FULL" | extract_ddl)"
 # echo "$DDL"
@@ -58,11 +60,13 @@ QUERIES="$(echo "$FULL" | extract_query)"
 
 # Overwrites old logs
 if [ "$PRETTY" = 1 ]; then
+    echo "Pretty printing to $SQLPATH"
     echo "$DDL" | pg_format > "$SQLPATH"
     # Do not pretty print dml, can be quite verbose
     echo "$DML" >> "$SQLPATH"
     echo "$QUERIES" | pg_format >> "$SQLPATH"
 else
+    echo "Printing raw output to $SQLPATH"
     echo "$DDL" > "$SQLPATH"
     echo "$DML" >> "$SQLPATH"
     echo "$QUERIES" >> "$SQLPATH"
