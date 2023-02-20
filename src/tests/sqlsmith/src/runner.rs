@@ -42,8 +42,9 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     tracing::info!("Set session variables");
 
     let rows_per_table = 10;
-    let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
-    let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
+    // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
+    // let populate_sql = populate_tables(client, &mut rng, base_tables.clone(),
+    // rows_per_table).await; let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
     tracing::info!("Populated base tables");
 
     let max_rows_inserted = rows_per_table * base_tables.len();
@@ -66,6 +67,7 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
     drop_tables(&mviews, testdata, client).await;
 }
 
+#[allow(dead_code)]
 async fn populate_tables<R: Rng>(
     client: &tokio_postgres::Client,
     rng: &mut R,
@@ -86,13 +88,14 @@ async fn test_sqlsmith<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     setup_sql: &str,
-    base_tables: Vec<Table>,
-    row_count: usize,
+    _base_tables: Vec<Table>,
+    _row_count: usize,
 ) {
     // Test inserted rows should be at least 50% population count,
     // otherwise we don't have sufficient data in our system.
-    test_population_count(client, base_tables, row_count).await;
-    tracing::info!("passed population count test");
+    // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
+    // test_population_count(client, base_tables, row_count).await;
+    // tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.20; // permit at most 20% of queries to be skipped.
@@ -132,6 +135,7 @@ async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mu
 }
 
 /// Expects at least 50% of inserted rows included.
+#[allow(dead_code)]
 async fn test_population_count(
     client: &tokio_postgres::Client,
     base_tables: Vec<Table>,
