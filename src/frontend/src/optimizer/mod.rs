@@ -483,7 +483,7 @@ impl PlanRoot {
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
+            ctx.trace("Inline Session Timezone:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -651,7 +651,7 @@ impl PlanRoot {
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
+            ctx.trace("Inline session timezone:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
