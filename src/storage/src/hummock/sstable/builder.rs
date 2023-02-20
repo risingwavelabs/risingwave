@@ -21,7 +21,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
@@ -183,6 +183,8 @@ impl<W: SstableWriter> SstableBuilder<W> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
+
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
@@ -191,6 +193,16 @@ impl<W: SstableWriter> SstableBuilder<W> {
                 smallest_key: full_key.encode(),
                 uncompressed_size: 0,
             })
+        }
+        let table_key_len = full_key.user_key.table_key.as_ref().len();
+        if table_key_len >= LARGE_KEY_LEN {
+            let table_id = full_key.user_key.table_id.table_id();
+            tracing::warn!(
+                "A large key (table_id={}, len={}, epoch={}) is added to block",
+                table_id,
+                table_key_len,
+                full_key.epoch
+            );
         }
 
         // TODO: refine me
