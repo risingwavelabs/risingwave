@@ -21,40 +21,48 @@ use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
 use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 
+// The execution model of SpaceReclaimCompactionPicker scans through the last level of files by
+// key_range and selects the appropriate files to generate compaction
 pub struct SpaceReclaimCompactionPicker {
     // config
     pub max_space_reclaim_bytes: u64,
+
+    // for filter
     pub all_table_ids: HashSet<u32>,
 }
 
+// According to the execution model of SpaceReclaimCompactionPicker, SpaceReclaimPickerState is
+// designed to record the state of each round of scanning
 #[derive(Default)]
 pub struct SpaceReclaimPickerState {
-    // pub last_select_end_key: Vec<u8>,
+    // Because of the right_exclusive, we use KeyRangeCommon to determine if the end_bounds
+    // overlap instead of directly comparing Vec<u8>. We don't need to use the start_bound in the
+    // filter, set it to -inf
 
-    // pub start_key_in_round: Vec<u8>,
-    // pub end_key_in_round: Vec<u8>,
-    pub last_select_key_range: KeyRange,
+    // record the end_bound that has been scanned
+    pub last_select_end_bound: KeyRange,
 
-    pub key_range_in_round: KeyRange,
+    // record the end_bound in the current round of scanning tasks
+    pub end_bound_in_round: KeyRange,
 }
 
 impl SpaceReclaimPickerState {
     pub fn valid(&self) -> bool {
-        !self.key_range_in_round.left.is_empty() && !self.key_range_in_round.right.is_empty()
+        !self.end_bound_in_round.right.is_empty()
     }
 
     pub fn init(&mut self, key_range: KeyRange) {
-        self.key_range_in_round = key_range;
-        self.last_select_key_range = KeyRange {
+        self.last_select_end_bound = KeyRange {
             left: vec![],
-            right: self.key_range_in_round.left.clone(),
+            right: key_range.left.clone(),
             right_exclusive: true,
         };
+        self.end_bound_in_round = key_range;
     }
 
     pub fn clear(&mut self) {
-        self.key_range_in_round = KeyRange::default();
-        self.last_select_key_range = KeyRange::default();
+        self.end_bound_in_round = KeyRange::default();
+        self.last_select_end_bound = KeyRange::default();
     }
 }
 
@@ -88,7 +96,7 @@ impl SpaceReclaimCompactionPicker {
         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
         if reclaimed_level.table_infos.is_empty() {
-            // 1. not file to be picked
+            // no file to be picked
             state.clear();
             return None;
         }
@@ -103,11 +111,10 @@ impl SpaceReclaimCompactionPicker {
         };
 
         if state.valid()
-            && !last_sst
-                .key_range
-                .as_ref()
-                .unwrap()
-                .sstable_overlap(&state.key_range_in_round)
+            && state
+                .last_select_end_bound
+                .compare_right_with(&state.end_bound_in_round.right)
+                == std::cmp::Ordering::Greater
         {
             // in round but end_key overflow
             // turn to next_round
@@ -121,18 +128,13 @@ impl SpaceReclaimCompactionPicker {
         }
 
         let mut select_file_size = 0;
-
-        let matched_sst = reclaimed_level
-            .table_infos
-            .iter()
-            .filter(|sst| match &sst.key_range {
-                Some(key_range) => !key_range.sstable_overlap(&state.last_select_key_range),
-
-                None => false,
-            });
-
-        for sst in matched_sst {
-            if level_handler.is_pending_compact(&sst.id) || self.filter(sst) {
+        for sst in &reclaimed_level.table_infos {
+            let matched_sst = sst
+                .key_range
+                .as_ref()
+                .unwrap()
+                .sstable_overlap(&state.last_select_end_bound);
+            if matched_sst || (level_handler.is_pending_compact(&sst.id) || self.filter(sst)) {
                 if !select_input_ssts.is_empty() {
                     // Our goal is to pick as many complete layers of data as possible and keep the
                     // picked files contiguous to avoid overlapping key_ranges, so the strategy is
@@ -157,11 +159,12 @@ impl SpaceReclaimCompactionPicker {
         }
 
         let select_last_sst = select_input_ssts.last().unwrap();
-        state.last_select_key_range.full_key_extend(&KeyRange {
+        state.last_select_end_bound.full_key_extend(&KeyRange {
             left: vec![],
             right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
             right_exclusive: true,
         });
+
         Some(CompactionInput {
             input_levels: vec![
                 InputLevel {
