@@ -28,6 +28,7 @@ use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
@@ -258,6 +259,40 @@ where
         commit_meta!(self, table_fragments)?;
         self.notify_fragment_mapping(&table_fragment, Operation::Add)
             .await;
+
+        Ok(())
+    }
+
+    pub async fn post_replace_table(
+        &self,
+        table_id: TableId,
+        dummy_table_id: TableId,
+        _merge_updates: &[MergeUpdate],
+    ) -> MetaResult<()> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+
+        let _old_table_fragment = table_fragments
+            .remove(table_id)
+            .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+        let mut table_fragment = table_fragments
+            .remove(dummy_table_id)
+            .with_context(|| format!("table_fragment not exist: id={}", dummy_table_id))?;
+
+        assert_eq!(table_fragment.state(), State::Initial);
+        table_fragment.set_table_id(table_id);
+        table_fragment.set_state(State::Created);
+        table_fragment.update_actors_state(ActorState::Running);
+
+        table_fragments.insert(table_id, table_fragment.clone());
+
+        commit_meta!(self, table_fragments)?;
+        self.notify_fragment_mapping(&table_fragment, Operation::Update)
+            .await;
+
+        // TODO: should update merge executors.
 
         Ok(())
     }

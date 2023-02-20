@@ -115,6 +115,12 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment(HashMap<FragmentId, Reschedule>),
 
+    ReplaceTable {
+        old_table_fragments: TableFragments,
+        new_table_fragments: TableFragments,
+        merge_updates: Vec<MergeUpdate>,
+    },
+
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
     SourceSplitAssignment(SplitAssignment),
@@ -153,6 +159,15 @@ impl Command {
                     .values()
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
+                CommandChanges::Actor { to_add, to_remove }
+            }
+            Command::ReplaceTable {
+                old_table_fragments,
+                new_table_fragments,
+                ..
+            } => {
+                let to_add = new_table_fragments.actor_ids().into_iter().collect();
+                let to_remove = old_table_fragments.actor_ids().into_iter().collect();
                 CommandChanges::Actor { to_add, to_remove }
             }
             Command::SourceSplitAssignment(_) => CommandChanges::None,
@@ -280,6 +295,20 @@ where
             Command::CancelStreamingJob(table_fragments) => {
                 let actors = table_fragments.actor_ids();
                 Some(Mutation::Stop(StopMutation { actors }))
+            }
+
+            Command::ReplaceTable {
+                old_table_fragments,
+                merge_updates,
+                ..
+            } => {
+                let dropped_actors = old_table_fragments.actor_ids();
+
+                Some(Mutation::Update(UpdateMutation {
+                    merge_update: merge_updates.clone(),
+                    dropped_actors,
+                    ..Default::default()
+                }))
             }
 
             Command::RescheduleFragment(reschedules) => {
@@ -603,6 +632,27 @@ where
                         )
                         .await;
                 }
+            }
+
+            Command::ReplaceTable {
+                old_table_fragments,
+                new_table_fragments,
+                merge_updates,
+            } => {
+                let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
+
+                // Tell compute nodes to drop actors.
+                let node_actors = self.fragment_manager.table_node_actors(&table_ids).await?;
+                self.clean_up(node_actors).await?;
+
+                // Drop fragment info in meta store.
+                self.fragment_manager
+                    .post_replace_table(
+                        old_table_fragments.table_id(),
+                        new_table_fragments.table_id(),
+                        &*merge_updates,
+                    )
+                    .await?;
             }
         }
 

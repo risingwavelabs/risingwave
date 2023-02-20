@@ -127,6 +127,8 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
+    pub old_table_fragments: TableFragments,
+
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
 
@@ -439,10 +441,11 @@ where
         &self,
         table_fragments: TableFragments,
         ReplaceTableContext {
+            old_table_fragments,
             merge_updates,
             building_locations,
             existing_locations,
-            table_properties,
+            table_properties: _,
         }: ReplaceTableContext,
     ) -> MetaResult<()> {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
@@ -457,7 +460,11 @@ where
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_command(Command::Plain(None))
+            .run_command(Command::ReplaceTable {
+                old_table_fragments,
+                new_table_fragments: table_fragments,
+                merge_updates,
+            })
             .await
         {
             self.fragment_manager

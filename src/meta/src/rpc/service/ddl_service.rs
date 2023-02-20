@@ -905,7 +905,13 @@ where
             env,
         );
 
+        let old_table_fragments = self
+            .fragment_manager
+            .select_table_fragments_by_table_id(&id.into())
+            .await?;
+
         let ctx = ReplaceTableContext {
+            old_table_fragments,
             merge_updates,
             building_locations,
             existing_locations,
