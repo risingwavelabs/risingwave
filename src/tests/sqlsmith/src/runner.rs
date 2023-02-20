@@ -119,6 +119,7 @@ async fn test_sqlsmith<R: Rng>(
 
 async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &str) -> String {
     let s = format!("SET {variable} TO {value};");
+    tracing::info!("Executing: {}", s);
     client.simple_query(&s).await.unwrap();
     s
 }
@@ -230,7 +231,7 @@ async fn create_tables(
     for i in 0..10 {
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
-        tracing::info!("Executing MView Setup: {}", &create_sql);
+        tracing::info!("Executing: {}", &create_sql);
         let response = client.simple_query(&create_sql).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
