@@ -23,8 +23,12 @@ use crate::{
 };
 
 /// e2e test runner for sqlsmith
-pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
-    let mut rng = rand::rngs::SmallRng::from_entropy();
+pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
+    let mut rng = if let Some(seed) = seed {
+        rand::rngs::SmallRng::seed_from_u64(seed)
+    } else {
+        rand::rngs::SmallRng::from_entropy()
+    };
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
 
     test_sqlsmith(client, &mut rng, tables.clone(), &setup_sql).await;
