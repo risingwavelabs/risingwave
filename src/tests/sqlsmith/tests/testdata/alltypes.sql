@@ -13,10 +13,9 @@ CREATE TABLE alltypes1 (
     -- TODO(Noel): Many timestamptz expressions are unsupported in RW, leave this out for now.
     -- c12 timestamp with time zone,
     c13 interval,
-    -- ENABLE: https://github.com/risingwavelabs/risingwave/issues/7132
-    -- c14 struct < a integer >,
-    -- c15 integer [],
-    -- c16 varchar []
+    c14 struct < a integer >,
+    c15 integer [],
+    c16 varchar []
 );
 
 CREATE TABLE alltypes2 (
@@ -34,8 +33,7 @@ CREATE TABLE alltypes2 (
     -- TODO(Noel): Many timestamptz expressions are unsupported in RW, leave this out for now.
     -- c12 timestamp with time zone,
     c13 interval,
-    -- ENABLE: https://github.com/risingwavelabs/risingwave/issues/7132
-    -- c14 struct < a integer >,
-    -- c15 integer [],
-    -- c16 varchar []
+    c14 struct < a integer >,
+    c15 integer [],
+    c16 varchar []
 );
