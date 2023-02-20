@@ -414,8 +414,6 @@ impl ToStream for LogicalTopN {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -435,7 +433,7 @@ mod tests {
             Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
-        let input = Rc::new(values);
+        let input = PlanRef::from(values);
 
         let original_logical =
             LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);

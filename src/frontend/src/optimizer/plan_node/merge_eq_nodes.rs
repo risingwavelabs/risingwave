@@ -77,7 +77,7 @@ struct Counter {
 }
 
 impl Counter {
-    fn to_pruner<'a>(&'a self) -> Pruner<'a> {
+    fn to_pruner(&self) -> Pruner<'_> {
         Pruner {
             counts: &self.counts,
             cache: HashMap::new(),

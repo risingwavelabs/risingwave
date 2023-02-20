@@ -238,7 +238,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
-            table_option: TableOption::build_table_option(&table_catalog.get_properties()),
+            table_option: TableOption::build_table_option(table_catalog.get_properties()),
             is_consistent_op,
             vnode_col_idx_in_pk,
             value_indices,

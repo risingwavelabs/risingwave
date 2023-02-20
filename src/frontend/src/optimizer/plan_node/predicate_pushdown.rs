@@ -82,7 +82,7 @@ pub struct PredicatePushdownContext {
 impl PredicatePushdownContext {
     pub fn new(root: PlanRef) -> Self {
         let mut share_parent_counter = ShareParentCounter::default();
-        share_parent_counter.visit(root.clone());
+        share_parent_counter.visit(root);
         Self {
             share_predicate_map: Default::default(),
             share_parent_counter,

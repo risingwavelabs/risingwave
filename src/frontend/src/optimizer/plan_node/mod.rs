@@ -99,11 +99,13 @@ impl_downcast!(PlanNode);
 
 // Using a new type wrapper allows direct function implementation on `PlanRef`,
 // and we currently need a manual implementation of `PartialEq` for `PlanRef`.
+#[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Debug, Eq, Hash)]
 pub struct PlanRef(Rc<dyn PlanNode>);
 
 // Cannot use the derived implementation for now.
 // See https://github.com/rust-lang/rust/issues/31740
+#[allow(clippy::op_ref)]
 impl PartialEq for PlanRef {
     fn eq(&self, other: &Self) -> bool {
         &self.0 == &other.0
@@ -250,7 +252,7 @@ impl ColPrunable for PlanRef {
                     &new_required_cols,
                     new_share.schema().len(),
                 );
-                return LogicalProject::with_mapping(new_share.clone(), mapping).into();
+                return LogicalProject::with_mapping(new_share, mapping).into();
             }
 
             // `LogicalShare` can't clone, so we implement column pruning for `LogicalShare`

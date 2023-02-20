@@ -45,7 +45,7 @@ impl LogicalProject {
     }
 
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        let core = generic::Project::new(exprs, input.clone());
+        let core = generic::Project::new(exprs, input);
         Self::with_core(core)
     }
 

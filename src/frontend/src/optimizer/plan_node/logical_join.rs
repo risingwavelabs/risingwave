@@ -250,8 +250,8 @@ impl LogicalJoin {
     /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::with_output_indices(
-            self.left().clone(),
-            self.right().clone(),
+            self.left(),
+            self.right(),
             self.join_type(),
             self.on().clone(),
             output_indices,
@@ -261,8 +261,8 @@ impl LogicalJoin {
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
         Self::with_output_indices(
-            self.left().clone(),
-            self.right().clone(),
+            self.left(),
+            self.right(),
             self.join_type(),
             cond,
             self.output_indices().clone(),
@@ -824,7 +824,7 @@ fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
 /// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
 ///    the equivalent in the other side.
 ///
-/// #[derive(Debug, Clone, PartialEq, Eq, Hash)]Arguments
+/// # Arguments
 ///
 /// Suppose we derive a predicate from the left side to be pushed to the right side.
 /// * `expr`: An expr from the left side.
@@ -881,7 +881,7 @@ fn derive_predicate_from_eq_condition(
 impl PredicatePushdown for LogicalJoin {
     /// Pushes predicates above and within a join node into the join node and/or its children nodes.
     ///
-    /// #[derive(Debug, Clone, PartialEq, Eq, Hash)]Which predicates can be pushed
+    /// # Which predicates can be pushed
     ///
     /// For inner join, we can do all kinds of pushdown.
     ///
@@ -890,7 +890,7 @@ impl PredicatePushdown for LogicalJoin {
     ///
     /// For left/right anti join, we can push filter to left/right, but on-clause can not be pushed
     ///
-    /// ##[derive(Debug, Clone, PartialEq, Eq, Hash)]Outer Join
+    /// ## Outer Join
     ///
     /// Preserved Row table
     /// : The table in an Outer Join that must return all rows.
