@@ -93,7 +93,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         // connect to UDF service and check the function
         let (client, function_id, arg_schema) = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let client = ArrowFlightUdfClient::connect(&udf.path).await?;
+                let client = ArrowFlightUdfClient::connect(&udf.link).await?;
                 let args = Arc::new(Schema::new(
                     udf.arg_types
                         .iter()

@@ -6,18 +6,18 @@
 
 # Create a function.
 statement ok
-create function int_42() returns int as 'http://localhost:8815' language arrow_flight;
+create function int_42() returns int language python as int_42 using link 'http://localhost:8815';
 
 statement ok
-create function gcd(int, int) returns int as 'http://localhost:8815' language arrow_flight;
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
 
 # Create a function with the same name but different arguments.
 statement ok
-create function gcd(int, int, int) returns int as 'http://localhost:8815' language arrow_flight;
+create function gcd(int, int, int) returns int language python as gcd3 using link 'http://localhost:8815';
 
 # Create a function with the same name and arguments.
 statement error exists
-create function gcd(int, int) returns int as 'http://localhost:8815' language arrow_flight;
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
 
 query I
 select int_42();

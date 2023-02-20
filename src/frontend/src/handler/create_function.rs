@@ -48,20 +48,26 @@ pub async fn handle_create_function(
         .into());
     }
     let language = match params.language {
-        Some(lang) => lang.real_value(),
+        Some(lang) => lang.real_value().to_lowercase(),
         None => {
             return Err(
                 ErrorCode::InvalidParameterValue("LANGUAGE must be specified".to_string()).into(),
             )
         }
     };
-    if language != "arrow_flight" {
+    if language != "python" {
         return Err(ErrorCode::InvalidParameterValue(
-            "LANGUAGE should be one of: arrow_flight".to_string(),
+            "LANGUAGE should be one of: python".to_string(),
         )
         .into());
     }
-    let Some(FunctionDefinition::SingleQuotedDef(flight_server_addr)) = params.as_ else {
+    let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
+        return Err(ErrorCode::InvalidParameterValue(
+            "AS must be specified".to_string(),
+        )
+        .into());
+    };
+    let Some(CreateFunctionUsing::Link(link)) = params.using else {
         return Err(ErrorCode::InvalidParameterValue(
             "AS must be specified".to_string(),
         )
@@ -104,7 +110,8 @@ pub async fn handle_create_function(
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(bind_data_type(&return_type)?.into()),
         language,
-        path: flight_server_addr,
+        identifier,
+        link,
         owner: session.user_id(),
     };
 

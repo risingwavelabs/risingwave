@@ -15,6 +15,6 @@ cargo run --example client
 Risingwave client:
 
 ```sql
-dev=> create function gcd(int, int) returns int as 'http://localhost:8815' language arrow_flight;
+dev=> create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
 dev=> select gcd(25, 15);
 ```

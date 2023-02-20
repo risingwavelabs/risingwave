@@ -53,7 +53,8 @@ impl UserDefinedFunction {
             arg_types,
             return_type: ret_type,
             language: udf.get_language().clone(),
-            path: udf.get_path().clone(),
+            identifier: udf.get_identifier().clone(),
+            link: udf.get_link().clone(),
         };
 
         Ok(Self {
@@ -84,7 +85,8 @@ impl Expr for UserDefinedFunction {
                     .map(|t| t.to_protobuf())
                     .collect(),
                 language: self.catalog.language.clone(),
-                path: self.catalog.path.clone(),
+                identifier: self.catalog.identifier.clone(),
+                link: self.catalog.link.clone(),
             })),
         }
     }
