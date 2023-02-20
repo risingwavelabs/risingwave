@@ -13,15 +13,13 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::HashSet;
 use std::fmt;
 use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, USER_COLUMN_ID_OFFSET};
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -29,6 +27,7 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
+use super::derive::{derive_columns, derive_pk};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -77,48 +76,7 @@ impl StreamSink {
             }
         };
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
-
-        // Used to validate and deduplicate column names.
-        let mut col_names = HashSet::new();
-        for name in &out_names {
-            if !col_names.insert(name.clone()) {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "column \"{}\" specified more than once",
-                    name
-                )))?;
-            }
-        }
-
-        let mut out_name_iter = out_names.into_iter();
-        let schema = input.schema();
-        let columns = schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| {
-                let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        field,
-                        i as i32 + USER_COLUMN_ID_OFFSET,
-                    ),
-                    is_hidden: !user_cols.contains(i),
-                };
-                c.column_desc.name = if !c.is_hidden {
-                    out_name_iter.next().unwrap()
-                } else {
-                    let mut name = field.name.clone();
-                    let mut count = 0;
-
-                    while !col_names.insert(name.clone()) {
-                        count += 1;
-                        name = format!("{}#{}", field.name, count);
-                    }
-
-                    name
-                };
-                c
-            })
-            .collect_vec();
+        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
         let sink = Self::derive_sink_desc(
             input.clone(),
@@ -140,47 +98,17 @@ impl StreamSink {
         definition: String,
         properties: WithOptions,
     ) -> Result<SinkDesc> {
-        let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
-        let schema = input.schema();
-        let distribution = input.distribution();
-
-        // Assert the uniqueness of column names and IDs.
-        if let Some(name) = columns.iter().map(|c| c.name()).duplicates().next() {
-            panic!("duplicated column name \"{name}\"");
-        }
-        if let Some(id) = columns.iter().map(|c| c.column_id()).duplicates().next() {
-            panic!("duplicated column ID {id}");
-        }
-
-        let mut in_order = FixedBitSet::with_capacity(schema.len());
-        let mut pk_list = vec![];
-        for field in &user_order_by.field_order {
-            let idx = field.index;
-            pk_list.push(field.to_order_pair());
-            in_order.insert(idx);
-        }
-
-        for &idx in &pk_indices {
-            if in_order.contains(idx) {
-                continue;
-            }
-            pk_list.push(OrderPair {
-                column_idx: idx,
-                order_type: OrderType::Ascending,
-            });
-            in_order.insert(idx);
-        }
-
-        let distribution_key = distribution.dist_column_indices().to_vec();
+        let distribution_key = input.distribution().dist_column_indices().to_vec();
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
+        let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
 
         Ok(SinkDesc {
             id: SinkId::placeholder(),
             name,
             definition,
             columns,
-            pk: pk_list,
-            stream_key: pk_indices,
+            pk: pk.iter().map(|k| k.to_order_pair()).collect_vec(),
+            stream_key,
             distribution_key,
             properties: properties.into_inner(),
             sink_type,
