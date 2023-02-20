@@ -550,8 +550,6 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: prometheus
-      - use: grafana
       - use: etcd
       - use: meta-node
       - use: compute-node
