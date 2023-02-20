@@ -2515,33 +2515,33 @@
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
         ├─LogicalJoin { type: Inner, on: true, output: all }
         | ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment] }
-        | └─LogicalShare { id = 7 }
-        |   └─LogicalProject { exprs: [lineitem.l_suppkey, sum($expr2)] }
-        |     └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr2)] }
-        |       └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2] }
+        | └─LogicalShare { id = 19 }
+        |   └─LogicalProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
+        |     └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
+        |       └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1] }
         |         └─LogicalFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
         |           └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
         └─LogicalProject { exprs: [max(sum($expr1))] }
           └─LogicalAgg { aggs: [max(sum($expr1))] }
             └─LogicalProject { exprs: [sum($expr1)] }
-              └─LogicalShare { id = 7 }
-                └─LogicalProject { exprs: [lineitem.l_suppkey, sum($expr2)] }
-                  └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr2)] }
-                    └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2] }
+              └─LogicalShare { id = 19 }
+                └─LogicalProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
+                  └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
+                    └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1] }
                       └─LogicalFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
                         └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (sum($expr20) = max(sum($expr20))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr20)] }
-    ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = lineitem.l_suppkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr20)] }
+    LogicalJoin { type: Inner, on: (sum($expr1) = max(sum($expr1))), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
+    ├─LogicalJoin { type: Inner, on: (supplier.s_suppkey = lineitem.l_suppkey), output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1)] }
     | ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone] }
-    | └─LogicalShare { id = 180 }
-    |   └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr2)] }
-    |     └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2] }
+    | └─LogicalShare { id = 294 }
+    |   └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
+    |     └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1] }
     |       └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
-    └─LogicalAgg { aggs: [max(sum($expr20))] }
-      └─LogicalShare { id = 180 }
-        └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr2)] }
-          └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2] }
+    └─LogicalAgg { aggs: [max(sum($expr1))] }
+      └─LogicalShare { id = 294 }
+        └─LogicalAgg { group_key: [lineitem.l_suppkey], aggs: [sum($expr1)] }
+          └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1] }
             └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
   batch_plan: |
     BatchExchange { order: [supplier.s_suppkey ASC], dist: Single }
@@ -2567,31 +2567,31 @@
                         └─BatchScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum($expr115)))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum($expr115)))] }
-    └─StreamHashJoin { type: Inner, predicate: sum($expr115) = max(max(sum($expr115))), output: all }
-      ├─StreamExchange { dist: HashShard(sum($expr115)) }
-      | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr115), lineitem.l_suppkey] }
+    └─StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: all }
+      ├─StreamExchange { dist: HashShard(sum($expr1)) }
+      | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
       |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-      |   └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr115)] }
-      |     └─StreamShare { id = 992 }
-      |       └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr2)] }
-      |         └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr2)] }
+      |   └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
+      |     └─StreamShare { id = 1020 }
+      |       └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
+      |         └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr1)] }
       |           └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
-      |             └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2, lineitem.l_orderkey, lineitem.l_linenumber] }
+      |             └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
       |               └─StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
       |                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-      └─StreamExchange { dist: HashShard(max(max(sum($expr115)))) }
-        └─StreamProject { exprs: [max(max(sum($expr115)))] }
-          └─StreamGlobalSimpleAgg { aggs: [count, max(max(sum($expr115)))] }
+      └─StreamExchange { dist: HashShard(max(max(sum($expr1)))) }
+        └─StreamProject { exprs: [max(max(sum($expr1)))] }
+          └─StreamGlobalSimpleAgg { aggs: [count, max(max(sum($expr1)))] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr3], aggs: [count, max(sum($expr115))] }
-                └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr115), Vnode(lineitem.l_suppkey) as $expr3] }
-                  └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr115)] }
-                    └─StreamShare { id = 992 }
-                      └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr2)] }
-                        └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr2)] }
+              └─StreamHashAgg { group_key: [$expr2], aggs: [count, max(sum($expr1))] }
+                └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as $expr2] }
+                  └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
+                    └─StreamShare { id = 1020 }
+                      └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
+                        └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr1)] }
                           └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
-                            └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2, lineitem.l_orderkey, lineitem.l_linenumber] }
+                            └─StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
                               └─StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
                                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
@@ -2616,13 +2616,13 @@
         BatchPlanNode
 
     Fragment 3
-      StreamProject { exprs: [lineitem.l_suppkey, sum($expr2)] }
-        StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr2)] }
+      StreamProject { exprs: [lineitem.l_suppkey, sum($expr115)] }
+        StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr115)] }
             result table: 8, state tables: []
           StreamExchange Hash([0]) from 4
 
     Fragment 4
-      StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2, lineitem.l_orderkey, lineitem.l_linenumber] }
+      StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr115, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
           Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
@@ -2649,7 +2649,7 @@
      Table 5 { columns: [supplier_s_suppkey, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 6 { columns: [lineitem_l_suppkey, sum($expr115)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 7 { columns: [lineitem_l_suppkey, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 8 { columns: [lineitem_l_suppkey, count, sum($expr2)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 8 { columns: [lineitem_l_suppkey, count, sum($expr115)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 9 { columns: [max(sum($expr115)), $expr116], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 10 { columns: [count, max(max(sum($expr115)))], primary key: [], value indices: [0, 1], distribution key: [] }
      Table 11 { columns: [$expr116, sum($expr115), lineitem_l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }

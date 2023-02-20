@@ -335,12 +335,9 @@ impl Explainable for PlanRef {
         // In order to let expression display id started from 1 for explaining.
         // We will reset expression display id to 0 and clone the whole plan to reset the schema.
         let plan = {
-            let rules = vec![];
-            // Use a optimizer without rules to clone a new plan.
-            let mut heuristic_optimizer = HeuristicOptimizer::new(&ApplyOrder::TopDown, &rules);
             let old_expr_display_id = self.ctx().get_expr_display_id();
             self.ctx().set_expr_display_id(0);
-            let plan = heuristic_optimizer.optimize(self.clone());
+            let plan = PlanCloner::clone_whole_plan(self.clone());
             self.ctx().set_expr_display_id(old_expr_display_id);
             plan
         };
@@ -621,8 +618,8 @@ pub use stream_union::StreamUnion;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
-use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
 
