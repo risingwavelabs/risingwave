@@ -123,7 +123,7 @@ tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev =
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 
-# TODO: remove these patchs when arrow releases v34
+# TODO: remove these patches when arrow releases v34
 # we need this commit for handling batch with no columns
 # https://github.com/apache/arrow-rs/commit/ea48b9571f88bfbced60f9790ae2a7102502870e
 arrow-array = { git = "https://github.com/apache/arrow-rs.git", rev = "9a6c516" }
