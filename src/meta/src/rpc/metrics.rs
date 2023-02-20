@@ -43,7 +43,7 @@ pub struct MetaMetrics {
 
     /// Latency between each barrier send
     pub barrier_send_latency: Histogram,
-    /// The number of all barriers. It is the sum of barreriers that are in-flight or completed but
+    /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
     pub all_barrier_nums: IntGauge,
     /// The number of in-flight barriers
@@ -90,6 +90,9 @@ pub struct MetaMetrics {
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
     pub compact_skip_frequency: IntCounterVec,
+
+    /// The roles of all meta nodes in the cluster.
+    pub meta_type: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -265,6 +268,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let meta_type = register_int_gauge_vec_with_registry!(
+            "meta_cluster",
+            "role of meta nodes in the cluster",
+            &["worker_addr", "role"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -295,6 +306,7 @@ impl MetaMetrics {
             time_after_last_observation: AtomicU64::new(0),
 
             worker_num,
+            meta_type,
         }
     }
 
@@ -340,6 +352,10 @@ pub async fn start_worker_num_monitor<S: MetaStore>(
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])
                     .set(meta_members.len() as i64);
+                meta_members.into_iter().for_each(|m| {
+                    let role = if m.is_leader {"leader"} else {"follower"};
+                    meta_metrics.meta_type.with_label_values(&[&m.id, role]).set(1);
+                });
             }
         }
     });
