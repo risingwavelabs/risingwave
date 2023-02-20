@@ -26,7 +26,7 @@ create source s with (
 statement ok
 create materialized view mv_1 as select * from s
 
-statement error
+statement error other relation(s) depend on it
 drop source s
 
 statement ok
