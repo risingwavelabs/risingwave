@@ -74,7 +74,7 @@ async fn populate_tables<R: Rng>(
 ) -> String {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
-        tracing::info!("Executing: {}", insert);
+        tracing::info!("[EXECUTING POPULATION] {}", insert);
         client.query(insert, &[]).await.unwrap();
     }
     inserts.into_iter().map(|i| format!("{};\n", i)).collect()
@@ -119,7 +119,7 @@ async fn test_sqlsmith<R: Rng>(
 
 async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &str) -> String {
     let s = format!("SET {variable} TO {value};");
-    tracing::info!("Executing: {}", s);
+    tracing::info!("[EXECUTING SET_VAR]: {}", s);
     client.simple_query(&s).await.unwrap();
     s
 }
@@ -127,7 +127,7 @@ async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &s
 #[allow(dead_code)]
 async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
     let session_sql = session_sql_gen(rng);
-    tracing::info!("Executing: {}", session_sql);
+    tracing::info!("[EXECUTING TEST SESSION_VAR]: {}", session_sql);
     client.simple_query(session_sql.as_str()).await.unwrap();
 }
 
@@ -167,7 +167,7 @@ async fn test_batch_queries<R: Rng>(
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
         // test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
     }
@@ -187,7 +187,7 @@ async fn test_stream_queries<R: Rng>(
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
         // test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
@@ -222,8 +222,9 @@ async fn create_tables(
 
     for stmt in &statements {
         let create_sql = stmt.to_string();
-        setup_sql.push_str(&format!("{};", &create_sql));
+        tracing::info!("[EXECUTING CREATE TABLE]: {}", &create_sql);
         client.simple_query(&create_sql).await.unwrap();
+        setup_sql.push_str(&format!("{};", &create_sql));
     }
 
     let mut mviews = vec![];
@@ -231,7 +232,7 @@ async fn create_tables(
     for i in 0..10 {
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
-        tracing::info!("Executing: {}", &create_sql);
+        tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
         let response = client.simple_query(&create_sql).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
