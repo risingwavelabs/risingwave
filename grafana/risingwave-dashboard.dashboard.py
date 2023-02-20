@@ -1457,6 +1457,27 @@ def section_streaming_exchange(outer_panels):
     ]
 
 
+def section_streaming_errors(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming Errors",
+            [
+                panels.timeseries_count(
+                    "User Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+
 def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -1501,6 +1522,61 @@ def section_frontend(outer_panels):
                         panels.target(
                             f"rate({metric('frontend_query_counter_local_execution')}[$__rate_interval])",
                             "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_query_per_sec(
+                    "Query Per second in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('distributed_completed_query_counter')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Running query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_running_query_num')}",
+                            "The number of running query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Rejected query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_rejected_query_counter')}",
+                            "The number of rejected query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Completed query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_completed_query_counter')}",
+                            "The number of completed query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Query Latency in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p50 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p90 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p99 - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2502,6 +2578,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_streaming_errors(panels),
         *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_compaction(panels),
