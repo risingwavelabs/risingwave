@@ -427,6 +427,7 @@ pub fn literal_parsing(
         // evaluation).
         DataType::List { .. } => return Err(None),
         DataType::Struct(_) => return Err(None),
+        DataType::Jsonb => return Err(None),
         DataType::Bytea => str_to_bytea(s)?.into(),
     };
     Ok(scalar)
@@ -455,6 +456,7 @@ macro_rules! for_all_cast_variants {
             { varchar, decimal, str_parse, false },
             { varchar, boolean, str_to_bool, false },
             { varchar, bytea, str_to_bytea, false },
+            { varchar, jsonb, str_parse, false },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, bool_to_varchar, false },
@@ -468,6 +470,7 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
+            { jsonb, varchar, |x, w| general_to_text(x, w), false },
             { list, varchar, |x, w| general_to_text(x, w), false },
 
             { boolean, int32, try_cast, false },

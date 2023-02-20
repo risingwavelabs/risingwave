@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod opendal_object_store;
-pub use opendal_object_store::*;
+use num_traits::Float;
+use risingwave_common::types::OrderedF64;
 
-#[cfg(feature = "hdfs-backend")]
-pub mod hdfs;
-#[cfg(feature = "hdfs-backend")]
-pub use hdfs::*;
+use crate::{ExprError, Result};
 
-pub mod oss;
-pub use oss::*;
+pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
+    let res = input.exp();
+    if res.is_infinite() {
+        Err(ExprError::NumericOutOfRange)
+    } else {
+        Ok(res)
+    }
+}

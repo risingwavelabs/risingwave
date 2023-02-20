@@ -272,14 +272,14 @@ pub async fn start_service_as_election_follower(
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() =>  {
+                res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown sender dropped")
                     }
                 },
                 // shutdown service if follower becomes leader
-                res = follower_shutdown_rx =>  {
+                res = follower_shutdown_rx => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down follower services"),
                         Err(_) => tracing::error!("Follower service shutdown sender dropped")
@@ -532,11 +532,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();
-    let abort_notification_handler = tokio::spawn(async move {
+    let stream_abort_handler = tokio::spawn(async move {
         abort_recv.await.unwrap();
         notification_mgr.abort_all().await;
+        compactor_manager.abort_all_compactors();
     });
-    sub_tasks.push((abort_notification_handler, abort_sender));
+    sub_tasks.push((stream_abort_handler, abort_sender));
 
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
