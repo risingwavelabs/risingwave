@@ -311,6 +311,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             vec![]
         };
 
+        let uncompressed_file_size = self
+            .block_metas
+            .iter()
+            .map(|block_meta| block_meta.uncompressed_size as u64)
+            .sum::<u64>();
+
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter,
@@ -336,6 +342,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
             divide_version: 0,
+            uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} ",

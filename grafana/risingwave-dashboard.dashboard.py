@@ -805,6 +805,17 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_percentage(
+                    "Lsm Level Compression Ratio",
+                    "bytes of Lsm tree needed to reach balance",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_level_compression_ratio')}) by (instance, group, level) / 100",
+                            "lsm compression ratio - {{group}} @ {{level}} @ {{instance}} ",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

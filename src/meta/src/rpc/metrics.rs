@@ -14,11 +14,13 @@
 
 use std::sync::atomic::AtomicU64;
 
+use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, Histogram, HistogramVec, IntCounterVec, IntGauge,
+    IntGaugeVec, Registry,
 };
 
 pub struct MetaMetrics {
@@ -84,6 +86,7 @@ pub struct MetaMetrics {
 
     /// compaction
     pub compact_pending_bytes: IntGaugeVec,
+    pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
 }
 
 impl MetaMetrics {
@@ -261,8 +264,16 @@ impl MetaMetrics {
 
         let compact_pending_bytes = register_int_gauge_vec_with_registry!(
             "storage_compact_pending_bytes",
-            "bytes of Lsm tree needed to reach balance",
+            "bytes of lsm tree needed to reach balance",
             &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compact_level_compression_ratio = register_gauge_vec_with_registry!(
+            "storage_compact_level_compression_ratio",
+            "compression ratio of each level of the lsm tree",
+            &["group", "level"],
             registry
         )
         .unwrap();
@@ -298,6 +309,7 @@ impl MetaMetrics {
 
             worker_num,
             compact_pending_bytes,
+            compact_level_compression_ratio,
         }
     }
 

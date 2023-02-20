@@ -240,6 +240,7 @@ pub mod tests {
         let mut levels = Levels {
             l0: Some(OverlappingLevel {
                 total_file_size: l0.total_file_size,
+                uncompressed_file_size: l0.total_file_size,
                 sub_levels: vec![l0],
             }),
             levels: vec![generate_level(
@@ -329,12 +330,14 @@ pub mod tests {
             ],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let mut levels = Levels {
             levels,
             l0: Some(OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
+                uncompressed_file_size: 0,
             }),
             ..Default::default()
         };
@@ -385,12 +388,14 @@ pub mod tests {
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let mut levels = Levels {
             levels,
             l0: Some(OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
+                uncompressed_file_size: 0,
             }),
             ..Default::default()
         };
@@ -430,6 +435,7 @@ pub mod tests {
                 table_infos: vec![generate_table(2, 1, 150, 300, 2)],
                 total_file_size: 150,
                 sub_level_id: 0,
+                uncompressed_file_size: 150,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![generate_table(
                 1, 1, 160, 280, 2,
@@ -486,6 +492,7 @@ pub mod tests {
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
@@ -531,6 +538,7 @@ pub mod tests {
                 ],
                 total_file_size: 590,
                 sub_level_id: 0,
+                uncompressed_file_size: 590,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
             ..Default::default()
@@ -586,6 +594,7 @@ pub mod tests {
                 ],
                 total_file_size: 900,
                 sub_level_id: 0,
+                uncompressed_file_size: 900,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
             ..Default::default()

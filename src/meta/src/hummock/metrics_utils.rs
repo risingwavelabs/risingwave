@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use itertools::enumerate;
+use itertools::{enumerate, Itertools};
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
@@ -228,17 +228,44 @@ pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
 }
 
 // Triggers a report on compact_pending_bytes_needed
-pub fn trigger_compact_pending_bytes_stat(
+pub fn trigger_lsm_stat(
     metrics: &MetaMetrics,
     group_label: String,
     compaction_config: Arc<CompactionConfig>,
     levels: &Levels,
 ) {
-    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config);
-    let compact_pending_bytes_needed = dynamic_level_core.compact_pending_bytes_needed(levels);
+    {
+        // compact_pending_bytes
+        let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config);
+        let compact_pending_bytes_needed = dynamic_level_core.compact_pending_bytes_needed(levels);
 
-    metrics
-        .compact_pending_bytes
-        .with_label_values(&[&group_label])
-        .set(compact_pending_bytes_needed as _);
+        metrics
+            .compact_pending_bytes
+            .with_label_values(&[&group_label])
+            .set(compact_pending_bytes_needed as _);
+    }
+
+    {
+        // compact_level_compression_ratio
+        let level_compression_ratio = levels
+            .get_levels()
+            .iter()
+            .map(|level| {
+                let ratio = if level.get_uncompressed_file_size() == 0 {
+                    0.0
+                } else {
+                    level.get_total_file_size() as f64 / level.get_uncompressed_file_size() as f64
+                };
+
+                (level.get_level_idx(), ratio)
+            })
+            .collect_vec();
+
+        for (level_index, compression_ratio) in level_compression_ratio {
+            metrics
+                .compact_level_compression_ratio
+                .with_label_values(&[&group_label, &level_index.to_string()])
+                .set(compression_ratio);
+        }
+    }
 }

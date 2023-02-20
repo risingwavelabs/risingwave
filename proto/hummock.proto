@@ -19,6 +19,7 @@ message SstableInfo {
   uint64 total_key_count = 7;
   // When a SST is divided, its divide_version will increase one.
   uint64 divide_version = 8;
+  uint64 uncompressed_file_size = 9;
 }
 
 enum LevelType {
@@ -30,6 +31,7 @@ enum LevelType {
 message OverlappingLevel {
   repeated Level sub_levels = 1;
   uint64 total_file_size = 2;
+  uint64 uncompressed_file_size = 3;
 }
 
 message Level {
@@ -38,6 +40,7 @@ message Level {
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
+  uint64 uncompressed_file_size = 6;
 }
 
 message InputLevel {

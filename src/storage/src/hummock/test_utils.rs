@@ -110,6 +110,7 @@ pub fn gen_dummy_sst_info(
         stale_key_count: 0,
         total_key_count: 0,
         divide_version: 0,
+        uncompressed_file_size: file_size,
     }
 }
 
@@ -182,6 +183,7 @@ pub async fn put_sst(
         stale_key_count: 0,
         total_key_count: 0,
         divide_version: 0,
+        uncompressed_file_size: meta.estimated_size as u64,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;

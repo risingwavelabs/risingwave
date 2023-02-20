@@ -524,6 +524,7 @@ pub mod tests {
             level_idx: 0,
             level_type: LevelType::Overlapping as i32,
             total_file_size: sst.file_size,
+            uncompressed_file_size: sst.uncompressed_file_size,
             sub_level_id: sst.id,
             table_infos: vec![sst],
         });
@@ -543,6 +544,10 @@ pub mod tests {
 
     pub fn push_tables_level0_nonoverlapping(levels: &mut Levels, table_infos: Vec<SstableInfo>) {
         let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
+        let uncompressed_file_size = table_infos
+            .iter()
+            .map(|table| table.uncompressed_file_size)
+            .sum();
         let sub_level_id = table_infos[0].id;
         levels.l0.as_mut().unwrap().total_file_size += total_file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
@@ -551,6 +556,7 @@ pub mod tests {
             total_file_size,
             sub_level_id,
             table_infos,
+            uncompressed_file_size,
         });
     }
 
@@ -574,6 +580,7 @@ pub mod tests {
             stale_key_count: 0,
             total_key_count: 0,
             divide_version: 0,
+            uncompressed_file_size: (right - left + 1) as u64,
         }
     }
 
@@ -598,6 +605,7 @@ pub mod tests {
             stale_key_count: 0,
             total_key_count: 0,
             divide_version: 0,
+            uncompressed_file_size: (right - left + 1) as u64,
         }
     }
 
@@ -621,12 +629,17 @@ pub mod tests {
 
     pub fn generate_level(level_idx: u32, table_infos: Vec<SstableInfo>) -> Level {
         let total_file_size = table_infos.iter().map(|sst| sst.file_size).sum();
+        let uncompressed_file_size = table_infos
+            .iter()
+            .map(|sst| sst.uncompressed_file_size)
+            .sum();
         Level {
             level_idx,
             level_type: LevelType::Nonoverlapping as i32,
             table_infos,
             total_file_size,
             sub_level_id: 0,
+            uncompressed_file_size,
         }
     }
 
@@ -634,6 +647,10 @@ pub mod tests {
     /// sub-level.
     pub fn generate_l0_nonoverlapping_sublevels(table_infos: Vec<SstableInfo>) -> OverlappingLevel {
         let total_file_size = table_infos.iter().map(|table| table.file_size).sum::<u64>();
+        let uncompressed_file_size = table_infos
+            .iter()
+            .map(|table| table.uncompressed_file_size)
+            .sum::<u64>();
         OverlappingLevel {
             sub_levels: table_infos
                 .into_iter()
@@ -642,11 +659,13 @@ pub mod tests {
                     level_idx: 0,
                     level_type: LevelType::Nonoverlapping as i32,
                     total_file_size: table.file_size,
+                    uncompressed_file_size: table.uncompressed_file_size,
                     sub_level_id: idx as u64,
                     table_infos: vec![table],
                 })
                 .collect_vec(),
             total_file_size,
+            uncompressed_file_size,
         }
     }
 
@@ -665,11 +684,21 @@ pub mod tests {
                     total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
                     sub_level_id: idx as u64,
                     table_infos: table.clone(),
+                    uncompressed_file_size: table
+                        .iter()
+                        .map(|sst| sst.uncompressed_file_size)
+                        .sum::<u64>(),
                 })
                 .collect_vec(),
             total_file_size: 0,
+            uncompressed_file_size: 0,
         };
         l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum::<u64>();
+        l0.uncompressed_file_size = l0
+            .sub_levels
+            .iter()
+            .map(|l| l.uncompressed_file_size)
+            .sum::<u64>();
         l0
     }
 

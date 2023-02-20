@@ -56,8 +56,8 @@ use crate::hummock::compaction::{
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_compact_pending_bytes_stat, trigger_pin_unpin_snapshot_state,
-    trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
+    trigger_lsm_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+    trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
@@ -1175,7 +1175,7 @@ where
                         .get_compaction_group_config(compact_task.compaction_group_id)
                         .await;
 
-                    trigger_compact_pending_bytes_stat(
+                    trigger_lsm_stat(
                         &self.metrics,
                         compact_task.compaction_group_id.to_string(),
                         group_config.compaction_config(),

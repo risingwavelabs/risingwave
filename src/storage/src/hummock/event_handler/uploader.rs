@@ -826,6 +826,7 @@ mod tests {
             stale_key_count: 0,
             total_key_count: 0,
             divide_version: 0,
+            uncompressed_file_size: 0,
         })]
     }
 

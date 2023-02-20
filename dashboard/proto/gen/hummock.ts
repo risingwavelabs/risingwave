@@ -56,11 +56,13 @@ export interface SstableInfo {
   totalKeyCount: number;
   /** When a SST is divided, its divide_version will increase one. */
   divideVersion: number;
+  uncompressedFileSize: number;
 }
 
 export interface OverlappingLevel {
   subLevels: Level[];
   totalFileSize: number;
+  uncompressedFileSize: number;
 }
 
 export interface Level {
@@ -69,6 +71,7 @@ export interface Level {
   tableInfos: SstableInfo[];
   totalFileSize: number;
   subLevelId: number;
+  uncompressedFileSize: number;
 }
 
 export interface InputLevel {
@@ -840,6 +843,7 @@ function createBaseSstableInfo(): SstableInfo {
     staleKeyCount: 0,
     totalKeyCount: 0,
     divideVersion: 0,
+    uncompressedFileSize: 0,
   };
 }
 
@@ -854,6 +858,7 @@ export const SstableInfo = {
       staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
       divideVersion: isSet(object.divideVersion) ? Number(object.divideVersion) : 0,
+      uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
     };
   },
 
@@ -871,6 +876,7 @@ export const SstableInfo = {
     message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
     message.divideVersion !== undefined && (obj.divideVersion = Math.round(message.divideVersion));
+    message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
     return obj;
   },
 
@@ -886,12 +892,13 @@ export const SstableInfo = {
     message.staleKeyCount = object.staleKeyCount ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
     message.divideVersion = object.divideVersion ?? 0;
+    message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
     return message;
   },
 };
 
 function createBaseOverlappingLevel(): OverlappingLevel {
-  return { subLevels: [], totalFileSize: 0 };
+  return { subLevels: [], totalFileSize: 0, uncompressedFileSize: 0 };
 }
 
 export const OverlappingLevel = {
@@ -899,6 +906,7 @@ export const OverlappingLevel = {
     return {
       subLevels: Array.isArray(object?.subLevels) ? object.subLevels.map((e: any) => Level.fromJSON(e)) : [],
       totalFileSize: isSet(object.totalFileSize) ? Number(object.totalFileSize) : 0,
+      uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
     };
   },
 
@@ -910,6 +918,7 @@ export const OverlappingLevel = {
       obj.subLevels = [];
     }
     message.totalFileSize !== undefined && (obj.totalFileSize = Math.round(message.totalFileSize));
+    message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
     return obj;
   },
 
@@ -917,12 +926,20 @@ export const OverlappingLevel = {
     const message = createBaseOverlappingLevel();
     message.subLevels = object.subLevels?.map((e) => Level.fromPartial(e)) || [];
     message.totalFileSize = object.totalFileSize ?? 0;
+    message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
     return message;
   },
 };
 
 function createBaseLevel(): Level {
-  return { levelIdx: 0, levelType: LevelType.UNSPECIFIED, tableInfos: [], totalFileSize: 0, subLevelId: 0 };
+  return {
+    levelIdx: 0,
+    levelType: LevelType.UNSPECIFIED,
+    tableInfos: [],
+    totalFileSize: 0,
+    subLevelId: 0,
+    uncompressedFileSize: 0,
+  };
 }
 
 export const Level = {
@@ -933,6 +950,7 @@ export const Level = {
       tableInfos: Array.isArray(object?.tableInfos) ? object.tableInfos.map((e: any) => SstableInfo.fromJSON(e)) : [],
       totalFileSize: isSet(object.totalFileSize) ? Number(object.totalFileSize) : 0,
       subLevelId: isSet(object.subLevelId) ? Number(object.subLevelId) : 0,
+      uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
     };
   },
 
@@ -947,6 +965,7 @@ export const Level = {
     }
     message.totalFileSize !== undefined && (obj.totalFileSize = Math.round(message.totalFileSize));
     message.subLevelId !== undefined && (obj.subLevelId = Math.round(message.subLevelId));
+    message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
     return obj;
   },
 
@@ -957,6 +976,7 @@ export const Level = {
     message.tableInfos = object.tableInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
     message.totalFileSize = object.totalFileSize ?? 0;
     message.subLevelId = object.subLevelId ?? 0;
+    message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
     return message;
   },
 };
