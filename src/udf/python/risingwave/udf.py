@@ -1,6 +1,5 @@
 from typing import *
 import pyarrow as pa
-import pathlib
 import pyarrow.flight
 import pyarrow.parquet
 
@@ -60,8 +59,8 @@ class UserDefinedFunctionWrapper(ScalarFunction):
 
     def __init__(self, func, input_types, result_type, name=None):
         self._func = func
-        self._input_types = input_types
-        self._result_type = result_type
+        self._input_types = [_to_data_type(t) for t in input_types]
+        self._result_type = _to_data_type(result_type)
         self._name = name or (
             func.__name__ if hasattr(func, '__name__') else func.__class__.__name__)
 
@@ -77,18 +76,14 @@ def _create_udf(f, input_types, result_type, name):
         f, input_types, result_type, name)
 
 
-def udf(f: Union[Callable, ScalarFunction, Type] = None,
-        input_types: Union[List[pa.DataType], pa.DataType] = None,
-        result_type: pa.DataType = None,
-        name: str = None) -> Union[Callable, UserDefinedFunction]:
+def udf(input_types: Union[List[pa.DataType], pa.DataType],
+        result_type: pa.DataType,
+        name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
-    Helper method for creating a user-defined function.
+    Annotation for creating a user-defined function.
     """
-    # annotation
-    if f is None:
-        return lambda f: _create_udf(f, input_types, result_type, name)
-    else:
-        return _create_udf(f, input_types, result_type, name)
+
+    return lambda f: _create_udf(f, input_types, result_type, name)
 
 
 class UdfServer(pa.flight.FlightServerBase):
@@ -103,13 +98,15 @@ class UdfServer(pa.flight.FlightServerBase):
         self._functions = {}
 
     def get_flight_info(self, context, descriptor):
-        """Return a FlightInfo."""
+        """Return the result schema of a function."""
         udf = self._functions[descriptor.path[0].decode('utf-8')]
         return pa.flight.FlightInfo(schema=udf.result_schema(), descriptor=descriptor, endpoints=[], total_records=0, total_bytes=0)
 
     def add_function(self, udf: UserDefinedFunction):
         """Add a function to the server."""
         name = udf.full_name()
+        if name in self._functions:
+            raise ValueError('Function already exists: ' + name)
         print('added function:', name)
         self._functions[name] = udf
 
@@ -118,10 +115,54 @@ class UdfServer(pa.flight.FlightServerBase):
         udf = self._functions[descriptor.path[0].decode('utf-8')]
         writer.begin(udf.result_schema())
         for chunk in reader:
-            print(pa.Table.from_batches([chunk.data]))
+            # print(pa.Table.from_batches([chunk.data]))
             result = udf.eval_batch(chunk.data)
             writer.write_batch(result)
 
     def serve(self):
         """Start the server."""
         super(UdfServer, self).serve()
+
+
+def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
+    """
+    Convert a string or pyarrow.DataType to pyarrow.DataType.
+    """
+    if isinstance(t, str):
+        return _string_to_data_type(t)
+    else:
+        return t
+
+
+def _string_to_data_type(type_str: str):
+    match type_str:
+        case 'BOOLEAN':
+            return pa.bool_()
+        case 'TINYINT':
+            return pa.int8()
+        case 'SMALLINT':
+            return pa.int16()
+        case 'INT' | 'INTEGER':
+            return pa.int32()
+        case 'BIGINT':
+            return pa.int64()
+        case 'FLOAT' | 'REAL':
+            return pa.float32()
+        case 'DOUBLE':
+            return pa.float64()
+        case 'DECIMAL':
+            return pa.decimal128(38)
+        case 'DATE':
+            return pa.date32()
+        case 'DATETIME':
+            return pa.timestamp('ms')
+        case 'TIME':
+            return pa.time32('ms')
+        case 'TIMESTAMP':
+            return pa.timestamp('us')
+        case 'CHAR' | 'VARCHAR':
+            return pa.string()
+        case 'BINARY' | 'VARBINARY':
+            return pa.binary()
+        case _:
+            raise ValueError(f'Unsupported type: {type_str}')
