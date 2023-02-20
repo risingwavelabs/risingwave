@@ -272,7 +272,11 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
-                    | AggKind::FirstValue => (),
+                    | AggKind::FirstValue
+                    | AggKind::StddevPop
+                    | AggKind::StddevSamp
+                    | AggKind::VarPop
+                    | AggKind::VarSamp => (),
                     AggKind::Count => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }

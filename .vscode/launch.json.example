@@ -1,3 +1,4 @@
+// Copy this file to .vscode/launch.json and edit it to your needs
 {
     "version": "0.2.0",
     "configurations": [

@@ -103,6 +103,11 @@ pub fn add_storage_backend(
                 .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
                 true
             }
+            else if opendal.engine == "oss"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+oss://{}@{}", opendal.bucket, opendal.root));
+                true
+            }
             else{
                 unimplemented!()
             }
