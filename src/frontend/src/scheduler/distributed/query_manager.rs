@@ -24,11 +24,13 @@ use pgwire::pg_server::{BoxedError, Session, SessionId};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
+use risingwave_common::session_config::QueryMode;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tracing::debug;
 
+use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
@@ -136,6 +138,8 @@ pub struct QueryManager {
     compute_client_pool: ComputeClientPoolRef,
     catalog_reader: CatalogReader,
     query_execution_info: QueryExecutionInfoRef,
+    pub query_metrics: Arc<DistributedQueryMetrics>,
+    disrtibuted_query_limit: Option<u64>,
 }
 
 type QueryManagerRef = Arc<QueryManager>;
@@ -146,6 +150,8 @@ impl QueryManager {
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
+        query_metrics: Arc<DistributedQueryMetrics>,
+        disrtibuted_query_limit: Option<u64>,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -153,6 +159,8 @@ impl QueryManager {
             compute_client_pool,
             catalog_reader,
             query_execution_info: Arc::new(RwLock::new(QueryExecutionInfo::default())),
+            query_metrics,
+            disrtibuted_query_limit,
         }
     }
 
@@ -162,6 +170,12 @@ impl QueryManager {
         query: Query,
         pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
+        if let Some(query_limit) = self.disrtibuted_query_limit && self.query_metrics.running_query_num.get() as u64 == query_limit {
+            self.query_metrics.rejected_query_counter.inc();
+            return Err(
+                crate::scheduler::SchedulerError::QueryReachLimit(QueryMode::Distributed, query_limit)
+            )
+        }
         let query_id = query.query_id.clone();
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
 
@@ -181,6 +195,7 @@ impl QueryManager {
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),
                 self.query_execution_info.clone(),
+                self.query_metrics.clone(),
             )
             .await
             .map_err(|err| {
@@ -192,7 +207,6 @@ impl QueryManager {
                     .delete_query(&query_id);
                 err
             })?;
-
         Ok(query_result_fetcher.stream_from_channel())
     }
 

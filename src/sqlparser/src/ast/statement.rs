@@ -123,7 +123,7 @@ impl ParseTo for SourceSchema {
             SourceSchema::DebeziumAvro(avro_schema)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -141,7 +141,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             SourceSchema::Native => write!(f, "NATIVE"),
-            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM {}", avro_schema),
+            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
         }
     }
 }
