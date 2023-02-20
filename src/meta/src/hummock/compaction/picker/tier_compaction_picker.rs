@@ -12,15 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
+use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
 
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
+use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel, SstableInfo};
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
-};
+use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker, SPLIT_VNODE_LIMIT};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -68,7 +71,7 @@ impl TierCompactionPicker {
 
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
-                self.config.max_bytes_for_level_base * 2,
+                self.config.sub_level_max_compaction_bytes * 2,
             );
 
             let mut compaction_bytes = level.total_file_size;
@@ -191,6 +194,41 @@ impl TierCompactionPicker {
         }
         None
     }
+
+    fn pick_files_in_one_table(
+        &self,
+        l0: &OverlappingLevel,
+        level_handler: &LevelHandler,
+    ) -> Option<CompactionInput> {
+        let non_overlapping_type = LevelType::Nonoverlapping as i32;
+        let mut table_ids = HashSet::new();
+        for  level in l0.sub_levels.iter() {
+            if level.level_type != non_overlapping_type {
+                continue;
+            }
+            for sst in &level.table_infos {
+                table_ids.extend(sst.table_ids.clone());
+            }
+        }
+        for table_id in table_ids {
+            for idx in 0..VirtualNode::COUNT / SPLIT_VNODE_LIMIT {
+                let left_vnode = idx * SPLIT_VNODE_LIMIT;
+                let right_vnode = (idx + 1) * SPLIT_VNODE_LIMIT;
+                let left_key = FullKey::new(TableId::new(table_id),
+                                                 TableKey(VirtualNode::from_index(left_vnode).to_be_bytes().to_vec()),
+                    0
+                );
+                let right_key = FullKey::new(TableId::new(table_id),
+                                                  TableKey(VirtualNode::from_index(left_vnode).to_be_bytes().to_vec()), 0);
+                let mock_sst = SstableInfo {
+
+                };
+                let overlapinfo = self.overlap_strategy.create_overlap_info();
+                let range = KeyRange::new()
+            }
+        }
+        None
+    }
 }
 
 impl CompactionPicker for TierCompactionPicker {
@@ -209,7 +247,10 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(ret);
         }
 
-        self.pick_whole_level(l0, &level_handlers[0], stats)
+        if let Some(ret) = self.pick_whole_level(l0, &level_handlers[0], stats) {
+            return Some(ret);
+        }
+        self.pick_files_in_one_table(l0, &level_handlers[0])
     }
 }
 

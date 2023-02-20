@@ -22,6 +22,7 @@ mod picker;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
+use itertools::Itertools;
 
 use picker::{
     LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
@@ -93,6 +94,8 @@ pub struct CompactionTask {
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
+    pub enable_split_by_table: bool,
+    pub compact_guard_vnode_size: u32,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -155,6 +158,8 @@ impl CompactStatus {
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
+            compact_guard_vnode_size: ret.compact_guard_vnode_size,
+            enable_split_by_table: ret.enable_split_by_table,
         };
         Some(compact_task)
     }
@@ -292,6 +297,8 @@ pub trait CompactionPicker {
     ) -> Option<CompactionInput>;
 }
 
+const SPLIT_VNODE_LIMIT: usize = 16;
+
 pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
@@ -312,10 +319,31 @@ pub fn create_compaction_task(
         compaction_config.compression_algorithm[idx].clone()
     };
 
+    let mut table_ids = vec![];
+    let mut total_file_size = 0;
+    for level in &input.input_levels {
+        for sst in &level.table_infos {
+            table_ids.extend(sst.table_ids.clone());
+            total_file_size += sst.file_size;
+        }
+    }
+    table_ids.sort();
+    table_ids.dedup();
+    let mut enable_split_by_table = false;
+    let mut compact_guard_vnode_size = 0;
+    if input.target_level > 0 || total_file_size > compaction_config.sub_level_max_compaction_bytes {
+        enable_split_by_table = true;
+    }
+    if input.target_level > 0 || (table_ids.len() == 1 && total_file_size > compaction_config.sub_level_max_compaction_bytes) {
+        compact_guard_vnode_size = SPLIT_VNODE_LIMIT;
+    }
+
     CompactionTask {
         input,
         compression_algorithm,
         target_file_size,
         compaction_task_type,
+        enable_split_by_table: false,
+        compact_guard_vnode_size,
     }
 }

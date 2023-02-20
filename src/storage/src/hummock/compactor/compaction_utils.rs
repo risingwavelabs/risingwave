@@ -121,6 +121,8 @@ pub struct TaskConfig {
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
+    pub min_split_sst_file_limit: u64,
+    pub split_by_vnode_count: usize,
 }
 
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
