@@ -13,9 +13,12 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
+use std::collections::HashMap;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
+use tokio_postgres::Error;
 use tokio_postgres::error::Error as PgError;
+use tracing::error;
 
 use crate::validation::is_permissible_error;
 use crate::{
@@ -228,11 +231,11 @@ async fn create_tables(
     for i in 0..10 {
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
-        setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
         let response = client.simple_query(&create_sql).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
+            setup_sql.push_str(&format!("{};\n", &create_sql));
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
         }
@@ -267,18 +270,8 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-/// Validate client responses, returning a count of skipped queries.
-fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) -> i64 {
-    match response {
-        Ok(_) => 0,
-        Err(e) => {
-            // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error()
-                && is_permissible_error(&e.to_string())
-            {
-                return 1;
-            }
-            panic!(
+fn format_fail_reason(setup_sql: &str, query: &str, e: &Error) -> String {
+                format!(
                 "
 Query failed:
 ---- START
@@ -293,6 +286,22 @@ Reason:
 ",
                 setup_sql, query, e
             );
+}
+
+/// Validate client responses, returning a count of skipped queries.
+fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) -> i64 {
+    match response {
+        Ok(_) => 0,
+        Err(e) => {
+            // Permit runtime errors conservatively.
+            if let Some(e) = e.as_db_error()
+                && is_permissible_error(&e.to_string())
+            {
+                return 1;
+            }
+            // consolidate error reason for deterministic test
+            tracing::info!(error_msg);
+            panic!("{}", error_msg);
         }
     }
 }
