@@ -42,5 +42,6 @@ RUN cargo uninstall cargo-quickinstall cargo-binstall
 
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
+ENV SCCACHE_IDLE_TIMEOUT=0
 ENV CARGO_INCREMENTAL=0
 ENV CARGO_MAKE_PRINT_TIME_SUMMARY=true
