@@ -31,6 +31,7 @@ impl DataType {
             | DataType::Varchar
             | DataType::Bytea
             | DataType::Interval
+            | DataType::Jsonb
             | DataType::Struct(_)
             | DataType::List { .. } => -1,
         }
@@ -57,6 +58,7 @@ impl DataType {
             1114 => Ok(DataType::Timestamp),
             1184 => Ok(DataType::Timestamptz),
             1186 => Ok(DataType::Interval),
+            3802 => Ok(DataType::Jsonb),
             1000 => Ok(DataType::List {
                 datatype: Box::new(DataType::Boolean),
             }),
@@ -99,6 +101,9 @@ impl DataType {
             1187 => Ok(DataType::List {
                 datatype: Box::new(DataType::Interval),
             }),
+            3807 => Ok(DataType::List {
+                datatype: Box::new(DataType::Jsonb),
+            }),
             _ => Err(ErrorCode::InternalError(format!("Unsupported oid {}", oid)).into()),
         }
     }
@@ -121,6 +126,7 @@ impl DataType {
             // NOTE: Struct type don't have oid in postgres, here we use varchar oid so that struct
             // will be considered as a varchar.
             DataType::Struct(_) => 1043,
+            DataType::Jsonb => 3802,
             DataType::Bytea => 17,
             DataType::List { datatype } => match unnested_list_type(datatype.as_ref().clone()) {
                 DataType::Boolean => 1000,
@@ -137,6 +143,7 @@ impl DataType {
                 DataType::Timestamp => 1115,
                 DataType::Timestamptz => 1185,
                 DataType::Interval => 1187,
+                DataType::Jsonb => 3807,
                 DataType::Struct(_) => 1015,
                 DataType::List { .. } => unreachable!("Never reach here!"),
             },

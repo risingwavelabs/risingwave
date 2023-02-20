@@ -31,8 +31,8 @@ use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
 
 use crate::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
-    StructRef,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
+    ListRef, StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::VirtualNode;
@@ -460,6 +460,20 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
         NaiveTimeWrapper::with_secs_nano(secs, nano).unwrap()
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for JsonbRef<'a> {
+    type S = Vec<u8>;
+
+    /// This should never be called
+    fn serialize(self) -> Self::S {
+        todo!()
+    }
+
+    /// This should never be called
+    fn deserialize<R: Read>(_source: &mut R) -> Self {
+        todo!()
     }
 }
 

@@ -24,7 +24,7 @@ fn main() {
 
     let opts = risingwave_frontend::FrontendOpts::parse();
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
     risingwave_rt::main_okk(risingwave_frontend::start(opts))
 }

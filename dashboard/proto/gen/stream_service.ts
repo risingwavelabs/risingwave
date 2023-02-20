@@ -84,6 +84,7 @@ export interface BarrierCompleteResponse_CreateMviewProgress {
   chainActorId: number;
   done: boolean;
   consumedEpoch: number;
+  consumedRows: number;
 }
 
 export interface BarrierCompleteResponse_GroupedSstableInfo {
@@ -564,7 +565,7 @@ export const BarrierCompleteResponse = {
 };
 
 function createBaseBarrierCompleteResponse_CreateMviewProgress(): BarrierCompleteResponse_CreateMviewProgress {
-  return { chainActorId: 0, done: false, consumedEpoch: 0 };
+  return { chainActorId: 0, done: false, consumedEpoch: 0, consumedRows: 0 };
 }
 
 export const BarrierCompleteResponse_CreateMviewProgress = {
@@ -573,6 +574,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
       chainActorId: isSet(object.chainActorId) ? Number(object.chainActorId) : 0,
       done: isSet(object.done) ? Boolean(object.done) : false,
       consumedEpoch: isSet(object.consumedEpoch) ? Number(object.consumedEpoch) : 0,
+      consumedRows: isSet(object.consumedRows) ? Number(object.consumedRows) : 0,
     };
   },
 
@@ -581,6 +583,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
     message.chainActorId !== undefined && (obj.chainActorId = Math.round(message.chainActorId));
     message.done !== undefined && (obj.done = message.done);
     message.consumedEpoch !== undefined && (obj.consumedEpoch = Math.round(message.consumedEpoch));
+    message.consumedRows !== undefined && (obj.consumedRows = Math.round(message.consumedRows));
     return obj;
   },
 
@@ -591,6 +594,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
     message.chainActorId = object.chainActorId ?? 0;
     message.done = object.done ?? false;
     message.consumedEpoch = object.consumedEpoch ?? 0;
+    message.consumedRows = object.consumedRows ?? 0;
     return message;
   },
 };

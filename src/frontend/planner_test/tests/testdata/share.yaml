@@ -48,7 +48,7 @@
               | └─StreamProject { exprs: [id, _row_id] }
               |   └─StreamFilter { predicate: (initial_bid = 1:Int32) }
               |     └─StreamProject { exprs: [id, initial_bid, _row_id] }
-              |       └─StreamShare { id = 539 }
+              |       └─StreamShare { id = 529 }
               |         └─StreamProject { exprs: [id, initial_bid, _row_id] }
               |           └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
               |             └─StreamRowIdGen { row_id_index: 10 }
@@ -57,7 +57,7 @@
                 └─StreamProject { exprs: [id, _row_id] }
                   └─StreamFilter { predicate: (initial_bid = 2:Int32) }
                     └─StreamProject { exprs: [id, initial_bid, _row_id] }
-                      └─StreamShare { id = 539 }
+                      └─StreamShare { id = 529 }
                         └─StreamProject { exprs: [id, initial_bid, _row_id] }
                           └─StreamFilter { predicate: ((initial_bid = 1:Int32) OR (initial_bid = 2:Int32)) }
                             └─StreamRowIdGen { row_id_index: 10 }
@@ -125,7 +125,7 @@
           |     └─StreamExchange { dist: HashShard(auction, window_start) }
           |       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
           |         └─StreamProject { exprs: [auction, date_time, _row_id] }
-          |           └─StreamShare { id = 764 }
+          |           └─StreamShare { id = 754 }
           |             └─StreamProject { exprs: [auction, date_time, _row_id] }
           |               └─StreamRowIdGen { row_id_index: 7 }
           |                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
@@ -137,7 +137,74 @@
                     └─StreamExchange { dist: HashShard(auction, window_start) }
                       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
                         └─StreamProject { exprs: [auction, date_time, _row_id] }
-                          └─StreamShare { id = 764 }
+                          └─StreamShare { id = 754 }
                             └─StreamProject { exprs: [auction, date_time, _row_id] }
                               └─StreamRowIdGen { row_id_index: 7 }
                                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+- sql: |
+    set rw_enable_share_plan=true;
+    create table t(a int, b int);
+    with cte as (select count(*) from t) select * from cte union all select * from cte;
+  stream_plan: |
+    StreamMaterialize { columns: [count, 0:Int32(hidden)], pk_columns: [0:Int32] }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(0:Int32) }
+      | └─StreamProject { exprs: [sum0(count), 0:Int32] }
+      |   └─StreamShare { id = 210 }
+      |     └─StreamProject { exprs: [sum0(count)] }
+      |       └─StreamGlobalSimpleAgg { aggs: [count, sum0(count)] }
+      |         └─StreamExchange { dist: Single }
+      |           └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
+      |             └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamExchange { dist: HashShard(1:Int32) }
+        └─StreamProject { exprs: [sum0(count), 1:Int32] }
+          └─StreamShare { id = 210 }
+            └─StreamProject { exprs: [sum0(count)] }
+              └─StreamGlobalSimpleAgg { aggs: [count, sum0(count)] }
+                └─StreamExchange { dist: Single }
+                  └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
+                    └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    set rw_enable_share_plan=false;
+    create table t(a int, b int);
+    with cte as (select count(*) from t) select * from cte union all select * from cte;
+  stream_plan: |
+    StreamMaterialize { columns: [count, 0:Int32(hidden)], pk_columns: [0:Int32] }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(0:Int32) }
+      | └─StreamProject { exprs: [sum0(count), 0:Int32] }
+      |   └─StreamGlobalSimpleAgg { aggs: [count, sum0(count)] }
+      |     └─StreamExchange { dist: Single }
+      |       └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
+      |         └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamExchange { dist: HashShard(1:Int32) }
+        └─StreamProject { exprs: [sum0(count), 1:Int32] }
+          └─StreamGlobalSimpleAgg { aggs: [count, sum0(count)] }
+            └─StreamExchange { dist: Single }
+              └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
+                └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- id: force_share_source_for_self_join
+  before:
+  - create_sources
+  sql: |
+    set rw_enable_share_plan=false;
+    select count(*) cnt from auction A join auction B on A.id = B.id;
+  stream_plan: |
+    StreamMaterialize { columns: [cnt], pk_columns: [] }
+    └─StreamProject { exprs: [sum0(count)] }
+      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [count, sum0(count)] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
+            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id, id] }
+              ├─StreamExchange { dist: HashShard(id) }
+              | └─StreamProject { exprs: [id, _row_id] }
+              |   └─StreamShare { id = 152 }
+              |     └─StreamProject { exprs: [id, _row_id] }
+              |       └─StreamRowIdGen { row_id_index: 10 }
+              |         └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }
+              └─StreamExchange { dist: HashShard(id) }
+                └─StreamProject { exprs: [id, _row_id] }
+                  └─StreamShare { id = 152 }
+                    └─StreamProject { exprs: [id, _row_id] }
+                      └─StreamRowIdGen { row_id_index: 10 }
+                        └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "extra", "_row_id"] }

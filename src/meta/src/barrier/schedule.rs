@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::{oneshot, watch, RwLock};
 
@@ -93,6 +94,24 @@ impl<S: MetaStore> BarrierScheduler<S> {
             if queue.len() == 1 {
                 self.inner.changed_tx.send(()).ok();
             }
+        }
+    }
+
+    /// Try to cancel scheduled cmd for create streaming job, return true if cancelled.
+    pub async fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
+        let mut queue = self.inner.queue.write().await;
+        if let Some(idx) = queue.iter().position(|scheduled| {
+            if let Command::CreateStreamingJob {table_fragments, ..} = &scheduled.command
+                    && table_fragments.table_id() == table_id {
+                    true
+                } else {
+                    false
+                }
+        }) {
+            queue.remove(idx).unwrap();
+            true
+        } else {
+            false
         }
     }
 

@@ -124,7 +124,8 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
             Self::Table(_, table) => table.definition.clone(),
-            _ => "".to_owned(),
+            Self::Index(_, table) => table.definition.clone(),
+            Self::Sink(sink) => sink.definition.clone(),
         }
     }
 
