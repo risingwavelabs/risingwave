@@ -123,6 +123,7 @@ pub struct Args {
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
+    use std::env;
     use std::sync::Arc;
 
     use risingwave_simulation::client::RisingWave;
@@ -169,10 +170,12 @@ async fn main() {
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
+                let seed = madsim::runtime::Handle::current().seed();
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
+                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count, Some(seed))
+                    .await;
             })
             .await;
         return;

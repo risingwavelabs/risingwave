@@ -659,6 +659,7 @@ mod stream_table_scan;
 mod stream_topn;
 mod stream_watermark_filter;
 
+mod derive;
 mod stream_share;
 mod stream_union;
 pub mod utils;

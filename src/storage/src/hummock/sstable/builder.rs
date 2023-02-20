@@ -30,7 +30,7 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use crate::hummock::sstable::{BloomFilterBuilder, FilterBuilder};
+use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
 use crate::opts::StorageOpts;
@@ -118,15 +118,12 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     filter_builder: F,
 }
 
-impl<W: SstableWriter> SstableBuilder<W, BloomFilterBuilder> {
+impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
             sstable_id,
             writer,
-            BloomFilterBuilder::new(
-                options.bloom_false_positive,
-                options.capacity / DEFAULT_ENTRY_SIZE + 1,
-            ),
+            XorFilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),

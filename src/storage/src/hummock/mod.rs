@@ -350,7 +350,7 @@ pub async fn get_from_sstable_info(
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
-    dist_key_hash: Option<u32>,
+    dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
@@ -413,7 +413,7 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    prefix_hash: u32,
+    prefix_hash: u64,
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
