@@ -122,9 +122,13 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn is_explain_logical(&self) -> bool {
+        self.explain_options.explain_type == ExplainType::Logical
+    }
+
     pub fn trace(&self, str: impl Into<String>) {
         // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.explain_options.explain_type == ExplainType::Logical
+        if self.is_explain_logical()
             && self.logical_explain.borrow().is_some()
         {
             return;

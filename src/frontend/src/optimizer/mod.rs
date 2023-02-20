@@ -446,7 +446,9 @@ impl PlanRoot {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        ctx.store_logical(plan.explain_to_string().unwrap());
+        if ctx.is_explain_logical() {
+            ctx.store_logical(plan.explain_to_string().unwrap());
+        }
 
         Ok(plan)
     }
