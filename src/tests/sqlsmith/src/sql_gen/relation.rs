@@ -190,7 +190,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation: right_factor,
             join_operator,
         };
-        // TODO: Different structures of joins (bushy, left, right)
+        // TODO: Different structures of joins (bushy, left, right, cycles)
         left_table.append(&mut right_table);
         (
             TableWithJoins {
