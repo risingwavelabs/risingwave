@@ -53,7 +53,7 @@ use crate::manager::{
     SystemParamManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_num_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -509,7 +509,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let mut sub_tasks =
         hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
     sub_tasks.push(
-        start_worker_num_monitor(
+        start_worker_info_monitor(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),

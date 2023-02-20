@@ -320,7 +320,7 @@ impl Default for MetaMetrics {
     }
 }
 
-pub async fn start_worker_num_monitor<S: MetaStore>(
+pub async fn start_worker_info_monitor<S: MetaStore>(
     cluster_manager: ClusterManagerRef<S>,
     election_client: Option<ElectionClientRef>,
     interval: Duration,
