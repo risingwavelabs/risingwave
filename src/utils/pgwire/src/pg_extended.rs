@@ -406,18 +406,33 @@ impl PreparedStatement {
                         .to_string(),
                     Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
                 },
-                DataType::Int64 => match param_format {
-                    Format::Binary => i64::from_sql(&place_hodler, raw_param).unwrap().to_string(),
-                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
-                },
-                DataType::Int16 => match param_format {
-                    Format::Binary => i16::from_sql(&place_hodler, raw_param).unwrap().to_string(),
-                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
-                },
-                DataType::Int32 => match param_format {
-                    Format::Binary => i32::from_sql(&place_hodler, raw_param).unwrap().to_string(),
-                    Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
-                },
+                DataType::Int64 => {
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            i64::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                    };
+                    format!("{}::INT8", tmp)
+                }
+                DataType::Int16 => {
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            i16::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                    };
+                    format!("{}::INT2", tmp)
+                }
+                DataType::Int32 => {
+                    let tmp = match param_format {
+                        Format::Binary => {
+                            i32::from_sql(&place_hodler, raw_param).unwrap().to_string()
+                        }
+                        Format::Text => cstr_to_str(raw_param).unwrap().to_string(),
+                    };
+                    format!("{}::INT4", tmp)
+                }
                 DataType::Float32 => {
                     let tmp = match param_format {
                         Format::Binary => {
@@ -637,7 +652,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
         let sql = prepared_statement.instance(&["1".into()], &[]).unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1::INT4" == sql);
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
@@ -650,7 +665,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
+        assert!("INSERT INTO test (index,data) VALUES (1::INT4,'DATA')" == sql);
 
         let raw_statement = "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
@@ -663,7 +678,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
+        assert!("UPDATE COFFEES SET SALES = 1::INT4 WHERE COF_NAME LIKE 'DATA'" == sql);
 
         let raw_statement = "SELECT * FROM test_table WHERE id = $1 AND name = $3".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
@@ -680,7 +695,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into(), "NAME".into()], &[])
             .unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1 AND name = 'NAME'" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1::INT4 AND name = 'NAME'" == sql);
     }
 
     #[test]
@@ -690,7 +705,7 @@ mod tests {
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
         let sql = prepared_statement.instance(&["1".into()], &[]).unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1::INT4" == sql);
 
         let raw_statement =
             "INSERT INTO test (index,data) VALUES ($1::INT4,$2::VARCHAR)".to_string();
@@ -700,7 +715,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
+        assert!("INSERT INTO test (index,data) VALUES (1::INT4,'DATA')" == sql);
 
         let raw_statement =
             "UPDATE COFFEES SET SALES = $1::INT WHERE COF_NAME LIKE $2::VARCHAR".to_string();
@@ -710,7 +725,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
+        assert!("UPDATE COFFEES SET SALES = 1::INT4 WHERE COF_NAME LIKE 'DATA'" == sql);
     }
 
     #[test]
@@ -725,7 +740,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("SELECT * FROM test_table WHERE id = 1 AND name = 'DATA'" == sql);
+        assert!("SELECT * FROM test_table WHERE id = 1::INT4 AND name = 'DATA'" == sql);
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement =
@@ -736,7 +751,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("INSERT INTO test (index,data) VALUES (1,'DATA')" == sql);
+        assert!("INSERT INTO test (index,data) VALUES (1::INT4,'DATA')" == sql);
 
         let raw_statement =
             "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2::VARCHAR".to_string();
@@ -748,7 +763,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("UPDATE COFFEES SET SALES = 1 WHERE COF_NAME LIKE 'DATA'" == sql);
+        assert!("UPDATE COFFEES SET SALES = 1::INT4 WHERE COF_NAME LIKE 'DATA'" == sql);
 
         let raw_statement = "SELECT $1,$2;".to_string();
         let prepared_statement = PreparedStatement::parse_statement(raw_statement, vec![]).unwrap();
@@ -764,7 +779,7 @@ mod tests {
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
             .unwrap();
-        assert!("SELECT 1,1,'DATA','DATA';" == sql);
+        assert!("SELECT 1::INT4,1::INT4,'DATA','DATA';" == sql);
     }
     #[test]
 
@@ -782,7 +797,7 @@ mod tests {
         let raw_params = vec!["1".into(), "2".into(), "3".into()];
         let type_description = vec![DataType::Int16, DataType::Int32, DataType::Int64];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, &[]).unwrap();
-        assert_eq!(params, vec!["1", "2", "3"]);
+        assert_eq!(params, vec!["1::INT2", "2::INT4", "3::INT8"]);
 
         let raw_params = vec![
             "1.0".into(),
@@ -864,7 +879,7 @@ mod tests {
         let params =
             PreparedStatement::parse_params(&type_description, &raw_params, &[Format::Binary])
                 .unwrap();
-        assert_eq!(params, vec!["1", "2", "3"]);
+        assert_eq!(params, vec!["1::INT2", "2::INT4", "3::INT8"]);
 
         // Test FLOAT4, FLOAT8, DECIMAL type.
         let mut raw_params = vec![BytesMut::new(); 3];
@@ -1002,7 +1017,7 @@ mod tests {
             &[Format::Binary, Format::Binary, Format::Text],
         )
         .unwrap();
-        assert_eq!(params, vec!["1", "2", "3"]);
+        assert_eq!(params, vec!["1::INT2", "2::INT4", "3::INT8"]);
 
         // Test FLOAT4, FLOAT8, DECIMAL type.
         let mut raw_params = vec![BytesMut::new(); 2];
