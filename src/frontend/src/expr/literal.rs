@@ -52,6 +52,7 @@ impl std::fmt::Debug for Literal {
                     | DataType::Timestamptz
                     | DataType::Time
                     | DataType::Interval
+                    | DataType::Jsonb
                     | DataType::Struct(_) => write!(
                         f,
                         "'{}'",
@@ -100,19 +101,15 @@ impl Expr for Literal {
         ExprNode {
             expr_type: self.get_expr_type() as i32,
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: literal_to_value_encoding(self.get_data()),
+            rex_node: Some(literal_to_value_encoding(self.get_data())),
         }
     }
 }
 
 /// Convert a literal value (datum) into protobuf.
-fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
-    if d.is_none() {
-        return None;
-    }
-
+fn literal_to_value_encoding(d: &Datum) -> RexNode {
     let body = serialize_datum(d.as_ref());
-    Some(RexNode::Constant(ProstDatum { body }))
+    RexNode::Constant(ProstDatum { body })
 }
 
 /// Convert protobuf into a literal value (datum).
@@ -123,9 +120,7 @@ fn value_encoding_to_literal(
     if let Some(rex_node) = proto {
         if let RexNode::Constant(prost_datum) = rex_node {
             let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
-            // remove unwrap
-            // https://github.com/risingwavelabs/risingwave/issues/7862
-            Ok(Some(datum.unwrap()))
+            Ok(datum)
         } else {
             unreachable!()
         }
@@ -152,7 +147,7 @@ mod tests {
         ]);
         let data = Some(ScalarImpl::Struct(value.clone()));
         let node = literal_to_value_encoding(&data);
-        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+        if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
                 &DataType::new_struct(
@@ -175,7 +170,7 @@ mod tests {
         ]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
-        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+        if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
                 &DataType::List {

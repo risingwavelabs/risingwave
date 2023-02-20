@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
@@ -75,6 +76,7 @@ impl ToBatchProst for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Delete(DeleteNode {
             table_id: self.logical.table_id().table_id(),
+            table_version_id: INITIAL_TABLE_VERSION_ID, // TODO: use correct version id
             returning: self.logical.has_returning(),
         })
     }

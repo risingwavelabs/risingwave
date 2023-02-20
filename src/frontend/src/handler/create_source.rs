@@ -16,7 +16,9 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID};
+use risingwave_common::catalog::{
+    columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID,
+};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -159,7 +161,8 @@ pub(crate) async fn resolve_source_schema(
                 )));
             }
 
-            columns.extend(
+            columns_extend(
+                columns,
                 extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
 
@@ -188,7 +191,10 @@ pub(crate) async fn resolve_source_schema(
                 )));
             }
 
-            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+            columns_extend(
+                columns,
+                extract_avro_table_schema(avro_schema, with_properties.clone()).await?,
+            );
 
             StreamSourceInfo {
                 row_format: RowFormatType::Avro as i32,
@@ -294,7 +300,7 @@ pub(crate) async fn resolve_source_schema(
                 let _ = full_columns.remove(index);
             }
 
-            columns.extend(full_columns);
+            columns_extend(columns, full_columns);
             StreamSourceInfo {
                 row_format: RowFormatType::DebeziumAvro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
@@ -393,6 +399,8 @@ pub async fn handle_create_source(
         false,
     )
     .await?;
+
+    debug_assert!(is_column_ids_dedup(&columns));
 
     let watermark_descs =
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;

@@ -327,6 +327,20 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
+    pub async fn replace_table(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<CatalogVersion> {
+        let request = ReplaceTablePlanRequest {
+            table: Some(table),
+            fragment_graph: Some(graph),
+        };
+        let resp = self.inner.replace_table_plan(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok(resp.version)
+    }
+
     pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
@@ -561,6 +575,12 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        let request = CancelCreatingJobsRequest { infos };
+        let _ = self.inner.cancel_creating_jobs(request).await?;
+        Ok(())
+    }
+
     pub async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -760,6 +780,18 @@ impl MetaClient {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
         Ok(resp.params.unwrap().into())
+    }
+
+    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+        let req = SetSystemParamRequest { param, value };
+        self.inner.set_system_param(req).await?;
+        Ok(())
+    }
+
+    pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let req = GetDdlProgressRequest {};
+        let resp = self.inner.get_ddl_progress(req).await?;
+        Ok(resp.ddl_progress)
     }
 }
 
@@ -1326,7 +1358,7 @@ impl GrpcMetaClient {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to connect to meta server {}, trying next address: {}",
+                            "Failed to connect to meta server {}, trying again: {}",
                             addr,
                             e
                         )
@@ -1335,7 +1367,7 @@ impl GrpcMetaClient {
             }
 
             Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
+                "Failed to connect to meta server"
             )))
         })
         .await?;
@@ -1371,6 +1403,7 @@ macro_rules! for_all_meta_rpc {
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
@@ -1390,7 +1423,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
+            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1432,6 +1467,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
+            ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }
     };
 }

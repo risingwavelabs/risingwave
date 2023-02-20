@@ -3543,9 +3543,11 @@ impl Parser {
                         Keyword::CONNECT => Action::Connect,
                         Keyword::CREATE => Action::Create,
                         Keyword::DELETE => Action::Delete,
+                        Keyword::EXECUTE => Action::Execute,
                         Keyword::INSERT => Action::Insert { columns },
                         Keyword::REFERENCES => Action::References { columns },
                         Keyword::SELECT => Action::Select { columns },
+                        Keyword::TEMPORARY => Action::Temporary,
                         Keyword::TRIGGER => Action::Trigger,
                         Keyword::TRUNCATE => Action::Truncate,
                         Keyword::UPDATE => Action::Update { columns },
@@ -3620,7 +3622,7 @@ impl Parser {
     }
 
     fn parse_grant_permission(&mut self) -> Result<(Keyword, Option<Vec<Ident>>), ParserError> {
-        if let Some(kw) = self.parse_one_of_keywords(&[
+        let kw = self.expect_one_of_keywords(&[
             Keyword::CONNECT,
             Keyword::CREATE,
             Keyword::DELETE,
@@ -3633,22 +3635,19 @@ impl Parser {
             Keyword::TRUNCATE,
             Keyword::UPDATE,
             Keyword::USAGE,
-        ]) {
-            let columns = match kw {
-                Keyword::INSERT | Keyword::REFERENCES | Keyword::SELECT | Keyword::UPDATE => {
-                    let columns = self.parse_parenthesized_column_list(Optional)?;
-                    if columns.is_empty() {
-                        None
-                    } else {
-                        Some(columns)
-                    }
+        ])?;
+        let columns = match kw {
+            Keyword::INSERT | Keyword::REFERENCES | Keyword::SELECT | Keyword::UPDATE => {
+                let columns = self.parse_parenthesized_column_list(Optional)?;
+                if columns.is_empty() {
+                    None
+                } else {
+                    Some(columns)
                 }
-                _ => None,
-            };
-            Ok((kw, columns))
-        } else {
-            self.expected("a privilege keyword", self.peek_token())?
-        }
+            }
+            _ => None,
+        };
+        Ok((kw, columns))
     }
 
     /// Parse a REVOKE statement

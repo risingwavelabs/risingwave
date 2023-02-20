@@ -155,6 +155,8 @@ impl QueryExecution {
                     query_execution_info,
                 };
 
+                tracing::trace!("Starting query: {:?}", self.query.query_id);
+
                 // Not trace the error here, it will be processed in scheduler.
                 tokio::spawn(async move { runner.run(pinned_snapshot).await });
 
@@ -168,6 +170,7 @@ impl QueryExecution {
                     self.query.query_id
                 );
 
+                tracing::trace!("Query {:?} started.", self.query.query_id);
                 Ok(root_stage)
             }
             _ => {
@@ -321,6 +324,10 @@ impl QueryRunner {
                     finished_stage_cnt += 1;
                     assert!(finished_stage_cnt <= self.stage_executions.len());
                     if finished_stage_cnt == self.stage_executions.len() {
+                        tracing::trace!(
+                            "Query {:?} completed, starting to clean stage tasks.",
+                            &self.query.query_id
+                        );
                         // Now all stages completed, we should remove all
                         self.clean_all_stages(None).await;
                         break;
@@ -385,7 +392,7 @@ impl QueryRunner {
 
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
-    async fn clean_all_stages(mut self, error: Option<SchedulerError>) {
+    async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
         let error_msg = error.as_ref().map(|e| e.to_string());
         if let Some(reason) = error {
             // Consume sender here and send error to root stage.
@@ -407,6 +414,7 @@ impl QueryRunner {
             // Query Result Fetcher.
         }
 
+        tracing::trace!("Cleaning stages in query [{:?}]", self.query.query_id);
         // Stop all running stages.
         for stage_execution in self.stage_executions.values() {
             // The stop is return immediately so no need to spawn tasks.

@@ -43,6 +43,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Timestamptz => AstDataType::Timestamp(true),
         DataType::Time => AstDataType::Time(false),
         DataType::Interval => AstDataType::Interval,
+        DataType::Jsonb => AstDataType::Custom(vec!["JSONB".into()].into()),
         DataType::Struct(inner) => AstDataType::Struct(
             inner
                 .field_names
