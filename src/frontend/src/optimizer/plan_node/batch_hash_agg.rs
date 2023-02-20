@@ -24,7 +24,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
@@ -79,7 +79,40 @@ impl ToDistributedBatch for BatchHashAgg {
             &Order::any(),
             &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
         )?;
-        Ok(self.clone_with_input(new_input).into())
+        if self.logical.can_two_phase_agg() && self.logical.two_phase_agg_forced() {
+            // partial agg
+            let partial_agg: PlanRef = self.clone_with_input(new_input).into();
+
+            // insert exchange
+            let exchange = BatchExchange::new(
+                partial_agg,
+                Order::any(),
+                Distribution::HashShard((0..self.group_key().len()).collect()),
+            )
+            .into();
+
+            // insert total agg
+            let total_agg_types = self
+                .logical
+                .agg_calls()
+                .iter()
+                .enumerate()
+                .map(|(partial_output_idx, agg_call)| {
+                    agg_call.partial_to_total_agg_call(
+                        partial_output_idx + self.group_key().len(),
+                        false,
+                    )
+                })
+                .collect();
+            let total_agg_logical = LogicalAgg::new(
+                total_agg_types,
+                (0..self.group_key().len()).collect(),
+                exchange,
+            );
+            Ok(BatchHashAgg::new(total_agg_logical).into())
+        } else {
+            Ok(self.clone_with_input(new_input).into())
+        }
     }
 }
 

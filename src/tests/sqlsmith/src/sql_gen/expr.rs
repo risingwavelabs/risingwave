@@ -452,6 +452,26 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             A::Avg => Some(Expr::Function(make_agg_func(
                 "avg", exprs, distinct, filter, order_by,
             ))),
+            A::VarSamp => Some(Expr::Function(make_agg_func(
+                "var_samp", exprs, distinct, filter, order_by,
+            ))),
+            A::VarPop => Some(Expr::Function(make_agg_func(
+                "var_pop", exprs, distinct, filter, order_by,
+            ))),
+            A::StddevSamp => Some(Expr::Function(make_agg_func(
+                "stddev_samp",
+                exprs,
+                distinct,
+                filter,
+                order_by,
+            ))),
+            A::StddevPop => Some(Expr::Function(make_agg_func(
+                "stddev_pop",
+                exprs,
+                distinct,
+                filter,
+                order_by,
+            ))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
                 // https://github.com/risingwavelabs/risingwave/blob/a703dc7d725aa995fecbaedc4e9569bc9f6ca5ba/src/frontend/src/optimizer/plan_node/logical_agg.rs#L394
@@ -521,6 +541,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
         E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
         E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
+        E::Pow => Some(Expr::Function(make_simple_func("pow", &exprs))),
         E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
         E::CharLength => Some(Expr::Function(make_simple_func("char_length", &exprs))),
         E::Substr => Some(Expr::Function(make_simple_func("substr", &exprs))),

@@ -46,6 +46,8 @@ pub struct OptimizerContext {
     with_options: WithOptions,
     /// Store the Session Timezone and whether it was used.
     session_timezone: RefCell<SessionTimezone>,
+    /// Store expr display id.
+    next_expr_display_id: RefCell<usize>,
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -73,6 +75,7 @@ impl OptimizerContext {
             next_correlated_id: RefCell::new(0),
             with_options: handler_args.with_options,
             session_timezone,
+            next_expr_display_id: RefCell::new(0),
         }
     }
 
@@ -91,6 +94,7 @@ impl OptimizerContext {
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
+            next_expr_display_id: RefCell::new(0),
         }
         .into()
     }
@@ -98,6 +102,11 @@ impl OptimizerContext {
     pub fn next_plan_node_id(&self) -> PlanNodeId {
         *self.next_plan_node_id.borrow_mut() += 1;
         PlanNodeId(*self.next_plan_node_id.borrow())
+    }
+
+    pub fn next_expr_display_id(&self) -> usize {
+        *self.next_expr_display_id.borrow_mut() += 1;
+        *self.next_expr_display_id.borrow()
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {

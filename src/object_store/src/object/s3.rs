@@ -524,9 +524,7 @@ impl S3ObjectStore {
             .load()
             .await;
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, &bucket)
-            .await
-            .unwrap();
+        Self::configure_bucket_lifecycle(&client, &bucket).await;
 
         Self {
             client,
@@ -566,9 +564,7 @@ impl S3ObjectStore {
             .await;
 
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, bucket.as_str())
-            .await
-            .unwrap();
+        Self::configure_bucket_lifecycle(&client, bucket.as_str()).await;
 
         // check whether use batch delete
         let charset = "1234567890";
@@ -610,8 +606,13 @@ impl S3ObjectStore {
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let loader = aws_config::ConfigLoader::default();
-        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await)
+        #[cfg(madsim)]
+        let builder = aws_sdk_s3::config::Builder::new();
+        #[cfg(not(madsim))]
+        let builder =
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+
+        let config = builder
             .region(Region::new("custom"))
             .endpoint_resolver(Endpoint::immutable(
                 format!("http://{}", address).try_into().unwrap(),
@@ -620,8 +621,8 @@ impl S3ObjectStore {
                 access_key_id,
                 secret_access_key,
                 None,
-            ));
-        let config = builder.build();
+            ))
+            .build();
         let client = Client::from_conf(config);
 
         Self {
@@ -683,7 +684,7 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
+    async fn configure_bucket_lifecycle(client: &Client, bucket: &str) {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let mut configured_rules = vec![];
         let get_config_result = client
@@ -721,19 +722,23 @@ impl S3ObjectStore {
             let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
                 .rules(bucket_lifecycle_rule)
                 .build();
-            client
+            if client
                 .put_bucket_lifecycle_configuration()
                 .bucket(bucket)
                 .lifecycle_configuration(bucket_lifecycle_config)
                 .send()
-                .await?;
-            tracing::info!(
-                "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
-                bucket,
-                S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
-            );
+                .await
+                .is_ok()
+            {
+                tracing::info!(
+                    "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
+                    bucket,
+                    S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+                );
+            } else {
+                tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
+            }
         }
-        Ok(())
     }
 }
 

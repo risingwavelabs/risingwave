@@ -48,7 +48,7 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     targets
         // enable trace for most modules
         .with_target("risingwave_stream", Level::DEBUG)
-        .with_target("risingwave_batch", Level::DEBUG)
+        .with_target("risingwave_batch", Level::INFO)
         .with_target("risingwave_storage", Level::DEBUG)
         .with_target("risingwave_sqlparser", Level::INFO)
         .with_target("risingwave_source", Level::INFO)
@@ -63,35 +63,48 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
         .with_target("events", Level::ERROR)
-
-    // if env_var_is_true("RW_CI") {
-    //     targets.with_target("events::meta::server_heartbeat", Level::TRACE)
-    // } else {
-    //     targets
-    // }
 }
 
-/// ===========================================================================
-/// END SECTION
-/// ===========================================================================
+// ===========================================================================
+// END SECTION
+// ===========================================================================
 
 pub struct LoggerSettings {
     /// Enable tokio console output.
     enable_tokio_console: bool,
     /// Enable colorful output in console.
     colorful: bool,
+    targets: Vec<(String, tracing::metadata::LevelFilter)>,
+}
+
+impl Default for LoggerSettings {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LoggerSettings {
-    pub fn new_default() -> Self {
-        Self::new(false)
+    pub fn new() -> Self {
+        Self {
+            enable_tokio_console: false,
+            colorful: console::colors_enabled_stderr() && console::colors_enabled(),
+            targets: vec![],
+        }
     }
 
-    pub fn new(enable_tokio_console: bool) -> Self {
-        Self {
-            enable_tokio_console,
-            colorful: console::colors_enabled_stderr() && console::colors_enabled(),
-        }
+    pub fn enable_tokio_console(mut self, enable: bool) -> Self {
+        self.enable_tokio_console = enable;
+        self
+    }
+
+    /// Overrides the default target settings.
+    pub fn with_target(
+        mut self,
+        target: impl Into<String>,
+        level: impl Into<tracing::metadata::LevelFilter>,
+    ) -> Self {
+        self.targets.push((target.into(), level.into()));
+        self
     }
 }
 
@@ -150,6 +163,13 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         // Enable DEBUG level for all other crates
         #[cfg(debug_assertions)]
         let filter = filter.with_default(Level::DEBUG);
+
+        let filter = settings
+            .targets
+            .into_iter()
+            .fold(filter, |filter, (target, level)| {
+                filter.with_target(target, level)
+            });
 
         layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
     };

@@ -26,6 +26,7 @@ use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
 };
+use risingwave_common::util::iter_util::ZipEqFast;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
 use crate::{ExprError, Result};
@@ -426,6 +427,7 @@ pub fn literal_parsing(
         // evaluation).
         DataType::List { .. } => return Err(None),
         DataType::Struct(_) => return Err(None),
+        DataType::Jsonb => return Err(None),
         DataType::Bytea => str_to_bytea(s)?.into(),
     };
     Ok(scalar)
@@ -454,6 +456,7 @@ macro_rules! for_all_cast_variants {
             { varchar, decimal, str_parse, false },
             { varchar, boolean, str_to_bool, false },
             { varchar, bytea, str_to_bytea, false },
+            { varchar, jsonb, str_parse, false },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, bool_to_varchar, false },
@@ -467,6 +470,7 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
+            { jsonb, varchar, |x, w| general_to_text(x, w), false },
             { list, varchar, |x, w| general_to_text(x, w), false },
 
             { boolean, int32, try_cast, false },
@@ -620,8 +624,8 @@ pub fn struct_cast(
         input
             .fields_ref()
             .into_iter()
-            .zip_eq(source_elem_type.fields.iter())
-            .zip_eq(target_elem_type.fields.iter())
+            .zip_eq_fast(source_elem_type.fields.iter())
+            .zip_eq_fast(target_elem_type.fields.iter())
             .map(|((datum_ref, source_elem_type), target_elem_type)| {
                 if source_elem_type == target_elem_type {
                     return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));

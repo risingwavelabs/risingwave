@@ -44,6 +44,10 @@ message UpdateMutation {
     // Merge executor can be uniquely identified by a combination of actor id and upstream fragment id.
     uint32 actor_id = 1;
     uint32 upstream_fragment_id = 2;
+    // - For scaling, this is always `None`.
+    // - For plan change, the upstream fragment will be changed to a new one, and this will be `Some`.
+    //   In this case, all the upstream actors should be removed and replaced by the `new` ones.
+    optional uint32 new_upstream_fragment_id = 5;
     // Added upstream actors.
     repeated uint32 added_upstream_actor_id = 3;
     // Removed upstream actors.
@@ -135,11 +139,20 @@ message SourceNode {
   StreamSource source_inner = 1;
 }
 
+message SinkDesc {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated plan_common.ColumnDesc columns = 4;
+  repeated plan_common.ColumnOrder pk = 5;
+  repeated uint32 stream_key = 6;
+  repeated uint32 distribution_key = 7;
+  map<string, string> properties = 8;
+  catalog.SinkType sink_type = 9;
+}
+
 message SinkNode {
-  uint32 table_id = 1;
-  map<string, string> properties = 3;
-  repeated plan_common.Field fields = 4;
-  repeated uint32 sink_pk = 5;
+  SinkDesc sink_desc = 1;
 }
 
 message ProjectNode {
@@ -205,6 +218,7 @@ message SimpleAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message HashAggNode {
@@ -215,6 +229,7 @@ message HashAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
 }
 
 message TopNNode {
@@ -423,12 +438,10 @@ message LookupNode {
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
 message WatermarkFilterNode {
-  // The expression to calculate the watermark value.
-  expr.ExprNode watermark_expr = 1;
-  // The column the event time belongs.
-  uint64 event_time_col_idx = 2;
-  // The table used to persist watermark, the key is vnode.
-  catalog.Table table = 3;
+  // The watermark descs
+  repeated catalog.WatermarkDesc watermark_descs = 1;
+  // The tables used to persist watermarks, the key is vnode.
+  repeated catalog.Table tables = 2;
 }
 
 // Acts like a merger, but on different inputs.
@@ -462,6 +475,8 @@ message SortNode {
 message DmlNode {
   // Id of the table on which DML performs.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
 }
@@ -554,10 +569,7 @@ message Dispatcher {
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as its downstream fragment id.
-  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
-  //   could belong to more than one downstream in DAG.
-  // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
+  // This is exactly the same as its downstream fragment id.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;

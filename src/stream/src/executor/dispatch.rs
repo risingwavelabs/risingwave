@@ -26,6 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use smallvec::{smallvec, SmallVec};
@@ -596,7 +597,7 @@ impl Dispatcher for HashDataDispatcher {
 
             let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
                 // Build visibility map for every output chunk.
-                for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
                     vis_map.append(
                         visible && self.hash_mapping[vnode.to_index()] == output.actor_id(),
                     );
@@ -627,16 +628,20 @@ impl Dispatcher for HashDataDispatcher {
 
             match visibility {
                 None => {
-                    vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
-                        build_op_vis(vnode, op, true);
-                    });
+                    vnodes
+                        .iter()
+                        .copied()
+                        .zip_eq_fast(ops)
+                        .for_each(|(vnode, op)| {
+                            build_op_vis(vnode, op, true);
+                        });
                 }
                 Some(visibility) => {
                     vnodes
                         .iter()
                         .copied()
-                        .zip_eq(ops)
-                        .zip_eq(visibility.iter())
+                        .zip_eq_fast(ops)
+                        .zip_eq_fast(visibility.iter())
                         .for_each(|((vnode, op), visible)| {
                             build_op_vis(vnode, op, visible);
                         });
@@ -646,7 +651,7 @@ impl Dispatcher for HashDataDispatcher {
             let ops = new_ops;
 
             // individually output StreamChunk integrated with vis_map
-            for (vis_map, output) in vis_maps.into_iter().zip_eq(self.outputs.iter_mut()) {
+            for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
@@ -854,6 +859,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::stream_plan::DispatcherType;
 
     use super::*;
@@ -1179,12 +1185,12 @@ mod tests {
             }
             let output_idx =
                 hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
-            for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
+            for (builder, val) in builders.iter_mut().zip_eq_fast(one_row.iter()) {
                 builder.append(Some(*val));
             }
             output_cols[output_idx]
                 .iter_mut()
-                .zip_eq(one_row.iter())
+                .zip_eq_fast(one_row.iter())
                 .for_each(|(each_column, val)| each_column.push(*val));
             output_ops[output_idx].push(op);
         }
@@ -1215,7 +1221,7 @@ mod tests {
                 real_chunk
                     .columns()
                     .iter()
-                    .zip_eq(output_cols[output_idx].iter())
+                    .zip_eq_fast(output_cols[output_idx].iter())
                     .for_each(|(real_col, expect_col)| {
                         let real_vals = real_chunk
                             .visibility()

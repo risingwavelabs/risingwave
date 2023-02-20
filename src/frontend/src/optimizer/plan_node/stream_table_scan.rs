@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -53,14 +52,19 @@ impl StreamTableScan {
         let batch_plan_id = ctx.next_plan_node_id();
 
         let distribution = {
-            let distribution_key = logical
-                .distribution_key()
-                .expect("distribution key of stream chain must exist in output columns");
-            if distribution_key.is_empty() {
-                Distribution::Single
-            } else {
-                // See also `BatchSeqScan::clone_with_dist`.
-                Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
+            match logical.distribution_key() {
+                Some(distribution_key) => {
+                    if distribution_key.is_empty() {
+                        Distribution::Single
+                    } else {
+                        // See also `BatchSeqScan::clone_with_dist`.
+                        Distribution::UpstreamHashShard(
+                            distribution_key,
+                            logical.table_desc().table_id,
+                        )
+                    }
+                }
+                None => Distribution::SomeShard,
             }
         };
         let base = PlanBase::new_stream(
@@ -70,8 +74,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,

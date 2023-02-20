@@ -14,10 +14,10 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -327,7 +327,7 @@ impl Expression for ArrayConcatExpression {
         for (vis, (left, right)) in input
             .vis()
             .iter()
-            .zip_eq(left_array.iter().zip_eq(right_array.iter()))
+            .zip_eq_fast(left_array.iter().zip_eq_fast(right_array.iter()))
         {
             if !vis {
                 builder.append_null();
@@ -382,6 +382,7 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
     use risingwave_pb::data::Datum as ProstDatum;

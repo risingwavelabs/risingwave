@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
+//! Helper functions to construct prost [`ExprNode`] for test.
+
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{DataType as ProstDataType, DataType, Datum as ProstDatum};
@@ -23,7 +25,7 @@ use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
 pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNode {
     let mut exprs = Vec::new();
-    for (idx, ret) in indices.iter().zip_eq(rets.iter()) {
+    for (idx, ret) in indices.iter().zip_eq_fast(rets.iter()) {
         exprs.push(make_input_ref(*idx, *ret));
     }
     let function_call = FunctionCall { children: exprs };

@@ -56,6 +56,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
@@ -203,7 +204,7 @@ impl IndexSelectionRule {
         let conjunctions = index
             .primary_table_pk_ref_to_index_table()
             .iter()
-            .zip_eq(index.primary_table.pk.iter())
+            .zip_eq_fast(index.primary_table.pk.iter())
             .map(|(x, y)| {
                 Self::create_null_safe_equal_expr(
                     x.index,
@@ -711,6 +712,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,
+            DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
         }

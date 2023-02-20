@@ -30,6 +30,7 @@ use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 
 use crate::error::BatchError;
@@ -148,7 +149,7 @@ fn convert_datum_refs_to_chunk(
         .map(|data_type| data_type.create_array_builder(num_tuples))
         .collect();
     for _i in 0..num_tuples {
-        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
+        for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq_fast(datum_refs) {
             builder.append_datum(*datum_ref);
         }
     }
