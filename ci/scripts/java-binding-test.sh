@@ -45,6 +45,9 @@ cargo make link-all-in-one-binaries
 echo "--- starting risingwave cluster"
 cargo make ci-start java-binding-demo
 
+echo "--- Build java binding demo"
+cargo make build-java-binding-java
+
 echo "--- ingest data and run java binding"
 cargo make ingest-data-and-run-java-binding
 
