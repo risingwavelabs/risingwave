@@ -59,7 +59,7 @@ echo "--- e2e, ci-3cn-1fe, udf"
 python3 e2e_test/udf/test.py &
 sleep 2
 sqllogictest -p 4566 -d dev './e2e_test/udf/python.slt'
-killall python3
+pkill python3
 
 echo "--- Kill cluster"
 cargo make ci-kill
