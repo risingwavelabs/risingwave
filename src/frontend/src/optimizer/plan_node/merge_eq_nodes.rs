@@ -16,8 +16,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use super::{EndoPlan, LogicalShare, PlanNodeId, PlanRef, PlanTreeNodeUnary, VisitPlan};
-use crate::utils::{Endo, Layer, Visit};
-use crate::Explain;
+use crate::utils::{Endo, Visit};
 
 pub trait Semantics<V: Hash + Eq> {
     fn semantics(&self) -> V;
@@ -57,7 +56,7 @@ where
     fn apply(&mut self, t: PlanRef) -> PlanRef {
         let semantics = t.semantics();
         let share = self.cache.get(&semantics).cloned().unwrap_or_else(|| {
-            let share = LogicalShare::new(t.map(|i| self.apply(i)));
+            let share = LogicalShare::new(self.tree_apply(t));
             self.cache.entry(semantics).or_insert(share).clone()
         });
         share.into()
@@ -87,8 +86,13 @@ impl Counter {
 }
 
 impl VisitPlan for Counter {
-    fn visited(&self, t: &PlanRef) -> bool {
-        self.counts.get(&t.id()).is_some_and(|c| *c > 1)
+    fn visited<F>(&mut self, plan: &PlanRef, mut f: F)
+    where
+        F: FnMut(&mut Self),
+    {
+        if !self.counts.get(&plan.id()).is_some_and(|c| *c > 1) {
+            f(self);
+        }
     }
 }
 
@@ -106,12 +110,18 @@ impl Visit<PlanRef> for Counter {
 
 struct Pruner<'a> {
     counts: &'a HashMap<PlanNodeId, u64>,
-    cache: HashMap<PlanRef, PlanRef>,
+    cache: HashMap<PlanNodeId, PlanRef>,
 }
 
 impl EndoPlan for Pruner<'_> {
-    fn cache(&mut self) -> &mut HashMap<PlanRef, PlanRef> {
-        &mut self.cache
+    fn cached<F>(&mut self, plan: PlanRef, mut f: F) -> PlanRef
+    where
+        F: FnMut(&mut Self) -> PlanRef,
+    {
+        self.cache.get(&plan.id()).cloned().unwrap_or_else(|| {
+            let res = f(self);
+            self.cache.entry(plan.id()).or_insert(res).clone()
+        })
     }
 }
 
@@ -129,9 +139,6 @@ impl Endo<PlanRef> for Pruner<'_> {
     }
 
     fn apply(&mut self, t: PlanRef) -> PlanRef {
-        // println!("Before:\n{}", t.explain_to_string().unwrap());
-        let result = self.dag_apply(t);
-        // println!("After:\n{}", result.explain_to_string().unwrap());
-        result
+        self.dag_apply(t)
     }
 }

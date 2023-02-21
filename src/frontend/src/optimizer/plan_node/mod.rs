@@ -28,7 +28,6 @@
 //! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
-use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 use std::ops::Deref;
@@ -154,8 +153,8 @@ impl Layer for PlanRef {
 pub struct PlanNodeId(pub i32);
 
 /// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
-/// In addition to `Endo`, one have to specify the `cache` hash map
-/// to store transformed `LogicalShare` and their results,
+/// In addition to `Endo`, one have to specify the `cached` function
+/// to persist transformed `LogicalShare` and their results,
 /// and the `dag_apply` function will take care to only transform every `LogicalShare` nodes once.
 ///
 /// Note: Due to the way super trait is designed in rust,
@@ -163,34 +162,39 @@ pub struct PlanNodeId(pub i32);
 /// And conventionally the real transformation `apply` is under `Endo<PlanRef>`,
 /// although one can refer to `dag_apply` in the implementation of `apply`.
 pub trait EndoPlan: Endo<PlanRef> {
-    fn cache(&mut self) -> &mut HashMap<PlanRef, PlanRef>;
+    // Return the cached result of `plan` if present,
+    // otherwise store and return the value provided by `f`.
+    // Notice that to allow mutable access of `self` in `f`,
+    // we let `f` to take `&mut Self` as its first argument.
+    fn cached<F>(&mut self, plan: PlanRef, f: F) -> PlanRef
+    where
+        F: FnMut(&mut Self) -> PlanRef;
 
     fn dag_apply(&mut self, plan: PlanRef) -> PlanRef {
         match plan.as_logical_share() {
-            Some(_) => self.cache().get(&plan).cloned().unwrap_or_else(|| {
-                let res = self.tree_apply(plan.clone());
-                self.cache().entry(plan).or_insert(res).clone()
-            }),
+            Some(_) => self.cached(plan.clone(), |this| this.tree_apply(plan.clone())),
             None => self.tree_apply(plan),
         }
     }
 }
 
 /// A more sophisticated `Visit` taking into account of the DAG structure of `PlanRef`.
-/// In addition to `Visit`, one have to specify `visited` to mark visited `LogicalShare` nodes,
+/// In addition to `Visit`, one have to specify `visited`
+/// to store and report visited `LogicalShare` nodes,
 /// and the `dag_visit` function will take care to only visit every `LogicalShare` nodes once.
 /// See also `EndoPlan`.
 pub trait VisitPlan: Visit<PlanRef> {
-    fn visited(&self, plan: &PlanRef) -> bool;
+    // Skip visiting `plan` if visited, otherwise run the traversal provided by `f`.
+    // Notice that to allow mutable access of `self` in `f`,
+    // we let `f` to take `&mut Self` as its first argument.
+    fn visited<F>(&mut self, plan: &PlanRef, f: F)
+    where
+        F: FnMut(&mut Self);
 
     fn dag_visit(&mut self, plan: &PlanRef) {
         match plan.as_logical_share() {
-            Some(_) if self.visited(plan) => (),
-            _ => {
-                self.pre(plan);
-                plan.descent(|i| self.visit(i));
-                self.post(plan);
-            }
+            Some(_) => self.visited(plan, |this| this.tree_visit(plan)),
+            None => self.tree_visit(plan),
         }
     }
 }
