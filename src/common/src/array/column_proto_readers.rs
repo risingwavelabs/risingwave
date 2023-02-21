@@ -135,6 +135,8 @@ macro_rules! read_one_value_array {
                     }
                 }
                 let arr = builder.finish();
+                ensure_eq!(arr.len(), cardinality);
+
                 Ok(arr.into())
             }
             )*
@@ -197,5 +199,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }
