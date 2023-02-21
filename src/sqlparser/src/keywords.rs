@@ -511,6 +511,8 @@ define_keywords!(
     UNNEST,
     UPDATE,
     UPPER,
+    UPSERT_AVRO,
+    UPSERT_JSON,
     USAGE,
     USER,
     USING,

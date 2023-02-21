@@ -89,12 +89,14 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,             // Keyword::JSON
-    DebeziumJson,     // Keyword::DEBEZIUM_JSON
-    Avro(AvroSchema), // Keyword::AVRO
-    Maxwell,          // Keyword::MAXWELL
-    CanalJson,        // Keyword::CANAL_JSON
-    Csv(CsvInfo),     // Keyword::CSV
+    Json,                   // Keyword::JSON
+    DebeziumJson,           // Keyword::DEBEZIUM_JSON
+    UpsertJson,             // Keyword::UPSERT_JSON
+    Avro(AvroSchema),       // Keyword::AVRO
+    UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
+    Maxwell,                // Keyword::MAXWELL
+    CanalJson,              // Keyword::CANAL_JSON
+    Csv(CsvInfo),           // Keyword::CSV
     Native,
     DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
 }
@@ -103,6 +105,8 @@ impl ParseTo for SourceSchema {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         let schema = if p.parse_keywords(&[Keyword::JSON]) {
             SourceSchema::Json
+        } else if p.parse_keywords(&[Keyword::UPSERT_JSON]) {
+            SourceSchema::UpsertJson
         } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
             impl_parse_to!(protobuf_schema: ProtobufSchema, p);
             SourceSchema::Protobuf(protobuf_schema)
@@ -111,6 +115,9 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::AVRO]) {
             impl_parse_to!(avro_schema: AvroSchema, p);
             SourceSchema::Avro(avro_schema)
+        } else if p.parse_keywords(&[Keyword::UPSERT_AVRO]) {
+            impl_parse_to!(avro_schema: AvroSchema, p);
+            SourceSchema::UpsertAvro(avro_schema)
         } else if p.parse_keywords(&[Keyword::MAXWELL]) {
             SourceSchema::Maxwell
         } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
@@ -123,7 +130,7 @@ impl ParseTo for SourceSchema {
             SourceSchema::DebeziumAvro(avro_schema)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -135,9 +142,11 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             SourceSchema::Native => write!(f, "NATIVE"),
