@@ -119,6 +119,7 @@ impl Endo<PlanRef> for Pruner<'_> {
         let prunable = |s: &LogicalShare| {
             *self.counts.get(&s.id()).expect("Unprocessed shared node.") == 1
                 || s.input().as_logical_scan().is_some()
+                || s.input().as_logical_values().is_some()
         };
         t.as_logical_share()
             .cloned()

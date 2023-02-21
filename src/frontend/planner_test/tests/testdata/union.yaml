@@ -230,9 +230,9 @@
       ├─LogicalValues { rows: [[2:Int32]], schema: Schema { fields: [2:Int32:Int32] } }
       ├─LogicalValues { rows: [[3:Int32]], schema: Schema { fields: [3:Int32:Int32] } }
       ├─LogicalValues { rows: [[4:Int32]], schema: Schema { fields: [4:Int32:Int32] } }
-      ├─LogicalShare { id = 290 }
+      ├─LogicalShare { id = 237 }
       | └─LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [5:Int32:Int32] } }
-      └─LogicalShare { id = 290 }
+      └─LogicalShare { id = 237 }
         └─LogicalValues { rows: [[5:Int32]], schema: Schema { fields: [5:Int32:Int32] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }

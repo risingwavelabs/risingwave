@@ -9,8 +9,7 @@
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
-    ├─LogicalShare { id = 106 }
-    | └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 - sql: |
     create table t(x int);
