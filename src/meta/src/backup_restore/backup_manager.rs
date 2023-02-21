@@ -188,7 +188,31 @@ impl<S: MetaStore> BackupManager<S> {
 
     /// Deletes existent backups from backup storage.
     pub async fn delete_backups(&self, ids: &[MetaSnapshotId]) -> MetaResult<()> {
-        self.backup_store.delete(ids).await?;
+        let exclude_id = self
+            .backup_store
+            .manifest()
+            .snapshot_metadata
+            .iter()
+            .map(|s| s.id)
+            .max();
+        let filtered_ids = ids
+            .iter()
+            .filter(|id| {
+                if let Some(exclude_id) = exclude_id && **id == exclude_id{
+                    tracing::info!(
+                        "meta snapshot {} cannot be deleted because it's the latest one",
+                        exclude_id
+                    );
+                    return false;
+                }
+                return true;
+            })
+            .cloned()
+            .collect_vec();
+        if filtered_ids.is_empty() {
+            return Ok(());
+        }
+        self.backup_store.delete(&filtered_ids).await?;
         self.env
             .notification_manager()
             .notify_hummock_without_version(
