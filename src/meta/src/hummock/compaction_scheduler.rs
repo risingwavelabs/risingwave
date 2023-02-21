@@ -586,9 +586,8 @@ mod tests {
         // Notified to retry cancellation.
         let mut task_to_cancel = match rx.recv().await.unwrap() {
             LocalNotification::CompactionTaskNeedCancel(task_to_cancel) => task_to_cancel,
-            _ => {
-                panic!()
-            }
+            LocalNotification::WorkerNodeIsDeleted(_) => unreachable!(),
+            LocalNotification::SystemParamsChange(_) => {}
         };
         hummock_manager
             .cancel_compact_task(&mut task_to_cancel, TaskStatus::ManualCanceled)
