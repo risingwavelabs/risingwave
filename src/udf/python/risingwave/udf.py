@@ -76,8 +76,8 @@ def _create_udf(f, input_types, result_type, name):
         f, input_types, result_type, name)
 
 
-def udf(input_types: Union[List[pa.DataType], pa.DataType],
-        result_type: pa.DataType,
+def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+        result_type: Union[str, pa.DataType],
         name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
     Annotation for creating a user-defined function.
