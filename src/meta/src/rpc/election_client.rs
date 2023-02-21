@@ -145,6 +145,9 @@ impl ElectionClient for EtcdElectionClient {
             };
 
             let mut ticker = time::interval(Duration::from_secs(1));
+
+            // timeout controller, when keep alive fails for more than a certain period of time
+            // before it is considered a complete failure
             let mut timeout = time::interval(Duration::from_secs((ttl / 2) as u64));
             timeout.reset();
 

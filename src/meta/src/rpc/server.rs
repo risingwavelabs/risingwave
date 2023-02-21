@@ -102,7 +102,7 @@ pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
-    lease_interval_secs: u64,
+    mut lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     match meta_store_backend {
@@ -129,6 +129,11 @@ pub async fn rpc_serve(
                 Some(options),
                 address_info.advertise_addr.clone(),
             ));
+
+            if lease_interval_secs <= 1 {
+                tracing::warn!("lease interval is too short, rewriting to a longer value");
+                lease_interval_secs = 2;
+            }
 
             rpc_serve_with_store(
                 meta_store,
