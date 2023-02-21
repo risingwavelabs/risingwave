@@ -32,8 +32,6 @@ use crate::types::{
     DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
-/// This is a naive implementation of list array.
-/// We will eventually move to a more efficient flatten implementation.
 #[derive(Debug)]
 pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
@@ -146,8 +144,15 @@ impl ListArrayBuilder {
     }
 }
 
-/// This is a naive implementation of list array.
-/// We will eventually move to a more efficient flatten implementation.
+/// Each item of this `ListArray` is a `List<T>`, or called `T[]` (T array).
+///
+/// * As other arrays, there is a null bitmap, with `1` meaning nonnull and `0` meaning null.
+/// * As [`BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has all
+///   items concatenated, and the offsets `Vec` stores start and end indices into it for slicing.
+///   Effectively, the inner array is the flattened form, and `offsets.len() == n + 1`.
+///
+/// For example, `values (array[1]), (array[]::int[]), (null), (array[2, 3]);` stores an inner
+///  `I32Array` with `[1, 2, 3]`, along with offsets `[0, 1, 1, 1, 3]` and null bitmap `TTFT`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListArray {
     bitmap: Bitmap,
