@@ -16,6 +16,7 @@ use core::convert::Into;
 use core::fmt::Formatter;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::string;
 use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
@@ -140,9 +141,10 @@ impl OptimizerContext {
             return;
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
-        optimizer_trace.push(str.into());
+        let string = str.into();
+        tracing::trace!("{}\n", string);
+        optimizer_trace.push(string);
         optimizer_trace.push("\n".to_string());
-        tracing::trace!("{}\n", str);
     }
 
     pub fn store_logical(&self, str: impl Into<String>) {
