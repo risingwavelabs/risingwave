@@ -19,7 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableVersionId, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
+    USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
@@ -381,7 +382,7 @@ fn gen_table_plan_inner(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let source = source_info.map(|source_info| ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name: name.clone(),
