@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use risingwave_pb::plan_common::Field;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
