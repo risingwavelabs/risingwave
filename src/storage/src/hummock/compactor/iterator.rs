@@ -42,6 +42,9 @@ struct SstableStreamIterator {
 
     /// Counts the time used for IO.
     stats_ptr: Arc<AtomicU64>,
+
+    // For debugging
+    sstable_info: SstableInfo,
 }
 
 impl SstableStreamIterator {
@@ -60,6 +63,7 @@ impl SstableStreamIterator {
     /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
+        sstable_info: &SstableInfo,
         block_stream: BlockStream,
         max_block_count: usize,
         stats: &StoreLocalStatistic,
@@ -69,6 +73,7 @@ impl SstableStreamIterator {
             block_iter: None,
             remaining_blocks: max_block_count,
             stats_ptr: stats.remote_io_time.clone(),
+            sstable_info: sstable_info.clone(),
         }
     }
 
@@ -152,17 +157,32 @@ impl SstableStreamIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.block_iter.as_ref().expect("no block iter").key()
+        self.block_iter
+            .as_ref()
+            .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
+            .key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
-        HummockValue::from_slice(raw_value).expect("decode error")
+        let raw_value = self
+            .block_iter
+            .as_ref()
+            .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
+            .value();
+        HummockValue::from_slice(raw_value)
+            .unwrap_or_else(|_| panic!("decode error sstinfo={}", self.sst_debug_info()))
     }
 
     fn is_valid(&self) -> bool {
         // True iff block_iter exists and is valid.
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+    }
+
+    fn sst_debug_info(&self) -> String {
+        format!(
+            "sst_id={}, meta_offset={}, table_ids={:?}",
+            self.sstable_info.id, self.sstable_info.meta_offset, self.sstable_info.table_ids
+        )
     }
 }
 
@@ -264,8 +284,12 @@ impl ConcatSstableIterator {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
 
-            let mut sstable_iter =
-                SstableStreamIterator::new(block_stream, end_index - start_index, &self.stats);
+            let mut sstable_iter = SstableStreamIterator::new(
+                table_info,
+                block_stream,
+                end_index - start_index,
+                &self.stats,
+            );
             sstable_iter.seek(seek_key).await?;
 
             self.sstable_iter = Some(sstable_iter);
