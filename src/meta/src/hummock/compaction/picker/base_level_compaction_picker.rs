@@ -80,22 +80,26 @@ impl CompactionPicker for LevelCompactionPicker {
             });
         }
 
-        // Pick one table which overlap with smallest data. There may be no file in target level
-        //  which overlap with select files. That would be a trivial move.
-        let mut input_levels =
-            self.pick_min_overlap_tables(l0, levels.get_level(self.target_level), level_handlers);
-        if input_levels.is_empty() {
-            stats.skip_by_pending_files += 1;
-            return None;
-        }
+        const MAX_WRITE_AMPLIFICATION: u64 = 100;
 
-        const MAX_WRITE_AMPLIFICATION: u64 = 150;
-
-        let write_amplification = cal_file_size(&input_levels[1].table_infos) * 100
-            / cal_file_size(&input_levels[0].table_infos);
-
+        let legacy_several_table = levels
+            .get_level(self.target_level)
+            .table_infos
+            .iter()
+            .any(|sst| sst.table_ids.len() > 1);
         // Pick the whole level to reduce write amplification.
-        if write_amplification <= MAX_WRITE_AMPLIFICATION {
+        if legacy_several_table {
+            // Pick one table which overlap with smallest data. There may be no file in target level
+            //  which overlap with select files. That would be a trivial move.
+            let mut input_levels = self.pick_min_overlap_tables(
+                l0,
+                levels.get_level(self.target_level),
+                level_handlers,
+            );
+            if input_levels.is_empty() {
+                stats.skip_by_pending_files += 1;
+                return None;
+            }
             return Some(CompactionInput {
                 input_levels,
                 target_level: self.target_level,
@@ -106,9 +110,10 @@ impl CompactionPicker for LevelCompactionPicker {
         for sst in &l0.sub_levels[0].table_infos {
             table_ids.extend(sst.table_ids.clone());
         }
+        let mut input_levels = vec![];
         for table_id in table_ids {
             let mut l0_total_file_size = 0;
-            input_levels.clear();
+            let mut legacy_several_table = false;
             for level in &l0.sub_levels {
                 // This break is optional. We can include overlapping sub-level actually.
                 if level.level_type() != LevelType::Nonoverlapping {
@@ -126,6 +131,9 @@ impl CompactionPicker for LevelCompactionPicker {
                     table_infos: vec![],
                 };
                 for sst in &level.table_infos {
+                    if sst.table_ids.len() > 1 {
+                        legacy_several_table = true;
+                    }
                     if sst.table_ids[0] != table_id {
                         continue;
                     }
@@ -136,7 +144,7 @@ impl CompactionPicker for LevelCompactionPicker {
                     cur_level_size += sst.file_size;
                     select_level.table_infos.push(sst.clone());
                 }
-                if pending_compact {
+                if pending_compact || legacy_several_table {
                     break;
                 }
 

@@ -66,7 +66,19 @@ impl TierCompactionPicker {
                 }
                 table_id = sst.table_ids[0];
             }
-            if !several_table && table_id == 0 {
+            if several_table {
+                return Some(CompactionInput {
+                    input_levels: vec![InputLevel {
+                        level_idx: 0,
+                        level_type: level.level_type,
+                        table_infos: level.table_infos.clone(),
+                    }],
+                    target_level: 0,
+                    target_sub_level_id: level.sub_level_id,
+                });
+            }
+
+            if table_id == 0 {
                 continue;
             }
             let mut select_level = InputLevel {
@@ -76,7 +88,7 @@ impl TierCompactionPicker {
             };
             let mut compaction_bytes = 0;
             for sst in &level.table_infos {
-                if several_table || table_id == sst.table_ids[0] {
+                if table_id == sst.table_ids[0] {
                     select_level.table_infos.push(sst.clone());
                     compaction_bytes += sst.file_size;
                 }
@@ -107,7 +119,11 @@ impl TierCompactionPicker {
                 };
                 let mut cur_level_size = 0;
                 for sst in &other.table_infos {
-                    if several_table || table_id == sst.table_ids[0] {
+                    if sst.table_ids.len() > 1 {
+                        several_table = true;
+                        break;
+                    }
+                    if table_id == sst.table_ids[0] {
                         if level_handler.is_pending_compact(&sst.id) {
                             pending_compact = true;
                             break;
@@ -116,7 +132,7 @@ impl TierCompactionPicker {
                         cur_level_size += sst.file_size;
                     }
                 }
-                if pending_compact {
+                if pending_compact || several_table {
                     break;
                 }
 
