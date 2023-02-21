@@ -18,7 +18,7 @@ use bytes::BufMut;
 
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, ToDatumRef,
+    memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum, ToDatumRef,
 };
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::sort_util::OrderType;
@@ -108,6 +108,20 @@ impl OrderedRowSerde {
         }
 
         Ok(len)
+    }
+
+    pub fn deserialize_first(&self, data: &[u8]) -> memcomparable::Result<Datum> {
+        let mut deserializer = memcomparable::Deserializer::new(data);
+
+        let err_msg =
+            || memcomparable::Error::Message("Need data type for the first element".to_string());
+        let data_type = self.schema.first().ok_or_else(err_msg)?;
+        let order_type = self.order_types.first().ok_or_else(err_msg)?;
+        deserializer.set_reverse(*order_type == OrderType::Descending);
+
+        let datum = memcmp_deserialize_datum_from(data_type, &mut deserializer)?;
+
+        Ok(datum)
     }
 }
 

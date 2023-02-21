@@ -226,14 +226,17 @@ where
         Ok(())
     }
 
-    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
-        if watermark.col_idx == self.group_by[0] {
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> StreamExecutorResult<Option<Watermark>> {
+        Ok(if watermark.col_idx == self.group_by[0] {
             self.managed_state
                 .state_table
                 .update_watermark(watermark.val.clone());
             Some(watermark)
         } else {
             None
-        }
+        })
     }
 }

@@ -188,9 +188,15 @@ where
             .await
     }
 
-    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
-        // TODO(yuhao): handle watermark
-        None
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> StreamExecutorResult<Option<Watermark>> {
+        Ok(if watermark.col_idx == self.storage_key_indices[0] {
+            Some(watermark)
+        } else {
+            None
+        })
     }
 }
 

@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::StateStore;
 
 use super::utils::*;
@@ -228,9 +228,37 @@ where
             .await
     }
 
-    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
-        // TODO(yuhao): handle watermark
-        None
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> StreamExecutorResult<Option<Watermark>> {
+        if watermark.col_idx == self.storage_key_indices[0] {
+            if self.cache_key_serde.0.get_order_types()[0] == OrderType::Ascending {
+                if self.cache.is_middle_cache_full() {
+                    let last_entry = self.cache.middle.last_entry().unwrap();
+                    let watermark_in_key = self
+                        .cache_key_serde
+                        .0
+                        .deserialize_first(&last_entry.key().0)?;
+
+                    if let Some(watermark_in_key) = watermark_in_key {
+                        if watermark.val > watermark_in_key {
+                            // FIXME(yuhao): range delete records above the watermark
+                            self.managed_state
+                                .state_table
+                                .update_watermark(watermark_in_key);
+                        }
+                    } else {
+                        // TODO(yuhao): handle null watermark
+                    }
+                }
+            } else {
+                // TODO(yuhao): handle watermark in descending case
+            }
+            Ok(Some(watermark))
+        } else {
+            Ok(None)
+        }
     }
 }
 

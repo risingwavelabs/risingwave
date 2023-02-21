@@ -70,7 +70,10 @@ pub trait TopNExecutorBase: Send + 'static {
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
     /// Handle incoming watermarks
-    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
+    async fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> StreamExecutorResult<Option<Watermark>>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -126,7 +129,7 @@ where
             let msg = msg?;
             match msg {
                 Message::Watermark(watermark) => {
-                    if let Some(output_watermark) = self.inner.handle_watermark(watermark).await {
+                    if let Some(output_watermark) = self.inner.handle_watermark(watermark).await? {
                         yield Message::Watermark(output_watermark);
                     }
                 }
