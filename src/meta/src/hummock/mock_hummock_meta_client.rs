@@ -202,7 +202,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             while let Some((group, task_type)) = sched_rx.recv().await {
-                sched_channel.unschedule(group);
+                sched_channel.unschedule(group, task_type);
 
                 let mut selector: Box<dyn LevelSelector> = match task_type {
                     compact_task::TaskType::Dynamic => default_level_selector(),

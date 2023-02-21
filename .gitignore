@@ -23,6 +23,9 @@ cmake-build-debug/
 *.app
 build/
 
+# Python
+*.pyc
+
 # Golang
 go/bin/
 
@@ -58,6 +61,7 @@ ft.txt
 src/tests/regress/output/*
 src/tests/sync_point/slt/e2e_test
 # generated e2e tests
-e2e_test/generated
+e2e_test/generated/*
+!e2e_test/generated/README.md
 # generated scale tests by `cargo nextest`
 scale-test.tar.zst

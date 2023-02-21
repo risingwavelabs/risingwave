@@ -159,6 +159,10 @@ pub struct MetaConfig {
     /// Schedule space_reclaim compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -502,6 +506,10 @@ mod default {
 
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
             3600 // 60min
+        }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
         }
     }
 
