@@ -139,7 +139,7 @@ fn rewrite_stream_node(
 
                 let strategy = DispatchStrategy {
                     r#type: DispatcherType::NoShuffle.into(),
-                    column_indices: vec![], // TODO: use distribution key
+                    dist_key_indices: vec![], // TODO: use distribution key
                 };
                 Ok(StreamNode {
                     stream_key: child_node.stream_key.clone(),

@@ -339,14 +339,14 @@ impl ActorGraphBuildStateInner {
 
     /// Create a new hash dispatcher.
     fn new_hash_dispatcher(
-        column_indices: &[u32],
+        dist_key_indices: &[u32],
         downstream_fragment_id: GlobalFragmentId,
         downstream_actors: &[GlobalActorId],
         downstream_actor_mapping: ActorMapping,
     ) -> Dispatcher {
         Dispatcher {
             r#type: DispatcherType::Hash as _,
-            column_indices: column_indices.to_vec(),
+            dist_key_indices: dist_key_indices.to_vec(),
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
@@ -362,7 +362,7 @@ impl ActorGraphBuildStateInner {
         assert_ne!(dispatcher_type, DispatcherType::Hash);
         Dispatcher {
             r#type: dispatcher_type as _,
-            column_indices: Vec::new(),
+            dist_key_indices: Vec::new(),
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
@@ -474,7 +474,7 @@ impl ActorGraphBuildStateInner {
                         .to_actor(&downstream_locations);
 
                     Self::new_hash_dispatcher(
-                        &edge.dispatch_strategy.column_indices,
+                        &edge.dispatch_strategy.dist_key_indices,
                         downstream.fragment_id,
                         downstream.actor_ids,
                         actor_mapping,

@@ -309,8 +309,8 @@ impl DispatcherImpl {
         let dispatcher_impl = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
-                let column_indices = dispatcher
-                    .column_indices
+                let dist_key_indices = dispatcher
+                    .dist_key_indices
                     .iter()
                     .map(|i| *i as usize)
                     .collect();
@@ -320,7 +320,7 @@ impl DispatcherImpl {
 
                 DispatcherImpl::Hash(HashDataDispatcher::new(
                     outputs,
-                    column_indices,
+                    dist_key_indices,
                     hash_mapping,
                     dispatcher.dispatcher_id,
                 ))

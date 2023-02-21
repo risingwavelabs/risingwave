@@ -46,7 +46,7 @@ fn build_no_shuffle_exchange_for_delta_join(
 fn build_consistent_hash_shuffle_exchange_for_delta_join(
     state: &mut BuildFragmentGraphState,
     upstream: &StreamNode,
-    column_indices: Vec<u32>,
+    dist_key_indices: Vec<u32>,
 ) -> StreamNode {
     StreamNode {
         operator_id: state.gen_operator_id() as u64,
@@ -54,7 +54,7 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
         node_body: Some(NodeBody::Exchange(ExchangeNode {
-            strategy: Some(dispatch_consistent_hash_shuffle(column_indices)),
+            strategy: Some(dispatch_consistent_hash_shuffle(dist_key_indices)),
         })),
         input: vec![],
         append_only: upstream.append_only,
@@ -64,15 +64,15 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
 fn dispatch_no_shuffle() -> DispatchStrategy {
     DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
-        column_indices: vec![],
+        dist_key_indices: vec![],
     }
 }
 
-fn dispatch_consistent_hash_shuffle(column_indices: Vec<u32>) -> DispatchStrategy {
+fn dispatch_consistent_hash_shuffle(dist_key_indices: Vec<u32>) -> DispatchStrategy {
     // Actually Hash shuffle is consistent hash shuffle now.
     DispatchStrategy {
         r#type: DispatcherType::Hash.into(),
-        column_indices,
+        dist_key_indices,
     }
 }
 

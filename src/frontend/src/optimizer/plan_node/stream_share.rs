@@ -91,22 +91,22 @@ impl StreamShare {
                     Distribution::HashShard(keys) | Distribution::UpstreamHashShard(keys, _) => {
                         DispatchStrategy {
                             r#type: DispatcherType::Hash as i32,
-                            column_indices: keys.iter().map(|x| *x as u32).collect_vec(),
+                            dist_key_indices: keys.iter().map(|x| *x as u32).collect_vec(),
                         }
                     }
                     Distribution::Single => DispatchStrategy {
                         r#type: DispatcherType::Simple as i32,
-                        column_indices: vec![],
+                        dist_key_indices: vec![],
                     },
                     Distribution::Broadcast => DispatchStrategy {
                         r#type: DispatcherType::Broadcast as i32,
-                        column_indices: vec![],
+                        dist_key_indices: vec![],
                     },
                     Distribution::SomeShard => {
                         // FIXME: use another DispatcherType?
                         DispatchStrategy {
                             r#type: DispatcherType::Hash as i32,
-                            column_indices: self
+                            dist_key_indices: self
                                 .base
                                 .logical_pk
                                 .iter()
