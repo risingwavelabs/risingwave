@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 
@@ -20,11 +19,10 @@ use anyhow::anyhow;
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
-use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -40,6 +38,9 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
+use crate::stream::scale::utils::{
+    appoint_actors_to_vacant_interval_sets, divide_vnode_into_occupied_and_vacant,
+};
 use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
 
@@ -97,23 +98,20 @@ impl RescheduleContext {
     }
 }
 
-/// This function provides an simple balancing method
+/// This function provides a simple balancing method, which aims to enable parallel units to
+/// leverage locality of vnodes which are assigned to them to reduce storage block cache size by not
+/// storing irrelevant data in their block cache, while keeping affinity to avoid too much
+/// operator cache refilling.
 /// The specific process is as follows
 ///
 /// 1. Calculate the number of target actors, and calculate the average value and the remainder, and
 /// use the average value as expected.
 ///
-/// 2. Filter out the actor to be removed and the actor to be retained, and sort them from largest
-/// to smallest (according to the number of virtual nodes held).
+/// 2. Filter out the actor to be removed and the actor to be retained.
 ///
-/// 3. Calculate their balance, 1) For the actors to be removed, the number of virtual nodes per
-/// actor is the balance. 2) For retained actors, the number of virtual nodes - expected is the
-/// balance. 3) For newly created actors, -expected is the balance (always negative).
+/// 3. Divide virtual nodes into occupied and vacant.
 ///
-/// 4. Allocate the remainder, high priority to newly created nodes.
-///
-/// 5. After that, merge removed, retained and created into a queue, with the head of the queue
-/// being the source, and move the virtual nodes to the destination at the end of the queue.
+/// 4. Assign vacant vnodes to actors.
 ///
 /// This can handle scale in, scale out, migration, and simultaneous scaling with as much affinity
 /// as possible.
@@ -133,14 +131,7 @@ pub(crate) fn rebalance_actor_vnode(
     let target_actor_count = actors.len() - actors_to_remove.len() + actors_to_create.len();
     assert!(target_actor_count > 0);
 
-    // represents the balance of each actor, used to sort later
-    #[derive(Debug)]
-    struct Balance {
-        actor_id: ActorId,
-        balance: i32,
-        builder: BitmapBuilder,
-    }
-    let (expected, mut remain) = VirtualNode::COUNT.div_rem(&target_actor_count);
+    let (expected, remain) = VirtualNode::COUNT.div_rem(&target_actor_count);
 
     tracing::debug!(
         "expected {}, remain {}, prev actors {}, target actors {}",
@@ -150,7 +141,7 @@ pub(crate) fn rebalance_actor_vnode(
         target_actor_count,
     );
 
-    let (mut removed, mut rest): (Vec<_>, Vec<_>) = actors
+    let (removed, rest): (Vec<_>, Vec<_>) = actors
         .iter()
         .filter_map(|actor| {
             actor
@@ -160,139 +151,54 @@ pub(crate) fn rebalance_actor_vnode(
         })
         .partition(|(actor_id, _)| actors_to_remove.contains(actor_id));
 
-    let order_by_bitmap_desc =
-        |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
-            bitmap_a.count_ones().cmp(&bitmap_b.count_ones()).reverse()
-        };
+    // Arbitrary vnodes can be assigned to flexible actors.
+    let mut flexible_actors = actors_to_create.iter().cloned().collect_vec();
 
-    let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
-        let mut builder = BitmapBuilder::default();
-        builder.append_bitmap(bitmap);
-        builder
-    };
-
-    let (prev_expected, _) = VirtualNode::COUNT.div_rem(&actors.len());
-
-    let prev_remain = removed
-        .iter()
-        .map(|(_, bitmap)| {
-            assert!(bitmap.count_ones() >= prev_expected);
-            bitmap.count_ones() - prev_expected
-        })
-        .sum::<usize>();
-
-    removed.sort_by(order_by_bitmap_desc);
-    rest.sort_by(order_by_bitmap_desc);
-
-    let removed_balances = removed.into_iter().map(|(actor_id, bitmap)| Balance {
-        actor_id,
-        balance: bitmap.count_ones() as i32,
-        builder: builder_from_bitmap(&bitmap),
-    });
-
-    let mut rest_balances = rest
-        .into_iter()
-        .map(|(actor_id, bitmap)| Balance {
-            actor_id,
-            balance: bitmap.count_ones() as i32 - expected as i32,
-            builder: builder_from_bitmap(&bitmap),
-        })
-        .collect_vec();
-
-    let mut created_balances = actors_to_create
-        .iter()
-        .map(|actor_id| Balance {
-            actor_id: *actor_id,
-            balance: -(expected as i32),
-            builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
-        })
-        .collect_vec();
-
-    for balance in created_balances
-        .iter_mut()
-        .rev()
-        .take(prev_remain)
-        .chain(rest_balances.iter_mut())
-    {
-        if remain > 0 {
-            balance.balance -= 1;
-            remain -= 1;
-        }
-    }
-
-    // consume the rest `remain`
-    for balance in &mut created_balances {
-        if remain > 0 {
-            balance.balance -= 1;
-            remain -= 1;
-        }
-    }
-
-    assert_eq!(remain, 0);
-
-    let mut v: VecDeque<_> = removed_balances
-        .chain(rest_balances)
-        .chain(created_balances)
-        .collect();
-
-    // We will return the full bitmap here after rebalancing,
-    // if we want to return only the changed actors, filter balance = 0 here
-    let mut result = HashMap::with_capacity(target_actor_count);
-
-    for balance in &v {
-        tracing::debug!(
-            "actor {:5}\tbalance {:5}\tR[{:5}]\tC[{:5}]",
-            balance.actor_id,
-            balance.balance,
-            actors_to_remove.contains(&balance.actor_id),
-            actors_to_create.contains(&balance.actor_id)
+    if actors_to_remove.len() == actors_to_create.len() {
+        let mut result = HashMap::with_capacity(target_actor_count);
+        result.extend(rest.into_iter());
+        result.extend(
+            flexible_actors
+                .into_iter()
+                .zip_eq_fast(removed.into_iter().map(|(_, bitmap)| bitmap)),
         );
+        return result;
     }
 
-    while !v.is_empty() {
-        if v.len() == 1 {
-            let single = v.pop_front().unwrap();
-            assert_eq!(single.balance, 0);
-            if !actors_to_remove.contains(&single.actor_id) {
-                result.insert(single.actor_id, single.builder.finish());
+    // We will allocate `expected + 1` first and prune excess ones later (View comments
+    // in function `prune_excess_remainder_segments` for details).
+    let quota = expected + if remain > 0 { 1 } else { 0 };
+    // `unallocated_remain` is the result of subtracting the number of actors which now have
+    // `expected + 1` vnodes from `remain`.
+    let (fixed_segments, unallocated_remain, uncovered_segments) =
+        divide_vnode_into_occupied_and_vacant(&rest, quota, expected, remain, &mut flexible_actors);
+
+    // Fill vnodes which are not occupied, i.e., assigning them to actors.
+    let builders = appoint_actors_to_vacant_interval_sets(
+        fixed_segments,
+        uncovered_segments,
+        quota,
+        expected,
+        remain,
+        unallocated_remain,
+        target_actor_count,
+        &mut flexible_actors,
+    );
+
+    // Build bitmap from vnode set for each actor.
+    let mut result = HashMap::with_capacity(target_actor_count);
+    for (actor_id, intervals) in builders {
+        let mut bitmap_builder = BitmapBuilder::zeroed(VirtualNode::COUNT);
+        for interval in intervals {
+            for vnode in interval {
+                bitmap_builder.set(vnode, true);
             }
-
-            continue;
         }
-
-        let mut src = v.pop_front().unwrap();
-        let mut dst = v.pop_back().unwrap();
-
-        let n = min(abs(src.balance), abs(dst.balance));
-
-        let mut moved = 0;
-        for idx in (0..VirtualNode::COUNT).rev() {
-            if moved >= n {
-                break;
-            }
-
-            if src.builder.is_set(idx) {
-                src.builder.set(idx, false);
-                assert!(!dst.builder.is_set(idx));
-                dst.builder.set(idx, true);
-                moved += 1;
-            }
-        }
-
-        src.balance -= n;
-        dst.balance += n;
-
-        if src.balance != 0 {
-            v.push_front(src);
-        } else if !actors_to_remove.contains(&src.actor_id) {
-            result.insert(src.actor_id, src.builder.finish());
-        }
-
-        if dst.balance != 0 {
-            v.push_back(dst);
-        } else {
-            result.insert(dst.actor_id, dst.builder.finish());
-        }
+        result.insert(actor_id, bitmap_builder.finish());
+    }
+    // Some actors can have empty bitmaps when `target_actor_count > VirtualNode::COUNT`.
+    for actor_id in flexible_actors {
+        result.insert(actor_id, BitmapBuilder::zeroed(VirtualNode::COUNT).finish());
     }
 
     result

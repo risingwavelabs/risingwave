@@ -97,6 +97,12 @@ mod tests {
         assert!((max - min) <= 1, "min {} max {}", min, max);
     }
 
+    fn check_bitmaps_locality<T>(bitmaps: &HashMap<T, Bitmap>) {
+        for bitmap in bitmaps.values() {
+            assert_eq!(bitmap.high_ranges().count(), 1);
+        }
+    }
+
     #[test]
     fn test_build_vnode_mapping() {
         for parallel_units_num in simulated_parallel_unit_nums(None, None) {
@@ -260,6 +266,25 @@ mod tests {
             assert_eq!(result.len(), actors.len() + actors_to_add.len());
             check_bitmaps(&result);
         }
+    }
+
+    #[test]
+    fn test_rebalance_scale_out_locality() {
+        let parallel_unit_num = 2;
+
+        let actors = build_fake_actors(
+            &(0..parallel_unit_num)
+                .map(|i| (i as ActorId, i as ParallelUnitId))
+                .collect_vec(),
+        );
+
+        // add 1
+        let actors_to_add = btreeset! {parallel_unit_num as ActorId};
+        let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
+        assert_eq!(result.len(), actors.len() + actors_to_add.len());
+        check_bitmaps(&result);
+
+        check_bitmaps_locality(&result);
     }
 
     #[test]
