@@ -106,7 +106,7 @@ impl StreamSink {
         if sink_type == SinkType::Upsert && pk.is_empty() {
             return Err(ErrorCode::SinkError(Box::new(Error::new(
                 ErrorKind::InvalidInput,
-                "No primary key for the upsert sink. Please include the primary key explictly in sink definition or make the sink append-only.",
+                "No primary key for the upsert sink. Please include the primary key explicitly in sink definition or make the sink append-only.",
             )))
             .into());
         }
