@@ -47,7 +47,15 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
         .zip_eq_fast(&sig.inputs_type)
         .map(|(expr, t)| {
             if DataTypeName::from(expr.return_type()) != *t {
-                return expr.cast_implicit((*t).into());
+                if t.is_scalar() {
+                    return expr.cast_implicit((*t).into());
+                } else {
+                    return Err(ErrorCode::BindError(format!(
+                        "Cannot implicitly cast '{:?}' to polymorphic type {:?}",
+                        &expr, t
+                    ))
+                    .into());
+                }
             }
             Ok(expr)
         })
