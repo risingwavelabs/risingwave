@@ -36,6 +36,8 @@ pub struct OpendalObjectStore {
 pub enum EngineType {
     Memory,
     Hdfs,
+    Gcs,
+    Oss,
 }
 
 impl OpendalObjectStore {
@@ -182,6 +184,8 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::Gcs => "Gcs",
+            EngineType::Oss => "Oss",
         }
     }
 }
