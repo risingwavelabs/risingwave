@@ -16,7 +16,7 @@ use core::convert::Into;
 use core::fmt::Formatter;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::string;
+
 use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
