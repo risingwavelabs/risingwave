@@ -118,8 +118,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     filter_builder: F,
 }
 
-const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
-
 impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
@@ -188,6 +186,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
+
         let mut is_new_table = false;
 
         let table_key_len = full_key.user_key.table_key.as_ref().len();
