@@ -101,15 +101,6 @@ impl SpaceReclaimCompactionPicker {
             return None;
         }
 
-        let first_sst = reclaimed_level.table_infos.first().unwrap();
-        let last_sst = reclaimed_level.table_infos.last().unwrap();
-
-        let key_range_this_round = KeyRange {
-            left: first_sst.key_range.as_ref().unwrap().left.clone(),
-            right: last_sst.key_range.as_ref().unwrap().right.clone(),
-            right_exclusive: last_sst.key_range.as_ref().unwrap().right_exclusive,
-        };
-
         if state.valid()
             && state
                 .last_select_end_bound
@@ -124,17 +115,25 @@ impl SpaceReclaimCompactionPicker {
 
         if !state.valid() {
             // new round init key_range bound with table_infos
+            let first_sst = reclaimed_level.table_infos.first().unwrap();
+            let last_sst = reclaimed_level.table_infos.last().unwrap();
+
+            let key_range_this_round = KeyRange {
+                left: first_sst.key_range.as_ref().unwrap().left.clone(),
+                right: last_sst.key_range.as_ref().unwrap().right.clone(),
+                right_exclusive: last_sst.key_range.as_ref().unwrap().right_exclusive,
+            };
             state.init(key_range_this_round);
         }
 
         let mut select_file_size = 0;
         for sst in &reclaimed_level.table_infos {
-            let matched_sst = sst
+            let unmatched_sst = sst
                 .key_range
                 .as_ref()
                 .unwrap()
                 .sstable_overlap(&state.last_select_end_bound);
-            if matched_sst || (level_handler.is_pending_compact(&sst.id) || self.filter(sst)) {
+            if unmatched_sst || (level_handler.is_pending_compact(&sst.id) || self.filter(sst)) {
                 if !select_input_ssts.is_empty() {
                     // Our goal is to pick as many complete layers of data as possible and keep the
                     // picked files contiguous to avoid overlapping key_ranges, so the strategy is
@@ -162,7 +161,7 @@ impl SpaceReclaimCompactionPicker {
         state.last_select_end_bound.full_key_extend(&KeyRange {
             left: vec![],
             right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
-            right_exclusive: true,
+            right_exclusive: select_last_sst.key_range.as_ref().unwrap().right_exclusive,
         });
 
         Some(CompactionInput {
@@ -214,7 +213,7 @@ mod test {
 
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
-        let levels = vec![
+        let mut levels = vec![
             generate_level(1, vec![]),
             generate_level(2, vec![]),
             generate_level(
@@ -236,12 +235,20 @@ mod test {
                     generate_table_with_ids_and_epochs(7, 1, 555, 600, 1, vec![7], 0, 0),
                     generate_table_with_ids_and_epochs(8, 1, 666, 700, 1, vec![8], 0, 0),
                     generate_table_with_ids_and_epochs(9, 1, 777, 800, 1, vec![9], 0, 0),
-                    generate_table_with_ids_and_epochs(10, 1, 888, 900, 1, vec![10], 0, 0),
+                    generate_table_with_ids_and_epochs(10, 1, 888, 1600, 1, vec![10], 0, 0),
+                    generate_table_with_ids_and_epochs(11, 1, 1600, 1800, 1, vec![10], 0, 0),
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
             },
         ];
+
+        {
+            let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
+            assert_eq!(10, sst_10.id);
+            sst_10.key_range.as_mut().unwrap().right_exclusive = true;
+        }
+
         assert_eq!(levels.len(), 4);
         let mut levels = Levels {
             levels,
@@ -318,11 +325,7 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
 
             // test select index, picker will select file from state
-            let all_file_count = levels.get_levels().last().unwrap().get_table_infos().len();
-            assert_eq!(
-                task.input.input_levels[0].table_infos.len(),
-                all_file_count - 5
-            );
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 4,);
 
             let mut start_id = 7;
             for sst in &task.input.input_levels[0].table_infos {
@@ -337,6 +340,44 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::SpaceReclaim
             ));
+
+            // test pick key_range right exclusive
+            let task = selector
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    HashMap::default(),
+                )
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
+            assert!(matches!(
+                task.compaction_task_type,
+                compact_task::TaskType::SpaceReclaim
+            ));
+            for sst in &task.input.input_levels[0].table_infos {
+                assert_eq!(start_id, sst.id);
+                start_id += 1;
+            }
+
+            assert!(selector
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    HashMap::default(),
+                )
+                .is_none())
         }
 
         {

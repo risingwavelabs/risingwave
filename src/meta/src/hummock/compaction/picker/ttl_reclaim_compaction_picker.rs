@@ -127,15 +127,6 @@ impl TtlReclaimCompactionPicker {
             return None;
         }
 
-        let first_sst = reclaimed_level.table_infos.first().unwrap();
-        let last_sst = reclaimed_level.table_infos.last().unwrap();
-
-        let key_range_this_round = KeyRange {
-            left: first_sst.key_range.as_ref().unwrap().left.clone(),
-            right: last_sst.key_range.as_ref().unwrap().right.clone(),
-            right_exclusive: last_sst.key_range.as_ref().unwrap().right_exclusive,
-        };
-
         if state.valid()
             && state
                 .last_select_end_bound
@@ -150,28 +141,29 @@ impl TtlReclaimCompactionPicker {
 
         if !state.valid() {
             // new round init key_range bound with table_infos
+            let first_sst = reclaimed_level.table_infos.first().unwrap();
+            let last_sst = reclaimed_level.table_infos.last().unwrap();
+
+            let key_range_this_round = KeyRange {
+                left: first_sst.key_range.as_ref().unwrap().left.clone(),
+                right: last_sst.key_range.as_ref().unwrap().right.clone(),
+                right_exclusive: last_sst.key_range.as_ref().unwrap().right_exclusive,
+            };
+
             state.init(key_range_this_round);
         }
 
         let current_epoch_time = Epoch::now().0;
         let mut select_file_size = 0;
-        let matched_sst = reclaimed_level
-            .table_infos
-            .iter()
-            .filter(|sst| match &sst.key_range {
-                // Some(key_range) => key_range.left > state.last_select_end_key,
-                Some(key_range) => !key_range.sstable_overlap(&state.last_select_end_bound),
 
-                None => false,
-            });
-
-        for sst in matched_sst {
-            let matched_sst = sst
+        for sst in &reclaimed_level.table_infos {
+            let unmatched_sst = sst
                 .key_range
                 .as_ref()
                 .unwrap()
                 .sstable_overlap(&state.last_select_end_bound);
-            if matched_sst
+
+            if unmatched_sst
                 || level_handler.is_pending_compact(&sst.id)
                 || self.filter(sst, current_epoch_time)
             {
@@ -203,7 +195,7 @@ impl TtlReclaimCompactionPicker {
         state.last_select_end_bound.full_key_extend(&KeyRange {
             left: vec![],
             right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
-            right_exclusive: true,
+            right_exclusive: select_last_sst.key_range.as_ref().unwrap().right_exclusive,
         });
 
         Some(CompactionInput {
@@ -256,7 +248,7 @@ mod test {
             current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS - (1000 * 1000),
         )
         .0;
-        let levels = vec![
+        let mut levels = vec![
             generate_level(1, vec![]),
             generate_level(2, vec![]),
             generate_level(
@@ -345,7 +337,17 @@ mod test {
                         10,
                         1,
                         888,
-                        900,
+                        1600,
+                        1,
+                        vec![10],
+                        expired_epoch,
+                        u64::MAX,
+                    ),
+                    generate_table_with_ids_and_epochs(
+                        11,
+                        1,
+                        1600,
+                        1800,
                         1,
                         vec![10],
                         expired_epoch,
@@ -356,6 +358,13 @@ mod test {
                 sub_level_id: 0,
             },
         ];
+
+        {
+            let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
+            assert_eq!(10, sst_10.id);
+            sst_10.key_range.as_mut().unwrap().right_exclusive = true;
+        }
+
         assert_eq!(levels.len(), 4);
         let levels = Levels {
             levels,
@@ -433,7 +442,7 @@ mod test {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
-                    table_id_to_options,
+                    table_id_to_options.clone(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -441,11 +450,7 @@ mod test {
             assert_eq!(task.input.input_levels[0].level_idx, 4);
 
             // test select index, picker will select file from state
-            let all_file_count = levels.get_levels().last().unwrap().get_table_infos().len();
-            assert_eq!(
-                task.input.input_levels[0].table_infos.len(),
-                all_file_count - 5
-            );
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 4);
 
             let mut start_id = 7;
             for sst in &task.input.input_levels[0].table_infos {
@@ -460,6 +465,44 @@ mod test {
                 task.compaction_task_type,
                 compact_task::TaskType::Ttl
             ));
+
+            // test pick key_range right exclusive
+            let task = selector
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    table_id_to_options.clone(),
+                )
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 4);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
+            assert_eq!(task.input.input_levels[1].level_idx, 4);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 4);
+            assert!(matches!(
+                task.compaction_task_type,
+                compact_task::TaskType::Ttl
+            ));
+            for sst in &task.input.input_levels[0].table_infos {
+                assert_eq!(start_id, sst.id);
+                start_id += 1;
+            }
+
+            assert!(selector
+                .pick_compaction(
+                    1,
+                    &group_config,
+                    &levels,
+                    &mut levels_handler,
+                    &mut local_stats,
+                    table_id_to_options,
+                )
+                .is_none())
         }
 
         {
