@@ -55,14 +55,18 @@ impl TierCompactionPicker {
             }
 
             let mut table_id = 0;
+            let mut several_table = false;
             for sst in &level.table_infos {
-                assert_eq!(sst.table_ids.len(), 1);
+                if sst.table_ids.len() > 1 {
+                    several_table = true;
+                    break;
+                }
                 if level_handler.is_pending_compact(&sst.id) {
                     continue;
                 }
                 table_id = sst.table_ids[0];
             }
-            if table_id == 0 {
+            if !several_table && table_id == 0 {
                 continue;
             }
             let mut select_level = InputLevel {
@@ -72,8 +76,7 @@ impl TierCompactionPicker {
             };
             let mut compaction_bytes = 0;
             for sst in &level.table_infos {
-                assert_eq!(sst.table_ids.len(), 1);
-                if table_id == sst.table_ids[0] {
+                if several_table || table_id == sst.table_ids[0] {
                     select_level.table_infos.push(sst.clone());
                     compaction_bytes += sst.file_size;
                 }
@@ -104,8 +107,7 @@ impl TierCompactionPicker {
                 };
                 let mut cur_level_size = 0;
                 for sst in &other.table_infos {
-                    assert_eq!(sst.table_ids.len(), 1);
-                    if table_id == sst.table_ids[0] {
+                    if several_table || table_id == sst.table_ids[0] {
                         if level_handler.is_pending_compact(&sst.id) {
                             pending_compact = true;
                             break;
@@ -120,35 +122,13 @@ impl TierCompactionPicker {
 
                 compaction_bytes += cur_level_size;
                 compact_file_count += cur_level.table_infos.len();
-                max_level_size = std::cmp::max(max_level_size, cur_level_size);
                 select_level_inputs.push(cur_level);
             }
 
-            if compact_file_count < self.config.level0_tier_compact_file_number as usize
+            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
-                continue;
-            }
-
-            // This limitation would keep our write-amplification no more than
-            // ln(max_compaction_bytes/flush_level_bytes) /
-            // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
-            // of level0_tier_compact_file_number just for convenient.
-            let is_write_amp_large =
-                max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
-
-            // do not pick a compact task with large write amplification. But if the total bytes is
-            // too large,  we can not check write amplification because it may cause
-            // compact task never be trigger.
-            if level.level_type == non_overlapping_type
-                && is_write_amp_large
-                && waiting_enough_files
-            {
-                stats.skip_by_write_amp_limit += 1;
-                continue;
-            }
-            if select_level_inputs.len() == 1 {
                 continue;
             }
 
