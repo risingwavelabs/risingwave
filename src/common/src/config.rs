@@ -349,10 +349,6 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
-
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
@@ -613,10 +609,6 @@ mod default {
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
-        }
-
-        pub fn enable_state_store_v1() -> bool {
-            false
         }
     }
 
