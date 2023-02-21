@@ -37,6 +37,7 @@ impl JsonParser {
         Ok(Self { rw_columns })
     }
 
+    #[inline(always)]
     fn parse_single_value(
         value: BorrowedValue<'_>,
         writer: &mut SourceStreamChunkRowWriter<'_>,
