@@ -111,7 +111,7 @@ class UdfServer(pa.flight.FlightServerBase):
         self._functions[name] = udf
 
     def do_exchange(self, context, descriptor, reader, writer):
-        """Run a simple echo server."""
+        """Call a function from the client."""
         udf = self._functions[descriptor.path[0].decode('utf-8')]
         writer.begin(udf.result_schema())
         for chunk in reader:
