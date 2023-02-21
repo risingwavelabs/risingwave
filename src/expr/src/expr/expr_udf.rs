@@ -89,20 +89,15 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let RexNode::Udf(udf) = prost.get_rex_node().unwrap() else {
             bail!("expect UDF");
         };
-        // connect to UDF service and check the function
-        let (client, arg_schema) = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let client = ArrowFlightUdfClient::connect(&udf.link).await?;
-                let args = Arc::new(Schema::new(
-                    udf.arg_types
-                        .iter()
-                        .map(|t| Field::new("", DataType::from(t).into(), true))
-                        .collect(),
-                ));
-                let returns = Schema::new(vec![Field::new("", (&return_type).into(), true)]);
-                client.check(&udf.identifier, &args, &returns).await?;
-                Ok((client, args)) as risingwave_udf::Result<_>
-            })
+        // connect to UDF service
+        let arg_schema = Arc::new(Schema::new(
+            udf.arg_types
+                .iter()
+                .map(|t| Field::new("", DataType::from(t).into(), true))
+                .collect(),
+        ));
+        let client = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(&udf.link))
         })?;
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -19,6 +20,7 @@ use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, DataType, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
+use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
 use crate::catalog::CatalogError;
@@ -69,7 +71,7 @@ pub async fn handle_create_function(
     };
     let Some(CreateFunctionUsing::Link(link)) = params.using else {
         return Err(ErrorCode::InvalidParameterValue(
-            "AS must be specified".to_string(),
+            "USING must be specified".to_string(),
         )
         .into());
     };
@@ -78,6 +80,8 @@ pub async fn handle_create_function(
             ErrorCode::InvalidParameterValue("return type must be specified".to_string()).into(),
         )
     };
+    let return_type = bind_data_type(&return_type)?;
+
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
         arg_types.push(bind_data_type(&arg.data_type)?);
@@ -102,13 +106,33 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
+    // check the service
+    let client = ArrowFlightUdfClient::connect(&link)
+        .await
+        .map_err(|e| anyhow!(e))?;
+    let args = arrow_schema::Schema::new(
+        arg_types
+            .iter()
+            .map(|t| arrow_schema::Field::new("", t.into(), true))
+            .collect(),
+    );
+    let returns = arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+        "",
+        return_type.clone().into(),
+        true,
+    )]);
+    client
+        .check(&identifier, &args, &returns)
+        .await
+        .map_err(|e| anyhow!(e))?;
+
     let function = Function {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
         name: function_name,
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
-        return_type: Some(bind_data_type(&return_type)?.into()),
+        return_type: Some(return_type.into()),
         language,
         identifier,
         link,

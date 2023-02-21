@@ -5934,6 +5934,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "arrow-schema",
  "assert_matches",
  "async-recursion",
  "async-trait",
@@ -5973,6 +5974,7 @@ dependencies = [
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
+ "risingwave_udf",
  "serde",
  "serde_json",
  "sha2",
