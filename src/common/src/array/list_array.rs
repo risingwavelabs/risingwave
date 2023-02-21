@@ -221,7 +221,11 @@ impl ListArray {
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.into();
         let array_data = array.get_list_array_data()?.to_owned();
-        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), bitmap.len())?;
+        let flatten_len = match array_data.offsets.last() {
+            Some(&n) => n as usize,
+            None => bail!("Must have at least one element in offsets"),
+        };
+        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), flatten_len)?;
         let arr = ListArray {
             bitmap,
             offsets: array_data.offsets,
