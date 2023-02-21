@@ -33,6 +33,7 @@
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(is_sorted)]
 
 pub mod backup_restore;
 mod barrier;
@@ -248,6 +249,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
+                periodic_ttl_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_ttl_reclaim_compaction_interval_sec,
             },
         )
         .await
