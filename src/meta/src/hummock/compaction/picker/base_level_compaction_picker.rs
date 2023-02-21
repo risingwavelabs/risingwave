@@ -12,25 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
-};
+use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
 
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{
     CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
-
-fn cal_file_size(table_infos: &[SstableInfo]) -> u64 {
-    table_infos.iter().map(|table| table.file_size).sum::<u64>()
-}
 
 pub struct LevelCompactionPicker {
     target_level: usize,
@@ -80,8 +73,6 @@ impl CompactionPicker for LevelCompactionPicker {
             });
         }
 
-        const MAX_WRITE_AMPLIFICATION: u64 = 100;
-
         let legacy_several_table = levels
             .get_level(self.target_level)
             .table_infos
@@ -91,7 +82,7 @@ impl CompactionPicker for LevelCompactionPicker {
         if legacy_several_table {
             // Pick one table which overlap with smallest data. There may be no file in target level
             //  which overlap with select files. That would be a trivial move.
-            let mut input_levels = self.pick_min_overlap_tables(
+            let input_levels = self.pick_min_overlap_tables(
                 l0,
                 levels.get_level(self.target_level),
                 level_handlers,
@@ -106,12 +97,8 @@ impl CompactionPicker for LevelCompactionPicker {
                 target_sub_level_id: 0,
             });
         }
-        let mut table_ids: HashSet<u32> = HashSet::default();
-        for sst in &l0.sub_levels[0].table_infos {
-            table_ids.extend(sst.table_ids.clone());
-        }
-        let mut input_levels = vec![];
-        for table_id in table_ids {
+        for table_id in levels.member_table_ids.clone() {
+            let mut input_levels = vec![];
             let mut l0_total_file_size = 0;
             let mut legacy_several_table = false;
             for level in &l0.sub_levels {
@@ -147,6 +134,9 @@ impl CompactionPicker for LevelCompactionPicker {
                 if pending_compact || legacy_several_table {
                     break;
                 }
+                if select_level.table_infos.is_empty() {
+                    continue;
+                }
 
                 l0_total_file_size += cur_level_size;
                 input_levels.push(select_level);
@@ -173,17 +163,24 @@ impl CompactionPicker for LevelCompactionPicker {
                 continue;
             }
 
-            if target_level_size * 100 > MAX_WRITE_AMPLIFICATION * l0_total_file_size
+            if target_level_size > l0_total_file_size
                 && l0_total_file_size < self.config.max_compaction_bytes
             {
+                stats.skip_by_write_amp_limit += 1;
                 continue;
             }
+
             // reverse because the ix of low sub-level is smaller.
             input_levels.reverse();
             input_levels.push(InputLevel {
                 level_idx: target_level,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: target_level_files.cloned().collect_vec(),
+            });
+            return Some(CompactionInput {
+                input_levels,
+                target_level: self.target_level,
+                target_sub_level_id: 0,
             });
         }
         None

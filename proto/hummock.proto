@@ -38,7 +38,6 @@ message Level {
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
-  uint32 split_by_vnode = 6;
 }
 
 message InputLevel {

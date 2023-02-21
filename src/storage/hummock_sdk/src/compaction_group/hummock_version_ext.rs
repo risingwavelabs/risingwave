@@ -457,7 +457,6 @@ pub fn build_initial_compaction_group_levels(
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
-            split_by_vnode: 0,
         });
     }
     Levels {
@@ -535,7 +534,6 @@ pub fn new_sub_level(
         table_infos,
         total_file_size,
         sub_level_id,
-        split_by_vnode: 0,
     }
 }
 

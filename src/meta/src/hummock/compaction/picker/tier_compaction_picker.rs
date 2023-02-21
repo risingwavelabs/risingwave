@@ -50,7 +50,9 @@ impl TierCompactionPicker {
         // do not pick the first sub-level because we do not want to block the level compaction.
         let non_overlapping_type = LevelType::Nonoverlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type != non_overlapping_type {
+            if level.level_type != non_overlapping_type
+                || level.total_file_size > self.config.sub_level_max_compaction_bytes
+            {
                 continue;
             }
 
@@ -98,16 +100,12 @@ impl TierCompactionPicker {
                 self.config.sub_level_max_compaction_bytes,
             );
 
-            let mut compact_file_count = select_level.table_infos.len();
+            let target_level_bytes = compaction_bytes;
             let mut waiting_enough_files = true;
             let mut select_level_inputs = vec![select_level];
             for other in &l0.sub_levels[idx + 1..] {
                 if compaction_bytes >= max_compaction_bytes {
                     waiting_enough_files = false;
-                    break;
-                }
-
-                if other.level_type != non_overlapping_type {
                     break;
                 }
 
@@ -132,19 +130,33 @@ impl TierCompactionPicker {
                         cur_level_size += sst.file_size;
                     }
                 }
-                if pending_compact || several_table {
+                if pending_compact
+                    || several_table
+                    || cur_level_size > self.config.sub_level_max_compaction_bytes
+                {
                     break;
                 }
 
+                if cur_level.table_infos.is_empty() {
+                    continue;
+                }
+
                 compaction_bytes += cur_level_size;
-                compact_file_count += cur_level.table_infos.len();
                 select_level_inputs.push(cur_level);
+            }
+
+            if select_level_inputs.len() <= 2 {
+                continue;
             }
 
             if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
+                continue;
+            }
+            if target_level_bytes * 2 > compaction_bytes && waiting_enough_files {
+                stats.skip_by_write_amp_limit += 1;
                 continue;
             }
 
@@ -188,7 +200,6 @@ impl TierCompactionPicker {
             );
 
             let mut compaction_bytes = level.total_file_size;
-            let mut max_level_size = level.total_file_size;
             let mut compact_file_count = level.table_infos.len();
             let mut waiting_enough_files = true;
 

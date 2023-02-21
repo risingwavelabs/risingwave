@@ -392,7 +392,6 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
-                split_by_vnode: 0,
             },
         ];
         let mut levels = Levels {
