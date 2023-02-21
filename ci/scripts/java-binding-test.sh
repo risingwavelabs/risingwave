@@ -28,11 +28,12 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
-mv target/debug/librisingwave_java_binding.so-"$profile" librisingwave_java_binding.so
+mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-dev
+chmod +x ./target/debug/librisingwave_java_binding.so
 
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.source.env risedev-components.user.env
