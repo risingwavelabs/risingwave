@@ -266,7 +266,6 @@ mod tests {
             data_directory: Some("data_directory".to_string()),
             backup_storage_url: Some("backup_storage_url".to_string()),
             backup_storage_directory: Some("backup_storage_directory".to_string()),
-            ..Default::default()
         }
     }
 
@@ -291,6 +290,7 @@ mod tests {
                 system_param: system_param.clone(),
                 ..Default::default()
             },
+            ..Default::default()
         };
 
         // target snapshot not found
@@ -344,6 +344,7 @@ mod tests {
                 system_param: get_system_params(),
                 ..Default::default()
             },
+            ..Default::default()
         };
         backup_store.create(&snapshot).await.unwrap();
 
@@ -400,6 +401,7 @@ mod tests {
                 system_param: get_system_params(),
                 ..Default::default()
             },
+            ..Default::default()
         };
         backup_store.create(&snapshot).await.unwrap();
 
@@ -430,6 +432,7 @@ mod tests {
                 system_param: get_system_params(),
                 ..Default::default()
             },
+            ..Default::default()
         };
         backup_store.create(&snapshot).await.unwrap();
 
@@ -476,6 +479,7 @@ mod tests {
                 system_param: system_param.clone(),
                 ..Default::default()
             },
+            ..Default::default()
         };
         backup_store.create(&snapshot).await.unwrap();
         restore_impl(

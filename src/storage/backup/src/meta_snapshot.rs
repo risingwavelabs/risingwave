@@ -233,7 +233,11 @@ mod tests {
     fn test_snapshot_encoding_decoding() {
         let mut metadata = ClusterMetadata::default();
         metadata.hummock_version.id = 321;
-        let raw = MetaSnapshot { id: 123, metadata };
+        let raw = MetaSnapshot {
+            format_version: 0,
+            id: 123,
+            metadata,
+        };
         let encoded = raw.encode();
         let decoded = MetaSnapshot::decode(&encoded).unwrap();
         assert_eq!(raw, decoded);

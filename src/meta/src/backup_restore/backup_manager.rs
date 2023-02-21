@@ -205,7 +205,7 @@ impl<S: MetaStore> BackupManager<S> {
                     );
                     return false;
                 }
-                return true;
+                true
             })
             .cloned()
             .collect_vec();
