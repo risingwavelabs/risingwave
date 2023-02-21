@@ -348,13 +348,6 @@ impl Locations {
             .into_group_map()
     }
 
-    /// Returns the `ActorInfo` map for every actor.
-    pub fn actor_info_map(&self) -> HashMap<ActorId, ActorInfo> {
-        self.actor_infos()
-            .map(|info| (info.actor_id, info))
-            .collect()
-    }
-
     /// Returns an iterator of `ActorInfo`.
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
