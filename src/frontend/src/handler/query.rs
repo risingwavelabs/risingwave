@@ -32,6 +32,7 @@ use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;

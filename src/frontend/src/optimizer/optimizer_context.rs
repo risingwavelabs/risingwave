@@ -109,6 +109,14 @@ impl OptimizerContext {
         *self.next_expr_display_id.borrow()
     }
 
+    pub fn get_expr_display_id(&self) -> usize {
+        *self.next_expr_display_id.borrow()
+    }
+
+    pub fn set_expr_display_id(&self, expr_display_id: usize) {
+        *self.next_expr_display_id.borrow_mut() = expr_display_id;
+    }
+
     pub fn next_correlated_id(&self) -> CorrelatedId {
         *self.next_correlated_id.borrow_mut() += 1;
         *self.next_correlated_id.borrow()

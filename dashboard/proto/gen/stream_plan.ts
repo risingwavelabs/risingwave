@@ -894,7 +894,7 @@ export interface StreamFragmentGraph {
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
   /** edges between fragments. */
   edges: StreamFragmentGraph_StreamFragmentEdge[];
-  dependentTableIds: number[];
+  dependentRelationIds: number[];
   tableIdsCnt: number;
   env:
     | StreamEnvironment
@@ -4041,7 +4041,7 @@ export const StreamEnvironment = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
+  return { fragments: {}, edges: [], dependentRelationIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -4059,8 +4059,8 @@ export const StreamFragmentGraph = {
       edges: Array.isArray(object?.edges)
         ? object.edges.map((e: any) => StreamFragmentGraph_StreamFragmentEdge.fromJSON(e))
         : [],
-      dependentTableIds: Array.isArray(object?.dependentTableIds)
-        ? object.dependentTableIds.map((e: any) => Number(e))
+      dependentRelationIds: Array.isArray(object?.dependentRelationIds)
+        ? object.dependentRelationIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
@@ -4081,10 +4081,10 @@ export const StreamFragmentGraph = {
     } else {
       obj.edges = [];
     }
-    if (message.dependentTableIds) {
-      obj.dependentTableIds = message.dependentTableIds.map((e) => Math.round(e));
+    if (message.dependentRelationIds) {
+      obj.dependentRelationIds = message.dependentRelationIds.map((e) => Math.round(e));
     } else {
-      obj.dependentTableIds = [];
+      obj.dependentRelationIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
@@ -4104,7 +4104,7 @@ export const StreamFragmentGraph = {
       return acc;
     }, {});
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
-    message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
+    message.dependentRelationIds = object.dependentRelationIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.env = (object.env !== undefined && object.env !== null)
       ? StreamEnvironment.fromPartial(object.env)
