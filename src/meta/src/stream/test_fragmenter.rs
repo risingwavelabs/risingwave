@@ -214,7 +214,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
-                output_indices: vec![],
+                output_indices: vec![0, 1, 2],
             }),
         })),
         fields: vec![
