@@ -95,5 +95,5 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
-    run(&client, &opt.testdata, opt.count).await;
+    run(&client, &opt.testdata, opt.count, None).await;
 }

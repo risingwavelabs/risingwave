@@ -12,8 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod simd_json_parser;
+use opendal::services::Gcs;
+use opendal::Operator;
 
-mod operators;
+use super::{EngineType, OpendalObjectStore};
+use crate::object::ObjectResult;
+impl OpendalObjectStore {
+    /// create opendal gcs engine.
+    pub fn new_gcs_engine(bucket: String, root: String) -> ObjectResult<Self> {
+        // Create gcs backend builder.
+        let mut builder = Gcs::default();
 
-pub use simd_json_parser::*;
+        builder.bucket(&bucket);
+
+        builder.root(&root);
+
+        let op: Operator = Operator::create(builder)?.finish();
+        Ok(Self {
+            op,
+            engine_type: EngineType::Gcs,
+        })
+    }
+}

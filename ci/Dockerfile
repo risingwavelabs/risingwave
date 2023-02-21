@@ -26,13 +26,19 @@ ENV PATH /root/.cargo/bin/:$PATH
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
 
+ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
+
 # install build tools
-RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache sccache \
+RUN cargo install cargo-quickinstall --locked
+RUN cargo quickinstall cargo-binstall
+RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache \
+    && cargo install sccache --locked \
     && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev dbadddb --bin sqllogictest --locked \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
+RUN cargo uninstall cargo-quickinstall cargo-binstall
 
 # download spark
 RUN wget https://archive.apache.org/dist/spark/spark-3.3.1/spark-3.3.1-bin-hadoop3.tgz && mkdir -p /opt/spark && mv spark-3.3.1-bin-hadoop3.tgz /opt/spark \
@@ -40,4 +46,6 @@ RUN wget https://archive.apache.org/dist/spark/spark-3.3.1/spark-3.3.1-bin-hadoo
 
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
+ENV SCCACHE_IDLE_TIMEOUT=0
 ENV CARGO_INCREMENTAL=0
+ENV CARGO_MAKE_PRINT_TIME_SUMMARY=true
