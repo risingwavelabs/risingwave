@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID,
+    columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, ROW_ID_COLUMN_ID,
 };
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -455,7 +455,7 @@ pub async fn handle_create_source(
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     let source = ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name,
