@@ -113,6 +113,9 @@ pub struct MetaOpts {
 
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -141,6 +144,7 @@ impl MetaOpts {
             state_store: None,
             data_directory: "hummock_001".to_string(),
             periodic_space_reclaim_compaction_interval_sec: 60,
+            periodic_ttl_reclaim_compaction_interval_sec: 60,
         }
     }
 

@@ -48,10 +48,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self
-            .mgr
-            .update_actors(&req.actors, &req.hanging_channels)
-            .await;
+        let res = self.mgr.update_actors(&req.actors).await;
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);
