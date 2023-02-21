@@ -116,7 +116,7 @@ impl SourceErrorContext {
             return;
         }
         self.metrics
-            .source_error_count
+            .user_source_error_count
             .with_label_values(&[
                 "SourceError",
                 // TODO(jon-chuang): add the error msg truncator to truncate these

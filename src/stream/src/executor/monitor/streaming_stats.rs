@@ -83,8 +83,8 @@ pub struct StreamingMetrics {
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
 
-    /// User error reporting
-    pub compute_error_count: GenericCounterVec<AtomicU64>,
+    /// User compute error reporting
+    pub user_compute_error_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -433,8 +433,8 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let compute_error_count = register_int_counter_vec_with_registry!(
-            "compute_error_count",
+        let user_compute_error_count = register_int_counter_vec_with_registry!(
+            "user_compute_error_count",
             "Compute errors in the system, queryable by tags",
             &["error_type", "error_msg", "executor_name", "fragment_id"],
             registry,
@@ -487,7 +487,7 @@ impl StreamingMetrics {
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
-            compute_error_count,
+            user_compute_error_count,
         }
     }
 

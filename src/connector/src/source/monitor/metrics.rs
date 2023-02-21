@@ -21,7 +21,7 @@ pub struct SourceMetrics {
     pub partition_input_count: GenericCounterVec<AtomicU64>,
     pub partition_input_bytes: GenericCounterVec<AtomicU64>,
     /// User error reporting
-    pub source_error_count: GenericCounterVec<AtomicU64>,
+    pub user_source_error_count: GenericCounterVec<AtomicU64>,
 }
 
 impl SourceMetrics {
@@ -40,8 +40,8 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
-        let source_error_count = register_int_counter_vec_with_registry!(
-            "source_error_count",
+        let user_source_error_count = register_int_counter_vec_with_registry!(
+            "user_source_error_count",
             "Source errors in the system, queryable by tags",
             &[
                 "error_type",
@@ -57,7 +57,7 @@ impl SourceMetrics {
             registry,
             partition_input_count,
             partition_input_bytes,
-            source_error_count,
+            user_source_error_count,
         }
     }
 

@@ -1468,7 +1468,7 @@ def section_streaming_errors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
                         ),
                     ],
@@ -1478,7 +1478,7 @@ def section_streaming_errors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
                         ),
                     ],
