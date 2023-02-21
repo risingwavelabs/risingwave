@@ -65,6 +65,7 @@ fn dispatch_no_shuffle() -> DispatchStrategy {
     DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
         dist_key_indices: vec![],
+        output_indices: vec![],
     }
 }
 
@@ -73,6 +74,7 @@ fn dispatch_consistent_hash_shuffle(dist_key_indices: Vec<u32>) -> DispatchStrat
     DispatchStrategy {
         r#type: DispatcherType::Hash.into(),
         dist_key_indices,
+        output_indices: vec![],
     }
 }
 

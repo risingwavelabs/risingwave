@@ -351,6 +351,7 @@ impl ActorGraphBuildStateInner {
         Dispatcher {
             r#type: DispatcherType::Hash as _,
             dist_key_indices: strategy.dist_key_indices.clone(),
+            output_indices: strategy.output_indices.clone(),
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
@@ -364,10 +365,12 @@ impl ActorGraphBuildStateInner {
         downstream_actors: &[GlobalActorId],
     ) -> Dispatcher {
         assert_ne!(strategy.r#type(), DispatcherType::Hash);
+        assert!(strategy.dist_key_indices.is_empty());
 
         Dispatcher {
             r#type: strategy.r#type,
-            dist_key_indices: Vec::new(),
+            dist_key_indices: vec![],
+            output_indices: strategy.output_indices.clone(),
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),

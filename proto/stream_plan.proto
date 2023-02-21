@@ -556,6 +556,7 @@ enum DispatcherType {
 message DispatchStrategy {
   DispatcherType type = 1;
   repeated uint32 dist_key_indices = 2;
+  repeated uint32 output_indices = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -565,6 +566,8 @@ message Dispatcher {
   // Indices of the columns to be used for hashing.
   // For dispatcher types other than HASH, this is ignored.
   repeated uint32 dist_key_indices = 2;
+
+  repeated uint32 output_indices = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;

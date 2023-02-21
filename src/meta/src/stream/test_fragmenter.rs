@@ -214,6 +214,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
+                output_indices: vec![],
             }),
         })),
         fields: vec![
@@ -375,6 +376,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 dist_key_indices: vec![],
+                output_indices: vec![],
             }),
             link_id: 4,
             upstream_id: 1,
@@ -384,6 +386,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 dist_key_indices: vec![0],
+                output_indices: vec![],
             }),
             link_id: 1,
             upstream_id: 2,

@@ -87,6 +87,7 @@ impl StreamNode for StreamExchange {
                     Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
                     _ => vec![],
                 },
+                output_indices: vec![],
             }),
         })
     }

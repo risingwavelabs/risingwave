@@ -92,15 +92,18 @@ impl StreamShare {
                         DispatchStrategy {
                             r#type: DispatcherType::Hash as i32,
                             dist_key_indices: keys.iter().map(|x| *x as u32).collect_vec(),
+                            output_indices: vec![],
                         }
                     }
                     Distribution::Single => DispatchStrategy {
                         r#type: DispatcherType::Simple as i32,
                         dist_key_indices: vec![],
+                        output_indices: vec![],
                     },
                     Distribution::Broadcast => DispatchStrategy {
                         r#type: DispatcherType::Broadcast as i32,
                         dist_key_indices: vec![],
+                        output_indices: vec![],
                     },
                     Distribution::SomeShard => {
                         // FIXME: use another DispatcherType?
@@ -112,6 +115,7 @@ impl StreamShare {
                                 .iter()
                                 .map(|x| *x as u32)
                                 .collect_vec(),
+                            output_indices: vec![],
                         }
                     }
                 };
