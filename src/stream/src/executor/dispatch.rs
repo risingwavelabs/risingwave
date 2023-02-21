@@ -866,7 +866,7 @@ mod tests {
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     #[derive(Debug)]
     pub struct MockOutput {
@@ -977,7 +977,7 @@ mod tests {
         let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
         let (old_simple, new_simple) = (114, 514); // simple downstream actors
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -985,16 +985,7 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(
-            ctx.clone(),
-            vec![
-                (actor_id, untouched),
-                (actor_id, old),
-                (actor_id, new),
-                (actor_id, old_simple),
-                (actor_id, new_simple),
-            ],
-        );
+        // actor_id -> untouched, old, new, old_simple, new_simple
 
         let broadcast_dispatcher_id = 666;
         let broadcast_dispatcher = DispatcherImpl::new(

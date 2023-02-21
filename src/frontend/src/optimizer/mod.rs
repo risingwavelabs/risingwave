@@ -229,6 +229,13 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Rewrite Like Expr".to_string(),
+            vec![RewriteLikeExprRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         // Simple Unnesting.
         plan = self.optimize_by_rules(
             plan,
@@ -741,7 +748,7 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_stream_plan()?;
 
-        StreamMaterialize::create(
+        StreamSink::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
@@ -749,10 +756,8 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
-            // Note: we first plan it like a materialized view, and then rewrite it into a sink.
-            TableType::MaterializedView,
+            properties,
         )
-        .and_then(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.
