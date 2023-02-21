@@ -1461,7 +1461,7 @@ def section_streaming_errors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Errors",
+            "User Streaming Errors",
             [
                 panels.timeseries_count(
                     "Compute Errors by Type",
