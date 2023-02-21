@@ -24,4 +24,5 @@ labels:
   title: "^doc.*"
 
 - label: "user-facing-changes"
-  body: '- \[ \] My PR \*\*DOES NOT\*\* contain user-facing changes'
+  negate: true
+  body: 'My PR \*\*DOES NOT\*\* contain user-facing changes'
