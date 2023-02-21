@@ -26,6 +26,7 @@ pub use split::*;
 
 use crate::common::KafkaCommon;
 
+use aws_config::retry::RetryConfig;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
 #[derive(Clone, Debug, Deserialize)]

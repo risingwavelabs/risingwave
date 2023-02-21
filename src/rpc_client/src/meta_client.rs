@@ -121,6 +121,10 @@ impl MetaClient {
         .await
     }
 
+    pub(crate) fn create_private_links(service_name: &str) -> String {
+        todo!("create_private_links")
+    }
+
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
         if meta_addr.starts_with(Self::META_ADDRESS_LOAD_BALANCE_MODE_PREFIX) {
             let addr = meta_addr

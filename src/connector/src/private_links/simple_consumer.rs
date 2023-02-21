@@ -1,8 +1,13 @@
 use std::collections::BTreeMap;
-use clap::{App, Arg};
+use std::io::Write;
+use std::thread;
 
+use chrono::prelude::*;
+use clap::{App, Arg};
+use env_logger::fmt::Formatter;
+use env_logger::Builder;
+use log::{LevelFilter, Record};
 use rdkafka::client::BrokerAddr;
-use rdkafka::ClientContext;
 use rdkafka::config::{ClientConfig, RDKafkaLogLevel};
 use rdkafka::consumer::stream_consumer::StreamConsumer;
 use rdkafka::consumer::{CommitMode, Consumer, ConsumerContext, Rebalance};
@@ -10,18 +15,11 @@ use rdkafka::error::KafkaResult;
 use rdkafka::message::{Headers, Message};
 use rdkafka::topic_partition_list::TopicPartitionList;
 use rdkafka::util::get_rdkafka_version;
+use rdkafka::ClientContext;
 use tracing::log::{info, warn};
 
-use std::io::Write;
-use std::thread;
-
-use chrono::prelude::*;
-use env_logger::fmt::Formatter;
-use env_logger::Builder;
-use log::{LevelFilter, Record};
-
 fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
-    let output_format = move |formatter: &mut Formatter, record: &Record| {
+    let output_format = move |formatter: &mut Formatter, record: &Record<'_>| {
         let thread_name = if log_thread {
             format!("(t: {}) ", thread::current().name().unwrap_or("unknown"))
         } else {
@@ -51,7 +49,6 @@ fn setup_logger(log_thread: bool, rust_log: Option<&str>) {
     builder.init();
 }
 
-
 // A context can be used to change the behavior of producers and consumers by adding callbacks
 // that will be executed by librdkafka.
 // This particular context sets up custom callbacks to log rebalancing events.
@@ -61,8 +58,11 @@ struct CustomContext {
 
 impl CustomContext {
     pub fn new() -> Self {
-        Self { brokers: BTreeMap::new() }
+        Self {
+            brokers: BTreeMap::new(),
+        }
     }
+
     pub fn add_rewrite_broker_addr(&mut self, old_addr: BrokerAddr, new_addr: BrokerAddr) {
         self.brokers.insert(old_addr.host.clone(), new_addr);
     }
@@ -71,7 +71,7 @@ impl CustomContext {
 impl ClientContext for CustomContext {
     fn rewrite_broker_addr(&self, addr: BrokerAddr) -> BrokerAddr {
         match self.brokers.get(&addr.host) {
-            None => { addr }
+            None => addr,
             Some(new_addr) => {
                 info!("broker addr {:?} rewrited to {:?}", addr, new_addr);
                 new_addr.clone()
@@ -81,11 +81,11 @@ impl ClientContext for CustomContext {
 }
 
 impl ConsumerContext for CustomContext {
-    fn pre_rebalance(&self, rebalance: &Rebalance) {
+    fn pre_rebalance(&self, rebalance: &Rebalance<'_>) {
         info!("Pre rebalance {:?}", rebalance);
     }
 
-    fn post_rebalance(&self, rebalance: &Rebalance) {
+    fn post_rebalance(&self, rebalance: &Rebalance<'_>) {
         info!("Post rebalance {:?}", rebalance);
     }
 
@@ -100,9 +100,18 @@ type LoggingConsumer = StreamConsumer<CustomContext>;
 async fn consume_and_print(brokers: &str, group_id: &str, topics: &[&str]) {
     let mut context = CustomContext::new();
 
-    let b1 = BrokerAddr { host: "b-1.sourcedemomsk.pakv5y.c3.kafka.us-east-1.amazonaws.com".to_string(), port: "9092".to_string() };
-    let b2 = BrokerAddr { host: "b-2.sourcedemomsk.pakv5y.c3.kafka.us-east-1.amazonaws.com".to_string(), port: "9092".to_string() };
-    let b3 = BrokerAddr { host: "b-3.sourcedemomsk.pakv5y.c3.kafka.us-east-1.amazonaws.com".to_string(), port: "9092".to_string() };
+    let b1 = BrokerAddr {
+        host: "b-1.sourcedemomsk.pakv5y.c3.kafka.us-east-1.amazonaws.com".to_string(),
+        port: "9092".to_string(),
+    };
+    let b2 = BrokerAddr {
+        host: "b-2.sourcedemomsk.pakv5y.c3.kafka.us-east-1.amazonaws.com".to_string(),
+        port: "9092".to_string(),
+    };
+    let b3 = BrokerAddr {
+        host: "b-3.sourcedemomsk.pakv5y.c3.kafka.us-east-1.amazonaws.com".to_string(),
+        port: "9092".to_string(),
+    };
 
     // vpce-0f23e813f5bc8bb4f-y96eipmp. vpce-svc-018d21e01fc2ec2aa.us-east-1.vpce.amazonaws.com
     context.add_rewrite_broker_addr(b1, BrokerAddr { host: "vpce-0f23e813f5bc8bb4f-y96eipmp-us-east-1c.vpce-svc-018d21e01fc2ec2aa.us-east-1.vpce.amazonaws.com".to_string(), port: "9001".to_string() });
@@ -118,7 +127,8 @@ async fn consume_and_print(brokers: &str, group_id: &str, topics: &[&str]) {
         //.set("statistics.interval.ms", "30000")
         .set("auto.offset.reset", "smallest")
         .set_log_level(RDKafkaLogLevel::Debug)
-        .create_with_context(context).await
+        .create_with_context(context)
+        .await
         .expect("Consumer creation failed");
 
     consumer
@@ -144,7 +154,10 @@ async fn consume_and_print(brokers: &str, group_id: &str, topics: &[&str]) {
                         info!("  Header {:#?}: {:?}", header.key, header.value);
                     }
                 }
-                consumer.commit_message(&m, CommitMode::Async).await.unwrap();
+                consumer
+                    .commit_message(&m, CommitMode::Async)
+                    .await
+                    .unwrap();
             }
         };
     }
