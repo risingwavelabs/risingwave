@@ -56,6 +56,49 @@ impl BatchHashAgg {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
+
+    fn must_two_phase_agg(&self, agg_distribution: &Distribution) -> bool {
+        self.logical.can_two_phase_agg()
+            && self.logical.two_phase_agg_forced()
+            && self.input().distribution() != agg_distribution
+    }
+
+    fn to_two_phase_agg(&self, agg_distribution: Distribution) -> Result<PlanRef> {
+        // Follow input distribution
+        let new_input = self.input().to_distributed()?;
+
+        // partial agg step
+        let partial_agg: PlanRef = self.clone_with_input(new_input).into();
+
+        // insert exchange
+        let exchange = BatchExchange::new(partial_agg, Order::any(), agg_distribution).into();
+
+        // insert total agg
+        let total_agg_types = self
+            .logical
+            .agg_calls()
+            .iter()
+            .enumerate()
+            .map(|(partial_output_idx, agg_call)| {
+                agg_call
+                    .partial_to_total_agg_call(partial_output_idx + self.group_key().len(), false)
+            })
+            .collect();
+        let total_agg_logical = LogicalAgg::new(
+            total_agg_types,
+            (0..self.group_key().len()).collect(),
+            exchange,
+        );
+        Ok(BatchHashAgg::new(total_agg_logical).into())
+    }
+
+    fn to_shuffle_agg(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_distributed_with_required(
+            &Order::any(),
+            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
+        )?;
+        Ok(self.clone_with_input(new_input).into())
+    }
 }
 
 impl fmt::Display for BatchHashAgg {
@@ -76,43 +119,11 @@ impl PlanTreeNodeUnary for BatchHashAgg {
 impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed_with_required(
-            &Order::any(),
-            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
-        )?;
-        if self.logical.can_two_phase_agg() && self.logical.two_phase_agg_forced() {
-            // partial agg
-            let partial_agg: PlanRef = self.clone_with_input(new_input).into();
-
-            // insert exchange
-            let exchange = BatchExchange::new(
-                partial_agg,
-                Order::any(),
-                Distribution::HashShard((0..self.group_key().len()).collect()),
-            )
-            .into();
-
-            // insert total agg
-            let total_agg_types = self
-                .logical
-                .agg_calls()
-                .iter()
-                .enumerate()
-                .map(|(partial_output_idx, agg_call)| {
-                    agg_call.partial_to_total_agg_call(
-                        partial_output_idx + self.group_key().len(),
-                        false,
-                    )
-                })
-                .collect();
-            let total_agg_logical = LogicalAgg::new(
-                total_agg_types,
-                (0..self.group_key().len()).collect(),
-                exchange,
-            );
-            Ok(BatchHashAgg::new(total_agg_logical).into())
+        let agg_distribution = Distribution::HashShard((0..self.group_key().len()).collect());
+        if self.must_two_phase_agg(&agg_distribution) {
+            self.to_two_phase_agg(agg_distribution)
         } else {
-            Ok(self.clone_with_input(new_input).into())
+            self.to_shuffle_agg()
         }
     }
 }
