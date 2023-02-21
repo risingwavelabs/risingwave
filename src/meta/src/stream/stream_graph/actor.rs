@@ -25,7 +25,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+};
 
 use super::id::GlobalFragmentIdsExt;
 use super::Locations;
@@ -339,14 +341,16 @@ impl ActorGraphBuildStateInner {
 
     /// Create a new hash dispatcher.
     fn new_hash_dispatcher(
-        dist_key_indices: &[u32],
+        strategy: &DispatchStrategy,
         downstream_fragment_id: GlobalFragmentId,
         downstream_actors: &[GlobalActorId],
         downstream_actor_mapping: ActorMapping,
     ) -> Dispatcher {
+        assert_eq!(strategy.r#type(), DispatcherType::Hash);
+
         Dispatcher {
             r#type: DispatcherType::Hash as _,
-            dist_key_indices: dist_key_indices.to_vec(),
+            dist_key_indices: strategy.dist_key_indices.clone(),
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
@@ -355,13 +359,14 @@ impl ActorGraphBuildStateInner {
 
     /// Create a new dispatcher for non-hash types.
     fn new_normal_dispatcher(
-        dispatcher_type: DispatcherType,
+        strategy: &DispatchStrategy,
         downstream_fragment_id: GlobalFragmentId,
         downstream_actors: &[GlobalActorId],
     ) -> Dispatcher {
-        assert_ne!(dispatcher_type, DispatcherType::Hash);
+        assert_ne!(strategy.r#type(), DispatcherType::Hash);
+
         Dispatcher {
-            r#type: dispatcher_type as _,
+            r#type: strategy.r#type,
             dist_key_indices: Vec::new(),
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
@@ -441,7 +446,11 @@ impl ActorGraphBuildStateInner {
                     // Create a new dispatcher just between these two actors.
                     self.add_dispatcher(
                         *upstream_id,
-                        Self::new_normal_dispatcher(dt, downstream.fragment_id, &[*downstream_id]),
+                        Self::new_normal_dispatcher(
+                            &edge.dispatch_strategy,
+                            downstream.fragment_id,
+                            &[*downstream_id],
+                        ),
                     );
 
                     // Also record the upstream for the downstream actor.
@@ -474,13 +483,17 @@ impl ActorGraphBuildStateInner {
                         .to_actor(&downstream_locations);
 
                     Self::new_hash_dispatcher(
-                        &edge.dispatch_strategy.dist_key_indices,
+                        &edge.dispatch_strategy,
                         downstream.fragment_id,
                         downstream.actor_ids,
                         actor_mapping,
                     )
                 } else {
-                    Self::new_normal_dispatcher(dt, downstream.fragment_id, downstream.actor_ids)
+                    Self::new_normal_dispatcher(
+                        &edge.dispatch_strategy,
+                        downstream.fragment_id,
+                        downstream.actor_ids,
+                    )
                 };
                 for upstream_id in upstream.actor_ids {
                     self.add_dispatcher(*upstream_id, dispatcher.clone());
