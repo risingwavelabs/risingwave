@@ -142,6 +142,7 @@ impl OptimizerContext {
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         optimizer_trace.push(str.into());
         optimizer_trace.push("\n".to_string());
+        tracing::trace!("{}\n", str);
     }
 
     pub fn store_logical(&self, str: impl Into<String>) {
