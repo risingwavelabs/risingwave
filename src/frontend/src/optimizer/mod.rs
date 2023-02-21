@@ -11,11 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-pub mod plan_node;
 use std::ops::DerefMut;
 
-pub use plan_node::PlanRef;
+pub mod plan_node;
+pub use plan_node::{Explain, PlanRef};
 pub mod property;
 
 mod delta_join_solver;
@@ -230,6 +229,13 @@ impl PlanRoot {
             ctx.trace("Share Source:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Rewrite Like Expr".to_string(),
+            vec![RewriteLikeExprRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         // Simple Unnesting.
         plan = self.optimize_by_rules(
@@ -450,7 +456,9 @@ impl PlanRoot {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        ctx.store_logical(plan.explain_to_string().unwrap());
+        if ctx.is_explain_logical() {
+            ctx.store_logical(plan.explain_to_string().unwrap());
+        }
 
         Ok(plan)
     }
@@ -756,7 +764,7 @@ impl PlanRoot {
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_stream_plan()?;
 
-        StreamMaterialize::create(
+        StreamSink::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
@@ -764,10 +772,8 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
-            // Note: we first plan it like a materialized view, and then rewrite it into a sink.
-            TableType::MaterializedView,
+            properties,
         )
-        .and_then(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.
