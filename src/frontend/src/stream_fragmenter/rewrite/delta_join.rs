@@ -234,7 +234,7 @@ fn build_delta_join_inner(
                     .iter()
                     .map(|x| *x as u32)
                     .collect_vec(),
-                i0_output_indices.clone(),
+                i0_output_indices,
             ),
             link_id: exchange_a0l1.operator_id,
         },
@@ -264,7 +264,7 @@ fn build_delta_join_inner(
         arrange_1_frag.fragment_id,
         lookup_1_frag.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(i1_output_indices.clone()),
+            dispatch_strategy: dispatch_no_shuffle(i1_output_indices),
             link_id: exchange_a1l1.operator_id,
         },
     );
