@@ -5648,6 +5648,7 @@ dependencies = [
  "criterion",
  "darwin-libproc",
  "derivative",
+ "easy-ext",
  "fixedbitset",
  "futures",
  "futures-async-stream",
