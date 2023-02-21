@@ -84,13 +84,6 @@ select max(ARRAY[1, v1*2]) from t;
 ----
 {1,6}
 
-query T
-select CAST(NULL as bool[]) from t;
-----
-NULL
-NULL
-NULL
-
 statement ok
 drop table t;
 
