@@ -172,6 +172,41 @@ impl JsonbRef<'_> {
         self.0.to_sql(&Type::JSONB, &mut output).unwrap();
         output.freeze().into()
     }
+
+    pub fn type_name(&self) -> &'static str {
+        match self.0 {
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+    }
+
+    pub fn as_bool(&self) -> Result<bool, String> {
+        match self.0 {
+            Value::Bool(v) => Ok(*v),
+            _ => Err(format!(
+                "cannot cast jsonb {} to type boolean",
+                self.type_name()
+            )),
+        }
+    }
+
+    /// Attempt to read jsonb as a JSON number.
+    ///
+    /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
+    /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
+    pub fn as_number(&self) -> Result<f64, String> {
+        match self.0 {
+            Value::Number(v) => v.as_f64().ok_or_else(|| "jsonb number out of range".into()),
+            _ => Err(format!(
+                "cannot cast jsonb {} to type number",
+                self.type_name()
+            )),
+        }
+    }
 }
 
 #[derive(Debug)]

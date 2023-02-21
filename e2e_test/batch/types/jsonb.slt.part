@@ -33,5 +33,55 @@ null
 true
 NULL
 
+query T
+select 'true'::jsonb::bool;
+----
+t
+
+query I
+select '1'::jsonb::smallint;
+----
+1
+
+query I
+select '1'::jsonb::int;
+----
+1
+
+query I
+select '1'::jsonb::bigint;
+----
+1
+
+query R
+select '2.5'::jsonb::decimal;
+----
+2.5
+
+query R
+select '2.5'::jsonb::real;
+----
+2.5
+
+query R
+select '2.5'::jsonb::double precision;
+----
+2.5
+
+# This would fail after #5576 fixed
+# Because PG rounds differently for `decimal -> int` and `float8 -> int`
+query II
+select '2.5'::jsonb::smallint, '3.5'::jsonb::smallint;
+----
+2 3
+
+statement error cannot cast jsonb null to type boolean
+select 'null'::jsonb::bool;
+
+query T
+select null::jsonb::bool;
+----
+NULL
+
 statement ok
 drop table t;
