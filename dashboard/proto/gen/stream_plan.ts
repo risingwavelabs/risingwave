@@ -827,6 +827,10 @@ export interface StreamNode {
   fields: Field[];
 }
 
+/**
+ * The property of an edge in the fragment graph.
+ * This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
+ */
 export interface DispatchStrategy {
   type: DispatcherType;
   distKeyIndices: number[];
@@ -844,6 +848,11 @@ export interface Dispatcher {
    * For dispatcher types other than HASH, this is ignored.
    */
   distKeyIndices: number[];
+  /**
+   * Indices of the columns to output.
+   * In most cases, this contains all columns in the input. But for some cases like MV on MV or
+   * schema change, we may only output a subset of the columns.
+   */
   outputIndices: number[];
   /**
    * The hash mapping for consistent hash.
