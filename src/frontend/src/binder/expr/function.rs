@@ -372,6 +372,7 @@ impl Binder {
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
+                ("array_join", raw_call(ExprType::ArrayToString)),
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 // System information operations.
