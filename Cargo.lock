@@ -5838,6 +5838,7 @@ dependencies = [
  "http",
  "http-serde",
  "hyper",
+ "hyper-tls",
  "itertools",
  "madsim-rdkafka",
  "madsim-tokio",
