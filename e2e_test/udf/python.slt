@@ -2,6 +2,7 @@
 #   python3 e2e_test/udf/test.py
 
 # TODO: check the service on creation
+# Currently whether the function exists in backend and whether the signature matches is checked on execution. Create function will always succeed.
 
 # Create a function.
 statement ok
