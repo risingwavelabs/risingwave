@@ -38,11 +38,15 @@ impl ArrowFlightUdfClient {
 
     /// Check if the function is available and return the function ID.
     pub async fn check(&self, name: &str, args: &Schema, returns: &Schema) -> Result<FunctionId> {
-        let mut path = vec![name.to_string()];
-        for arg in &args.fields {
-            path.push(format!("{}", arg.data_type()));
+        // path = name/[args,]*
+        let mut path = name.to_string() + "/";
+        for (i, arg) in args.fields.iter().enumerate() {
+            if i != 0 {
+                path += ",";
+            }
+            path += &arg.data_type().to_string().to_lowercase();
         }
-        let descriptor = FlightDescriptor::new_path(path.clone());
+        let descriptor = FlightDescriptor::new_path(vec![path.clone()]);
 
         let response = self.client.clone().get_flight_info(descriptor).await?;
 
@@ -58,7 +62,7 @@ impl ArrowFlightUdfClient {
                 actual: format!("{:?}", actual_types),
             });
         }
-        Ok(FunctionId(path))
+        Ok(FunctionId(vec![path]))
     }
 
     /// Call a function.
