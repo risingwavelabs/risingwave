@@ -25,8 +25,8 @@ use risingwave_expr::vector_op::cast::{
 };
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
-use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
+use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceErrorContext};
 use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
