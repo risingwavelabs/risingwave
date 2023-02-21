@@ -34,7 +34,7 @@ use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, ErrorReportingContext, SourceInfo, SourceMessage, SourceMeta,
+    BoxSourceWithStateStream, Column, SourceErrorContext, SourceInfo, SourceMessage, SourceMeta,
     SplitImpl, StreamChunkWithState,
 };
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
@@ -189,7 +189,7 @@ impl S3FileReader {
         for split in self.splits {
             let actor_id = self.source_info.actor_id.to_string();
             let source_id = self.source_info.source_id.to_string();
-            let error_ctx = ErrorReportingContext::new(
+            let error_ctx = SourceErrorContext::new(
                 self.source_info.source_id.table_id,
                 self.source_info.fragment_id,
                 self.metrics.clone(),

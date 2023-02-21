@@ -34,7 +34,7 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{ErrorReportingContext, SourceColumnDesc};
+use crate::source::{SourceErrorContext, SourceColumnDesc};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -50,7 +50,7 @@ pub struct DebeziumAvroParser {
     inner_schema: Arc<Schema>,
     schema_resolver: Arc<ConfluentSchemaResolver>,
     rw_columns: Vec<SourceColumnDesc>,
-    error_ctx: ErrorReportingContext,
+    error_ctx: SourceErrorContext,
 }
 
 #[derive(Debug, Clone)]
@@ -143,7 +143,7 @@ impl DebeziumAvroParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         config: DebeziumAvroParserConfig,
-        error_ctx: ErrorReportingContext,
+        error_ctx: SourceErrorContext,
     ) -> Result<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
@@ -395,7 +395,7 @@ mod tests {
             .collect_vec();
 
         let parser =
-            DebeziumAvroParser::new(columns.clone(), config, ErrorReportingContext::for_test())?;
+            DebeziumAvroParser::new(columns.clone(), config, SourceErrorContext::for_test())?;
         let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA)
             .await
             .try_into()

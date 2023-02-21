@@ -94,32 +94,14 @@ impl SourceInfo {
     }
 }
 
-// const MAX_BLACKLISTED_STREAM_ERROR_MSGS: usize = 50;
-
-// struct ErrorTruncator {
-//     max_size_reached: bool,
-//     // We will only report a maximum of `MAX_UNIQUE_ERROR_MSGS` unique errors before
-//     // we truncate the error messages to reduce their cardinality
-//     past_error_msgs: Arc<RwLock<HashSet<String>>>
-// }
-
-// impl ErrorTrucator {
-//     fn should_truncate_msg(&self, msg: &str) -> bool {
-//         if !self.past_error_msgs.read().contains(msg) {
-
-//         }
-//         false
-//     }
-// }
-
 #[derive(Debug, Clone)]
-pub struct ErrorReportingContext {
+pub struct SourceErrorContext {
     metrics: Arc<SourceMetrics>,
     table_id: u32,
     fragment_id: u32,
 }
 
-impl ErrorReportingContext {
+impl SourceErrorContext {
     pub(crate) fn new(table_id: u32, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
         Self {
             metrics,
@@ -139,7 +121,7 @@ impl ErrorReportingContext {
                 "SourceError",
                 // TODO(jon-chuang): add the error msg truncator to truncate these
                 &e.inner().to_string(),
-                // Let's be a bit more specific for SourceExecutor
+                // Let's be a bit more specific for SourceExecutor 
                 "SourceExecutor",
                 &self.fragment_id.to_string(),
                 &self.table_id.to_string(),

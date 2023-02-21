@@ -28,7 +28,7 @@ use crate::parser::{
     BoxSourceWithStateStream, ByteStreamSourceParser, SourceColumnDesc, SourceStreamChunkBuilder,
     SourceStreamChunkRowWriter, StreamChunkWithState, WriteGuard,
 };
-use crate::source::{BoxSourceStream, ErrorReportingContext, SplitId};
+use crate::source::{BoxSourceStream, SourceErrorContext, SplitId};
 
 macro_rules! to_rust_type {
     ($v:ident, $t:ty) => {
@@ -53,14 +53,14 @@ pub struct CsvParser {
     output_cursor: usize,
     ends: Vec<usize>,
     ends_cursor: usize,
-    error_ctx: ErrorReportingContext,
+    error_ctx: SourceErrorContext,
 }
 
 impl CsvParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         parser_config: CsvParserConfig,
-        error_ctx: ErrorReportingContext,
+        error_ctx: SourceErrorContext,
     ) -> Result<Self> {
         let CsvParserConfig {
             delimiter,
@@ -322,7 +322,7 @@ mod tests {
             delimiter: b',',
             has_header: true,
         };
-        let parser = CsvParser::new(descs, config, ErrorReportingContext::for_test()).unwrap();
+        let parser = CsvParser::new(descs, config, SourceErrorContext::for_test()).unwrap();
         let data = b"
 name,age
 pite,20
@@ -347,7 +347,7 @@ alex,10";
             delimiter: b',',
             has_header: true,
         };
-        let parser = CsvParser::new(descs, config, ErrorReportingContext::for_test()).unwrap();
+        let parser = CsvParser::new(descs, config, SourceErrorContext::for_test()).unwrap();
         let data = b"
 name,age
 pite,20

@@ -20,7 +20,7 @@ use simd_json::{BorrowedValue, ValueAccess};
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{ErrorReportingContext, SourceColumnDesc};
+use crate::source::{SourceErrorContext, SourceColumnDesc};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -28,13 +28,13 @@ impl_common_parser_logic!(JsonParser);
 #[derive(Debug)]
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,
-    error_ctx: ErrorReportingContext,
+    error_ctx: SourceErrorContext,
 }
 
 impl JsonParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
-        error_ctx: ErrorReportingContext,
+        error_ctx: SourceErrorContext,
     ) -> Result<Self> {
         Ok(Self {
             rw_columns,
@@ -45,7 +45,7 @@ impl JsonParser {
     pub fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
         Ok(Self {
             rw_columns,
-            error_ctx: ErrorReportingContext::for_test(),
+            error_ctx: SourceErrorContext::for_test(),
         })
     }
 
@@ -90,7 +90,7 @@ mod tests {
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
-    use crate::source::ErrorReportingContext;
+    use crate::source::SourceErrorContext;
 
     #[tokio::test]
     async fn test_json_parser() {
@@ -107,7 +107,7 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
-        let parser = JsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
+        let parser = JsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -199,7 +199,7 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
-        let parser = JsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
+        let parser = JsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
@@ -260,7 +260,7 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(descs.clone(), ErrorReportingContext::for_test()).unwrap();
+        let parser = JsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
         let payload = br#"
         {
             "data": {

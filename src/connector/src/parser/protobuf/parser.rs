@@ -33,7 +33,7 @@ use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{ErrorReportingContext, SourceColumnDesc};
+use crate::source::{SourceErrorContext, SourceColumnDesc};
 
 impl_common_parser_logic!(ProtobufParser);
 
@@ -42,7 +42,7 @@ pub struct ProtobufParser {
     message_descriptor: MessageDescriptor,
     confluent_wire_type: bool,
     rw_columns: Vec<SourceColumnDesc>,
-    error_ctx: ErrorReportingContext,
+    error_ctx: SourceErrorContext,
 }
 
 #[derive(Debug, Clone)]
@@ -171,7 +171,7 @@ impl ProtobufParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         config: ProtobufParserConfig,
-        error_ctx: ErrorReportingContext,
+        error_ctx: SourceErrorContext,
     ) -> Result<Self> {
         let ProtobufParserConfig {
             confluent_wire_type,
@@ -368,7 +368,7 @@ mod test {
         println!("location: {}", location);
         let conf =
             ProtobufParserConfig::new(&HashMap::new(), &location, message_name, false).await?;
-        let parser = ProtobufParser::new(Vec::default(), conf, ErrorReportingContext::for_test())?;
+        let parser = ProtobufParser::new(Vec::default(), conf, SourceErrorContext::for_test())?;
         let value = DynamicMessage::decode(parser.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
         assert_eq!(

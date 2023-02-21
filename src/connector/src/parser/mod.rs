@@ -32,7 +32,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, ErrorReportingContext, SourceColumnDesc,
+    BoxSourceStream, BoxSourceWithStateStream, SourceErrorContext, SourceColumnDesc,
     SourceFormat, StreamChunkWithState,
 };
 
@@ -335,7 +335,7 @@ impl ByteStreamSourceParserImpl {
         }
     }
 
-    pub fn create(parser_config: ParserConfig, error_ctx: ErrorReportingContext) -> Result<Self> {
+    pub fn create(parser_config: ParserConfig, error_ctx: SourceErrorContext) -> Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         match parser_config.specific {
             SpecificParserConfig::Csv(config) => {

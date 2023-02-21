@@ -23,7 +23,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{ErrorReportingContext, SourceColumnDesc};
+use crate::source::{SourceErrorContext, SourceColumnDesc};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -43,13 +43,13 @@ impl_common_parser_logic!(DebeziumJsonParser);
 #[derive(Debug)]
 pub struct DebeziumJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
-    error_ctx: ErrorReportingContext,
+    error_ctx: SourceErrorContext,
 }
 
 impl DebeziumJsonParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
-        error_ctx: ErrorReportingContext,
+        error_ctx: SourceErrorContext,
     ) -> Result<Self> {
         Ok(Self {
             rw_columns,
@@ -237,7 +237,7 @@ mod tests {
         let columns = get_test_columns();
 
         let parser =
-            DebeziumJsonParser::new(columns.clone(), ErrorReportingContext::for_test()).unwrap();
+            DebeziumJsonParser::new(columns.clone(), SourceErrorContext::for_test()).unwrap();
 
         let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
 
@@ -260,7 +260,7 @@ mod tests {
 
         let columns = get_test_columns();
         let parser =
-            DebeziumJsonParser::new(columns.clone(), ErrorReportingContext::for_test()).unwrap();
+            DebeziumJsonParser::new(columns.clone(), SourceErrorContext::for_test()).unwrap();
         let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
         assert_eq!(op, Op::Insert);
 
@@ -283,7 +283,7 @@ mod tests {
 
         let columns = get_test_columns();
         let parser =
-            DebeziumJsonParser::new(columns.clone(), ErrorReportingContext::for_test()).unwrap();
+            DebeziumJsonParser::new(columns.clone(), SourceErrorContext::for_test()).unwrap();
         let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
 
         assert_eq!(op, Op::Delete);
@@ -313,7 +313,7 @@ mod tests {
         let columns = get_test_columns();
 
         let parser =
-            DebeziumJsonParser::new(columns.clone(), ErrorReportingContext::for_test()).unwrap();
+            DebeziumJsonParser::new(columns.clone(), SourceErrorContext::for_test()).unwrap();
         let [(op1, row1), (op2, row2)]: [_; 2] =
             parse_one(parser, columns, data).await.try_into().unwrap();
 
@@ -345,7 +345,7 @@ mod tests {
 
         let columns = get_test_columns();
         let parser =
-            DebeziumJsonParser::new(columns.clone(), ErrorReportingContext::for_test()).unwrap();
+            DebeziumJsonParser::new(columns.clone(), SourceErrorContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         let writer = builder.row_writer();

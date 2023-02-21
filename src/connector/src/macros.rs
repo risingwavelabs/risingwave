@@ -242,7 +242,7 @@ macro_rules! impl_common_split_reader_logic {
                 let source_id = self.source_info.source_id.to_string();
                 let split_id = self.split_id.clone();
                 let metrics = self.metrics.clone();
-                let error_ctx = $crate::source::base::ErrorReportingContext::new(
+                let error_ctx = $crate::source::base::SourceErrorContext::new(
                     self.source_info.source_id.table_id,
                     self.source_info.fragment_id,
                     self.metrics.clone()
