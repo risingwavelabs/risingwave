@@ -27,7 +27,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 ## Checklist For Reviewers
 
 - [ ] I have requested macro/micro-benchmarks as this PR can affect performance substantially, and the results are shown.
-To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3).
+<!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
 
 ## Documentation
 
