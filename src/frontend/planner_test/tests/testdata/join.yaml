@@ -200,14 +200,14 @@
       └─StreamProject { exprs: [Coalesce(i.x, i.x) as $expr1, i.t._row_id, i.t._row_id, i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.x] }
         └─StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.t._row_id, i.t._row_id, i.x] }
           ├─StreamProject { exprs: [i.x, i.t._row_id, i.t._row_id, i.x] }
-          | └─StreamShare { id = 422 }
+          | └─StreamShare { id = 400 }
           |   └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id, i.x] }
           |     ├─StreamExchange { dist: HashShard(i.x) }
           |     | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
           |     └─StreamExchange { dist: HashShard(i.x) }
           |       └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
           └─StreamProject { exprs: [i.x, i.t._row_id, i.t._row_id, i.x] }
-            └─StreamShare { id = 422 }
+            └─StreamShare { id = 400 }
               └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id, i.x] }
                 ├─StreamExchange { dist: HashShard(i.x) }
                 | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
@@ -604,7 +604,7 @@
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
         └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr25(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr25, v2] }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr29(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr29, v2] }
     └─StreamHashJoin { type: Inner, predicate: $expr1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, $expr1, t2._row_id] }
       ├─StreamExchange { dist: HashShard($expr1) }
       | └─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr1, t1._row_id] }

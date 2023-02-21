@@ -17,6 +17,7 @@ use std::hash::Hash;
 
 use super::{EndoPlan, LogicalShare, PlanNodeId, PlanRef, PlanTreeNodeUnary, VisitPlan};
 use crate::utils::{Endo, Layer, Visit};
+use crate::Explain;
 
 pub trait Semantics<V: Hash + Eq> {
     fn semantics(&self) -> V;
@@ -116,18 +117,21 @@ impl EndoPlan for Pruner<'_> {
 
 impl Endo<PlanRef> for Pruner<'_> {
     fn pre(&mut self, t: PlanRef) -> PlanRef {
-        let prunable = |s: &LogicalShare| {
+        let prunable = |s: &&LogicalShare| {
             *self.counts.get(&s.id()).expect("Unprocessed shared node.") == 1
+                || s.input().as_logical_share().is_some()
                 || s.input().as_logical_scan().is_some()
                 || s.input().as_logical_values().is_some()
         };
         t.as_logical_share()
-            .cloned()
             .filter(prunable)
-            .map_or(t, |s| s.input())
+            .map_or(t.clone(), |s| self.pre(s.input()))
     }
 
     fn apply(&mut self, t: PlanRef) -> PlanRef {
-        self.dag_apply(t)
+        // println!("Before:\n{}", t.explain_to_string().unwrap());
+        let result = self.dag_apply(t);
+        // println!("After:\n{}", result.explain_to_string().unwrap());
+        result
     }
 }

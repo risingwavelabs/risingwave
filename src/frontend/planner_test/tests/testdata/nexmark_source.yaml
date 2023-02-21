@@ -349,7 +349,7 @@
           |   └─StreamAppendOnlyHashAgg { group_key: [window_start, auction], aggs: [count, count] }
           |     └─StreamExchange { dist: HashShard(auction, window_start) }
           |       └─StreamProject { exprs: [auction, window_start, _row_id] }
-          |         └─StreamShare { id = 912 }
+          |         └─StreamShare { id = 906 }
           |           └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
           |             └─StreamProject { exprs: [auction, date_time, _row_id] }
           |               └─StreamRowIdGen { row_id_index: 7 }
@@ -361,7 +361,7 @@
                   └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count, count] }
                     └─StreamExchange { dist: HashShard(auction, window_start) }
                       └─StreamProject { exprs: [auction, window_start, _row_id] }
-                        └─StreamShare { id = 912 }
+                        └─StreamShare { id = 906 }
                           └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
                             └─StreamProject { exprs: [auction, date_time, _row_id] }
                               └─StreamRowIdGen { row_id_index: 7 }
@@ -473,63 +473,58 @@
                   └─BatchProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, price] }
                     └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
-    StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr120(hidden), max(price)(hidden)], pk_columns: [_row_id, $expr120, price, max(price)] }
+    StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr119(hidden), max(price)(hidden)], pk_columns: [_row_id, $expr119, price, max(price)] }
     └─StreamProject { exprs: [auction, price, bidder, date_time, _row_id, $expr1, max(price)] }
       └─StreamFilter { predicate: (date_time >= $expr2) AND (date_time <= $expr1) }
         └─StreamHashJoin { type: Inner, predicate: price = max(price), output: all }
           ├─StreamExchange { dist: HashShard(price) }
           | └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
-          |   └─StreamShare { id = 549 }
-          |     └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
-          |       └─StreamRowIdGen { row_id_index: 7 }
-          |         └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+          |   └─StreamRowIdGen { row_id_index: 7 }
+          |     └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
           └─StreamExchange { dist: HashShard(max(price)) }
             └─StreamProject { exprs: [max(price), $expr1, ($expr1 - '00:00:10':Interval) as $expr2] }
               └─StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [count, max(price)] }
                 └─StreamExchange { dist: HashShard($expr1) }
                   └─StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, price, _row_id] }
-                    └─StreamShare { id = 549 }
-                      └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
-                        └─StreamRowIdGen { row_id_index: 7 }
-                          └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+                    └─StreamRowIdGen { row_id_index: 7 }
+                      └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr120(hidden), max(price)(hidden)], pk_columns: [_row_id, $expr120, price, max(price)] }
+      StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr119(hidden), max(price)(hidden)], pk_columns: [_row_id, $expr119, price, max(price)] }
           materialized table: 4294967294
-        StreamProject { exprs: [auction, price, bidder, date_time, _row_id, $expr120, max(price)] }
-          StreamFilter { predicate: (date_time >= $expr122) AND (date_time <= $expr120) }
+        StreamProject { exprs: [auction, price, bidder, date_time, _row_id, $expr119, max(price)] }
+          StreamFilter { predicate: (date_time >= $expr121) AND (date_time <= $expr119) }
             StreamHashJoin { type: Inner, predicate: price = max(price), output: all }
                 left table: 0, right table 2, left degree table: 1, right degree table: 3,
               StreamExchange Hash([2]) from 1
-              StreamExchange Hash([0]) from 3
+              StreamExchange Hash([0]) from 2
 
     Fragment 1
-      StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
-        StreamExchange Hash([4]) from 2
-
-    Fragment 2
       StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
         StreamRowIdGen { row_id_index: 7 }
           StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
               source state table: 4
 
-    Fragment 3
-      StreamProject { exprs: [max(price), $expr120, ($expr120 - '00:00:10':Interval) as $expr122] }
-        StreamAppendOnlyHashAgg { group_key: [$expr120], aggs: [count, max(price)] }
+    Fragment 2
+      StreamProject { exprs: [max(price), $expr119, ($expr119 - '00:00:10':Interval) as $expr121] }
+        StreamAppendOnlyHashAgg { group_key: [$expr119], aggs: [count, max(price)] }
             result table: 5, state tables: []
-          StreamExchange Hash([0]) from 4
+          StreamExchange Hash([0]) from 3
 
-    Fragment 4
-      StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr120, price, _row_id] }
-        StreamExchange Hash([4]) from 2
+    Fragment 3
+      StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr119, price, _row_id] }
+        StreamRowIdGen { row_id_index: 7 }
+          StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+              source state table: 6
 
      Table 0 { columns: [auction, bidder, price, date_time, _row_id], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
      Table 1 { columns: [price, _row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [max(price), $expr120, $expr122], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 3 { columns: [max(price), $expr120, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 2 { columns: [max(price), $expr119, $expr121], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 3 { columns: [max(price), $expr119, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
-     Table 5 { columns: [$expr120, count, max(price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 4294967294 { columns: [auction, price, bidder, date_time, _row_id, $expr120, max(price)], primary key: [$4 ASC, $5 ASC, $1 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
+     Table 5 { columns: [$expr119, count, max(price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 6 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 4294967294 { columns: [auction, price, bidder, date_time, _row_id, $expr119, max(price)], primary key: [$4 ASC, $5 ASC, $1 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
 - id: nexmark_q8
   before:
   - create_sources
@@ -1330,10 +1325,8 @@
         |     |     └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "_row_id"] }
         |     └─StreamExchange { dist: HashShard(auction) }
         |       └─StreamProject { exprs: [auction, _row_id] }
-        |         └─StreamShare { id = 708 }
-        |           └─StreamProject { exprs: [auction, _row_id] }
-        |             └─StreamRowIdGen { row_id_index: 7 }
-        |               └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+        |         └─StreamRowIdGen { row_id_index: 7 }
+        |           └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [(sum0(count) / count(auction)) as $expr1] }
             └─StreamGlobalSimpleAgg { aggs: [count, sum0(count), count(auction)] }
@@ -1342,10 +1335,8 @@
                   └─StreamAppendOnlyHashAgg { group_key: [auction], aggs: [count, count] }
                     └─StreamExchange { dist: HashShard(auction) }
                       └─StreamProject { exprs: [auction, _row_id] }
-                        └─StreamShare { id = 708 }
-                          └─StreamProject { exprs: [auction, _row_id] }
-                            └─StreamRowIdGen { row_id_index: 7 }
-                              └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+                        └─StreamRowIdGen { row_id_index: 7 }
+                          └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name] }
@@ -1360,7 +1351,7 @@
                     left table: 3, right table 5, left degree table: 4, right degree table: 6,
                   StreamExchange Hash([0]) from 1
                   StreamExchange Hash([0]) from 2
-            StreamExchange Broadcast from 4
+            StreamExchange Broadcast from 3
 
     Fragment 1
       StreamProject { exprs: [id, item_name, _row_id] }
@@ -1370,29 +1361,27 @@
 
     Fragment 2
       StreamProject { exprs: [auction, _row_id] }
-        StreamExchange Hash([1]) from 3
-
-    Fragment 3
-      StreamProject { exprs: [auction, _row_id] }
         StreamRowIdGen { row_id_index: 7 }
           StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
               source state table: 8
 
-    Fragment 4
+    Fragment 3
       StreamProject { exprs: [(sum0(count) / count(auction)) as $expr55] }
         StreamGlobalSimpleAgg { aggs: [count, sum0(count), count(auction)] }
             result table: 9, state tables: []
-          StreamExchange Single from 5
+          StreamExchange Single from 4
 
-    Fragment 5
+    Fragment 4
       StreamProject { exprs: [auction, count] }
         StreamAppendOnlyHashAgg { group_key: [auction], aggs: [count, count] }
             result table: 10, state tables: []
-          StreamExchange Hash([0]) from 6
+          StreamExchange Hash([0]) from 5
 
-    Fragment 6
+    Fragment 5
       StreamProject { exprs: [auction, _row_id] }
-        StreamExchange Hash([1]) from 3
+        StreamRowIdGen { row_id_index: 7 }
+          StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+              source state table: 11
 
      Table 0 { columns: [id, item_name, count(auction), count(auction)_0], primary key: [$3 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
      Table 1 { columns: [$expr55], primary key: [], value indices: [0], distribution key: [] }
@@ -1405,6 +1394,7 @@
      Table 8 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
      Table 9 { columns: [count, sum0(count), count(auction)], primary key: [], value indices: [0, 1, 2], distribution key: [] }
      Table 10 { columns: [auction, count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 11 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
 - id: nexmark_q103
   before:

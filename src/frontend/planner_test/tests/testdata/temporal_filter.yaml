@@ -52,7 +52,9 @@
       | ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       | └─StreamExchange { dist: Broadcast }
       |   └─StreamProject { exprs: [(now - '02:00:00':Interval) as $expr1], watermark_columns: [(now - '02:00:00':Interval)] }
-      |     └─StreamNow { output: [now] }
+      |     └─StreamShare { id = 128 }
+      |       └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(now - '01:00:00':Interval) as $expr2], watermark_columns: [(now - '01:00:00':Interval)] }
-          └─StreamNow { output: [now] }
+          └─StreamShare { id = 128 }
+            └─StreamNow { output: [now] }

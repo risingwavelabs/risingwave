@@ -297,7 +297,7 @@
           |   └─StreamAppendOnlyHashAgg { group_key: [window_start, bid.auction], aggs: [count, count] }
           |     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
           |       └─StreamProject { exprs: [bid.auction, window_start, bid._row_id] }
-          |         └─StreamShare { id = 862 }
+          |         └─StreamShare { id = 764 }
           |           └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
           |             └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
           └─StreamProject { exprs: [max(count), window_start] }
@@ -307,7 +307,7 @@
                   └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
                     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
                       └─StreamProject { exprs: [bid.auction, window_start, bid._row_id] }
-                        └─StreamShare { id = 862 }
+                        └─StreamShare { id = 764 }
                           └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
                             └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
