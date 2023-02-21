@@ -19,6 +19,7 @@ use std::sync::Arc;
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -54,6 +55,8 @@ pub struct DebeziumAvroParser {
 
 #[derive(Debug, Clone)]
 pub struct DebeziumAvroParserConfig {
+    pub key_schema: Arc<Schema>,
+
     pub outer_schema: Arc<Schema>,
     pub inner_schema: Arc<Schema>,
     pub schema_resolver: Arc<ConfluentSchemaResolver>,
@@ -66,10 +69,17 @@ impl DebeziumAvroParserConfig {
         })?;
         let kafka_topic = get_kafka_topic(props)?;
         let client = Client::new(url, props)?;
+        let raw_schema = client
+            .get_schema_by_subject(format!("{}-key", kafka_topic).as_str())
+            .await?;
+        let key_schema = Schema::parse_str(&raw_schema.content)
+            .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
+
         let (outer_schema, resolver) =
             ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client).await?;
         let inner_schema = Self::extract_inner_schema(&outer_schema)?;
         Ok(Self {
+            key_schema: Arc::new(key_schema),
             outer_schema: Arc::new(outer_schema),
             inner_schema: Arc::new(inner_schema),
             schema_resolver: Arc::new(resolver),
@@ -116,6 +126,20 @@ impl DebeziumAvroParserConfig {
         }
     }
 
+    pub fn get_pk_names(&self) -> Result<Vec<String>> {
+        Self::get_pk_names_inner(&self.key_schema)
+    }
+
+    pub(crate) fn get_pk_names_inner(key_schema: &Schema) -> Result<Vec<String>> {
+        if let Schema::Record { fields, .. } = key_schema {
+            Ok(fields.iter().map(|field| field.name.clone()).collect_vec())
+        } else {
+            Err(RwError::from(InternalError(
+                "Get pk names from key schema: top level message must be a record".into(),
+            )))
+        }
+    }
+
     pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         Self::map_to_columns_inner(&self.inner_schema)
     }
@@ -132,7 +156,8 @@ impl DebeziumAvroParserConfig {
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
-                "inner avro schema invalid, record required".into(),
+                "Map to columns from value schema failed: top level message must be a record"
+                    .into(),
             )))
         }
     }
@@ -147,6 +172,7 @@ impl DebeziumAvroParser {
             outer_schema,
             inner_schema,
             schema_resolver,
+            ..
         } = config;
         Ok(Self {
             outer_schema,
@@ -319,6 +345,24 @@ mod tests {
         let extracted_inner_schema =
             DebeziumAvroParserConfig::extract_inner_schema(&outer_schema).unwrap();
         assert_eq!(expected_inner_schema, extracted_inner_schema);
+    }
+
+    #[test]
+    fn test_get_pk_column_names() {
+        let key_schema_str = r#"{
+    "type": "record",
+    "name": "Key",
+    "namespace": "dbserver1.inventory.customers",
+    "fields": [{
+        "name": "id",
+        "type": "int"
+    }],
+    "connect.name": "dbserver1.inventory.customers.Key"
+}        
+"#;
+        let key_schema = Schema::parse_str(key_schema_str).unwrap();
+        let names = DebeziumAvroParserConfig::get_pk_names_inner(&key_schema).unwrap();
+        assert_eq!(names, vec!["id".to_owned()])
     }
 
     #[test]

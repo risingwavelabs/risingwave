@@ -26,7 +26,9 @@ use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Planner;
@@ -131,6 +133,17 @@ pub async fn handle_create_sink(
             .map(|parallelism| Parallelism { parallelism });
         (sink, graph)
     };
+
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                sink.database_id.database_id,
+                sink.schema_id.schema_id,
+                sink.name.clone(),
+            ));
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_sink(sink.to_proto(), graph).await?;
