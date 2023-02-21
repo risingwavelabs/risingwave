@@ -159,6 +159,10 @@ pub struct MetaConfig {
     /// Schedule space_reclaim compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -206,6 +210,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    #[serde(default)]
+    pub distributed_query_limit: Option<u64>,
 }
 
 impl Default for BatchConfig {
@@ -342,10 +349,6 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
-
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
@@ -504,6 +507,10 @@ mod default {
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
             3600 // 60min
         }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
+        }
     }
 
     pub mod server {
@@ -602,10 +609,6 @@ mod default {
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
-        }
-
-        pub fn enable_state_store_v1() -> bool {
-            false
         }
     }
 

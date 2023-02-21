@@ -19,7 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableVersionId, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
+    USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
@@ -289,7 +290,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     let properties = context.with_options().inner();
 
-    let (mut columns, pk_column_ids, row_id_index) =
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     let definition = context.normalized_sql().to_owned();
@@ -298,8 +299,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
         source_schema,
         &mut columns,
         properties,
-        row_id_index,
-        &pk_column_ids,
+        &mut row_id_index,
+        &mut pk_column_ids,
         true,
     )
     .await?;
@@ -381,7 +382,7 @@ fn gen_table_plan_inner(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let source = source_info.map(|source_info| ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name: name.clone(),
