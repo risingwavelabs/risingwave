@@ -121,7 +121,7 @@ impl SourceErrorContext {
                 "SourceError",
                 // TODO(jon-chuang): add the error msg truncator to truncate these
                 &e.inner().to_string(),
-                // Let's be a bit more specific for SourceExecutor 
+                // Let's be a bit more specific for SourceExecutor
                 "SourceExecutor",
                 &self.fragment_id.to_string(),
                 &self.table_id.to_string(),

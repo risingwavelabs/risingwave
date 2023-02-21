@@ -23,7 +23,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceErrorContext, SourceColumnDesc};
+use crate::source::{SourceColumnDesc, SourceErrorContext};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -47,10 +47,7 @@ pub struct DebeziumJsonParser {
 }
 
 impl DebeziumJsonParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        error_ctx: SourceErrorContext,
-    ) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, error_ctx: SourceErrorContext) -> Result<Self> {
         Ok(Self {
             rw_columns,
             error_ctx,

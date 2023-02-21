@@ -31,7 +31,7 @@ use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceErrorContext, SourceColumnDesc};
+use crate::source::{SourceColumnDesc, SourceErrorContext};
 
 impl_common_parser_logic!(AvroParser);
 
@@ -202,7 +202,7 @@ mod test {
     };
     use crate::parser::avro::util::unix_epoch_days;
     use crate::parser::SourceStreamChunkBuilder;
-    use crate::source::{SourceErrorContext, SourceColumnDesc};
+    use crate::source::{SourceColumnDesc, SourceErrorContext};
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();

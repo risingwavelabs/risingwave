@@ -34,7 +34,7 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceErrorContext, SourceColumnDesc};
+use crate::source::{SourceColumnDesc, SourceErrorContext};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";

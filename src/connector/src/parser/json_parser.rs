@@ -20,7 +20,7 @@ use simd_json::{BorrowedValue, ValueAccess};
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceErrorContext, SourceColumnDesc};
+use crate::source::{SourceColumnDesc, SourceErrorContext};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -32,10 +32,7 @@ pub struct JsonParser {
 }
 
 impl JsonParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        error_ctx: SourceErrorContext,
-    ) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, error_ctx: SourceErrorContext) -> Result<Self> {
         Ok(Self {
             rw_columns,
             error_ctx,

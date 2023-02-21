@@ -28,7 +28,7 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceErrorContext, SourceColumnDesc};
+use crate::source::{SourceColumnDesc, SourceErrorContext};
 use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
 
 const AFTER: &str = "data";
@@ -44,10 +44,7 @@ pub struct CanalJsonParser {
 }
 
 impl CanalJsonParser {
-    pub fn new(
-        rw_columns: Vec<SourceColumnDesc>,
-        error_ctx: SourceErrorContext,
-    ) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, error_ctx: SourceErrorContext) -> Result<Self> {
         Ok(Self {
             rw_columns,
             error_ctx,
@@ -262,8 +259,7 @@ mod tests {
             SourceColumnDesc::simple("win_rate", DataType::Float64, 5.into()),
         ];
 
-        let parser =
-            CanalJsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
+        let parser = CanalJsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -340,8 +336,7 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int32, 1.into()),
         ];
 
-        let parser =
-            CanalJsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
+        let parser = CanalJsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
