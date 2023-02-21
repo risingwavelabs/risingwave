@@ -34,6 +34,10 @@ RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-so
     && rm -rf "/root/.cargo/registry/cache" \
     && rm -rf "/root/.cargo/git/db"
 
+# download spark
+RUN wget https://archive.apache.org/dist/spark/spark-3.3.1/spark-3.3.1-bin-hadoop3.tgz && mkdir -p /opt/spark && mv spark-3.3.1-bin-hadoop3.tgz /opt/spark \
+    && cd /opt/spark && tar xf spark-3.3.1-bin-hadoop3.tgz
+
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
 ENV CARGO_INCREMENTAL=0
