@@ -33,7 +33,7 @@ use super::executor_core::StreamSourceCore;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source::reader::SourceReaderStream;
+use crate::executor::stream_reader::ReaderStreamWithPause;
 use crate::executor::*;
 /// [`FsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
@@ -109,7 +109,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn apply_split_change(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut SourceReaderStream,
+        stream: &mut ReaderStreamWithPause,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -175,7 +175,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn replace_stream_reader_with_target_state(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut SourceReaderStream,
+        stream: &mut ReaderStreamWithPause,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -329,9 +329,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .await?;
 
         // Merge the chunks from source and the barriers into a single stream.
-        let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        let mut stream =
+            ReaderStreamWithPause::new_with_barrier_receiver(barrier_receiver, source_chunk_reader);
         if start_with_paused {
-            stream.pause_source();
+            stream.pause_data_stream();
         }
 
         yield Message::Barrier(barrier);
@@ -345,42 +346,53 @@ impl<S: StateStore> FsSourceExecutor<S> {
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
-                Either::Left(barrier) => {
-                    last_barrier_time = Instant::now();
-                    if self_paused {
-                        stream.resume_source();
-                        self_paused = false;
-                    }
-                    let epoch = barrier.epoch;
-
-                    if let Some(ref mutation) = barrier.mutation.as_deref() {
-                        match mutation {
-                            Mutation::SourceChangeSplit(actor_splits) => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?
-                            }
-                            Mutation::Pause => stream.pause_source(),
-                            Mutation::Resume => stream.resume_source(),
-                            Mutation::Update { actor_splits, .. } => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
-                            }
-                            _ => {}
+                Either::Left(msg) => match &msg {
+                    Message::Barrier(barrier) => {
+                        last_barrier_time = Instant::now();
+                        if self_paused {
+                            stream.resume_data_stream();
+                            self_paused = false;
                         }
+                        let epoch = barrier.epoch;
+
+                        if let Some(ref mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::SourceChangeSplit(actor_splits) => {
+                                    self.apply_split_change(&source_desc, &mut stream, actor_splits)
+                                        .await?
+                                }
+                                Mutation::Pause => stream.pause_data_stream(),
+                                Mutation::Resume => stream.resume_data_stream(),
+                                Mutation::Update { actor_splits, .. } => {
+                                    self.apply_split_change(
+                                        &source_desc,
+                                        &mut stream,
+                                        actor_splits,
+                                    )
+                                    .await?;
+                                }
+                                _ => {}
+                            }
+                        }
+                        self.take_snapshot_and_clear_cache(epoch).await?;
+
+                        self.metrics
+                            .source_row_per_barrier
+                            .with_label_values(&[
+                                self.ctx.id.to_string().as_str(),
+                                self.stream_source_core.source_identify.as_ref(),
+                            ])
+                            .inc_by(metric_row_per_barrier);
+                        metric_row_per_barrier = 0;
+
+                        yield msg;
                     }
-                    self.take_snapshot_and_clear_cache(epoch).await?;
-
-                    self.metrics
-                        .source_row_per_barrier
-                        .with_label_values(&[
-                            self.ctx.id.to_string().as_str(),
-                            self.stream_source_core.source_identify.as_ref(),
-                        ])
-                        .inc_by(metric_row_per_barrier);
-                    metric_row_per_barrier = 0;
-
-                    yield Message::Barrier(barrier);
-                }
+                    _ => {
+                        // For the source executor, the message we receive from this arm should
+                        // always be barrier message.
+                        unreachable!();
+                    }
+                },
 
                 Either::Right(StreamChunkWithState {
                     chunk,
@@ -391,7 +403,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         // we can guarantee the source is not paused since it received stream
                         // chunks.
                         self_paused = true;
-                        stream.pause_source();
+                        stream.pause_data_stream();
                     }
                     // update split offset
                     if let Some(mapping) = split_offset_mapping {

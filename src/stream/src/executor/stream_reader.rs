@@ -25,32 +25,33 @@ use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithStat
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::Barrier;
+use crate::executor::{Barrier, Message};
 
-type SourceReaderMessage = StreamExecutorResult<Either<Barrier, StreamChunkWithState>>;
-type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
-type SourceReaderStreamInner =
-    SelectWithStrategy<SourceReaderArm, SourceReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
+type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
+type ReaderStreamData = StreamExecutorResult<Either<Message, StreamChunkWithState>>;
+type ReaderArm = BoxStream<'static, ReaderStreamData>;
+type ReaderStreamWithPauseInner =
+    SelectWithStrategy<ReaderArm, ReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
 
-pub(super) struct SourceReaderStream {
-    inner: SourceReaderStreamInner,
+pub(super) struct ReaderStreamWithPause {
+    inner: ReaderStreamWithPauseInner,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl SourceReaderStream {
+impl ReaderStreamWithPause {
     /// Receive barriers from barrier manager with the channel, error on channel close.
-    #[try_stream(ok = Barrier, error = StreamExecutorError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
         while let Some(barrier) = rx.recv().stack_trace("source_recv_barrier").await {
-            yield barrier;
+            yield Message::Barrier(barrier);
         }
         bail!("barrier reader closed unexpectedly");
     }
 
-    /// Receive chunks and states from the source reader, hang up on error.
+    /// Receive chunks and states from the reader. Hang up on error.
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn source_stream(stream: BoxSourceWithStateStream) {
+    async fn data_stream(stream: BoxSourceWithStateStream) {
         // TODO: support stack trace for Stream
         #[for_await]
         for chunk in stream {
@@ -64,38 +65,48 @@ impl SourceReaderStream {
         }
     }
 
-    /// Convert this reader to a stream.
-    pub fn new(
-        barrier_receiver: UnboundedReceiver<Barrier>,
-        source_stream: BoxSourceWithStateStream,
+    // TODO(Yuanxin): Add comments.
+    pub fn new_with_message_stream(
+        message_stream: ExecutorMessageStream,
+        data_stream: BoxSourceWithStateStream,
     ) -> Self {
+        let message_stream_arm = message_stream.map_ok(Either::Left).boxed();
+        let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
+        let inner = Self::new_inner(message_stream_arm, data_stream_arm);
         Self {
-            inner: Self::new_inner(
-                Self::barrier_receiver(barrier_receiver)
-                    .map_ok(Either::Left)
-                    .boxed(),
-                Self::source_stream(source_stream)
-                    .map_ok(Either::Right)
-                    .boxed(),
-            ),
+            inner,
             paused: false,
         }
     }
 
-    fn new_inner(
-        barrier_receiver_arm: SourceReaderArm,
-        source_stream_arm: SourceReaderArm,
-    ) -> SourceReaderStreamInner {
+    // TODO(Yuanxin): Add comments.
+    pub fn new_with_barrier_receiver(
+        barrier_receiver: UnboundedReceiver<Barrier>,
+        data_stream: BoxSourceWithStateStream,
+    ) -> Self {
+        let barrier_receiver_arm = Self::barrier_receiver(barrier_receiver)
+            .map_ok(Either::Left)
+            .boxed();
+        let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
+        let inner = Self::new_inner(barrier_receiver_arm, data_stream_arm);
+        Self {
+            inner,
+            paused: false,
+        }
+    }
+
+    fn new_inner(message_stream: ReaderArm, data_stream: ReaderArm) -> ReaderStreamWithPauseInner {
         select_with_strategy(
-            barrier_receiver_arm,
-            source_stream_arm,
-            // We prefer barrier on the left hand side over source chunks.
+            message_stream,
+            data_stream,
+            // We prefer the left stream (which contains barriers of `Mutation::Pause` and
+            // `Mutation::Resume`) over the stream of data chunks.
             |_: &mut ()| PollNext::Left,
         )
     }
 
-    /// Replace the source stream with a new one for given `stream`. Used for split change.
-    pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream) {
+    /// Replace the data stream with a new one for given `stream`. Used for split change.
+    pub fn replace_source_stream(&mut self, data_stream: BoxSourceWithStateStream) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
@@ -106,27 +117,25 @@ impl SourceReaderStream {
         // to ensure the internal state of the `SelectWithStrategy` is reset. (#6300)
         self.inner = Self::new_inner(
             barrier_receiver_arm,
-            Self::source_stream(source_stream)
-                .map_ok(Either::Right)
-                .boxed(),
+            Self::data_stream(data_stream).map_ok(Either::Right).boxed(),
         );
     }
 
-    /// Pause the source stream.
-    pub fn pause_source(&mut self) {
+    /// Pause the data stream.
+    pub fn pause_data_stream(&mut self) {
         assert!(!self.paused, "already paused");
         self.paused = true;
     }
 
-    /// Resume the source stream, panic if the source is not paused before.
-    pub fn resume_source(&mut self) {
+    /// Resume the data stream. Panic if the data stream is not paused.
+    pub fn resume_data_stream(&mut self) {
         assert!(self.paused, "not paused");
         self.paused = false;
     }
 }
 
-impl Stream for SourceReaderStream {
-    type Item = SourceReaderMessage;
+impl Stream for ReaderStreamWithPause {
+    type Item = ReaderStreamData;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -157,7 +166,7 @@ mod tests {
         let table_dml_handle = TableDmlHandle::new(vec![]);
         let source_stream = table_dml_handle.stream_reader().into_stream();
 
-        let stream = SourceReaderStream::new(barrier_rx, source_stream);
+        let stream = ReaderStreamWithPause::new_with_barrier_receiver(barrier_rx, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
@@ -181,7 +190,7 @@ mod tests {
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
-        stream.pause_source();
+        stream.pause_data_stream();
 
         // Write a barrier.
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
@@ -197,7 +206,7 @@ mod tests {
         assert!(next!().is_none());
 
         // Resume the stream.
-        stream.resume_source();
+        stream.resume_data_stream();
         // Then we can receive the chunk sent when the stream is paused.
         assert_matches!(next!().unwrap(), Either::Right(_));
     }

@@ -85,6 +85,7 @@ mod sink;
 mod sort;
 mod sort_buffer;
 pub mod source;
+mod stream_reader;
 pub mod subtask;
 mod top_n;
 mod union;

@@ -19,7 +19,6 @@ pub use fs_source_executor::*;
 
 pub mod source_executor;
 
-mod reader;
 pub mod state_table_handler;
 
 pub use state_table_handler::*;
