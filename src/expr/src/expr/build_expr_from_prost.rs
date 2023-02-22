@@ -64,11 +64,15 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         // Fixed number of arguments and based on `Unary/Binary/Ternary/...Expression`
         Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
         | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | Exp | BitwiseNot | CharLength
-        | BoolOut | OctetLength | BitLength | ToTimestamp => build_unary_expr_prost(prost),
+        | BoolOut | OctetLength | BitLength | ToTimestamp | JsonbTypeof | JsonbArrayLength => {
+            build_unary_expr_prost(prost)
+        }
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
+        | ConcatOp | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
+            build_binary_expr_prost(prost)
+        }
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
             build_nullable_binary_expr_prost(prost)
         }
