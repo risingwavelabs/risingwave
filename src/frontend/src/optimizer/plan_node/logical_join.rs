@@ -24,7 +24,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
     PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
     ToStream,
 };
@@ -32,9 +32,9 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
+    BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
     EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter, ToStreamContext,
+    StreamDynamicFilter, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -1344,7 +1344,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
 
     /// Pruning
@@ -1636,18 +1636,15 @@ mod tests {
         // Perform `to_batch`
         let result = logical_join.to_batch().unwrap();
 
-        // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
-        let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(
-            ExprImpl::from(batch_filter.predicate().clone()),
-            non_eq_cond
-        );
-
-        let input = batch_filter.input();
-        let hash_join = input.as_batch_hash_join().unwrap();
+        // Expected plan:  HashJoin($1 = $3 AND $2 == 42)
+        let hash_join = result.as_batch_hash_join().unwrap();
         assert_eq!(
             ExprImpl::from(hash_join.eq_join_predicate().eq_cond()),
             eq_cond
+        );
+        assert_eq!(
+            *hash_join.eq_join_predicate().non_eq_cond().conjunctions.first().unwrap(),
+            non_eq_cond
         );
     }
 
