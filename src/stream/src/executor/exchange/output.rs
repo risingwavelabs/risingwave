@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use anyhow::anyhow;
 use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
+use derivative::Derivative;
 use risingwave_common::util::addr::is_local_address;
 use tokio::sync::mpsc::error::SendError;
 
@@ -44,20 +45,16 @@ pub trait Output: Debug + Send + Sync + 'static {
 pub type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local channel.
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct LocalOutput {
     actor_id: ActorId,
 
+    #[derivative(Debug = "ignore")]
     span: SpanValue,
 
+    #[derivative(Debug = "ignore")]
     ch: Sender,
-}
-
-impl Debug for LocalOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalOutput")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
 }
 
 impl LocalOutput {
@@ -97,20 +94,16 @@ impl Output for LocalOutput {
 ///
 /// [`ExchangeService`]: risingwave_pb::task_service::exchange_service_server::ExchangeService
 // FIXME: can we just use the same `Output` with local and compacts it in gRPC server?
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct RemoteOutput {
     actor_id: ActorId,
 
+    #[derivative(Debug = "ignore")]
     span: SpanValue,
 
+    #[derivative(Debug = "ignore")]
     ch: Sender,
-}
-
-impl Debug for RemoteOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteOutput")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
 }
 
 impl RemoteOutput {

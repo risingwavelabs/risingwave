@@ -32,6 +32,7 @@ enum WorkerType {
   COMPUTE_NODE = 2;
   RISE_CTL = 3;
   COMPACTOR = 4;
+  META = 5;
 }
 
 message ParallelUnit {
