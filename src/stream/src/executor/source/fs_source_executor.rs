@@ -33,7 +33,7 @@ use super::executor_core::StreamSourceCore;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::stream_reader::ReaderStreamWithPause;
+use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 /// [`FsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
@@ -109,7 +109,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut ReaderStreamWithPause<BIASED>,
+        stream: &mut StreamReaderWithPause<BIASED>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -175,7 +175,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut ReaderStreamWithPause<BIASED>,
+        stream: &mut StreamReaderWithPause<BIASED>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -330,12 +330,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        let mut stream = ReaderStreamWithPause::<true>::new_with_barrier_receiver(
-            barrier_receiver,
-            source_chunk_reader,
-        );
+        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let mut stream = StreamReaderWithPause::<true>::new(barrier_stream, source_chunk_reader);
         if start_with_paused {
-            stream.pause_data_stream();
+            stream.pause_stream();
         }
 
         yield Message::Barrier(barrier);
@@ -353,7 +351,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     Message::Barrier(barrier) => {
                         last_barrier_time = Instant::now();
                         if self_paused {
-                            stream.resume_data_stream();
+                            stream.resume_stream();
                             self_paused = false;
                         }
                         let epoch = barrier.epoch;
@@ -364,8 +362,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                     self.apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?
                                 }
-                                Mutation::Pause => stream.pause_data_stream(),
-                                Mutation::Resume => stream.resume_data_stream(),
+                                Mutation::Pause => stream.pause_stream(),
+                                Mutation::Resume => stream.resume_stream(),
                                 Mutation::Update { actor_splits, .. } => {
                                     self.apply_split_change(
                                         &source_desc,
@@ -406,7 +404,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         // we can guarantee the source is not paused since it received stream
                         // chunks.
                         self_paused = true;
-                        stream.pause_data_stream();
+                        stream.pause_stream();
                     }
                     // update split offset
                     if let Some(mapping) = split_offset_mapping {

@@ -19,7 +19,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
-use super::stream_reader::ReaderStreamWithPause;
+use super::stream_reader::StreamReaderWithPause;
 use super::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, Mutation,
     PkIndices, PkIndicesRef,
@@ -93,16 +93,15 @@ impl DmlExecutor {
             .map_err(StreamExecutorError::connector_error)?;
         let batch_reader = batch_reader.stream_reader().into_stream();
 
-        // Merge the two streams using `ReaderStreamWithPause` because when we receive a pause
+        // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream =
-            ReaderStreamWithPause::<false>::new_with_message_stream(upstream, batch_reader);
+        let mut stream = StreamReaderWithPause::<false>::new(upstream, batch_reader);
 
         // If the first barrier is configuration change, then the DML executor must be newly
         // created, and we should start with the paused state.
         if barrier.is_update() {
-            stream.pause_data_stream();
+            stream.pause_stream();
         }
 
         yield Message::Barrier(barrier);
@@ -116,8 +115,8 @@ impl DmlExecutor {
                         // from DML.
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             match mutation {
-                                Mutation::Pause => stream.pause_data_stream(),
-                                Mutation::Resume => stream.resume_data_stream(),
+                                Mutation::Pause => stream.pause_stream(),
+                                Mutation::Resume => stream.resume_stream(),
                                 _ => {}
                             }
                         }

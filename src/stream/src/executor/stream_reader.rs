@@ -20,37 +20,35 @@ use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::bail;
 use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithState};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::{Barrier, Message};
+use crate::executor::Message;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
-type ReaderStreamData = StreamExecutorResult<Either<Message, StreamChunkWithState>>;
-type ReaderArm = BoxStream<'static, ReaderStreamData>;
-type ReaderStreamWithPauseInner =
+type StreamReaderData = StreamExecutorResult<Either<Message, StreamChunkWithState>>;
+type ReaderArm = BoxStream<'static, StreamReaderData>;
+type StreamReaderWithPauseInner =
     SelectWithStrategy<ReaderArm, ReaderArm, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
 
-/// `ReaderStreamWithPause` merges two streams, with one of them receiving barriers. When the
-/// barrier requires the data stream
-pub(super) struct ReaderStreamWithPause<const BIASED: bool> {
-    inner: ReaderStreamWithPauseInner,
+/// [`StreamReaderWithPause`] merges two streams, with one receiving barriers (and maybe other types
+/// of messages) and the other receiving data only (no barrier). The merged stream can be paused
+/// (`StreamReaderWithPause::pause_stream`) and resumed (`StreamReaderWithPause::resume_stream`).
+/// A paused stream will not receive any data from either original stream until a barrier arrives
+/// and the stream is resumed.
+///
+/// ## Priority
+///
+/// If `BIASED` is `true`, the left-hand stream (the one receiving barriers) will get a higher
+/// priority over the right-hand one. Otherwise, the two streams will be polled in a round robin
+/// fashion.
+pub(super) struct StreamReaderWithPause<const BIASED: bool> {
+    inner: StreamReaderWithPauseInner,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl<const BIASED: bool> ReaderStreamWithPause<BIASED> {
-    /// Receive barriers from barrier manager with the channel, error on channel close.
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
-        while let Some(barrier) = rx.recv().stack_trace("source_recv_barrier").await {
-            yield Message::Barrier(barrier);
-        }
-        bail!("barrier reader closed unexpectedly");
-    }
-
+impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
     /// Receive chunks and states from the reader. Hang up on error.
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
     async fn data_stream(stream: BoxSourceWithStateStream) {
@@ -67,9 +65,9 @@ impl<const BIASED: bool> ReaderStreamWithPause<BIASED> {
         }
     }
 
-    /// Construct a `ReaderStreamWithPause` with one stream receiving streaming messages and the
-    /// other receiving data only.
-    pub fn new_with_message_stream(
+    /// Construct a `StreamReaderWithPause` with one stream receiving barrier messages (and maybe
+    /// other types of messages) and the other receiving data only (no barrier).
+    pub fn new(
         message_stream: ExecutorMessageStream,
         data_stream: BoxSourceWithStateStream,
     ) -> Self {
@@ -82,24 +80,7 @@ impl<const BIASED: bool> ReaderStreamWithPause<BIASED> {
         }
     }
 
-    /// Construct a `ReaderStreamWithPause` with one stream receiving barriers only and the other
-    /// receiving data only.
-    pub fn new_with_barrier_receiver(
-        barrier_receiver: UnboundedReceiver<Barrier>,
-        data_stream: BoxSourceWithStateStream,
-    ) -> Self {
-        let barrier_receiver_arm = Self::barrier_receiver(barrier_receiver)
-            .map_ok(Either::Left)
-            .boxed();
-        let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
-        let inner = Self::new_inner(barrier_receiver_arm, data_stream_arm);
-        Self {
-            inner,
-            paused: false,
-        }
-    }
-
-    fn new_inner(message_stream: ReaderArm, data_stream: ReaderArm) -> ReaderStreamWithPauseInner {
+    fn new_inner(message_stream: ReaderArm, data_stream: ReaderArm) -> StreamReaderWithPauseInner {
         let strategy = if BIASED {
             |_: &mut PollNext| PollNext::Left
         } else {
@@ -126,20 +107,20 @@ impl<const BIASED: bool> ReaderStreamWithPause<BIASED> {
     }
 
     /// Pause the data stream.
-    pub fn pause_data_stream(&mut self) {
+    pub fn pause_stream(&mut self) {
         assert!(!self.paused, "already paused");
         self.paused = true;
     }
 
     /// Resume the data stream. Panic if the data stream is not paused.
-    pub fn resume_data_stream(&mut self) {
+    pub fn resume_stream(&mut self) {
         assert!(self.paused, "not paused");
         self.paused = false;
     }
 }
 
-impl<const BIASED: bool> Stream for ReaderStreamWithPause<BIASED> {
-    type Item = ReaderStreamData;
+impl<const BIASED: bool> Stream for StreamReaderWithPause<BIASED> {
+    type Item = StreamReaderData;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -151,7 +132,7 @@ impl<const BIASED: bool> Stream for ReaderStreamWithPause<BIASED> {
             // should be no more message until a `Mutation::Update` and a 'Mutation::Resume`.
             self.inner.get_mut().0.poll_next_unpin(ctx)
         } else {
-            // TODO: We may need to prioritize the data stream (right hand stream) after resuming
+            // TODO: We may need to prioritize the data stream (right-hand stream) after resuming
             // from the paused state.
             self.inner.poll_next_unpin(ctx)
         }
@@ -167,6 +148,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
+    use crate::executor::{barrier_to_message_stream, Barrier};
 
     #[tokio::test]
     async fn test_pause_and_resume() {
@@ -175,8 +157,8 @@ mod tests {
         let table_dml_handle = TableDmlHandle::new(vec![]);
         let source_stream = table_dml_handle.stream_reader().into_stream();
 
-        let stream =
-            ReaderStreamWithPause::<true>::new_with_barrier_receiver(barrier_rx, source_stream);
+        let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
+        let stream = StreamReaderWithPause::<true>::new(barrier_stream, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
@@ -200,7 +182,7 @@ mod tests {
         assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
-        stream.pause_data_stream();
+        stream.pause_stream();
 
         // Write a barrier.
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
@@ -216,7 +198,7 @@ mod tests {
         assert!(next!().is_none());
 
         // Resume the stream.
-        stream.resume_data_stream();
+        stream.resume_stream();
         // Then we can receive the chunk sent when the stream is paused.
         assert_matches!(next!().unwrap(), Either::Right(_));
     }
