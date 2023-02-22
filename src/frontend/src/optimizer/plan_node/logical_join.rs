@@ -1058,38 +1058,7 @@ impl LogicalJoin {
 
         let logical_join = self.clone_with_left_right(left, right);
 
-        // Convert to Hash Join for equal joins
-        // For inner joins, pull non-equal conditions to a filter operator on top of it
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
-        if pull_filter {
-            let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
-
-            // Temporarily remove output indices.
-            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-            let eq_cond = EqJoinPredicate::new(
-                Condition::true_cond(),
-                predicate.eq_keys().to_vec(),
-                self.left().schema().len(),
-            );
-            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-            let plan = StreamFilter::new(logical_filter).into();
-            if self.output_indices() != &default_indices {
-                let logical_project = LogicalProject::with_mapping(
-                    plan,
-                    ColIndexMapping::with_remaining_columns(
-                        self.output_indices(),
-                        self.internal_column_num(),
-                    ),
-                );
-                Ok(StreamProject::new(logical_project).into())
-            } else {
-                Ok(plan)
-            }
-        } else {
-            Ok(StreamHashJoin::new(logical_join, predicate).into())
-        }
+        Ok(StreamHashJoin::new(logical_join, predicate).into())
     }
 
     fn to_stream_dynamic_filter(
@@ -1189,33 +1158,7 @@ impl LogicalJoin {
         logical_join: LogicalJoin,
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        // Convert to Hash Join for equal joins
-        // For inner joins, pull non-equal conditions to a filter operator on top of it
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
-        if pull_filter {
-            let new_output_indices = logical_join.output_indices().clone();
-            let new_internal_column_num = logical_join.internal_column_num();
-            let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
-            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-            let eq_cond = EqJoinPredicate::new(
-                Condition::true_cond(),
-                predicate.eq_keys().to_vec(),
-                self.left().schema().len(),
-            );
-            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-            let plan = BatchFilter::new(logical_filter).into();
-            if self.output_indices() != &default_indices {
-                let logical_project =
-                    LogicalProject::with_out_col_idx(plan, new_output_indices.into_iter());
-                Ok(BatchProject::new(logical_project).into())
-            } else {
-                Ok(plan)
-            }
-        } else {
-            Ok(BatchHashJoin::new(logical_join, predicate).into())
-        }
+        Ok(BatchHashJoin::new(logical_join, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
