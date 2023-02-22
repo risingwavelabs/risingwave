@@ -32,7 +32,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    connection, Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -100,13 +102,19 @@ pub struct CatalogManager<S: MetaStore> {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
+    // TODO(siyuan): persist to meta store
+    pub service_map: HashMap<String, Connection>,
 }
 
 impl CatalogManagerCore {
     async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
         let user = UserManager::new(env, &database).await?;
-        Ok(Self { database, user })
+        Ok(Self {
+            database,
+            user,
+            service_map: HashMap::new(),
+        })
     }
 }
 
@@ -322,6 +330,19 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
         }
+    }
+
+    pub async fn create_connection(
+        &self,
+        service_name: &str,
+        payload: &connection::Payload,
+    ) -> MetaResult<u32> {
+        let core = &mut *self.core.lock().await;
+        // todo: save the connection to meta store
+        // core.service_map
+        //     .insert(service_name.to_string(), connection.clone());
+
+        Ok(0)
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {

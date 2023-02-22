@@ -235,6 +235,24 @@ message GetDdlProgressResponse {
   repeated DdlProgress ddl_progress = 1;
 }
 
+
+message CreateConnectionRequest {
+  message PrivateLink {
+    string service_name = 2;
+    repeated string availability_zones = 3;
+  }
+
+  oneof payload {
+    PrivateLink private_link = 1;
+  }
+}
+
+message CreateConnectionResponse {
+  uint32 connection_id = 1;
+  // global catalog version
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -258,4 +276,5 @@ service DdlService {
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
   rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
+  rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
 }

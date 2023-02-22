@@ -80,6 +80,21 @@ message Sink {
   string definition = 13;
 }
 
+
+message Connection {
+  message PrivateLinkService {
+    string endpoint_id = 1;
+    map<string, string> dns_entries = 2;
+  }
+
+  uint32 id = 1;
+  string name = 2;
+  oneof payload {
+    PrivateLinkService private_link_service = 3;
+  }
+
+}
+
 message Index {
   uint32 id = 1;
   uint32 schema_id = 2;

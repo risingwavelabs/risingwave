@@ -121,8 +121,10 @@ impl MetaClient {
         .await
     }
 
-    pub(crate) fn create_private_links(service_name: &str) -> String {
-        todo!("create_private_links")
+    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<u32> {
+        let request = CreateConnectionRequest { payload: Some(req) };
+        let resp = self.inner.create_connection(request).await?;
+        Ok(resp.connection_id)
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
@@ -1430,6 +1432,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
+            ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

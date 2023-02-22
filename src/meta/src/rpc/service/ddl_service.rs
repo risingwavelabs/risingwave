@@ -14,8 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
+use risingwave_pb::catalog;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{connection, Table};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
@@ -29,6 +30,7 @@ use crate::manager::{
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
+use crate::rpc::cloud_platform::AwsEc2Client;
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -47,6 +49,8 @@ pub struct DdlServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     barrier_manager: BarrierManagerRef<S>,
+
+    aws_client: Option<AwsEc2Client>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -56,6 +60,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         env: MetaSrvEnv<S>,
+        aws_client: Option<AwsEc2Client>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
@@ -65,6 +70,7 @@ where
     ) -> Self {
         Self {
             env,
+            aws_client,
             catalog_manager,
             stream_manager,
             source_manager,
@@ -539,6 +545,47 @@ where
         Ok(Response::new(GetDdlProgressResponse {
             ddl_progress: self.barrier_manager.get_ddl_progress().await,
         }))
+    }
+
+    async fn create_connection(
+        &self,
+        request: Request<CreateConnectionRequest>,
+    ) -> Result<Response<CreateConnectionResponse>, Status> {
+        if self.aws_client.is_none() {
+            return Err(Status::from(MetaError::unavailable(
+                "AWS client is not configured".into(),
+            )));
+        }
+
+        let req = request.into_inner();
+        if req.payload.is_none() {
+            return Err(Status::invalid_argument("request is empty"));
+        }
+        match req.payload.unwrap() {
+            create_connection_request::Payload::PrivateLink(req) => {
+                // todo: check if the private link service is already exists
+
+                let cli = self.aws_client.as_ref().unwrap();
+                let private_link_svc = cli
+                    .create_aws_private_link(&req.service_name, &req.availability_zones)
+                    .await?;
+
+                // save private link info to catalog
+                let id = self
+                    .catalog_manager
+                    .create_connection(
+                        &req.service_name,
+                        &connection::Payload::PrivateLinkService(private_link_svc),
+                    )
+                    .await?;
+
+                Ok(Response::new(CreateConnectionResponse {
+                    connection_id: id,
+                    version: 0,
+                }))
+            }
+            _ => Err(Status::invalid_argument("connection type is not supported")),
+        }
     }
 }
 

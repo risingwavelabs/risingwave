@@ -6128,6 +6128,8 @@ dependencies = [
  "arc-swap",
  "assert_matches",
  "async-trait",
+ "aws-config",
+ "aws-sdk-ec2",
  "axum",
  "bytes",
  "clap 3.2.23",

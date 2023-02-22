@@ -20,13 +20,12 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use aws_config::retry::RetryConfig;
 pub use enumerator::*;
 pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
-
-use aws_config::retry::RetryConfig;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 
 #[derive(Clone, Debug, Deserialize)]

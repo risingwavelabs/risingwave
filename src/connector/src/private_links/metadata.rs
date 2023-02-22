@@ -226,6 +226,7 @@ async fn example_main() {
 
 #[tokio::main]
 async fn main() {
+    println!("start to create private links...");
     let azs = vec![
         "us-east-1a".to_string(),
         "us-east-1b".to_string(),
@@ -270,7 +271,7 @@ impl AwsEc2Client {
             .describe_subnets(&self.vpc_id, &availability_zones)
             .await?;
 
-        info!("subnet_ids => {:?}", subnet_ids);
+        println!("subnet_ids => {:?}", subnet_ids);
         self.create_vpc_endpoint(&self.vpc_id, service_name, &subnet_ids)
             .await
     }
@@ -281,11 +282,11 @@ impl AwsEc2Client {
         availability_zones: &[String],
     ) -> anyhow::Result<Vec<String>> {
         let vpc_filter = Filter::builder().name("vpc-id").values(vpc_id).build();
-
         let az_filter = Filter::builder()
             .name("availability-zone")
             .set_values(Some(Vec::from(availability_zones)))
             .build();
+
         let resp = self
             .client
             .describe_subnets()
@@ -323,10 +324,12 @@ impl AwsEc2Client {
             .send()
             .await?;
 
+        println!("endpoint created success");
         if let Some(endpoint) = output.vpc_endpoint() {
+            println!("endpoint id => {:?}", endpoint.vpc_endpoint_id());
             if let Some(dns_entries) = endpoint.dns_entries() {
                 for dns_entry in dns_entries {
-                    println!("dns entry: {:?}", dns_entry)
+                    println!("dns entry => {:?}", dns_entry)
                 }
             }
         }
