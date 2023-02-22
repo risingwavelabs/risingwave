@@ -14,7 +14,9 @@
 
 //! Provides E2E Test runner functionality.
 use itertools::Itertools;
+use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use rand_chacha::ChaChaRng;
 use tokio_postgres::error::Error as PgError;
 
 use crate::validation::is_permissible_error;
@@ -25,9 +27,9 @@ use crate::{
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
     let mut rng = if let Some(seed) = seed {
-        rand::rngs::SmallRng::seed_from_u64(seed)
+        ChaChaRng::seed_from_u64(seed)
     } else {
-        rand::rngs::SmallRng::from_entropy()
+        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
     };
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
 
