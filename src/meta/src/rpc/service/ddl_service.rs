@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -20,7 +22,9 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
+use risingwave_pb::stream_plan::{
+    DispatchStrategy, StreamFragmentGraph as StreamFragmentGraphProto,
+};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -845,6 +849,7 @@ where
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
+        let original_table = self.catalog_manager.get_table(id).await?;
 
         // 1. Get the env for streaming jobs.
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
@@ -859,6 +864,7 @@ where
         // 3. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let stream_job = &*stream_job;
+        let table = stream_job.table().unwrap();
 
         // 4. Mark current relation as "updating".
         self.catalog_manager
@@ -867,14 +873,44 @@ where
 
         // 5. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
-        let original_table_fragment = self
-            .fragment_manager
-            .get_mview_fragment(id.into())
-            .await?;
+        let original_table_fragment = self.fragment_manager.get_mview_fragment(id.into()).await?;
+
+        let column_mapping: HashMap<_, _> = original_table
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(index, c)| {
+                let new_index = table
+                    .columns
+                    .iter()
+                    .position(|nc| {
+                        nc.get_column_desc().unwrap().column_id
+                            == c.get_column_desc().unwrap().column_id
+                    })
+                    .map(|i| i as u32);
+                (index as u32, new_index)
+            })
+            .collect();
+        let map = |index: &[u32]| -> Option<Vec<u32>> {
+            index
+                .iter()
+                .map(|i| column_mapping.get(i).copied().flatten())
+                .collect()
+        };
         let downstream_fragments = self
             .fragment_manager
             .get_downstream_chain_fragments(id.into())
-            .await?;
+            .await?
+            .into_iter()
+            .map(|(d, f)| {
+                let d = DispatchStrategy {
+                    r#type: d.r#type,
+                    dist_key_indices: map(&d.dist_key_indices).unwrap(),
+                    output_indices: map(&d.output_indices).unwrap(),
+                };
+                (d, f)
+            })
+            .collect();
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,

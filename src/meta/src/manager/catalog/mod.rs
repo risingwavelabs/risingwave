@@ -784,6 +784,14 @@ where
         }
     }
 
+    pub async fn get_table(&self, table_id: TableId) -> MetaResult<Table> {
+        if let Some(table) = self.core.lock().await.database.get_table(table_id) {
+            Ok(table.clone())
+        } else {
+            bail!("table doesn't exist");
+        }
+    }
+
     pub async fn drop_index(
         &self,
         index_id: IndexId,
