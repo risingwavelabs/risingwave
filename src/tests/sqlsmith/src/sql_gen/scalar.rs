@@ -41,9 +41,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // e.g. -1 becomes -(1).
         // See: https://github.com/risingwavelabs/risingwave/issues/4344
         match *typ {
-            T::Int64 => Expr::Nested(Box::new(Expr::Value(Value::Number(
-                self.gen_int(i64::MIN as isize, i64::MAX as isize),
-            )))),
+            T::Int64 => Expr::Nested(Box::new(Expr::TypedString {
+                data_type: AstDataType::BigInt,
+                value: self.gen_int(i64::MIN as isize, i64::MAX as isize),
+            })),
             T::Int32 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::Int,
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),

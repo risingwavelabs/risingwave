@@ -19,6 +19,7 @@ use std::collections::HashMap;
 // (found in the LICENSE.Apache file in the root directory).
 use std::sync::Arc;
 
+use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig};
@@ -50,6 +51,7 @@ pub trait LevelSelector: Sync + Send {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
+        table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask>;
 
     fn report_statistic_metrics(&self, _metrics: &MetaMetrics) {}
@@ -314,6 +316,7 @@ impl LevelSelector for DynamicLevelSelector {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
+        _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(compaction_group.compaction_config.clone());
@@ -373,6 +376,7 @@ impl LevelSelector for ManualCompactionSelector {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
+        _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
@@ -428,6 +432,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
+        _table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let mut picker = SpaceReclaimCompactionPicker::new(
@@ -472,11 +477,14 @@ impl LevelSelector for TtlCompactionSelector {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
         _selector_stats: &mut LocalSelectorStatistic,
+        table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactionTask> {
         let dynamic_level_core = DynamicLevelSelectorCore::new(group.compaction_config.clone());
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
-        let picker =
-            TtlReclaimCompactionPicker::new(group.compaction_config.max_space_reclaim_bytes);
+        let picker = TtlReclaimCompactionPicker::new(
+            group.compaction_config.max_space_reclaim_bytes,
+            table_id_to_options,
+        );
         let state = self
             .state
             .entry(group.group_id)
@@ -581,16 +589,21 @@ pub mod tests {
             total_key_count: 0,
             divide_version: 0,
             uncompressed_file_size: (right - left + 1) as u64,
+            min_epoch: 0,
+            max_epoch: 0,
         }
     }
 
-    pub fn generate_table_with_table_ids(
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_table_with_ids_and_epochs(
         id: u64,
         table_prefix: u64,
         left: usize,
         right: usize,
         epoch: u64,
         table_ids: Vec<u32>,
+        min_epoch: u64,
+        max_epoch: u64,
     ) -> SstableInfo {
         SstableInfo {
             id,
@@ -606,6 +619,8 @@ pub mod tests {
             total_key_count: 0,
             divide_version: 0,
             uncompressed_file_size: (right - left + 1) as u64,
+            min_epoch,
+            max_epoch,
         }
     }
 
@@ -823,6 +838,7 @@ pub mod tests {
                 &levels,
                 &mut levels_handlers,
                 &mut local_stats,
+                HashMap::default(),
             )
             .unwrap();
         // trivial move.
@@ -850,6 +866,7 @@ pub mod tests {
                 &levels,
                 &mut levels_handlers,
                 &mut local_stats,
+                HashMap::default(),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -868,6 +885,7 @@ pub mod tests {
                 &levels,
                 &mut levels_handlers,
                 &mut local_stats,
+                HashMap::default(),
             )
             .unwrap();
         assert_compaction_task(&compaction, &levels_handlers);
@@ -888,6 +906,7 @@ pub mod tests {
             &levels,
             &mut levels_handlers,
             &mut local_stats,
+            HashMap::default(),
         );
         assert!(compaction.is_none());
     }

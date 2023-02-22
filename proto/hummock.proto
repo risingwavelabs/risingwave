@@ -19,7 +19,9 @@ message SstableInfo {
   uint64 total_key_count = 7;
   // When a SST is divided, its divide_version will increase one.
   uint64 divide_version = 8;
-  uint64 uncompressed_file_size = 9;
+  uint64 min_epoch = 9;
+  uint64 max_epoch = 10;
+  uint64 uncompressed_file_size = 11;
 }
 
 enum LevelType {

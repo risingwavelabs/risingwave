@@ -40,6 +40,7 @@ use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, Ss
 use crate::monitor::StoreLocalStatistic;
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum UncommittedData {
     Sst(LocalSstableInfo),
     Batch(SharedBufferBatch),

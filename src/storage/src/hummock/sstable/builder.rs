@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -20,7 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
-use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
@@ -30,7 +31,7 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use crate::hummock::sstable::{BloomFilterBuilder, FilterBuilder};
+use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
 use crate::opts::StorageOpts;
@@ -115,18 +116,19 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// `last_table_stats` accumulates stats for `last_table_id` and finalizes it in `table_stats`
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
+
     filter_builder: F,
+
+    min_epoch: u64,
+    max_epoch: u64,
 }
 
-impl<W: SstableWriter> SstableBuilder<W, BloomFilterBuilder> {
+impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
             sstable_id,
             writer,
-            BloomFilterBuilder::new(
-                options.bloom_false_positive,
-                options.capacity / DEFAULT_ENTRY_SIZE + 1,
-            ),
+            XorFilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
@@ -166,6 +168,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             total_key_count: 0,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
+            min_epoch: u64::MAX,
+            max_epoch: u64::MIN,
         }
     }
 
@@ -189,7 +193,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
+
         let mut is_new_table = false;
+
+        let table_key_len = full_key.user_key.table_key.as_ref().len();
+        if table_key_len >= LARGE_KEY_LEN {
+            let table_id = full_key.user_key.table_id.table_id();
+            tracing::warn!(
+                "A large key (table_id={}, len={}, epoch={}) is added to block",
+                table_id,
+                table_key_len,
+                full_key.epoch
+            );
+        }
 
         // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
@@ -245,6 +262,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.raw_key.clear();
         self.raw_value.clear();
+
+        self.min_epoch = cmp::min(self.min_epoch, full_key.epoch);
+        self.max_epoch = cmp::max(self.max_epoch, full_key.epoch);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
@@ -329,6 +349,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_list: self.range_tombstones,
         };
         meta.estimated_size = meta.encoded_size() as u32 + meta_offset as u32;
+
+        // Expand the epoch of the whole sst by tombstone epoch
+        let (tombstone_min_epoch, tombstone_max_epoch) = {
+            let mut tombstone_min_epoch = u64::MAX;
+            let mut tombstone_max_epoch = u64::MIN;
+
+            for tombstone in &meta.range_tombstone_list {
+                tombstone_min_epoch = cmp::min(tombstone_min_epoch, tombstone.sequence);
+                tombstone_max_epoch = cmp::max(tombstone_max_epoch, tombstone.sequence);
+            }
+
+            (tombstone_min_epoch, tombstone_max_epoch)
+        };
+
         let sst_info = SstableInfo {
             id: self.sstable_id,
             key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -343,12 +377,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             total_key_count: self.total_key_count,
             divide_version: 0,
             uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
+            min_epoch: cmp::min(self.min_epoch, tombstone_min_epoch),
+            max_epoch: cmp::max(self.max_epoch, tombstone_max_epoch),
         };
         tracing::trace!(
-            "meta_size {} bloom_filter_size {}  add_key_counts {} ",
+            "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {}",
             meta.encoded_size(),
             meta.bloom_filter.len(),
             self.total_key_count,
+            self.stale_key_count,
+            self.min_epoch,
+            self.max_epoch,
         );
         let bloom_filter_size = meta.bloom_filter.len();
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
