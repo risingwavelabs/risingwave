@@ -238,24 +238,28 @@
     CREATE TABLE t(x smallint);
     CREATE MATERIALIZED VIEW mv AS
       SELECT x from t group by x;
-- name: When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet.
+- name: When the constant has a larger type and if it out of the range of the column's type, we can convert it as false condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x = 60000;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (mv.x = 60000:Int32) }
-      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
-- name: When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet.
+    BatchValues { rows: [] }
+- name: When the constant has a larger type and if it bigger than the max value of the column's type, we can convert < as true condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x < 60000;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (mv.x < 60000:Int32) }
-      └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+    └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+- name: When the constant has a larger type and if it bigger than the max value of the column's type, we can convert > as false condition.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x > 60000;
+  batch_plan: |
+    BatchValues { rows: [] }
 - before:
   - create_table_and_mv
   sql: |
