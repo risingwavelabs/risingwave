@@ -524,6 +524,15 @@ def section_cluster_node(panels):
                 )
             ],
         ),
+        panels.timeseries_count(
+            "Meta Cluster",
+            "",
+            [
+                panels.target(f"sum({metric('meta_num')}) by (worker_addr,role)",
+                              "{{worker_addr}} @ {{role}}")
+            ],
+            ["last"],
+        ),
     ]
 
 

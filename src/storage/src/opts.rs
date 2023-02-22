@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::RwConfig;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::SystemParamsReader;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {

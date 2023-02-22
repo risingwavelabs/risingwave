@@ -19,7 +19,7 @@ use parse_display::Display;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl, OrderBy, Result};
+use super::{Expr, ExprImpl, OrderBy, RwResult};
 
 /// A window function performs a calculation across a set of table rows that are somehow related to
 /// the current row, according to the window spec `OVER (PARTITION BY .. ORDER BY ..)`.
@@ -79,7 +79,7 @@ impl WindowFunction {
         partition_by: Vec<ExprImpl>,
         order_by: OrderBy,
         args: Vec<ExprImpl>,
-    ) -> Result<Self> {
+    ) -> RwResult<Self> {
         if !args.is_empty() {
             return Err(ErrorCode::BindError(format!(
                 "the length of args of {function_type} function should be 0"

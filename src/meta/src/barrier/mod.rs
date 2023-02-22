@@ -52,7 +52,8 @@ use crate::barrier::snapshot::SnapshotManager;
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, WorkerId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
+    WorkerId,
 };
 use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
@@ -564,6 +565,12 @@ where
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        self.env
+            .notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
         loop {
             tokio::select! {
                 biased;
@@ -571,6 +578,10 @@ where
                 _ = &mut shutdown_rx => {
                     tracing::info!("Barrier manager is stopped");
                     return;
+                }
+                // Checkpoint frequency change
+                notification = local_notification_rx.recv() => {
+                    self.handle_local_notification(notification.unwrap());
                 }
                 result = barrier_complete_rx.recv() => {
                     checkpoint_control.update_barrier_nums_metrics();
@@ -981,6 +992,14 @@ where
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.tracker.lock().await.gen_ddl_progress()
+    }
+
+    /// Only handle `SystemParamsChange`.
+    fn handle_local_notification(&self, notification: LocalNotification) {
+        if let LocalNotification::SystemParamsChange(p) = notification {
+            self.scheduled_barriers
+                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
+        }
     }
 }
 
