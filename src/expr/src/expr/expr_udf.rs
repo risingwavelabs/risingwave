@@ -15,7 +15,7 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use arrow_schema::{Field, Schema};
+use arrow_schema::{Field, Schema, SchemaRef};
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -33,6 +33,7 @@ pub struct UdfExpression {
     // name: String,
     arg_types: Vec<DataType>,
     return_type: DataType,
+    arg_schema: SchemaRef,
     client: ArrowFlightUdfClient,
     function_id: FunctionId,
 }
@@ -51,10 +52,13 @@ impl Expression for UdfExpression {
         let columns: Vec<_> = self
             .children
             .iter()
-            .map(|c| c.eval_checked(input).map(|a| ("", a.as_ref().into())))
+            .map(|c| c.eval_checked(input).map(|a| a.as_ref().into()))
             .try_collect()?;
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
         let input =
-            arrow_array::RecordBatch::try_from_iter(columns).expect("failed to build record batch");
+            arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
+                .expect("failed to build record batch");
         let output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.client.call(&self.function_id, input))
         })?;
@@ -87,18 +91,18 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             bail!("expect UDF");
         };
         // connect to UDF service and check the function
-        let (client, function_id) = tokio::task::block_in_place(|| {
+        let (client, function_id, arg_schema) = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let client = ArrowFlightUdfClient::connect(&udf.path).await?;
-                let args = Schema::new(
+                let args = Arc::new(Schema::new(
                     udf.arg_types
                         .iter()
                         .map(|t| Field::new("", DataType::from(t).into(), true))
                         .collect(),
-                );
+                ));
                 let returns = Schema::new(vec![Field::new("", (&return_type).into(), true)]);
                 let id = client.check(&udf.name, &args, &returns).await?;
-                Ok((client, id)) as risingwave_udf::Result<_>
+                Ok((client, id, args)) as risingwave_udf::Result<_>
             })
         })?;
         Ok(Self {
@@ -106,6 +110,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             // name: udf.name.clone(),
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
+            arg_schema,
             client,
             function_id,
         })
