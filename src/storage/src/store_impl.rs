@@ -27,8 +27,8 @@ use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockStorage, HummockStorageV1, MemoryLimiter, SstableIdManagerRef, SstableStore,
-    TieredCache, TieredCacheMetricsBuilder,
+    HummockStorage, MemoryLimiter, SstableIdManagerRef, SstableStore, TieredCache,
+    TieredCacheMetricsBuilder,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -40,12 +40,12 @@ use crate::opts::StorageOpts;
 use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
-pub type HummockStorageV1Type = impl StateStore + AsHummockTrait;
 pub type MemoryStateStoreType = impl StateStore + AsHummockTrait;
 pub type SledStateStoreType = impl StateStore + AsHummockTrait;
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
+#[allow(clippy::enum_variant_names)]
 pub enum StateStoreImpl {
     /// The Hummock state store, which operates on an S3-like service. URLs beginning with
     /// `hummock` will be automatically recognized as Hummock state store.
@@ -56,7 +56,6 @@ pub enum StateStoreImpl {
     /// * `hummock+minio://KEY:SECRET@minio-ip:port`
     /// * `hummock+memory` (should only be used in 1 compute node mode)
     HummockStateStore(Monitored<HummockStorageType>),
-    HummockStateStoreV1(Monitored<HummockStorageV1Type>),
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
@@ -124,16 +123,6 @@ impl StateStoreImpl {
         )
     }
 
-    pub fn hummock_v1(
-        state_store: HummockStorageV1,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
-        // The specific type of HummockStateStoreV1Type in deducted here.
-        Self::HummockStateStoreV1(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
-        )
-    }
-
     pub fn sled(
         state_store: SledStateStore,
         storage_metrics: Arc<MonitoredStorageMetrics>,
@@ -156,12 +145,6 @@ impl StateStoreImpl {
         {
             match self {
                 StateStoreImpl::HummockStateStore(hummock) => Some(
-                    hummock
-                        .inner()
-                        .as_hummock_trait()
-                        .expect("should be hummock"),
-                ),
-                StateStoreImpl::HummockStateStoreV1(hummock) => Some(
                     hummock
                         .inner()
                         .as_hummock_trait()
@@ -191,7 +174,6 @@ impl Debug for StateStoreImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StateStoreImpl::HummockStateStore(_) => write!(f, "HummockStateStore"),
-            StateStoreImpl::HummockStateStoreV1(_) => write!(f, "HummockStateStoreV1"),
             StateStoreImpl::MemoryStateStore(_) => write!(f, "MemoryStateStore"),
             StateStoreImpl::SledStateStore(_) => write!(f, "SledStateStore"),
         }
@@ -233,8 +215,6 @@ macro_rules! dispatch_state_store {
             }
 
             StateStoreImpl::HummockStateStore($store) => $body,
-
-            StateStoreImpl::HummockStateStoreV1($store) => $body,
         }
     }};
 }
@@ -530,40 +510,25 @@ impl StateStoreImpl {
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
 
-                if !opts.enable_state_store_v1 {
-                    let backup_store = parse_meta_snapshot_storage(
-                        &opts.backup_storage_url,
-                        &opts.backup_storage_directory,
-                    )
-                    .await?;
-                    let backup_reader = BackupReader::new(backup_store);
-                    let inner = HummockStorage::new(
-                        opts.clone(),
-                        sstable_store,
-                        backup_reader,
-                        hummock_meta_client.clone(),
-                        notification_client,
-                        state_store_metrics.clone(),
-                        tracing,
-                        compactor_metrics.clone(),
-                    )
-                    .await?;
+                let backup_store = parse_meta_snapshot_storage(
+                    &opts.backup_storage_url,
+                    &opts.backup_storage_directory,
+                )
+                .await?;
+                let backup_reader = BackupReader::new(backup_store);
+                let inner = HummockStorage::new(
+                    opts.clone(),
+                    sstable_store,
+                    backup_reader,
+                    hummock_meta_client.clone(),
+                    notification_client,
+                    state_store_metrics.clone(),
+                    tracing,
+                    compactor_metrics.clone(),
+                )
+                .await?;
 
-                    StateStoreImpl::hummock(inner, storage_metrics)
-                } else {
-                    let inner = HummockStorageV1::new(
-                        opts.clone(),
-                        sstable_store,
-                        hummock_meta_client.clone(),
-                        notification_client,
-                        state_store_metrics.clone(),
-                        tracing,
-                        compactor_metrics.clone(),
-                    )
-                    .await?;
-
-                    StateStoreImpl::hummock_v1(inner, storage_metrics)
-                }
+                StateStoreImpl::hummock(inner, storage_metrics)
             }
 
             "in_memory" | "in-memory" => {
@@ -584,7 +549,7 @@ impl StateStoreImpl {
     }
 }
 
-/// This trait is for aligning some common methods of hummock v1 and v2 for external use
+/// This trait is for aligning some common methods of `state_store_impl` for external use
 pub trait HummockTrait {
     fn sstable_id_manager(&self) -> &SstableIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
@@ -615,39 +580,11 @@ impl HummockTrait for HummockStorage {
     }
 }
 
-impl HummockTrait for HummockStorageV1 {
-    fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        self.sstable_id_manager()
-    }
-
-    fn sstable_store(&self) -> SstableStoreRef {
-        self.sstable_store()
-    }
-
-    fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {
-        self.filter_key_extractor_manager()
-    }
-
-    fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
-        self.get_memory_limiter()
-    }
-
-    fn as_hummock(&self) -> Option<&HummockStorage> {
-        None
-    }
-}
-
 pub trait AsHummockTrait {
     fn as_hummock_trait(&self) -> Option<&dyn HummockTrait>;
 }
 
 impl AsHummockTrait for HummockStorage {
-    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
-        Some(self)
-    }
-}
-
-impl AsHummockTrait for HummockStorageV1 {
     fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
         Some(self)
     }
