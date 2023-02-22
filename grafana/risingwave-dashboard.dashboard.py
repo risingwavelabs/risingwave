@@ -1461,15 +1461,25 @@ def section_streaming_errors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Errors",
+            "User Streaming Errors",
             [
                 panels.timeseries_count(
-                    "User Errors by Type",
+                    "Compute Errors by Type",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Source Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
