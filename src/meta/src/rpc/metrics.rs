@@ -328,7 +328,7 @@ pub fn start_worker_info_monitor<S: MetaStore>(
     event_manager.register_interval_task(interval, move || {
         let cluster_manager = manager.clone();
         let meta_metrics = metrics.clone();
-        let election_client = client.as_ref().map(|cli|cli.clone());
+        let election_client = client.clone();
         async move {
             for (worker_type, worker_num) in cluster_manager.count_worker_node().await {
                 meta_metrics
