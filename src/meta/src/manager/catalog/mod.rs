@@ -1533,8 +1533,8 @@ where
         self.core.lock().await.database.list_tables()
     }
 
-    pub async fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
-        self.core.lock().await.database.get_table_options(table_ids)
+    pub async fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
+        self.core.lock().await.database.get_all_table_options()
     }
 
     pub async fn list_table_ids(&self, schema_id: SchemaId) -> Vec<TableId> {
