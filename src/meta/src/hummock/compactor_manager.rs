@@ -120,57 +120,6 @@ impl Compactor {
     pub fn set_state(&self, new_state: CompactorState) {
         *self.state.try_lock().unwrap() = new_state;
     }
-
-    pub fn try_up_state(&self) {
-        match self.state() {
-            CompactorState::Idle(_) => self.try_update_state(CompactorState::Burst(Instant::now())),
-
-            CompactorState::Burst(_) => self.try_update_state(CompactorState::Busy(Instant::now())),
-
-            _ => {}
-        }
-    }
-
-    pub fn try_down_state(&self) {
-        match self.state() {
-            CompactorState::Busy(_) => self.try_update_state(CompactorState::Burst(Instant::now())),
-
-            CompactorState::Burst(_) => self.try_update_state(CompactorState::Idle(Instant::now())),
-
-            _ => {}
-        }
-    }
-
-    pub fn try_update_state(&self, new_state: CompactorState) {
-        // compactor state update interval relay on workload collect interval on compactor side
-        match new_state {
-            CompactorState::Idle(_) => {
-                if let CompactorState::Burst(last_state_time) = self.state() {
-                    if last_state_time.elapsed().as_secs() > 90 {
-                        self.set_state(new_state)
-                    }
-                }
-            }
-
-            CompactorState::Burst(_) => match self.state() {
-                CompactorState::Idle(last_state_time) | CompactorState::Busy(last_state_time) => {
-                    if last_state_time.elapsed().as_secs() > 90 {
-                        self.set_state(new_state)
-                    }
-                }
-
-                _ => {}
-            },
-
-            CompactorState::Busy(_) => {
-                if let CompactorState::Burst(last_state_time) = self.state() {
-                    if last_state_time.elapsed().as_secs() > 90 {
-                        self.set_state(new_state)
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// `CompactorManager` maintains compactors which can process compact task.
@@ -468,9 +417,9 @@ impl CompactorManager {
 
         if let Some(compactor) = self.policy.read().get_compactor(context_id) {
             if workload.cpu > CPU_THRESHOLD {
-                compactor.try_up_state();
+                compactor.set_state(CompactorState::Busy(Instant::now()))
             } else {
-                compactor.try_down_state();
+                compactor.set_state(CompactorState::Idle(Instant::now()))
             }
 
             tracing::info!(
