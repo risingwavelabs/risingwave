@@ -150,6 +150,7 @@ where
                 tracing::info!("Cancelled compaction task {}", task_id);
                 sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
             }
+            LocalNotification::SystemParamsChange(_) => {}
         }
     }
 }
