@@ -85,28 +85,6 @@ where
         self.core.read().await
     }
 
-    pub fn start_worker_num_monitor(
-        cluster_manager_ref: ClusterManagerRef<S>,
-        timer_manager: &mut GlobalEventManager,
-        interval: u64,
-        metrics: Arc<MetaMetrics>,
-    ) {
-        timer_manager.register_interval_task(interval, move || {
-            let meta_metrics = metrics.clone();
-            let cluster_manager = cluster_manager_ref.clone();
-            async move {
-                for (worker_type, worker_num) in
-                    cluster_manager.core.read().await.count_worker_node()
-                {
-                    meta_metrics
-                        .worker_num
-                        .with_label_values(&[(worker_type.as_str_name())])
-                        .set(worker_num as i64);
-                }
-            }
-        });
-    }
-    
     pub async fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
         self.core.read().await.count_worker_node()
     }

@@ -14,7 +14,6 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::time::Duration;
 
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
@@ -23,12 +22,11 @@ use prometheus::{
     HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
 use risingwave_pb::common::WorkerType;
-use tokio::sync::oneshot::Sender;
-use tokio::task::JoinHandle;
 
 use crate::manager::ClusterManagerRef;
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
+use crate::util::GlobalEventManager;
 
 pub struct MetaMetrics {
     registry: Registry,
@@ -320,27 +318,18 @@ impl Default for MetaMetrics {
     }
 }
 
-pub async fn start_worker_info_monitor<S: MetaStore>(
-    cluster_manager: ClusterManagerRef<S>,
-    election_client: Option<ElectionClientRef>,
-    interval: Duration,
-    meta_metrics: Arc<MetaMetrics>,
-) -> (JoinHandle<()>, Sender<()>) {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let mut monitor_interval = tokio::time::interval(interval);
-        monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            tokio::select! {
-                // Wait for interval
-                _ = monitor_interval.tick() => {},
-                // Shutdown monitor
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Worker number monitor is stopped");
-                    return;
-                }
-            }
-
+pub fn start_worker_info_monitor<S: MetaStore>(
+    manager: ClusterManagerRef<S>,
+    client: Option<ElectionClientRef>,
+    event_manager: &mut GlobalEventManager,
+    interval: u64,
+    metrics: Arc<MetaMetrics>,
+) {
+    event_manager.register_interval_task(interval, move || {
+        let cluster_manager = manager.clone();
+        let meta_metrics = metrics.clone();
+        let election_client = client.as_ref().map(|cli|cli.clone());
+        async move {
             for (worker_type, worker_num) in cluster_manager.count_worker_node().await {
                 meta_metrics
                     .worker_num
@@ -359,6 +348,4 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
             }
         }
     });
-
-    (join_handle, shutdown_tx)
 }

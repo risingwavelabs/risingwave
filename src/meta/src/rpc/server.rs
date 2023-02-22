@@ -512,18 +512,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         vacuum_manager,
         compaction_scheduler,
         &mut timer_manager,
-        &env.opts);
-    sub_tasks.push(
-        start_worker_info_monitor(
-            cluster_manager.clone(),
-            election_client.clone(),
-            Duration::from_secs(env.opts.node_num_monitor_interval_sec),
-            meta_metrics.clone(),
-        )
-        .await,
+        &env.opts,
     );
-    ClusterManager::start_worker_num_monitor(
+    start_worker_info_monitor(
         cluster_manager.clone(),
+        election_client.clone(),
         &mut timer_manager,
         env.opts.node_num_monitor_interval_sec,
         meta_metrics.clone(),
