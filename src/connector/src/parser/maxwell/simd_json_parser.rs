@@ -23,7 +23,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{SourceColumnDesc, SourceErrorContext};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -34,11 +34,15 @@ impl_common_parser_logic!(MaxwellParser);
 #[derive(Debug)]
 pub struct MaxwellParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
+    error_ctx: SourceErrorContext,
 }
 
 impl MaxwellParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        Ok(Self { rw_columns })
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, error_ctx: SourceErrorContext) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            error_ctx,
+        })
     }
 
     #[allow(clippy::unused_async)]
@@ -134,7 +138,7 @@ mod tests {
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
 
-        let parser = MaxwellParser::new(descs.clone()).unwrap();
+        let parser = MaxwellParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         let payloads = vec![
