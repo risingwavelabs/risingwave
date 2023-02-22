@@ -51,14 +51,16 @@ pub trait Transactional {
     fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
 }
 
-/// A marker trait helps to collect all implementors of `MetadataModel` in
-/// `for_all_metadata_models`. The trait should only be implemented by adding item in
-/// `for_all_metadata_models`.
-pub trait MetadataModelMarker {}
+mod private {
+    /// A marker trait helps to collect all implementors of `MetadataModel` in
+    /// `for_all_metadata_models`. The trait should only be implemented by adding item in
+    /// `for_all_metadata_models`.
+    pub trait MetadataModelMarker {}
+}
 
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
-pub trait MetadataModel: std::fmt::Debug + Sized + MetadataModelMarker {
+pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker {
     /// Serialized prost message type.
     type ProstType: Message + Default;
     /// Serialized key type.
@@ -189,7 +191,7 @@ macro_rules! for_all_metadata_models {
 macro_rules! impl_metadata_model_marker {
     ($({ $target_type:ty },)*) => {
         $(
-            impl MetadataModelMarker for $target_type {}
+            impl private::MetadataModelMarker for $target_type {}
         )*
     }
 }
