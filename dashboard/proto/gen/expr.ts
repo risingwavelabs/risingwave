@@ -106,6 +106,7 @@ export const ExprNode_Type = {
   OVERLAY: "OVERLAY",
   REGEXP_MATCH: "REGEXP_MATCH",
   POW: "POW",
+  EXP: "EXP",
   /** IS_TRUE - Boolean comparison */
   IS_TRUE: "IS_TRUE",
   IS_NOT_TRUE: "IS_NOT_TRUE",
@@ -123,6 +124,7 @@ export const ExprNode_Type = {
   ARRAY: "ARRAY",
   ARRAY_ACCESS: "ARRAY_ACCESS",
   ROW: "ROW",
+  ARRAY_TO_STRING: "ARRAY_TO_STRING",
   /** ARRAY_CAT - Array functions */
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
@@ -343,6 +345,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 233:
     case "POW":
       return ExprNode_Type.POW;
+    case 234:
+    case "EXP":
+      return ExprNode_Type.EXP;
     case 301:
     case "IS_TRUE":
       return ExprNode_Type.IS_TRUE;
@@ -382,6 +387,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 523:
     case "ROW":
       return ExprNode_Type.ROW;
+    case 524:
+    case "ARRAY_TO_STRING":
+      return ExprNode_Type.ARRAY_TO_STRING;
     case 531:
     case "ARRAY_CAT":
       return ExprNode_Type.ARRAY_CAT;
@@ -544,6 +552,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "REGEXP_MATCH";
     case ExprNode_Type.POW:
       return "POW";
+    case ExprNode_Type.EXP:
+      return "EXP";
     case ExprNode_Type.IS_TRUE:
       return "IS_TRUE";
     case ExprNode_Type.IS_NOT_TRUE:
@@ -570,6 +580,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_ACCESS";
     case ExprNode_Type.ROW:
       return "ROW";
+    case ExprNode_Type.ARRAY_TO_STRING:
+      return "ARRAY_TO_STRING";
     case ExprNode_Type.ARRAY_CAT:
       return "ARRAY_CAT";
     case ExprNode_Type.ARRAY_APPEND:

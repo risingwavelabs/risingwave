@@ -553,9 +553,12 @@ enum DispatcherType {
   NO_SHUFFLE = 4;
 }
 
+// The property of an edge in the fragment graph.
+// This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
 message DispatchStrategy {
   DispatcherType type = 1;
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  repeated uint32 output_indices = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -564,7 +567,11 @@ message Dispatcher {
   DispatcherType type = 1;
   // Indices of the columns to be used for hashing.
   // For dispatcher types other than HASH, this is ignored.
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  // Indices of the columns to output.
+  // In most cases, this contains all columns in the input. But for some cases like MV on MV or
+  // schema change, we may only output a subset of the columns.
+  repeated uint32 output_indices = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
@@ -650,7 +657,7 @@ message StreamFragmentGraph {
   // edges between fragments.
   repeated StreamFragmentEdge edges = 2;
 
-  repeated uint32 dependent_table_ids = 3;
+  repeated uint32 dependent_relation_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.

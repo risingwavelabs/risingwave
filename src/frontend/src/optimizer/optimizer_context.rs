@@ -109,6 +109,14 @@ impl OptimizerContext {
         *self.next_expr_display_id.borrow()
     }
 
+    pub fn get_expr_display_id(&self) -> usize {
+        *self.next_expr_display_id.borrow()
+    }
+
+    pub fn set_expr_display_id(&self, expr_display_id: usize) {
+        *self.next_expr_display_id.borrow_mut() = expr_display_id;
+    }
+
     pub fn next_correlated_id(&self) -> CorrelatedId {
         *self.next_correlated_id.borrow_mut() += 1;
         *self.next_correlated_id.borrow()
@@ -122,15 +130,19 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn is_explain_logical(&self) -> bool {
+        self.explain_options.explain_type == ExplainType::Logical
+    }
+
     pub fn trace(&self, str: impl Into<String>) {
         // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.explain_options.explain_type == ExplainType::Logical
-            && self.logical_explain.borrow().is_some()
-        {
+        if self.is_explain_logical() && self.logical_explain.borrow().is_some() {
             return;
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
-        optimizer_trace.push(str.into());
+        let string = str.into();
+        tracing::trace!("{}", string);
+        optimizer_trace.push(string);
         optimizer_trace.push("\n".to_string());
     }
 

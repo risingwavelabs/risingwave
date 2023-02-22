@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod plan_node;
-pub use plan_node::PlanRef;
+pub use plan_node::{Explain, PlanRef};
 pub mod property;
 
 mod delta_join_solver;
@@ -37,8 +37,8 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 
 use self::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
-    StreamSink,
+    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
+    StreamRowIdGen, StreamSink,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -49,6 +49,7 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
     RewriteExprsRecursive,
@@ -229,6 +230,13 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Rewrite Like Expr".to_string(),
+            vec![RewriteLikeExprRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         // Simple Unnesting.
         plan = self.optimize_by_rules(
             plan,
@@ -408,6 +416,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
                 // project-join merge should be applied after merge
                 // eliminate and to values
                 ProjectJoinMergeRule::create(),
@@ -424,6 +433,7 @@ impl PlanRoot {
                 ProjectMergeRule::create(),
                 ProjectEliminateRule::create(),
                 TrivialProjectToValuesRule::create(),
+                UnionInputValuesMergeRule::create(),
             ],
             ApplyOrder::TopDown,
         );
@@ -443,17 +453,12 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
-        plan = self.optimize_by_rules(
-            plan,
-            "Agg on Index".to_string(),
-            vec![TopNOnIndexRule::create()],
-            ApplyOrder::TopDown,
-        );
-
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        ctx.store_logical(plan.explain_to_string().unwrap());
+        if ctx.is_explain_logical() {
+            ctx.store_logical(plan.explain_to_string().unwrap());
+        }
 
         Ok(plan)
     }
@@ -468,6 +473,13 @@ impl PlanRoot {
             plan,
             "DAG To Tree".to_string(),
             vec![DagToTreeRule::create()],
+            ApplyOrder::TopDown,
+        );
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Agg on Index".to_string(),
+            vec![TopNOnIndexRule::create()],
             ApplyOrder::TopDown,
         );
 
@@ -735,9 +747,26 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_stream_plan()?;
 
-        StreamMaterialize::create(
+        // Add a project node if there is hidden column(s).
+        let input_fields = stream_plan.schema().fields();
+        if input_fields.len() != self.out_fields.count_ones(..) {
+            let exprs = input_fields
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, field)| {
+                    if self.out_fields.contains(idx) {
+                        Some(InputRef::new(idx, field.data_type.clone()).into())
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            stream_plan = StreamProject::new(LogicalProject::new(stream_plan, exprs)).into();
+        }
+
+        StreamSink::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
@@ -745,10 +774,8 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
-            // Note: we first plan it like a materialized view, and then rewrite it into a sink.
-            TableType::MaterializedView,
+            properties,
         )
-        .and_then(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.

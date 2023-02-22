@@ -422,6 +422,8 @@ mod tests {
                     stale_key_count: 0,
                     total_key_count: 0,
                     divide_version: 0,
+                    min_epoch: 0,
+                    max_epoch: 0,
                 }],
             }],
             splits: vec![],

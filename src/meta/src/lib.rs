@@ -33,6 +33,7 @@
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(is_sorted)]
 
 pub mod backup_restore;
 mod barrier;
@@ -166,7 +167,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, MetaBackend};
+use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
@@ -201,6 +202,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaBackend::Mem => MetaStoreBackend::Mem,
         };
 
+        validate_config(&config);
+
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let barrier_interval = Duration::from_millis(config.streaming.barrier_interval_ms as u64);
@@ -216,7 +219,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -248,22 +251,33 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
+                periodic_ttl_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_ttl_reclaim_compaction_interval_sec,
             },
         )
         .await
         .unwrap();
 
-        if let Some(leader_lost_handle) = leader_lost_handle {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("receive ctrl+c");
-                    shutdown_send.send(()).unwrap();
-                    join_handle.await.unwrap();
-                    leader_lost_handle.abort();
-                },
+        let res = tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("receive ctrl+c");
+                shutdown_send.send(()).unwrap();
+                join_handle.await
             }
-        } else {
-            join_handle.await.unwrap();
+            res = &mut join_handle => res,
+        };
+        res.unwrap();
+        if let Some(leader_lost_handle) = leader_lost_handle {
+            leader_lost_handle.abort();
         }
     })
+}
+
+fn validate_config(config: &RwConfig) {
+    if config.meta.meta_leader_lease_secs <= 1 {
+        let error_msg = "meta leader lease secs should be larger than 1";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
 }

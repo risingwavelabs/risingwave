@@ -52,6 +52,7 @@ impl std::fmt::Debug for Literal {
                     | DataType::Timestamptz
                     | DataType::Time
                     | DataType::Interval
+                    | DataType::Jsonb
                     | DataType::Struct(_) => write!(
                         f,
                         "'{}'",
