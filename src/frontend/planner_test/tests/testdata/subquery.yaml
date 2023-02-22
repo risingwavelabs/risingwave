@@ -217,14 +217,16 @@
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    | └─LogicalScan { table: auction, columns: [auction.date_time] }
+    ├─LogicalShare { id = 242 }
+    | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    |   └─LogicalScan { table: auction, columns: [auction.date_time] }
     └─LogicalProject { exprs: [auction.date_time] }
       └─LogicalAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
         └─LogicalJoin { type: Inner, on: true, output: [auction.date_time, auction.date_time] }
           ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-          |   └─LogicalScan { table: auction, columns: [auction.date_time] }
+          | └─LogicalShare { id = 242 }
+          |   └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+          |     └─LogicalScan { table: auction, columns: [auction.date_time] }
           └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -287,18 +289,15 @@
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
         ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
-        |   ├─LogicalShare { id = 383 }
-        |   | └─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   |   └─LogicalScan { table: a, columns: [a.a1] }
+        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        |   | └─LogicalScan { table: a, columns: [a.a1] }
         |   └─LogicalJoin { type: Inner, on: true, output: all }
-        |     ├─LogicalShare { id = 383 }
-        |     | └─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |     |   └─LogicalScan { table: a, columns: [a.a1] }
+        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        |     | └─LogicalScan { table: a, columns: [a.a1] }
         |     └─LogicalScan { table: b, columns: [] }
         └─LogicalJoin { type: Inner, on: true, output: all }
-          ├─LogicalShare { id = 383 }
-          | └─LogicalAgg { group_key: [a.a1], aggs: [] }
-          |   └─LogicalScan { table: a, columns: [a.a1] }
+          ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+          | └─LogicalScan { table: a, columns: [a.a1] }
           └─LogicalScan { table: c, columns: [] }
 - sql: |
     create table a(a1 int, a2 int);
@@ -326,16 +325,14 @@
     ├─LogicalScan { table: a, columns: [a.a1, a.a2] }
     └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
       └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1, b.b1] }
-        ├─LogicalShare { id = 496 }
-        | └─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   └─LogicalScan { table: a, columns: [a.a1] }
+        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        | └─LogicalScan { table: a, columns: [a.a1] }
         └─LogicalJoin { type: Inner, on: (b.b2 = min(b.b1)), output: [a.a1, b.b1] }
           ├─LogicalScan { table: b, columns: [b.b1, b.b2] }
           └─LogicalAgg { group_key: [a.a1], aggs: [min(b.b1)] }
             └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, b.b1), output: [a.a1, b.b1] }
-              ├─LogicalShare { id = 496 }
-              | └─LogicalAgg { group_key: [a.a1], aggs: [] }
-              |   └─LogicalScan { table: a, columns: [a.a1] }
+              ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+              | └─LogicalScan { table: a, columns: [a.a1] }
               └─LogicalProject { exprs: [b.b1, b.b1] }
                 └─LogicalScan { table: b, columns: [b.b1], predicate: IsNotNull(b.b1) }
 - name: test subquery in join on condition

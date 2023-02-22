@@ -472,13 +472,9 @@
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t.v2, t._row_id] }
       | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       | └─StreamExchange { dist: Broadcast }
-      |   └─StreamProject { exprs: [now], watermark_columns: [now] }
-      |     └─StreamShare { id = 94 }
-      |       └─StreamNow { output: [now] }
+      |   └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [now], watermark_columns: [now] }
-          └─StreamShare { id = 94 }
-            └─StreamNow { output: [now] }
+        └─StreamNow { output: [now] }
 - name: or of two now expression condition
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);

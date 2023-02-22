@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 
 use super::{EndoPlan, LogicalShare, PlanNodeId, PlanRef, PlanTreeNodeUnary, VisitPlan};
+use crate::optimizer::plan_visitor;
 use crate::utils::{Endo, Visit};
 
 pub trait Semantics<V: Hash + Eq> {
@@ -128,10 +129,13 @@ impl EndoPlan for Pruner<'_> {
 impl Endo<PlanRef> for Pruner<'_> {
     fn pre(&mut self, t: PlanRef) -> PlanRef {
         let prunable = |s: &&LogicalShare| {
+            // Prune if share node has only one parent
+            // or it just shares a scan
+            // or it doesn't share any scan or source.
             *self.counts.get(&s.id()).expect("Unprocessed shared node.") == 1
-                || s.input().as_logical_share().is_some()
                 || s.input().as_logical_scan().is_some()
-                || s.input().as_logical_values().is_some()
+                || !(plan_visitor::has_logical_scan(s.input())
+                    || plan_visitor::has_logical_source(s.input()))
         };
         t.as_logical_share()
             .filter(prunable)
