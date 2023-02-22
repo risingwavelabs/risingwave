@@ -167,7 +167,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, MetaBackend};
+use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
@@ -201,6 +201,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             },
             MetaBackend::Mem => MetaStoreBackend::Mem,
         };
+
+        validate_config(&config);
 
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
@@ -270,4 +272,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             leader_lost_handle.abort();
         }
     })
+}
+
+fn validate_config(config: &RwConfig) {
+    if config.meta.meta_leader_lease_secs <= 1 {
+        let error_msg = "meta leader lease secs should be larger than 1";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
 }
