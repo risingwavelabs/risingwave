@@ -243,10 +243,7 @@ where
 
                     if let Some(watermark_in_key) = watermark_in_key {
                         if watermark.val > watermark_in_key {
-                            // FIXME(yuhao): range delete records above the watermark
-                            self.managed_state
-                                .state_table
-                                .update_watermark(watermark_in_key);
+                            // TODO(yuhao): range delete records above the watermark
                         }
                     } else {
                         // TODO(yuhao): handle null watermark
