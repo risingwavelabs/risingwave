@@ -151,11 +151,12 @@ impl DebeziumJsonParser {
 mod tests {
 
     use std::convert::TryInto;
+    use std::str::FromStr;
 
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, NaiveDateWrapper, ScalarImpl};
 
     use super::*;
     use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
@@ -190,6 +191,61 @@ mod tests {
                 name: "weight".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(3),
+                is_row_id: false,
+                is_meta: false,
+                fields: vec![],
+            },
+        ];
+
+        descs
+    }
+
+    fn get_test_columns_with_date() -> Vec<SourceColumnDesc> {
+        let descs = vec![
+            SourceColumnDesc {
+                name: "id".to_string(),
+                data_type: DataType::Int32,
+                column_id: ColumnId::from(0),
+                is_row_id: false,
+                is_meta: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "name".to_string(),
+                data_type: DataType::Varchar,
+                column_id: ColumnId::from(1),
+                is_row_id: false,
+                is_meta: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "description".to_string(),
+                data_type: DataType::Varchar,
+                column_id: ColumnId::from(2),
+                is_row_id: false,
+                is_meta: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "weight".to_string(),
+                data_type: DataType::Float64,
+                column_id: ColumnId::from(3),
+                is_row_id: false,
+                is_meta: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "l_shipdate".to_string(),
+                data_type: DataType::Date,
+                column_id: ColumnId::from(4),
+                is_row_id: false,
+                is_meta: false,
+                fields: vec![],
+            },
+            SourceColumnDesc {
+                name: "l_commitdate".to_string(),
+                data_type: DataType::Date,
+                column_id: ColumnId::from(5),
                 is_row_id: false,
                 is_meta: false,
                 fields: vec![],
@@ -237,6 +293,37 @@ mod tests {
         assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
         assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
         assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+    }
+
+    #[tokio::test]
+    async fn test_debezium_json_parser_read_date() {
+        //     "before": null,
+        //     "after": {
+        //       "id": 101,
+        //       "name": "scooter",
+        //       "description": "Small 2-wheel scooter",
+        //       "weight": 1.234,
+        //       "l_shipdate": "1993-04-16",
+        //       "l_commitdate": "1993-03-15"
+        //     },
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"},{"type":"string","optional":false,"field":"l_shipdate"},{"type":"string","optional":false,"field":"l_commitdate"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234,"l_shipdate": "1993-04-16", "l_commitdate": "1993-03-15"},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}}"#;
+
+        let columns = get_test_columns_with_date();
+
+        let parser = DebeziumJsonParser::new(columns.clone()).unwrap();
+
+        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
+        assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+        assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
+        assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+        assert!(row[4].eq(&Some(ScalarImpl::NaiveDate(
+            NaiveDateWrapper::from_str("1993-04-16").unwrap()
+        ))));
+        assert!(row[5].eq(&Some(ScalarImpl::NaiveDate(
+            NaiveDateWrapper::from_str("1993-03-15").unwrap()
+        ))));
     }
 
     #[tokio::test]
