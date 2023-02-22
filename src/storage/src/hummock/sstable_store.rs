@@ -866,11 +866,12 @@ mod tests {
     async fn validate_sst(
         sstable_store: SstableStoreRef,
         info: &SstableInfo,
-        meta: SstableMeta,
+        mut meta: SstableMeta,
         x_range: Range<usize>,
     ) {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
+        std::mem::take(&mut meta.bloom_filter);
         assert_eq!(holder.value().meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);

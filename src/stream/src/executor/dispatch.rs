@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use smallvec::{smallvec, SmallVec};
@@ -641,7 +641,7 @@ impl Dispatcher for HashDataDispatcher {
                         .iter()
                         .copied()
                         .zip_eq_fast(ops)
-                        .zip_eq_debug(visibility.iter())
+                        .zip_eq_fast(visibility.iter())
                         .for_each(|((vnode, op), visible)| {
                             build_op_vis(vnode, op, visible);
                         });
@@ -866,7 +866,7 @@ mod tests {
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     #[derive(Debug)]
     pub struct MockOutput {
@@ -977,7 +977,7 @@ mod tests {
         let (untouched, old, new) = (234, 235, 238); // broadcast downstream actors
         let (old_simple, new_simple) = (114, 514); // simple downstream actors
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -985,16 +985,7 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(
-            ctx.clone(),
-            vec![
-                (actor_id, untouched),
-                (actor_id, old),
-                (actor_id, new),
-                (actor_id, old_simple),
-                (actor_id, new_simple),
-            ],
-        );
+        // actor_id -> untouched, old, new, old_simple, new_simple
 
         let broadcast_dispatcher_id = 666;
         let broadcast_dispatcher = DispatcherImpl::new(

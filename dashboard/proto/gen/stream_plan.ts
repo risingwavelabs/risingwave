@@ -269,6 +269,14 @@ export interface UpdateMutation_MergeUpdate {
   /** Merge executor can be uniquely identified by a combination of actor id and upstream fragment id. */
   actorId: number;
   upstreamFragmentId: number;
+  /**
+   * - For scaling, this is always `None`.
+   * - For plan change, the upstream fragment will be changed to a new one, and this will be `Some`.
+   *   In this case, all the upstream actors should be removed and replaced by the `new` ones.
+   */
+  newUpstreamFragmentId?:
+    | number
+    | undefined;
   /** Added upstream actors. */
   addedUpstreamActorId: number[];
   /** Removed upstream actors. */
@@ -461,6 +469,12 @@ export interface SimpleAggNode {
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
+  distinctDedupTables: { [key: number]: Table };
+}
+
+export interface SimpleAggNode_DistinctDedupTablesEntry {
+  key: number;
+  value: Table | undefined;
 }
 
 export interface HashAggNode {
@@ -475,6 +489,12 @@ export interface HashAggNode {
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
+  distinctDedupTables: { [key: number]: Table };
+}
+
+export interface HashAggNode_DistinctDedupTablesEntry {
+  key: number;
+  value: Table | undefined;
 }
 
 export interface TopNNode {
@@ -745,6 +765,8 @@ export interface SortNode {
 export interface DmlNode {
   /** Id of the table on which DML performs. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   /** Column descriptions of the table. */
   columnDescs: ColumnDesc[];
 }
@@ -830,10 +852,7 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as its downstream fragment id.
-   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
-   *   could belong to more than one downstream in DAG.
-   * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
+   * This is exactly the same as its downstream fragment id.
    */
   dispatcherId: number;
   /** Number of downstreams decides how many endpoints a dispatcher should dispatch. */
@@ -875,7 +894,7 @@ export interface StreamFragmentGraph {
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
   /** edges between fragments. */
   edges: StreamFragmentGraph_StreamFragmentEdge[];
-  dependentTableIds: number[];
+  dependentRelationIds: number[];
   tableIdsCnt: number;
   env:
     | StreamEnvironment
@@ -1257,7 +1276,13 @@ export const UpdateMutation_DispatcherUpdate = {
 };
 
 function createBaseUpdateMutation_MergeUpdate(): UpdateMutation_MergeUpdate {
-  return { actorId: 0, upstreamFragmentId: 0, addedUpstreamActorId: [], removedUpstreamActorId: [] };
+  return {
+    actorId: 0,
+    upstreamFragmentId: 0,
+    newUpstreamFragmentId: undefined,
+    addedUpstreamActorId: [],
+    removedUpstreamActorId: [],
+  };
 }
 
 export const UpdateMutation_MergeUpdate = {
@@ -1265,6 +1290,7 @@ export const UpdateMutation_MergeUpdate = {
     return {
       actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
       upstreamFragmentId: isSet(object.upstreamFragmentId) ? Number(object.upstreamFragmentId) : 0,
+      newUpstreamFragmentId: isSet(object.newUpstreamFragmentId) ? Number(object.newUpstreamFragmentId) : undefined,
       addedUpstreamActorId: Array.isArray(object?.addedUpstreamActorId)
         ? object.addedUpstreamActorId.map((e: any) => Number(e))
         : [],
@@ -1278,6 +1304,8 @@ export const UpdateMutation_MergeUpdate = {
     const obj: any = {};
     message.actorId !== undefined && (obj.actorId = Math.round(message.actorId));
     message.upstreamFragmentId !== undefined && (obj.upstreamFragmentId = Math.round(message.upstreamFragmentId));
+    message.newUpstreamFragmentId !== undefined &&
+      (obj.newUpstreamFragmentId = Math.round(message.newUpstreamFragmentId));
     if (message.addedUpstreamActorId) {
       obj.addedUpstreamActorId = message.addedUpstreamActorId.map((e) => Math.round(e));
     } else {
@@ -1295,6 +1323,7 @@ export const UpdateMutation_MergeUpdate = {
     const message = createBaseUpdateMutation_MergeUpdate();
     message.actorId = object.actorId ?? 0;
     message.upstreamFragmentId = object.upstreamFragmentId ?? 0;
+    message.newUpstreamFragmentId = object.newUpstreamFragmentId ?? undefined;
     message.addedUpstreamActorId = object.addedUpstreamActorId?.map((e) => e) || [];
     message.removedUpstreamActorId = object.removedUpstreamActorId?.map((e) => e) || [];
     return message;
@@ -2240,7 +2269,14 @@ export const AggCallState_MaterializedInputState = {
 };
 
 function createBaseSimpleAggNode(): SimpleAggNode {
-  return { aggCalls: [], distributionKey: [], aggCallStates: [], resultTable: undefined, isAppendOnly: false };
+  return {
+    aggCalls: [],
+    distributionKey: [],
+    aggCallStates: [],
+    resultTable: undefined,
+    isAppendOnly: false,
+    distinctDedupTables: {},
+  };
 }
 
 export const SimpleAggNode = {
@@ -2253,6 +2289,12 @@ export const SimpleAggNode = {
         : [],
       resultTable: isSet(object.resultTable) ? Table.fromJSON(object.resultTable) : undefined,
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      distinctDedupTables: isObject(object.distinctDedupTables)
+        ? Object.entries(object.distinctDedupTables).reduce<{ [key: number]: Table }>((acc, [key, value]) => {
+          acc[Number(key)] = Table.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2276,6 +2318,12 @@ export const SimpleAggNode = {
     message.resultTable !== undefined &&
       (obj.resultTable = message.resultTable ? Table.toJSON(message.resultTable) : undefined);
     message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    obj.distinctDedupTables = {};
+    if (message.distinctDedupTables) {
+      Object.entries(message.distinctDedupTables).forEach(([k, v]) => {
+        obj.distinctDedupTables[k] = Table.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -2288,12 +2336,57 @@ export const SimpleAggNode = {
       ? Table.fromPartial(object.resultTable)
       : undefined;
     message.isAppendOnly = object.isAppendOnly ?? false;
+    message.distinctDedupTables = Object.entries(object.distinctDedupTables ?? {}).reduce<{ [key: number]: Table }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Table.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseSimpleAggNode_DistinctDedupTablesEntry(): SimpleAggNode_DistinctDedupTablesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const SimpleAggNode_DistinctDedupTablesEntry = {
+  fromJSON(object: any): SimpleAggNode_DistinctDedupTablesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? Table.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SimpleAggNode_DistinctDedupTablesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? Table.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SimpleAggNode_DistinctDedupTablesEntry>, I>>(
+    object: I,
+  ): SimpleAggNode_DistinctDedupTablesEntry {
+    const message = createBaseSimpleAggNode_DistinctDedupTablesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null) ? Table.fromPartial(object.value) : undefined;
     return message;
   },
 };
 
 function createBaseHashAggNode(): HashAggNode {
-  return { groupKey: [], aggCalls: [], aggCallStates: [], resultTable: undefined, isAppendOnly: false };
+  return {
+    groupKey: [],
+    aggCalls: [],
+    aggCallStates: [],
+    resultTable: undefined,
+    isAppendOnly: false,
+    distinctDedupTables: {},
+  };
 }
 
 export const HashAggNode = {
@@ -2306,6 +2399,12 @@ export const HashAggNode = {
         : [],
       resultTable: isSet(object.resultTable) ? Table.fromJSON(object.resultTable) : undefined,
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      distinctDedupTables: isObject(object.distinctDedupTables)
+        ? Object.entries(object.distinctDedupTables).reduce<{ [key: number]: Table }>((acc, [key, value]) => {
+          acc[Number(key)] = Table.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2329,6 +2428,12 @@ export const HashAggNode = {
     message.resultTable !== undefined &&
       (obj.resultTable = message.resultTable ? Table.toJSON(message.resultTable) : undefined);
     message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    obj.distinctDedupTables = {};
+    if (message.distinctDedupTables) {
+      Object.entries(message.distinctDedupTables).forEach(([k, v]) => {
+        obj.distinctDedupTables[k] = Table.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -2341,6 +2446,44 @@ export const HashAggNode = {
       ? Table.fromPartial(object.resultTable)
       : undefined;
     message.isAppendOnly = object.isAppendOnly ?? false;
+    message.distinctDedupTables = Object.entries(object.distinctDedupTables ?? {}).reduce<{ [key: number]: Table }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Table.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseHashAggNode_DistinctDedupTablesEntry(): HashAggNode_DistinctDedupTablesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const HashAggNode_DistinctDedupTablesEntry = {
+  fromJSON(object: any): HashAggNode_DistinctDedupTablesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? Table.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: HashAggNode_DistinctDedupTablesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? Table.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HashAggNode_DistinctDedupTablesEntry>, I>>(
+    object: I,
+  ): HashAggNode_DistinctDedupTablesEntry {
+    const message = createBaseHashAggNode_DistinctDedupTablesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null) ? Table.fromPartial(object.value) : undefined;
     return message;
   },
 };
@@ -3250,13 +3393,14 @@ export const SortNode = {
 };
 
 function createBaseDmlNode(): DmlNode {
-  return { tableId: 0, columnDescs: [] };
+  return { tableId: 0, tableVersionId: 0, columnDescs: [] };
 }
 
 export const DmlNode = {
   fromJSON(object: any): DmlNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
     };
   },
@@ -3264,6 +3408,7 @@ export const DmlNode = {
   toJSON(message: DmlNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.columnDescs) {
       obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
     } else {
@@ -3275,6 +3420,7 @@ export const DmlNode = {
   fromPartial<I extends Exact<DeepPartial<DmlNode>, I>>(object: I): DmlNode {
     const message = createBaseDmlNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     return message;
   },
@@ -3895,7 +4041,7 @@ export const StreamEnvironment = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
+  return { fragments: {}, edges: [], dependentRelationIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3913,8 +4059,8 @@ export const StreamFragmentGraph = {
       edges: Array.isArray(object?.edges)
         ? object.edges.map((e: any) => StreamFragmentGraph_StreamFragmentEdge.fromJSON(e))
         : [],
-      dependentTableIds: Array.isArray(object?.dependentTableIds)
-        ? object.dependentTableIds.map((e: any) => Number(e))
+      dependentRelationIds: Array.isArray(object?.dependentRelationIds)
+        ? object.dependentRelationIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
@@ -3935,10 +4081,10 @@ export const StreamFragmentGraph = {
     } else {
       obj.edges = [];
     }
-    if (message.dependentTableIds) {
-      obj.dependentTableIds = message.dependentTableIds.map((e) => Math.round(e));
+    if (message.dependentRelationIds) {
+      obj.dependentRelationIds = message.dependentRelationIds.map((e) => Math.round(e));
     } else {
-      obj.dependentTableIds = [];
+      obj.dependentRelationIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
@@ -3958,7 +4104,7 @@ export const StreamFragmentGraph = {
       return acc;
     }, {});
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
-    message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
+    message.dependentRelationIds = object.dependentRelationIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.env = (object.env !== undefined && object.env !== null)
       ? StreamEnvironment.fromPartial(object.env)

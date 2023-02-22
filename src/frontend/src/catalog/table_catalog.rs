@@ -16,11 +16,9 @@ use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId};
+use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
 };
@@ -83,8 +81,7 @@ pub struct TableCatalog {
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index
-    /// tables, and internal tables. Sinks will have a type of `TableType::Table` because there is
-    /// no need to distinguish sinks from other types of tables now.
+    /// tables, and internal tables.
     pub table_type: TableType,
 
     /// Distribution key column indices.
@@ -172,7 +169,7 @@ impl TableType {
 /// The version of a table, used by schema change. See [`ProstTableVersion`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableVersion {
-    pub version_id: u64,
+    pub version_id: TableVersionId,
     pub next_column_id: ColumnId,
 }
 
@@ -180,8 +177,10 @@ impl TableVersion {
     /// Create an initial version for a table, with the given max column id.
     #[cfg(test)]
     pub fn new_initial_for_test(max_column_id: ColumnId) -> Self {
+        use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
+
         Self {
-            version_id: 0,
+            version_id: INITIAL_TABLE_VERSION_ID,
             next_column_id: max_column_id.next(),
         }
     }
@@ -363,20 +362,6 @@ impl TableCatalog {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
-        }
-    }
-
-    pub fn to_sink_desc(&self, properties: WithOptions, sink_type: SinkType) -> SinkDesc {
-        SinkDesc {
-            id: SinkId::placeholder(),
-            name: self.name.clone(),
-            columns: self.columns.clone(),
-            pk: self.pk.iter().map(|x| x.to_order_pair()).collect(),
-            stream_key: self.stream_key.clone(),
-            distribution_key: self.distribution_key.clone(),
-            definition: self.definition.clone(),
-            properties: properties.into_inner(),
-            sink_type,
         }
     }
 }

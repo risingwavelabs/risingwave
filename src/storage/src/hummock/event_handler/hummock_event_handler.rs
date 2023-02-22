@@ -544,15 +544,18 @@ impl HummockEventHandler {
                                 instance_id
                             );
                             let mut read_version_mapping_guard = self.read_version_mapping.write();
-                            read_version_mapping_guard
+                            let entry = read_version_mapping_guard
                                 .get_mut(&table_id)
                                 .unwrap_or_else(|| {
                                     panic!(
                                         "DestroyHummockInstance table_id {} instance_id {} fail",
                                         table_id, instance_id
                                     )
-                                })
-                                .remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
+                                });
+                            entry.remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
+                            if entry.is_empty() {
+                                read_version_mapping_guard.remove(&table_id);
+                            }
                         }
                     }
                 }

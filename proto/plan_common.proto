@@ -80,4 +80,5 @@ enum RowFormatType {
   CANAL_JSON = 6;
   CSV = 7;
   NATIVE = 8;
+  DEBEZIUM_AVRO = 9;
 }

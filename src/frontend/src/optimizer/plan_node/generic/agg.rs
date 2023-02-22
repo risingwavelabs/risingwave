@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use itertools::Itertools;
@@ -296,9 +296,14 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
-                    AggCallState::ResultValue
-                }
+                AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp => AggCallState::ResultValue,
                 AggKind::ApproxCountDistinct => {
                     if !in_append_only {
                         // FIXME: now the approx count distinct on a non-append-only stream does not
@@ -359,6 +364,66 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         internal_table_catalog_builder
             .set_value_indices((self.group_key.len()..out_fields.len()).collect());
         internal_table_catalog_builder.build(tb_dist)
+    }
+
+    /// Infer dedup tables for distinct agg calls, partitioned by distinct columns.
+    /// Since distinct agg calls only dedup on the first argument, the key of the result map is
+    /// `usize`, i.e. the distinct column index.
+    ///
+    /// Dedup table schema:
+    /// group key | distinct key | count for AGG1(distinct x) | count for AGG2(distinct x) | ...
+    pub fn infer_distinct_dedup_tables(
+        &self,
+        me: &impl GenericPlanRef,
+        vnode_col_idx: Option<usize>,
+    ) -> HashMap<usize, TableCatalog> {
+        let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
+        let in_fields = self.input.schema().fields();
+
+        self.agg_calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| call.distinct) // only distinct agg calls need dedup table
+            .into_group_map_by(|(_, call)| call.inputs[0].index) // one table per distinct column
+            .into_iter()
+            .map(|(distinct_col, indices_and_calls)| {
+                let mut table_builder =
+                    TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+
+                let key_cols = self
+                    .group_key
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(distinct_col))
+                    .collect_vec();
+                for &idx in &key_cols {
+                    let table_col_idx = table_builder.add_column(&in_fields[idx]);
+                    table_builder.add_order_column(table_col_idx, OrderType::Ascending);
+                }
+
+                // Agg calls with same distinct column share the same dedup table, but they may have
+                // different filter conditions, so the count of occurrence of one distinct key may
+                // differ among different calls. We add one column for each call in the dedup table.
+                for (call_index, _) in indices_and_calls {
+                    table_builder.add_column(&Field {
+                        data_type: DataType::Int64,
+                        name: format!("count_for_agg_call_{}", call_index),
+                        sub_fields: vec![],
+                        type_name: String::default(),
+                    });
+                }
+                table_builder
+                    .set_value_indices((key_cols.len()..table_builder.columns().len()).collect());
+
+                let mapping = ColIndexMapping::with_included_columns(&key_cols, in_fields.len());
+                if let Some(idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
+                    table_builder.set_vnode_col_idx(idx);
+                }
+                let dist_key = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
+                let table = table_builder.build(dist_key);
+                (distinct_col, table)
+            })
+            .collect()
     }
 
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
@@ -579,6 +644,9 @@ impl PlanAggCall {
             }
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
+            }
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
+                panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
         };
         PlanAggCall {

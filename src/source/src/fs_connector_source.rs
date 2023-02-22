@@ -21,7 +21,7 @@ use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceInfo, SplitReaderV2Impl,
+    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceInfo, SplitReaderImpl,
 };
 
 #[derive(Clone, Debug)]
@@ -80,7 +80,7 @@ impl FsConnectorSource {
         column_ids: Vec<ColumnId>,
         metrics: Arc<SourceMetrics>,
         source_info: SourceInfo,
-    ) -> Result<SplitReaderV2Impl> {
+    ) -> Result<SplitReaderImpl> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
@@ -90,7 +90,7 @@ impl FsConnectorSource {
                 rw_columns: columns,
             },
         };
-        SplitReaderV2Impl::create(config, state, parser_config, metrics, source_info, None)
+        SplitReaderImpl::create(config, state, parser_config, metrics, source_info, None)
             .await
             .map_err(RwError::from)
     }

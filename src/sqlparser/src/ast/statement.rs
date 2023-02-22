@@ -96,6 +96,7 @@ pub enum SourceSchema {
     CanalJson,        // Keyword::CANAL_JSON
     Csv(CsvInfo),     // Keyword::CSV
     Native,
+    DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
 }
 
 impl ParseTo for SourceSchema {
@@ -117,9 +118,12 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::CSV]) {
             impl_parse_to!(csv_info: CsvInfo, p);
             SourceSchema::Csv(csv_info)
+        } else if p.parse_keywords(&[Keyword::DEBEZIUM_AVRO]) {
+            impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
+            SourceSchema::DebeziumAvro(avro_schema)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -137,6 +141,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             SourceSchema::Native => write!(f, "NATIVE"),
+            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
         }
     }
 }
@@ -218,6 +223,51 @@ impl fmt::Display for AvroSchema {
         impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
         impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
+        impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebeziumAvroSchema {
+    pub row_schema_location: AstString,
+}
+
+impl ParseTo for DebeziumAvroSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(
+            [
+                Keyword::ROW,
+                Keyword::SCHEMA,
+                Keyword::LOCATION,
+                Keyword::CONFLUENT,
+                Keyword::SCHEMA,
+                Keyword::REGISTRY
+            ],
+            p
+        );
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            row_schema_location,
+        })
+    }
+}
+
+impl fmt::Display for DebeziumAvroSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(
+            [
+                Keyword::ROW,
+                Keyword::SCHEMA,
+                Keyword::LOCATION,
+                Keyword::CONFLUENT,
+                Keyword::SCHEMA,
+                Keyword::REGISTRY
+            ],
+            v
+        );
         impl_fmt_display!(row_schema_location, v, self);
         v.iter().join(" ").fmt(f)
     }

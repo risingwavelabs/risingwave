@@ -31,7 +31,7 @@ use crate::source::google_pubsub::PubsubProperties;
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReaderV2,
+    SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -113,7 +113,7 @@ impl PubsubSplitReader {
 }
 
 #[async_trait]
-impl SplitReaderV2 for PubsubSplitReader {
+impl SplitReader for PubsubSplitReader {
     type Properties = PubsubProperties;
 
     async fn new(

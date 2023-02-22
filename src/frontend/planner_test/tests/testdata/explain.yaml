@@ -36,23 +36,27 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
+    Project Remove:
+
+    apply TrivialProjectToValuesRule 1 time(s)
+
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+
     To Batch Physical Plan:
 
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 
     To Batch Local Plan:
 
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 
     {
       "root_stage_id": 0,
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 29,
-            "plan_node_type": "BatchProject",
+            "plan_node_id": 30,
+            "plan_node_type": "BatchValues",
             "schema": [
               {
                 "dataType": {
@@ -62,15 +66,7 @@
                 "name": "1:Int32"
               }
             ],
-            "children": [
-              {
-                "plan_node_id": 27,
-                "plan_node_type": "BatchValues",
-                "schema": [],
-                "children": [],
-                "source_stage_id": null
-              }
-            ],
+            "children": [],
             "source_stage_id": null
           },
           "parallelism": 1,

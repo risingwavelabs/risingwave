@@ -173,6 +173,7 @@ mod tests {
         // Write a chunk, and we should receive it.
         table_dml_handle
             .write_chunk(StreamChunk::default())
+            .await
             .unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
@@ -187,6 +188,7 @@ mod tests {
         // Then write a chunk.
         table_dml_handle
             .write_chunk(StreamChunk::default())
+            .await
             .unwrap();
 
         // We should receive the barrier.

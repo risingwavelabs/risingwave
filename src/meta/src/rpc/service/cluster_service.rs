@@ -20,27 +20,20 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::{ClusterManagerRef, SystemParamManagerRef};
+use crate::manager::ClusterManagerRef;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
 pub struct ClusterServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
-    system_param_manager: SystemParamManagerRef<S>,
 }
 
 impl<S> ClusterServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(
-        cluster_manager: ClusterManagerRef<S>,
-        system_param_manager: SystemParamManagerRef<S>,
-    ) -> Self {
-        ClusterServiceImpl {
-            cluster_manager,
-            system_param_manager,
-        }
+    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
+        ClusterServiceImpl { cluster_manager }
     }
 }
 
@@ -61,11 +54,9 @@ where
             .cluster_manager
             .add_worker_node(worker_type, host, worker_node_parallelism)
             .await?;
-        let system_params = self.system_param_manager.get_params().clone();
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,
             node: Some(worker_node),
-            system_params: Some(system_params),
         }))
     }
 
