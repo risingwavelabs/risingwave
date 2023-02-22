@@ -134,8 +134,8 @@
     └─StreamProject { exprs: [max(max(t.v))] }
       └─StreamGlobalSimpleAgg { aggs: [count, max(max(t.v))] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr3], aggs: [count, max(t.v)] }
-            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr3] }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t.v)] }
+            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |
     Fragment 0
@@ -393,8 +393,8 @@
     └─StreamProject { exprs: [max(max(t.v)), sum0(count(t.v))] }
       └─StreamGlobalSimpleAgg { aggs: [count, max(max(t.v)), sum0(count(t.v))] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr3], aggs: [count, max(t.v), count(t.v)] }
-            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr3] }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t.v), count(t.v)] }
+            └─StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |
     Fragment 0

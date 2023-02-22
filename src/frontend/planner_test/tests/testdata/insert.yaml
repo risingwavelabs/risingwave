@@ -171,7 +171,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: ['2020-01-01 01:02:03':Timestamp::Time as $expr1, 11:Int32, 4.5:Decimal::Float32 as $expr2] }
+        └─BatchProject { exprs: ['01:02:03':Time, 11:Int32, 4.5:Float32] }
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - name: insert into select with cast error
   sql: |

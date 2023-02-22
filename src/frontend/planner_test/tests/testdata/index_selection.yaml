@@ -618,7 +618,7 @@
       └─StreamTopN { order: "[t1.a ASC]", limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: "[t1.a ASC]", limit: 1, offset: 0, group_key: [1] }
-            └─StreamProject { exprs: [t1.a, Vnode(t1.a) as $expr3] }
+            └─StreamProject { exprs: [t1.a, Vnode(t1.a) as $expr1] }
               └─StreamTableScan { table: t1, columns: [t1.a], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
 - sql: |
     create table t1 (a varchar, b int, c int, d int);

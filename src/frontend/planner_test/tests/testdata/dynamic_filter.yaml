@@ -21,8 +21,8 @@
         └─StreamProject { exprs: [max(max(t2.v2))] }
           └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr3], aggs: [count, max(t2.v2)] }
-                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr3] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: |
     With Top-1 on inner side
@@ -117,8 +117,8 @@
         └─StreamProject { exprs: [max(max(t2.v2))] }
           └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr3], aggs: [count, max(t2.v2)] }
-                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr3] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Dynamic filter join on unequal types
   sql: |
@@ -157,8 +157,8 @@
         └─StreamProject { exprs: [max(max(t2.v2))] }
           └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr3], aggs: [count, max(t2.v2)] }
-                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr3] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Complex expression on RHS of condition will still result in dynamic filter
   before:
