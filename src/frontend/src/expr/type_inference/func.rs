@@ -14,7 +14,7 @@
 
 use itertools::Itertools as _;
 use num_integer::Integer as _;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -48,7 +48,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
         .map(|(expr, t)| {
             if DataTypeName::from(expr.return_type()) != *t {
                 if t.is_scalar() {
-                    return expr.cast_implicit((*t).into());
+                    return expr.cast_implicit((*t).into()).map_err(Into::into);
                 } else {
                     return Err(ErrorCode::BindError(format!(
                         "Cannot implicitly cast '{:?}' to polymorphic type {:?}",
@@ -59,7 +59,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
             }
             Ok(expr)
         })
-        .try_collect()?;
+        .try_collect::<_, _, RwError>()?;
     Ok(sig.ret_type.into())
 }
 
@@ -318,7 +318,7 @@ fn infer_type_for_special(
                 .enumerate()
                 .map(|(i, input)| match i {
                     // 0-th arg must be string
-                    0 => input.cast_implicit(DataType::Varchar),
+                    0 => input.cast_implicit(DataType::Varchar).map_err(Into::into),
                     // subsequent can be any type, using the output format
                     _ => input.cast_output(),
                 })
