@@ -14,9 +14,9 @@
 
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
-use std::cmp::{self};
 use std::ptr;
 
+use risingwave_hummock_sdk::key::MAX_KEY_LEN;
 use xxhash_rust::xxh64;
 
 use super::{HummockError, HummockResult};
@@ -30,8 +30,8 @@ unsafe fn u32(ptr: *const u8) -> u32 {
 }
 
 #[inline]
-pub fn bytes_diff<'a>(base: &[u8], target: &'a [u8]) -> &'a [u8] {
-    let end = cmp::min(base.len(), target.len());
+pub fn bytes_diff_below_max_key_length<'a>(base: &[u8], target: &'a [u8]) -> &'a [u8] {
+    let end = base.len().min(target.len()).min(MAX_KEY_LEN);
     let mut i = 0;
     unsafe {
         while i + 8 <= end {
