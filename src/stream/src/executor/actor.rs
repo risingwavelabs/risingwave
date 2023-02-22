@@ -35,7 +35,7 @@ use crate::task::{ActorId, SharedContext};
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
-    fragment_id: u32,
+    pub fragment_id: u32,
 
     // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
@@ -82,7 +82,7 @@ impl ActorContext {
         tracing::error!("Compute error: {}, executor: {identity}", err);
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         self.streaming_metrics
-            .user_error_count
+            .user_compute_error_count
             .with_label_values(&[
                 "ExprError",
                 &err.to_string(),
