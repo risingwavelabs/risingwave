@@ -346,7 +346,7 @@ impl SstableStore {
                         .map_err(HummockError::object_io_error)?;
                     let meta = SstableMeta::decode(&mut &buf[..])?;
                     let sst = Sstable::new(sst_id, meta);
-                    let charge = sst.meta.encoded_size();
+                    let charge = sst.estimate_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                     stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                     Ok((Box::new(sst), charge))
