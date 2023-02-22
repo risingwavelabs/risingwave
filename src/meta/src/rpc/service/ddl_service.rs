@@ -865,15 +865,22 @@ where
             .start_replace_table_procedure(stream_job.table().unwrap())
             .await?;
 
-        // 5. Resolve the downstream fragments, extend the fragment graph to a complete graph that
-        // contains all information needed for building the actor graph.
+        // 5. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
+        // graph that contains all information needed for building the actor graph.
+        let original_table_fragment = self
+            .fragment_manager
+            .get_mview_fragment(id.into())
+            .await?;
         let downstream_fragments = self
             .fragment_manager
             .get_downstream_chain_fragments(id.into())
             .await?;
 
-        let complete_graph =
-            CompleteStreamFragmentGraph::with_downstreams(fragment_graph, downstream_fragments)?;
+        let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
+            fragment_graph,
+            original_table_fragment.fragment_id,
+            downstream_fragments,
+        )?;
 
         // 6. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;

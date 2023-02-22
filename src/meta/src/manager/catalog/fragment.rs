@@ -30,7 +30,7 @@ use risingwave_pb::meta::FragmentParallelUnitMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
+    DispatchStrategy, Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -880,7 +880,7 @@ where
     pub async fn get_downstream_chain_fragments(
         &self,
         table_id: TableId,
-    ) -> MetaResult<Vec<Fragment>> {
+    ) -> MetaResult<Vec<(DispatchStrategy, Fragment)>> {
         let map = &self.core.read().await.table_fragments;
 
         let table_fragments = map
@@ -888,10 +888,18 @@ where
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
         let mview_fragment = table_fragments.mview_fragment().unwrap();
-        let downstream_fragment_ids: HashSet<_> = mview_fragment.actors[0]
+        let downstream_dispatches: HashMap<_, _> = mview_fragment.actors[0]
             .dispatcher
             .iter()
-            .map(|d| d.dispatcher_id as FragmentId)
+            .map(|d| {
+                let fragment_id = d.dispatcher_id as FragmentId;
+                let strategy = DispatchStrategy {
+                    r#type: d.r#type,
+                    dist_key_indices: d.dist_key_indices.clone(),
+                    output_indices: d.output_indices.clone(),
+                };
+                (fragment_id, strategy)
+            })
             .collect();
 
         // Find the fragments based on the fragment ids.
@@ -901,16 +909,63 @@ where
                 table_fragments
                     .fragments
                     .values()
-                    .filter(|fragment| downstream_fragment_ids.contains(&fragment.fragment_id))
-                    .inspect(|f| {
+                    .filter_map(|fragment| {
+                        downstream_dispatches
+                            .get(&fragment.fragment_id)
+                            .map(|d| (d.clone(), fragment.clone()))
+                    })
+                    .inspect(|(_, f)| {
                         assert!((f.fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0)
                     })
             })
-            .cloned()
             .collect_vec();
 
-        assert_eq!(downstream_fragment_ids.len(), fragments.len());
+        assert_eq!(downstream_dispatches.len(), fragments.len());
 
         Ok(fragments)
     }
+
+    /// Get the `Materialize` fragment of the specified table.
+    pub async fn get_mview_fragment(&self, table_id: TableId) -> MetaResult<Fragment> {
+        let map = &self.core.read().await.table_fragments;
+
+        let table_fragments = map
+            .get(&table_id)
+            .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+        let mview_fragment = table_fragments
+            .mview_fragment()
+            .with_context(|| format!("mview fragment not exist: id={}", table_id))?;
+
+        Ok(mview_fragment)
+    }
+
+    // /// Get the dispatch strategies after the `Materialize` fragment of the specified table.
+    // pub async fn get_mview_dispatch_strategies(
+    //     &self,
+    //     table_id: TableId,
+    // ) -> MetaResult<HashMap<FragmentId, DispatchStrategy>> {
+    //     let map = &self.core.read().await.table_fragments;
+
+    //     let table_fragments = map
+    //         .get(&table_id)
+    //         .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+    //     let mview_fragment = table_fragments.mview_fragment().unwrap();
+    //     let dispatches: HashMap<_, _> = mview_fragment.actors[0]
+    //         .dispatcher
+    //         .iter()
+    //         .map(|d| {
+    //             let fragment_id = d.dispatcher_id as FragmentId;
+    //             let strategy = DispatchStrategy {
+    //                 r#type: d.r#type,
+    //                 dist_key_indices: d.dist_key_indices.clone(),
+    //                 output_indices: d.output_indices.clone(),
+    //             };
+    //             (fragment_id, strategy)
+    //         })
+    //         .collect();
+
+    //     Ok(dispatches)
+    // }
 }
