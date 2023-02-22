@@ -2546,8 +2546,6 @@ def section_grpc_hummock_meta_client(outer_panels):
         ),
     ]
 
-<<<<<<< HEAD
-=======
 def section_memory_manager(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -2607,7 +2605,6 @@ def section_memory_manager(outer_panels):
             ],
         ),
     ]
->>>>>>> b429e9c2966a88c47f71ea0e05f4dc3589801448
 
 templating = Templating()
 if namespace_filter_enabled:

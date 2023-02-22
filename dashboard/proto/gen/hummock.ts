@@ -558,9 +558,15 @@ export interface CompactTaskProgress {
   numSstsUploaded: number;
 }
 
+/** The measurement of the workload on a compactor to determine whether it is idle. */
+export interface CompactorWorkload {
+  cpu: number;
+}
+
 export interface CompactorHeartbeatRequest {
   contextId: number;
   progress: CompactTaskProgress[];
+  workload: CompactorWorkload | undefined;
 }
 
 export interface CompactorHeartbeatResponse {
@@ -830,6 +836,17 @@ export interface HummockVersionStats {
 export interface HummockVersionStats_TableStatsEntry {
   key: number;
   value: TableStats | undefined;
+}
+
+export interface GetScaleCompactorRequest {
+}
+
+export interface GetScaleCompactorResponse {
+  suggestCores: number;
+  runningCores: number;
+  totalCores: number;
+  waitingCompactionBytes: number;
+  pendingCompactionBytes: number;
 }
 
 function createBaseSstableInfo(): SstableInfo {
@@ -2766,8 +2783,30 @@ export const CompactTaskProgress = {
   },
 };
 
+function createBaseCompactorWorkload(): CompactorWorkload {
+  return { cpu: 0 };
+}
+
+export const CompactorWorkload = {
+  fromJSON(object: any): CompactorWorkload {
+    return { cpu: isSet(object.cpu) ? Number(object.cpu) : 0 };
+  },
+
+  toJSON(message: CompactorWorkload): unknown {
+    const obj: any = {};
+    message.cpu !== undefined && (obj.cpu = Math.round(message.cpu));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CompactorWorkload>, I>>(object: I): CompactorWorkload {
+    const message = createBaseCompactorWorkload();
+    message.cpu = object.cpu ?? 0;
+    return message;
+  },
+};
+
 function createBaseCompactorHeartbeatRequest(): CompactorHeartbeatRequest {
-  return { contextId: 0, progress: [] };
+  return { contextId: 0, progress: [], workload: undefined };
 }
 
 export const CompactorHeartbeatRequest = {
@@ -2775,6 +2814,7 @@ export const CompactorHeartbeatRequest = {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       progress: Array.isArray(object?.progress) ? object.progress.map((e: any) => CompactTaskProgress.fromJSON(e)) : [],
+      workload: isSet(object.workload) ? CompactorWorkload.fromJSON(object.workload) : undefined,
     };
   },
 
@@ -2786,15 +2826,18 @@ export const CompactorHeartbeatRequest = {
     } else {
       obj.progress = [];
     }
+    message.workload !== undefined &&
+      (obj.workload = message.workload ? CompactorWorkload.toJSON(message.workload) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatRequest>, I>>(
-    object: I,
-  ): CompactorHeartbeatRequest {
+  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatRequest>, I>>(object: I): CompactorHeartbeatRequest {
     const message = createBaseCompactorHeartbeatRequest();
     message.contextId = object.contextId ?? 0;
     message.progress = object.progress?.map((e) => CompactTaskProgress.fromPartial(e)) || [];
+    message.workload = (object.workload !== undefined && object.workload !== null)
+      ? CompactorWorkload.fromPartial(object.workload)
+      : undefined;
     return message;
   },
 };
@@ -2814,9 +2857,7 @@ export const CompactorHeartbeatResponse = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatResponse>, I>>(
-    object: I,
-  ): CompactorHeartbeatResponse {
+  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatResponse>, I>>(object: I): CompactorHeartbeatResponse {
     const message = createBaseCompactorHeartbeatResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
@@ -4403,6 +4444,64 @@ export const HummockVersionStats_TableStatsEntry = {
     message.value = (object.value !== undefined && object.value !== null)
       ? TableStats.fromPartial(object.value)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseGetScaleCompactorRequest(): GetScaleCompactorRequest {
+  return {};
+}
+
+export const GetScaleCompactorRequest = {
+  fromJSON(_: any): GetScaleCompactorRequest {
+    return {};
+  },
+
+  toJSON(_: GetScaleCompactorRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetScaleCompactorRequest>, I>>(_: I): GetScaleCompactorRequest {
+    const message = createBaseGetScaleCompactorRequest();
+    return message;
+  },
+};
+
+function createBaseGetScaleCompactorResponse(): GetScaleCompactorResponse {
+  return { suggestCores: 0, runningCores: 0, totalCores: 0, waitingCompactionBytes: 0, pendingCompactionBytes: 0 };
+}
+
+export const GetScaleCompactorResponse = {
+  fromJSON(object: any): GetScaleCompactorResponse {
+    return {
+      suggestCores: isSet(object.suggestCores) ? Number(object.suggestCores) : 0,
+      runningCores: isSet(object.runningCores) ? Number(object.runningCores) : 0,
+      totalCores: isSet(object.totalCores) ? Number(object.totalCores) : 0,
+      waitingCompactionBytes: isSet(object.waitingCompactionBytes) ? Number(object.waitingCompactionBytes) : 0,
+      pendingCompactionBytes: isSet(object.pendingCompactionBytes) ? Number(object.pendingCompactionBytes) : 0,
+    };
+  },
+
+  toJSON(message: GetScaleCompactorResponse): unknown {
+    const obj: any = {};
+    message.suggestCores !== undefined && (obj.suggestCores = Math.round(message.suggestCores));
+    message.runningCores !== undefined && (obj.runningCores = Math.round(message.runningCores));
+    message.totalCores !== undefined && (obj.totalCores = Math.round(message.totalCores));
+    message.waitingCompactionBytes !== undefined &&
+      (obj.waitingCompactionBytes = Math.round(message.waitingCompactionBytes));
+    message.pendingCompactionBytes !== undefined &&
+      (obj.pendingCompactionBytes = Math.round(message.pendingCompactionBytes));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetScaleCompactorResponse>, I>>(object: I): GetScaleCompactorResponse {
+    const message = createBaseGetScaleCompactorResponse();
+    message.suggestCores = object.suggestCores ?? 0;
+    message.runningCores = object.runningCores ?? 0;
+    message.totalCores = object.totalCores ?? 0;
+    message.waitingCompactionBytes = object.waitingCompactionBytes ?? 0;
+    message.pendingCompactionBytes = object.pendingCompactionBytes ?? 0;
     return message;
   },
 };
