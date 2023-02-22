@@ -155,11 +155,10 @@ impl Compactor {
 
         let need_quota = estimate_memory_use_for_compaction(&compact_task);
         tracing::info!(
-            "Ready to handle compaction task: {} need memory: {} select_level {} target_level {} compression_algorithm {:?}",
+            "Ready to handle compaction task: {} need memory: {} target_level {} compression_algorithm {:?}",
             compact_task.task_id,
             need_quota,
-            compact_task.input_ssts[0].level_idx,
-            compact_task.input_ssts[1].level_idx,
+            compact_task.target_level,
             compact_task.compression_algorithm,
         );
 

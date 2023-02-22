@@ -273,11 +273,6 @@ pub fn trigger_lsm_stat(
                 ""
             };
 
-            println!(
-                "level_index {} compression_algorithm {} compression_algorithm_label {} compression_ratio {} target_level {}",
-                level_index, compact_task.compression_algorithm, compression_algorithm_label, compression_ratio, compact_task.target_level
-            );
-
             metrics
                 .compact_level_compression_ratio
                 .with_label_values(&[
