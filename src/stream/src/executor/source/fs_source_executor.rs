@@ -106,10 +106,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
         Ok(steam_reader.into_stream())
     }
 
-    async fn apply_split_change(
+    async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut ReaderStreamWithPause,
+        stream: &mut ReaderStreamWithPause<BIASED>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -172,10 +172,10 @@ impl<S: StateStore> FsSourceExecutor<S> {
         Ok((!no_change_flag).then_some(target_state))
     }
 
-    async fn replace_stream_reader_with_target_state(
+    async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &FsSourceDesc,
-        stream: &mut ReaderStreamWithPause,
+        stream: &mut ReaderStreamWithPause<BIASED>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -328,9 +328,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .stack_trace("fs_source_start_reader")
             .await?;
 
-        // Merge the chunks from source and the barriers into a single stream.
-        let mut stream =
-            ReaderStreamWithPause::new_with_barrier_receiver(barrier_receiver, source_chunk_reader);
+        // Merge the chunks from source and the barriers into a single stream. We prioritize
+        // barriers over source data chunks here.
+        let mut stream = ReaderStreamWithPause::<true>::new_with_barrier_receiver(
+            barrier_receiver,
+            source_chunk_reader,
+        );
         if start_with_paused {
             stream.pause_data_stream();
         }

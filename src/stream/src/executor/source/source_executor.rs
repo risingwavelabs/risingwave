@@ -106,10 +106,10 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
-    async fn apply_split_change(
+    async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut ReaderStreamWithPause,
+        stream: &mut ReaderStreamWithPause<BIASED>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -163,10 +163,10 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok((!no_change_flag).then_some(target_state))
     }
 
-    async fn replace_stream_reader_with_target_state(
+    async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut ReaderStreamWithPause,
+        stream: &mut ReaderStreamWithPause<BIASED>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -289,9 +289,12 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_build_reader")
             .await?;
 
-        // Merge the chunks from source and the barriers into a single stream.
-        let mut stream =
-            ReaderStreamWithPause::new_with_barrier_receiver(barrier_receiver, source_chunk_reader);
+        // Merge the chunks from source and the barriers into a single stream. We prioritize
+        // barriers over source data chunks here.
+        let mut stream = ReaderStreamWithPause::<true>::new_with_barrier_receiver(
+            barrier_receiver,
+            source_chunk_reader,
+        );
 
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.

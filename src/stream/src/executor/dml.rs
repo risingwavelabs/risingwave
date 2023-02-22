@@ -94,8 +94,10 @@ impl DmlExecutor {
         let batch_reader = batch_reader.stream_reader().into_stream();
 
         // Merge the two streams using `ReaderStreamWithPause` because when we receive a pause
-        // barrier, we should stop receiving the data from DML.
-        let mut stream = ReaderStreamWithPause::new_with_message_stream(upstream, batch_reader);
+        // barrier, we should stop receiving the data from DML. We poll data from the two streams in
+        // a round robin way.
+        let mut stream =
+            ReaderStreamWithPause::<false>::new_with_message_stream(upstream, batch_reader);
 
         // If the first barrier is configuration change, then the DML executor must be newly
         // created, and we should start with the paused state.

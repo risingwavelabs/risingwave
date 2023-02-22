@@ -31,15 +31,17 @@ type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 type ReaderStreamData = StreamExecutorResult<Either<Message, StreamChunkWithState>>;
 type ReaderArm = BoxStream<'static, ReaderStreamData>;
 type ReaderStreamWithPauseInner =
-    SelectWithStrategy<ReaderArm, ReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
+    SelectWithStrategy<ReaderArm, ReaderArm, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
 
-pub(super) struct ReaderStreamWithPause {
+/// `ReaderStreamWithPause` merges two streams, with one of them receiving barriers. When the
+/// barrier requires the data stream
+pub(super) struct ReaderStreamWithPause<const BIASED: bool> {
     inner: ReaderStreamWithPauseInner,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl ReaderStreamWithPause {
+impl<const BIASED: bool> ReaderStreamWithPause<BIASED> {
     /// Receive barriers from barrier manager with the channel, error on channel close.
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
@@ -65,7 +67,8 @@ impl ReaderStreamWithPause {
         }
     }
 
-    // TODO(Yuanxin): Add comments.
+    /// Construct a `ReaderStreamWithPause` with one stream receiving streaming messages and the
+    /// other receiving data only.
     pub fn new_with_message_stream(
         message_stream: ExecutorMessageStream,
         data_stream: BoxSourceWithStateStream,
@@ -79,7 +82,8 @@ impl ReaderStreamWithPause {
         }
     }
 
-    // TODO(Yuanxin): Add comments.
+    /// Construct a `ReaderStreamWithPause` with one stream receiving barriers only and the other
+    /// receiving data only.
     pub fn new_with_barrier_receiver(
         barrier_receiver: UnboundedReceiver<Barrier>,
         data_stream: BoxSourceWithStateStream,
@@ -96,13 +100,13 @@ impl ReaderStreamWithPause {
     }
 
     fn new_inner(message_stream: ReaderArm, data_stream: ReaderArm) -> ReaderStreamWithPauseInner {
-        select_with_strategy(
-            message_stream,
-            data_stream,
-            // We prefer the left stream (which contains barriers of `Mutation::Pause` and
-            // `Mutation::Resume`) over the stream of data chunks.
-            |_: &mut ()| PollNext::Left,
-        )
+        let strategy = if BIASED {
+            |_: &mut PollNext| PollNext::Left
+        } else {
+            // The poll strategy is not biased: we poll the two streams in a round robin way.
+            |last: &mut PollNext| last.toggle()
+        };
+        select_with_strategy(message_stream, data_stream, strategy)
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.
@@ -134,7 +138,7 @@ impl ReaderStreamWithPause {
     }
 }
 
-impl Stream for ReaderStreamWithPause {
+impl<const BIASED: bool> Stream for ReaderStreamWithPause<BIASED> {
     type Item = ReaderStreamData;
 
     fn poll_next(
@@ -142,8 +146,13 @@ impl Stream for ReaderStreamWithPause {
         ctx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         if self.paused {
+            // Note: It is safe here to poll the left arm even if it contains streaming messages
+            // other than barriers: after the upstream executor sends a `Mutation::Pause`, there
+            // should be no more message until a `Mutation::Update` and a 'Mutation::Resume`.
             self.inner.get_mut().0.poll_next_unpin(ctx)
         } else {
+            // TODO: We may need to prioritize the data stream (right hand stream) after resuming
+            // from the paused state.
             self.inner.poll_next_unpin(ctx)
         }
     }
@@ -166,7 +175,8 @@ mod tests {
         let table_dml_handle = TableDmlHandle::new(vec![]);
         let source_stream = table_dml_handle.stream_reader().into_stream();
 
-        let stream = ReaderStreamWithPause::new_with_barrier_receiver(barrier_rx, source_stream);
+        let stream =
+            ReaderStreamWithPause::<true>::new_with_barrier_receiver(barrier_rx, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
