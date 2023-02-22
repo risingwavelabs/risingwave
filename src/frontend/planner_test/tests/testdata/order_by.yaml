@@ -214,3 +214,24 @@
         └─BatchSort { order: [$expr1 ASC] }
           └─BatchProject { exprs: [(test.b % 2:Int32) as $expr1, test.a] }
             └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
+- name: Orderby with always-false predicate
+  sql: |
+    create table t1 (v1 int);
+    select
+        1 as col_0
+    from
+        t1 as t_0
+    where
+        false
+    group by
+        t_0.v1
+    order by
+        t_0.v1 asc;
+  batch_plan: |
+    BatchProject { exprs: [1:Int32] }
+    └─BatchExchange { order: [t1.v1 ASC], dist: Single }
+      └─BatchProject { exprs: [1:Int32, t1.v1] }
+        └─BatchSortAgg { group_key: [t1.v1], aggs: [] }
+          └─BatchExchange { order: [t1.v1 ASC], dist: HashShard(t1.v1) }
+            └─BatchSort { order: [t1.v1 ASC] }
+              └─BatchValues { rows: [] }

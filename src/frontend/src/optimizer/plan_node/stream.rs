@@ -433,10 +433,11 @@ pub fn to_stream_prost_body(
                     Distribution::Broadcast => DispatcherType::Broadcast,
                     _ => panic!("Do not allow Any or AnyShard in serialization process"),
                 } as i32,
-                column_indices: match &base.dist {
+                dist_key_indices: match &base.dist {
                     Distribution::HashShard(keys) => keys.iter().map(|&num| num as u32).collect(),
                     _ => vec![],
                 },
+                output_indices: (0..base.schema().len() as u32).collect(),
             }),
         }),
         Node::DynamicFilter(me) => {

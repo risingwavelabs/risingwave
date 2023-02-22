@@ -37,8 +37,8 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 
 use self::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
-    StreamSink,
+    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
+    StreamRowIdGen, StreamSink,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -49,6 +49,7 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
     RewriteExprsRecursive,
@@ -756,7 +757,24 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_stream_plan()?;
+
+        // Add a project node if there is hidden column(s).
+        let input_fields = stream_plan.schema().fields();
+        if input_fields.len() != self.out_fields.count_ones(..) {
+            let exprs = input_fields
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, field)| {
+                    if self.out_fields.contains(idx) {
+                        Some(InputRef::new(idx, field.data_type.clone()).into())
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            stream_plan = StreamProject::new(LogicalProject::new(stream_plan, exprs)).into();
+        }
 
         StreamSink::create(
             stream_plan,
