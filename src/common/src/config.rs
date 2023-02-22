@@ -19,6 +19,7 @@
 
 use std::fs;
 
+use clap::ArgEnum;
 use serde::{Deserialize, Serialize};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -27,17 +28,50 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 /// Use a large value for HTTP/2 stream window size to improve the performance of remote exchange,
 /// as we don't rely on this for back-pressure.
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
+/// For non-user-facing components where the CLI arguments do not override the config file.
+pub const NO_OVERRIDE: Option<NoOverride> = None;
 
-pub fn load_config(path: &str) -> RwConfig
+/// A workaround for a bug in clap where the attribute `from_flag` on `Option<bool>` results in
+/// compilation error.
+pub type Flag = Option<bool>;
+
+pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
 {
-    if path.is_empty() {
+    let mut config = if path.is_empty() {
         tracing::warn!("risingwave.toml not found, using default config.");
-        return RwConfig::default();
+        RwConfig::default()
+    } else {
+        let config_str = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
+        toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+    };
+    // TODO(zhidong): warn deprecated config
+    if let Some(cli_override) = cli_override {
+        cli_override.r#override(&mut config);
     }
-    let config_str = fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
-    toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
+    config
+}
+
+/// Map command line flag to `Flag`. Should only be used in `#[derive(OverrideConfig)]`.
+pub fn true_if_present(b: bool) -> Flag {
+    if b {
+        Some(true)
+    } else {
+        None
+    }
+}
+
+pub trait OverrideConfig {
+    fn r#override(self, config: &mut RwConfig);
+}
+
+/// A dummy struct for `NO_OVERRIDE`. Do NOT use it directly.
+#[derive(Clone, Copy)]
+pub struct NoOverride {}
+
+impl OverrideConfig for NoOverride {
+    fn r#override(self, _config: &mut RwConfig) {}
 }
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
@@ -61,6 +95,13 @@ pub struct RwConfig {
 
     #[serde(default)]
     pub backup: BackupConfig,
+}
+
+#[derive(Copy, Clone, Debug, Default, ArgEnum, Serialize, Deserialize)]
+pub enum MetaBackend {
+    #[default]
+    Mem,
+    Etcd,
 }
 
 /// The section `[meta]` in `risingwave.toml`.
@@ -111,6 +152,17 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::node_num_monitor_interval_sec")]
     pub node_num_monitor_interval_sec: u64,
+
+    #[serde(default = "default::meta::backend")]
+    pub backend: MetaBackend,
+
+    /// Schedule space_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -133,6 +185,12 @@ pub struct ServerConfig {
 
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
+
+    #[serde(default = "default::server::metrics_level")]
+    /// Used for control the metrics level, similar to log level.
+    /// 0 = close metrics
+    /// >0 = open metrics
+    pub metrics_level: u32,
 }
 
 impl Default for ServerConfig {
@@ -152,6 +210,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    #[serde(default)]
+    pub distributed_query_limit: Option<u64>,
 }
 
 impl Default for BatchConfig {
@@ -181,6 +242,14 @@ pub struct StreamingConfig {
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
 
+    /// Enable reporting tracing information to jaeger.
+    #[serde(default = "default::streaming::enable_jaegar_tracing")]
+    pub enable_jaeger_tracing: bool,
+
+    /// Enable async stack tracing for risectl.
+    #[serde(default = "default::streaming::async_stack_trace")]
+    pub async_stack_trace: AsyncStackTraceOption,
+
     #[serde(default)]
     pub developer: DeveloperConfig,
 }
@@ -195,14 +264,20 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Target size of the Sstable.
     #[serde(default = "default::storage::sst_size_mb")]
     pub sstable_size_mb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Size of each block in bytes in SST.
     #[serde(default = "default::storage::block_size_kb")]
     pub block_size_kb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// False positive probability of bloom filter.
     #[serde(default = "default::storage::bloom_false_positive")]
     pub bloom_false_positive: f64,
@@ -219,8 +294,10 @@ pub struct StorageConfig {
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
-    pub shared_buffer_capacity_mb: u32,
+    pub shared_buffer_capacity_mb: usize,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
     pub data_directory: String,
@@ -270,12 +347,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
-    #[serde(default = "default::storage::object_store_use_batch_delete")]
-    pub object_store_use_batch_delete: bool,
-
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
+    #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
+    pub max_concurrent_compaction_task_number: u64,
 }
 
 impl Default for StorageConfig {
@@ -290,6 +363,9 @@ impl Default for StorageConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
+    #[serde(default = "default::file_cache::dir")]
+    pub dir: String,
+
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
 
@@ -310,6 +386,14 @@ impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
+}
+
+#[derive(Debug, Default, Clone, ArgEnum, Serialize, Deserialize)]
+pub enum AsyncStackTraceOption {
+    Off,
+    #[default]
+    On,
+    Verbose,
 }
 
 /// The subsections `[batch.developer]` and `[streaming.developer]`.
@@ -366,9 +450,13 @@ impl Default for DeveloperConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote storage url for storing snapshots.
     #[serde(default = "default::backup::storage_url")]
     pub storage_url: String,
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing snapshots.
     #[serde(default = "default::backup::storage_directory")]
     pub storage_directory: String,
@@ -382,6 +470,8 @@ impl Default for BackupConfig {
 
 mod default {
     pub mod meta {
+        use crate::config::MetaBackend;
+
         pub fn min_sst_retention_time_sec() -> u64 {
             604800
         }
@@ -409,6 +499,18 @@ mod default {
         pub fn node_num_monitor_interval_sec() -> u64 {
             10
         }
+
+        pub fn backend() -> MetaBackend {
+            MetaBackend::Mem
+        }
+
+        pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
+            3600 // 60min
+        }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
+        }
     }
 
     pub mod server {
@@ -423,6 +525,10 @@ mod default {
 
         pub fn connection_pool_size() -> u16 {
             16
+        }
+
+        pub fn metrics_level() -> u32 {
+            0
         }
     }
 
@@ -448,7 +554,7 @@ mod default {
             4
         }
 
-        pub fn shared_buffer_capacity_mb() -> u32 {
+        pub fn shared_buffer_capacity_mb() -> usize {
             1024
         }
 
@@ -501,15 +607,14 @@ mod default {
             4
         }
 
-        pub fn object_store_use_batch_delete() -> bool {
-            true
-        }
-        pub fn enable_state_store_v1() -> bool {
-            false
+        pub fn max_concurrent_compaction_task_number() -> u64 {
+            16
         }
     }
 
     pub mod streaming {
+        use crate::config::AsyncStackTraceOption;
+
         pub fn barrier_interval_ms() -> u32 {
             1000
         }
@@ -523,9 +628,21 @@ mod default {
         pub fn checkpoint_frequency() -> usize {
             10
         }
+
+        pub fn enable_jaegar_tracing() -> bool {
+            false
+        }
+
+        pub fn async_stack_trace() -> AsyncStackTraceOption {
+            AsyncStackTraceOption::On
+        }
     }
 
     pub mod file_cache {
+
+        pub fn dir() -> String {
+            "".to_string()
+        }
 
         pub fn capacity_mb() -> usize {
             1024
@@ -549,6 +666,7 @@ mod default {
     }
 
     pub mod developer {
+
         pub fn batch_output_channel_size() -> usize {
             64
         }

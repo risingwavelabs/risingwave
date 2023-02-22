@@ -19,8 +19,8 @@ use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, CompactorWorkload, HummockSnapshot,
-    HummockVersion, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
+    VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient, MetaClient};
@@ -141,10 +141,6 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
         self.meta_client.report_vacuum_task(vacuum_task).await
-    }
-
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
-        self.meta_client.get_compaction_groups().await
     }
 
     async fn trigger_manual_compaction(

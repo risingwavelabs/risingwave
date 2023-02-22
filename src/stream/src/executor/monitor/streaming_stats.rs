@@ -46,6 +46,7 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+    pub stream_total_mem_usage: IntGauge,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -81,6 +82,9 @@ pub struct StreamingMetrics {
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
+
+    /// User error reporting
+    pub user_error_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -137,6 +141,13 @@ impl StreamingMetrics {
             "stream_exchange_frag_recv_size",
             "Total size of messages that have been received from upstream Fragment",
             &["up_fragment_id", "down_fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let stream_total_mem_usage = register_int_gauge_with_registry!(
+            "stream_total_mem_usage",
+            "The memory allocated by streaming jobs, get from TaskLocalAlloc",
             registry
         )
         .unwrap();
@@ -422,6 +433,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let user_error_count = register_int_counter_vec_with_registry!(
+            "user_error_count",
+            "user errors in the system, queryable by tags",
+            &["error_type", "error_msg", "executor_name", "fragment_id"],
+            registry,
+        )
+        .unwrap();
+
         Self {
             registry,
             executor_row_count,
@@ -445,6 +464,7 @@ impl StreamingMetrics {
             source_output_row_count,
             source_row_per_barrier,
             exchange_frag_recv_size,
+            stream_total_mem_usage,
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,
@@ -467,6 +487,7 @@ impl StreamingMetrics {
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
+            user_error_count,
         }
     }
 

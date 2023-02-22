@@ -86,6 +86,22 @@ pub enum Convention {
     Stream,
 }
 
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef;
+}
+
+impl RewriteExprsRecursive for PlanRef {
+    fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
+        let new = self.rewrite_exprs(r);
+        let inputs: Vec<PlanRef> = new
+            .inputs()
+            .iter()
+            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
+            .collect();
+        new.clone_with_inputs(&inputs[..])
+    }
+}
+
 impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
@@ -263,9 +279,22 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
-impl dyn PlanNode {
+pub trait Explain {
     /// Write explain the whole plan tree.
-    pub fn explain(
+    fn explain(
+        &self,
+        is_last: &mut Vec<bool>,
+        level: usize,
+        f: &mut impl std::fmt::Write,
+    ) -> std::fmt::Result;
+
+    /// Explain the plan node and return a string.
+    fn explain_to_string(&self) -> Result<String>;
+}
+
+impl Explain for PlanRef {
+    /// Write explain the whole plan tree.
+    fn explain(
         &self,
         is_last: &mut Vec<bool>,
         level: usize,
@@ -302,13 +331,25 @@ impl dyn PlanNode {
     }
 
     /// Explain the plan node and return a string.
-    pub fn explain_to_string(&self) -> Result<String> {
+    fn explain_to_string(&self) -> Result<String> {
+        // In order to let expression display id started from 1 for explaining.
+        // We will reset expression display id to 0 and clone the whole plan to reset the schema.
+        let plan = {
+            let old_expr_display_id = self.ctx().get_expr_display_id();
+            self.ctx().set_expr_display_id(0);
+            let plan = PlanCloner::clone_whole_plan(self.clone());
+            self.ctx().set_expr_display_id(old_expr_display_id);
+            plan
+        };
+
         let mut output = String::new();
-        self.explain(&mut vec![], 0, &mut output)
+        plan.explain(&mut vec![], 0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
     }
+}
 
+impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
         self.plan_base().id
     }
@@ -376,16 +417,6 @@ impl dyn PlanNode {
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
-    }
-
-    pub fn rewrite_exprs_recursive(&self, r: &mut impl ExprRewriter) -> PlanRef {
-        let new = self.rewrite_exprs(r);
-        let inputs: Vec<PlanRef> = new
-            .inputs()
-            .iter()
-            .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
-            .collect();
-        new.clone_with_inputs(&inputs[..])
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
@@ -508,7 +539,9 @@ mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_watermark_filter;
 
+mod derive;
 mod stream_share;
 mod stream_union;
 pub mod utils;
@@ -583,9 +616,11 @@ pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
+pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -676,6 +711,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }
@@ -775,6 +811,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Dml }
             , { Stream, Now }
             , { Stream, Share }
+            , { Stream, WatermarkFilter }
         }
     };
 }

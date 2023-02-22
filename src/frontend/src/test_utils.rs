@@ -34,12 +34,15 @@ use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
+use risingwave_rpc_client::SystemParamsReader;
 use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
@@ -74,6 +77,10 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
         todo!()
     }
 
+    fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
+        todo!()
+    }
+
     fn end_session(&self, _session: &Self::Session) {
         todo!()
     }
@@ -91,7 +98,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), false).await
+        self.session_ref().run_statement(sql.as_str(), vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -103,7 +110,7 @@ impl LocalFrontend {
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), false)
+            .run_statement(sql.as_str(), vec![])
             .await
     }
 
@@ -246,6 +253,11 @@ impl CatalogWriter for MockCatalogWriter {
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
         self.create_materialized_view(table, graph).await?;
+        Ok(())
+    }
+
+    async fn replace_table(&self, table: ProstTable, _graph: StreamFragmentGraph) -> Result<()> {
+        self.catalog.write().update_table(&table);
         Ok(())
     }
 
@@ -657,6 +669,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
+    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn list_table_fragments(
         &self,
         _table_ids: &[u32],
@@ -673,6 +689,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
+        Ok(vec![])
+    }
+
+    async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
+        Ok(SystemParams::default().into())
+    }
+
+    async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }
 }

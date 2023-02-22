@@ -14,15 +14,23 @@
 
 //! Provides E2E Test runner functionality.
 use itertools::Itertools;
+use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use rand_chacha::ChaChaRng;
 use tokio_postgres::error::Error as PgError;
 
 use crate::validation::is_permissible_error;
-use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
+use crate::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, session_sql_gen, sql_gen, Table,
+};
 
 /// e2e test runner for sqlsmith
-pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
-    let mut rng = rand::rngs::SmallRng::from_entropy();
+pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
+    let mut rng = if let Some(seed) = seed {
+        ChaChaRng::seed_from_u64(seed)
+    } else {
+        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+    };
     let (tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
 
     test_sqlsmith(client, &mut rng, tables.clone(), &setup_sql).await;
@@ -65,6 +73,22 @@ async fn test_sqlsmith<R: Rng>(
     }
 }
 
+/// `SET QUERY_MODE TO DISTRIBUTED`.
+/// Panics if it fails.
+async fn set_distributed_query_mode(client: &tokio_postgres::Client) {
+    client
+        .simple_query("SET query_mode TO distributed;")
+        .await
+        .unwrap();
+}
+
+#[allow(dead_code)]
+async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
+    let session_sql = session_sql_gen(rng);
+    tracing::info!("Executing: {}", session_sql);
+    client.simple_query(session_sql.as_str()).await.unwrap();
+}
+
 /// Test batch queries, returns skipped query statistics
 /// Runs in distributed mode, since queries can be complex and cause overflow in local execution
 /// mode.
@@ -75,15 +99,14 @@ async fn test_batch_queries<R: Rng>(
     setup_sql: &str,
     sample_size: usize,
 ) -> f64 {
-    client
-        .query("SET query_mode TO distributed;", &[])
-        .await
-        .unwrap();
+    set_distributed_query_mode(client).await;
     let mut skipped = 0;
     for _ in 0..sample_size {
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("Executing: {}", sql);
-        let response = client.query(sql.as_str(), &[]).await;
+        let response = client.simple_query(sql.as_str()).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
     }
     skipped as f64 / sample_size as f64
@@ -99,9 +122,11 @@ async fn test_stream_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
+        // test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
-        let response = client.execute(&sql, &[]).await;
+        let response = client.simple_query(&sql).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
     }
@@ -134,7 +159,7 @@ async fn create_tables(
     for stmt in &statements {
         let create_sql = stmt.to_string();
         setup_sql.push_str(&format!("{};", &create_sql));
-        client.execute(&create_sql, &[]).await.unwrap();
+        client.simple_query(&create_sql).await.unwrap();
     }
 
     let mut mviews = vec![];
@@ -143,7 +168,7 @@ async fn create_tables(
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
-        let response = client.execute(&create_sql, &[]).await;
+        let response = client.simple_query(&create_sql).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
             tables.push(table.clone());
@@ -156,10 +181,7 @@ async fn create_tables(
 /// Drops mview tables.
 async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
     client
-        .execute(
-            &format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name),
-            &[],
-        )
+        .simple_query(&format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name))
         .await
         .unwrap();
 }
@@ -179,7 +201,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
         .collect::<String>();
 
     for stmt in sql.lines() {
-        client.execute(stmt, &[]).await.unwrap();
+        client.simple_query(stmt).await.unwrap();
     }
 }
 

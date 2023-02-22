@@ -16,7 +16,7 @@ use futures::future::Either;
 use futures::stream::select;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_connector::source::StreamChunkWithState;
 use risingwave_source::dml_manager::DmlManagerRef;
 
@@ -43,11 +43,15 @@ pub struct DmlExecutor {
     // Id of the table on which DML performs.
     table_id: TableId,
 
+    // Version of the table on which DML performs.
+    table_version_id: TableVersionId,
+
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
 }
 
 impl DmlExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         upstream: BoxedExecutor,
         schema: Schema,
@@ -55,6 +59,7 @@ impl DmlExecutor {
         executor_id: u64,
         dml_manager: DmlManagerRef,
         table_id: TableId,
+        table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
     ) -> Self {
         Self {
@@ -64,6 +69,7 @@ impl DmlExecutor {
             identity: format!("DmlExecutor {:X}", executor_id),
             dml_manager,
             table_id,
+            table_version_id,
             column_descs,
         }
     }
@@ -72,20 +78,25 @@ impl DmlExecutor {
     async fn execute_inner(self: Box<Self>) {
         let mut upstream = self.upstream.execute();
 
+        // The first barrier message should be propagated.
+        let barrier = expect_first_barrier(&mut upstream).await?;
+
         // Construct the reader of batch data (DML from users). We must create a variable to hold
         // this `Arc<TableDmlHandle>` here, or it will be dropped due to the `Weak` reference in
         // `DmlManager`.
+        //
+        // Note(bugen): Only register after the first barrier message is received, which means the
+        // current executor is activated. This avoids the new reader overwriting the old one during
+        // the preparation of schema change.
         let batch_reader = self
             .dml_manager
-            .register_reader(self.table_id, &self.column_descs)
+            .register_reader(self.table_id, self.table_version_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
         let batch_reader = batch_reader
             .stream_reader()
             .into_stream()
             .map(Either::Right);
 
-        // The first barrier message should be propagated.
-        let barrier = expect_first_barrier(&mut upstream).await?;
         yield Message::Barrier(barrier);
 
         // Stream data from the upstream executor.
@@ -136,7 +147,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
@@ -166,6 +177,7 @@ mod tests {
             1,
             dml_manager.clone(),
             table_id,
+            INITIAL_TABLE_VERSION_ID,
             column_descs,
         ));
         let mut dml_executor = dml_executor.execute();
@@ -203,7 +215,10 @@ mod tests {
         tx.push_chunk(stream_chunk3);
 
         // Message from batch
-        dml_manager.write_chunk(&table_id, batch_chunk).unwrap();
+        dml_manager
+            .write_chunk(table_id, INITIAL_TABLE_VERSION_ID, batch_chunk)
+            .await
+            .unwrap();
 
         // Consume the 1st message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();

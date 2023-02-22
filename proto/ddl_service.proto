@@ -214,13 +214,25 @@ message ReplaceTablePlanResponse {
   uint64 version = 2;
 }
 
-message JavaGetTableRequest {
+message GetTableRequest {
   string database_name = 1;
   string table_name = 2;
 }
 
-message JavaGetTableResponse {
+message GetTableResponse {
   catalog.Table table = 1;
+}
+
+message GetDdlProgressRequest {}
+
+message DdlProgress {
+  uint64 id = 1;
+  string statement = 2;
+  string progress = 3;
+}
+
+message GetDdlProgressResponse {
+  repeated DdlProgress ddl_progress = 1;
 }
 
 service DdlService {
@@ -244,5 +256,6 @@ service DdlService {
   rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
   rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
-  rpc JavaGetTable(JavaGetTableRequest) returns (JavaGetTableResponse);
+  rpc GetTable(GetTableRequest) returns (GetTableResponse);
+  rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
 }

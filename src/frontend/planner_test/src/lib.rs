@@ -32,8 +32,8 @@ use risingwave_frontend::handler::{
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
-    PlanRef, Planner,
+    build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
+    OptimizerContextRef, PlanRef, Planner,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -441,7 +441,8 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
-                    let rsp = explain::handle_explain(handler_args, *statement, options, analyze)?;
+                    let rsp =
+                        explain::handle_explain(handler_args, *statement, options, analyze).await?;
 
                     let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {

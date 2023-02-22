@@ -105,6 +105,8 @@ export const ExprNode_Type = {
   BIT_LENGTH: "BIT_LENGTH",
   OVERLAY: "OVERLAY",
   REGEXP_MATCH: "REGEXP_MATCH",
+  POW: "POW",
+  EXP: "EXP",
   /** IS_TRUE - Boolean comparison */
   IS_TRUE: "IS_TRUE",
   IS_NOT_TRUE: "IS_NOT_TRUE",
@@ -122,10 +124,12 @@ export const ExprNode_Type = {
   ARRAY: "ARRAY",
   ARRAY_ACCESS: "ARRAY_ACCESS",
   ROW: "ROW",
+  ARRAY_TO_STRING: "ARRAY_TO_STRING",
   /** ARRAY_CAT - Array functions */
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
+  FORMAT_TYPE: "FORMAT_TYPE",
   /**
    * VNODE - Non-pure functions below (> 600)
    * ------------------------
@@ -338,6 +342,12 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 232:
     case "REGEXP_MATCH":
       return ExprNode_Type.REGEXP_MATCH;
+    case 233:
+    case "POW":
+      return ExprNode_Type.POW;
+    case 234:
+    case "EXP":
+      return ExprNode_Type.EXP;
     case 301:
     case "IS_TRUE":
       return ExprNode_Type.IS_TRUE;
@@ -377,6 +387,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 523:
     case "ROW":
       return ExprNode_Type.ROW;
+    case 524:
+    case "ARRAY_TO_STRING":
+      return ExprNode_Type.ARRAY_TO_STRING;
     case 531:
     case "ARRAY_CAT":
       return ExprNode_Type.ARRAY_CAT;
@@ -386,6 +399,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 533:
     case "ARRAY_PREPEND":
       return ExprNode_Type.ARRAY_PREPEND;
+    case 534:
+    case "FORMAT_TYPE":
+      return ExprNode_Type.FORMAT_TYPE;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -534,6 +550,10 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "OVERLAY";
     case ExprNode_Type.REGEXP_MATCH:
       return "REGEXP_MATCH";
+    case ExprNode_Type.POW:
+      return "POW";
+    case ExprNode_Type.EXP:
+      return "EXP";
     case ExprNode_Type.IS_TRUE:
       return "IS_TRUE";
     case ExprNode_Type.IS_NOT_TRUE:
@@ -560,12 +580,16 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_ACCESS";
     case ExprNode_Type.ROW:
       return "ROW";
+    case ExprNode_Type.ARRAY_TO_STRING:
+      return "ARRAY_TO_STRING";
     case ExprNode_Type.ARRAY_CAT:
       return "ARRAY_CAT";
     case ExprNode_Type.ARRAY_APPEND:
       return "ARRAY_APPEND";
     case ExprNode_Type.ARRAY_PREPEND:
       return "ARRAY_PREPEND";
+    case ExprNode_Type.FORMAT_TYPE:
+      return "FORMAT_TYPE";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
@@ -699,6 +723,10 @@ export const AggCall_Type = {
   ARRAY_AGG: "ARRAY_AGG",
   FIRST_VALUE: "FIRST_VALUE",
   SUM0: "SUM0",
+  VAR_POP: "VAR_POP",
+  VAR_SAMP: "VAR_SAMP",
+  STDDEV_POP: "STDDEV_POP",
+  STDDEV_SAMP: "STDDEV_SAMP",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -739,6 +767,18 @@ export function aggCall_TypeFromJSON(object: any): AggCall_Type {
     case 10:
     case "SUM0":
       return AggCall_Type.SUM0;
+    case 11:
+    case "VAR_POP":
+      return AggCall_Type.VAR_POP;
+    case 12:
+    case "VAR_SAMP":
+      return AggCall_Type.VAR_SAMP;
+    case 13:
+    case "STDDEV_POP":
+      return AggCall_Type.STDDEV_POP;
+    case 14:
+    case "STDDEV_SAMP":
+      return AggCall_Type.STDDEV_SAMP;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -770,6 +810,14 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
       return "FIRST_VALUE";
     case AggCall_Type.SUM0:
       return "SUM0";
+    case AggCall_Type.VAR_POP:
+      return "VAR_POP";
+    case AggCall_Type.VAR_SAMP:
+      return "VAR_SAMP";
+    case AggCall_Type.STDDEV_POP:
+      return "STDDEV_POP";
+    case AggCall_Type.STDDEV_SAMP:
+      return "STDDEV_SAMP";
     case AggCall_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

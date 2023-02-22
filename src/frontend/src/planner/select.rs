@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
@@ -176,7 +177,13 @@ impl Planner {
         }
 
         if let BoundDistinct::Distinct = distinct {
-            let group_key = (0..root.schema().fields().len()).collect();
+            let fields = root.schema().fields();
+            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id"  {
+                // Do not group by projected_row_id hidden column.
+                (1..fields.len()).collect()
+            }else {
+                (0..fields.len()).collect()
+            };
             root = LogicalAgg::new(vec![], group_key, root).into();
         }
 
@@ -349,7 +356,7 @@ impl Planner {
         for (subquery, correlated_indices) in rewriter
             .subqueries
             .into_iter()
-            .zip_eq(rewriter.correlated_indices_collection)
+            .zip_eq_fast(rewriter.correlated_indices_collection)
         {
             let mut right = self.plan_query(subquery.query)?.into_subplan();
 

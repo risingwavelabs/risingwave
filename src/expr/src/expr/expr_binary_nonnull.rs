@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::{
-    Array, BoolArray, DecimalArray, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, StructArray, Utf8Array,
+    Array, BoolArray, DecimalArray, F64Array, I32Array, I64Array, IntervalArray, ListArray,
+    NaiveDateArray, NaiveDateTimeArray, StructArray, Utf8Array,
 };
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
@@ -502,6 +502,7 @@ pub fn new_date_trunc_expr(
     }
 }
 
+/// Create a new binary expression.
 pub fn new_binary_expr(
     expr_type: Type,
     ret: DataType,
@@ -662,6 +663,9 @@ pub fn new_binary_expr(
                 },
             }
         }
+        Type::Pow => Box::new(BinaryExpression::<F64Array, F64Array, F64Array, _>::new(
+            l, r, ret, pow_f64,
+        )),
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
         Type::CastWithTimeZone => build_cast_with_time_zone_expr(ret, l, r)?,

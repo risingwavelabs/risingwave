@@ -25,7 +25,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -163,7 +163,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             info: ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: format!("TopNExecutorNew {:X}", executor_id),
+                identity: format!("TopNExecutor {:X}", executor_id),
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
@@ -226,6 +226,11 @@ where
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
+    }
+
+    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
+        // TODO(yuhao): handle watermark
+        None
     }
 }
 

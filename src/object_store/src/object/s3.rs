@@ -29,6 +29,7 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
+use random_string::generate;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
@@ -523,9 +524,8 @@ impl S3ObjectStore {
             .load()
             .await;
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, &bucket)
-            .await
-            .unwrap();
+        Self::configure_bucket_lifecycle(&client, &bucket).await;
+
         Self {
             client,
             bucket,
@@ -535,11 +535,7 @@ impl S3ObjectStore {
         }
     }
 
-    pub async fn new_s3_compatible(
-        bucket: String,
-        metrics: Arc<ObjectStoreMetrics>,
-        object_store_use_batch_delete: bool,
-    ) -> Self {
+    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
         // load from env
         let region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
@@ -568,9 +564,32 @@ impl S3ObjectStore {
             .await;
 
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, bucket.as_str())
+        Self::configure_bucket_lifecycle(&client, bucket.as_str()).await;
+
+        // check whether use batch delete
+        let charset = "1234567890";
+        let test_path = "risingwave_check_batch_delete/".to_string() + &generate(10, charset);
+        client
+            .put_object()
+            .bucket(&bucket)
+            .body(aws_sdk_s3::types::ByteStream::from(Bytes::from(
+                "test batch delete",
+            )))
+            .key(&test_path)
+            .send()
             .await
             .unwrap();
+        let obj_ids = vec![ObjectIdentifier::builder().key(&test_path).build()];
+
+        let delete_builder = Delete::builder().set_objects(Some(obj_ids));
+        let object_store_use_batch_delete = client
+            .delete_objects()
+            .bucket(&bucket)
+            .delete(delete_builder.build())
+            .send()
+            .await
+            .is_ok();
+
         Self {
             client,
             bucket: bucket.to_string(),
@@ -587,8 +606,13 @@ impl S3ObjectStore {
         let (secret_access_key, rest) = rest.split_once('@').unwrap();
         let (address, bucket) = rest.split_once('/').unwrap();
 
-        let loader = aws_config::ConfigLoader::default();
-        let builder = aws_sdk_s3::config::Builder::from(&loader.load().await)
+        #[cfg(madsim)]
+        let builder = aws_sdk_s3::config::Builder::new();
+        #[cfg(not(madsim))]
+        let builder =
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+
+        let config = builder
             .region(Region::new("custom"))
             .endpoint_resolver(Endpoint::immutable(
                 format!("http://{}", address).try_into().unwrap(),
@@ -597,8 +621,8 @@ impl S3ObjectStore {
                 access_key_id,
                 secret_access_key,
                 None,
-            ));
-        let config = builder.build();
+            ))
+            .build();
         let client = Client::from_conf(config);
 
         Self {
@@ -660,7 +684,7 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    async fn configure_bucket_lifecycle(client: &Client, bucket: &str) -> ObjectResult<()> {
+    async fn configure_bucket_lifecycle(client: &Client, bucket: &str) {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let mut configured_rules = vec![];
         let get_config_result = client
@@ -698,19 +722,23 @@ impl S3ObjectStore {
             let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
                 .rules(bucket_lifecycle_rule)
                 .build();
-            client
+            if client
                 .put_bucket_lifecycle_configuration()
                 .bucket(bucket)
                 .lifecycle_configuration(bucket_lifecycle_config)
                 .send()
-                .await?;
-            tracing::info!(
-                "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
-                bucket,
-                S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
-            );
+                .await
+                .is_ok()
+            {
+                tracing::info!(
+                    "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
+                    bucket,
+                    S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+                );
+            } else {
+                tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
+            }
         }
-        Ok(())
     }
 }
 

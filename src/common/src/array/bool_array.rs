@@ -170,6 +170,7 @@ mod tests {
 
     use super::*;
     use crate::array::{read_bool_array, NULL_VAL_FOR_HASH};
+    use crate::util::iter_util::ZipEqFast;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
         let mut builder = BoolArrayBuilder::new(data.len());
@@ -193,7 +194,7 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
-        let res = v.iter().zip_eq(array.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -217,7 +218,10 @@ mod tests {
             let encoded = array.to_protobuf();
             let decoded = read_bool_array(&encoded, num_bits).unwrap().into_bool();
 
-            let equal = array.iter().zip_eq(decoded.iter()).all(|(a, b)| a == b);
+            let equal = array
+                .iter()
+                .zip_eq_fast(decoded.iter())
+                .all(|(a, b)| a == b);
             assert!(equal);
         }
     }
@@ -258,10 +262,12 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
-                Some(inner) => inner.hash(state),
-                None => NULL_VAL_FOR_HASH.hash(state),
-            })
+            v.iter()
+                .zip_eq_fast(&mut states)
+                .for_each(|(x, state)| match x {
+                    Some(inner) => inner.hash(state),
+                    None => NULL_VAL_FOR_HASH.hash(state),
+                })
         });
         let hashes = hash_finish(&mut states[..]);
 

@@ -92,7 +92,6 @@ impl DistinctAggRule {
             column_subsets.push(subset);
         }
 
-        let mut num_of_subsets_for_distinct_agg = 0;
         distinct_aggs.iter().for_each(|agg_call| {
             let subset = {
                 let mut subset = FixedBitSet::from_iter(group_keys.iter().cloned());
@@ -106,14 +105,19 @@ impl DistinctAggRule {
                 flag_values.push(flag_value);
                 hash_map.insert(subset.clone(), flag_value);
                 column_subsets.push(subset);
-                num_of_subsets_for_distinct_agg += 1;
             }
         });
 
-        if num_of_subsets_for_distinct_agg <= 1 {
+        let n_different_distinct = distinct_aggs
+            .iter()
+            .unique_by(|agg_call| agg_call.input_indices())
+            .count();
+        assert_ne!(n_different_distinct, 0); // since `distinct_aggs` is not empty here
+        if n_different_distinct == 1 {
             // no need to have expand if there is only one distinct aggregates.
             return Some((input, flag_values, false));
         }
+
         let expand = LogicalExpand::create(input, column_subsets);
         // manual version of column pruning for expand.
         let project = Self::build_project(input_schema_len, expand, group_keys, agg_calls);
@@ -268,7 +272,11 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
-                    | AggKind::FirstValue => (),
+                    | AggKind::FirstValue
+                    | AggKind::StddevPop
+                    | AggKind::StddevSamp
+                    | AggKind::VarPop
+                    | AggKind::VarSamp => (),
                     AggKind::Count => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }

@@ -481,6 +481,7 @@ def metric(name, filter=None):
 
 def quantile(f, percentiles):
     quantile_map = {
+        "60": ["0.6", "60"],
         "50": ["0.5", "50"],
         "90": ["0.9", "90"],
         "99": ["0.99", "99"],
@@ -578,8 +579,8 @@ def section_compaction(outer_panels):
                     "num of compactions from each level to next level",
                     [
                         panels.target(
-                            f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, result)",
-                            "{{result}} - group-{{group}} @ {{compactor}}",
+                            f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, task_type, result)",
+                            "{{task_type}} - {{result}} - group-{{group}} @ {{compactor}}",
                         ),
                     ],
                 ),
@@ -1477,11 +1478,32 @@ def section_streaming_exchange(outer_panels):
     ]
 
 
+def section_streaming_errors(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming Errors",
+            [
+                panels.timeseries_count(
+                    "User Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+
 def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Batch Exchange",
+            "Batch Metrics",
             [
                 panels.timeseries_row(
                     "Exchange Recv Row Number",
@@ -1490,6 +1512,16 @@ def section_batch_exchange(outer_panels):
                         panels.target(
                             f"{metric('batch_task_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mpp Task Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_task_num')}",
+                            "",
                         ),
                     ],
                 ),
@@ -1564,6 +1596,61 @@ def section_frontend(outer_panels):
                         panels.target(
                             f"rate({metric('frontend_query_counter_local_execution')}[$__rate_interval])",
                             "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_query_per_sec(
+                    "Query Per second in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('distributed_completed_query_counter')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Running query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_running_query_num')}",
+                            "The number of running query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Rejected query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_rejected_query_counter')}",
+                            "The number of rejected query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Completed query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_completed_query_counter')}",
+                            "The number of completed query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Query Latency in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p50 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p90 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p99 - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1653,18 +1740,6 @@ def section_hummock(panels):
                     f"sum(rate({metric('state_store_iter_in_process_counts')}[$__rate_interval])) by(job,instance,table_id)",
                     "iter - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req bloom filter false positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
             ],
         ),
         panels.timeseries_latency(
@@ -1691,13 +1766,13 @@ def section_hummock(panels):
                 *quantile(
                     lambda quantile, legend: panels.target(
                         f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
-                        f"total_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
+                        f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
                 ),
                 panels.target(
                     f"sum by(le, job, instance)(rate({metric('state_store_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_duration_count')}[$__rate_interval]))",
-                    "total_time avg - {{job}} @ {{instance}}",
+                    "create_iter_time avg - {{job}} @ {{instance}}",
                 ),
                 *quantile(
                     lambda quantile, legend: panels.target(
@@ -1771,6 +1846,23 @@ def section_hummock(panels):
                 ),
             ],
         ),
+        panels.timeseries_latency(
+            "Read Duration - MayExist",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_may_exist_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"p{legend}" + " - {{table_id}} @ {{job}} @ {{instance}}",
+                    ),
+                    [50, 90, 99, "max"],
+                ),
+                panels.target(
+                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_may_exist_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_may_exist_duration_count')}[$__rate_interval]))",
+                    "avg - {{table_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
         panels.timeseries_ops(
             "Read Bloom Filter",
             "",
@@ -1780,8 +1872,16 @@ def section_hummock(panels):
                     "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "bloom filter check count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2159,6 +2259,14 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Stale SST Total Number",
+                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    [
+                        panels.target(f"{metric('storage_stale_ssts_count')}",
+                                      "stale SST total number"),
+                    ],
+                ),
             ],
         )
     ]
@@ -2438,6 +2546,68 @@ def section_grpc_hummock_meta_client(outer_panels):
         ),
     ]
 
+<<<<<<< HEAD
+=======
+def section_memory_manager(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Memory manager",
+            [
+                panels.timeseries_count(
+                    "LRU manager loop count per sec",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('lru_runtime_loop_count')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "LRU manager watermark steps",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_watermark_step')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ms(
+                    "LRU manager diff between watermark_time and now (ms)",
+                    "watermark_time is the current lower watermark of cached data. physical_now is the current time of the machine. The diff (physical_now - watermark_time) shows how much data is cached.",
+                    [
+                        panels.target(
+                            f"{metric('lru_physical_now_ms')} - {metric('lru_current_watermark_time_ms')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by streaming",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('stream_total_mem_usage')}",
+                            "",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+>>>>>>> b429e9c2966a88c47f71ea0e05f4dc3589801448
 
 templating = Templating()
 if namespace_filter_enabled:
@@ -2481,6 +2651,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_streaming_errors(panels),
         *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_compaction(panels),

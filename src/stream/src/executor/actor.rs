@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use async_stack_trace::{SpanValue, StackTrace};
 use futures::future::join_all;
 use futures::pin_mut;
+use hytra::TrAdder;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::util::epoch::EpochPair;
@@ -33,9 +35,15 @@ use crate::task::{ActorId, SharedContext};
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
+    fragment_id: u32,
 
     // TODO: report errors and prompt the user.
     pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
+
+    last_mem_val: Arc<AtomicUsize>,
+    cur_mem_val: Arc<AtomicUsize>,
+    total_mem_val: Arc<TrAdder<i64>>,
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -44,17 +52,66 @@ impl ActorContext {
     pub fn create(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
+            fragment_id: 0,
             errors: Default::default(),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
+            total_mem_val: Arc::new(TrAdder::new()),
+            streaming_metrics: Arc::new(StreamingMetrics::unused()),
+        })
+    }
+
+    pub fn create_with_metrics(
+        id: ActorId,
+        fragment_id: u32,
+        total_mem_val: Arc<TrAdder<i64>>,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> ActorContextRef {
+        Arc::new(Self {
+            id,
+            fragment_id,
+            errors: Default::default(),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
+            total_mem_val,
+            streaming_metrics,
         })
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
         tracing::error!("Compute error: {}, executor: {identity}", err);
+        let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
+        self.streaming_metrics
+            .user_error_count
+            .with_label_values(&[
+                "ExprError",
+                &err.to_string(),
+                executor_name,
+                &self.fragment_id.to_string(),
+            ])
+            .inc();
         self.errors
             .lock()
             .entry(identity.to_owned())
             .or_default()
             .push(err);
+    }
+
+    pub fn store_mem_usage(&self, val: usize) {
+        // Record the last mem val.
+        // Calculate the difference between old val and new value, and apply the diff to total
+        // memory usage value.
+        let old_value = self.cur_mem_val.load(Ordering::Relaxed);
+        self.last_mem_val.store(old_value, Ordering::Relaxed);
+        let diff = val as i64 - old_value as i64;
+
+        self.total_mem_val.inc(diff);
+
+        self.cur_mem_val.store(val, Ordering::Relaxed);
+    }
+
+    pub fn mem_usage(&self) -> usize {
+        self.cur_mem_val.load(Ordering::Relaxed)
     }
 }
 

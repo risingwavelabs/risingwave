@@ -17,11 +17,12 @@
 use std::fmt;
 use std::sync::Arc;
 
-use itertools::{multizip, Itertools};
+use itertools::multizip;
 use paste::paste;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
+use risingwave_common::util::iter_util::ZipEqDebug;
 
 use crate::expr::{BoxedExpression, Expression};
 
@@ -38,7 +39,7 @@ macro_rules! gen_eval {
                 let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
-                        for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
+                        for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq_debug(bitmap.iter()) {
                             if !visible {
                                 output_array.append_null();
                                 continue;

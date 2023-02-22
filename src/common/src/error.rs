@@ -128,16 +128,10 @@ pub enum ErrorCode {
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
-
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-
     #[error("unrecognized configuration parameter \"{0}\"")]
     UnrecognizedConfigurationParameter(String),
-}
-
-pub fn internal_err(msg: impl Into<anyhow::Error>) -> RwError {
-    ErrorCode::InternalError(msg.into().to_string()).into()
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -272,6 +266,7 @@ impl From<tonic::Status> for RwError {
                 ErrorCode::CatalogError(err.message().to_string().into()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
             _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }
     }

@@ -19,8 +19,8 @@ use risingwave_hummock_sdk::{
     HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, CompactorWorkload, HummockSnapshot,
-    HummockVersion, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
+    VacuumTask,
 };
 
 use crate::error::Result;
@@ -60,7 +60,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         max_concurrent_task_number: u64,
     ) -> Result<BoxStream<'static, CompactTaskItem>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>>;
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,

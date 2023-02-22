@@ -105,7 +105,7 @@ macro_rules! impl_split {
 #[macro_export]
 macro_rules! impl_split_reader {
     ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderV2Impl {
+        impl SplitReaderImpl {
             pub fn into_stream(self) -> BoxSourceWithStateStream {
                 match self {
                     $( Self::$variant_name(inner) => inner.into_stream(), )*                 }
@@ -235,7 +235,7 @@ macro_rules! impl_common_split_reader_logic {
     ($reader:ty, $props:ty) => {
         impl $reader {
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
-            pub(crate) async fn into_msg_stream(self) {
+            pub(crate) async fn into_chunk_stream(self) {
                 let parser_config = self.parser_config.clone();
                 let actor_id = self.source_info.actor_id.to_string();
                 let source_id = self.source_info.source_id.to_string();
@@ -270,34 +270,6 @@ macro_rules! impl_common_split_reader_logic {
                 for msg_batch in parser.into_stream(data_stream) {
                     yield msg_batch?;
                 }
-            }
-        }
-
-        #[async_trait]
-        impl $crate::source::SplitReaderV2 for $reader {
-            type Properties = $props;
-
-            async fn new(
-                properties: $props,
-                state: Vec<SplitImpl>,
-                parser_config: ParserConfig,
-                metrics: Arc<SourceMetrics>,
-                source_info: SourceInfo,
-                columns: Option<Vec<Column>>,
-            ) -> Result<Self> {
-                Self::new(
-                    properties,
-                    state,
-                    parser_config,
-                    metrics,
-                    source_info,
-                    columns,
-                )
-                .await
-            }
-
-            fn into_stream(self) -> $crate::source::BoxSourceWithStateStream {
-                self.into_msg_stream()
             }
         }
     };

@@ -17,12 +17,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_stack_trace::StackTraceManager;
-use risingwave_batch::executor::BatchTaskMetrics;
+use pretty_bytes::converter::convert;
+use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
-use risingwave_common::config::{load_config, MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::config::{
+    load_config, AsyncStackTraceOption, StorageConfig, MAX_CONNECTION_WINDOW_SIZE,
+    STREAM_WINDOW_SIZE,
+};
 use risingwave_common::monitor::process_prometheus::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -44,13 +49,16 @@ use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
+use crate::memory_management::memory_manager::{
+    GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
+};
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -59,35 +67,51 @@ use crate::rpc::service::monitor_service::{
     GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::{AsyncStackTraceOption, ComputeNodeOpts};
+use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
-    client_addr: HostAddr,
+    advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path, Some(opts.override_config));
+    info!("Starting compute node",);
+    info!("> config: {:?}", config);
     info!(
-        "Starting compute node with config {:?} with debug assertions {}",
-        config,
+        "> debug assertions: {}",
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
+    info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
     // Initialize all the configs
-    let storage_config = Arc::new(config.storage.clone());
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
-    let meta_client = MetaClient::register_new(
+    let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
-        &client_addr,
+        &advertise_addr,
         opts.parallelism,
     )
     .await
     .unwrap();
+    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+
+    let state_store_url = {
+        let from_local = opts.state_store.unwrap_or("hummock+memory".to_string());
+        system_params.state_store(from_local)
+    };
+
+    let embedded_compactor_enabled =
+        embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
+    validate_compute_node_memory_config(
+        opts.total_memory_bytes,
+        embedded_compactor_enabled,
+        &config.storage,
+    );
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -100,6 +124,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
@@ -116,14 +141,13 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &opts.state_store,
-        &opts.file_cache_dir,
-        &config,
+        &state_store_url,
+        storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if opts.enable_jaeger_tracing {
+        if config.streaming.enable_jaeger_tracing {
             Arc::new(
                 risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
                     "127.0.0.1:6831".to_string(),
@@ -142,18 +166,13 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
-        // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
-        // compactor along with compute node.
-        if opts.state_store == "hummock+memory"
-            || opts.state_store.starts_with("hummock+disk")
-            || storage_config.disable_remote_compactor
-        {
+        if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
-                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
+                storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = Arc::new(CompactorContext {
-                storage_config,
+                storage_opts,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),
@@ -189,7 +208,7 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
-    let async_stack_trace_config = match opts.async_stack_trace {
+    let async_stack_trace_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => Some(async_stack_trace::TraceConfig {
             report_detached: true,
@@ -199,9 +218,12 @@ pub async fn compute_node_serve(
     };
 
     // Initialize the managers.
-    let batch_mgr = Arc::new(BatchManager::new(config.batch.clone()));
+    let batch_mgr = Arc::new(BatchManager::new(
+        config.batch.clone(),
+        batch_manager_metrics,
+    ));
     let stream_mgr = Arc::new(LocalStreamManager::new(
-        client_addr.clone(),
+        advertise_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
@@ -213,7 +235,7 @@ pub async fn compute_node_serve(
     let stream_mgr_clone = stream_mgr.clone();
     let mgr = GlobalMemoryManager::new(
         opts.total_memory_bytes,
-        config.streaming.barrier_interval_ms,
+        system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
     );
     // Run a background memory monitor
@@ -232,7 +254,7 @@ pub async fn compute_node_serve(
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
         batch_mgr.clone(),
-        client_addr.clone(),
+        advertise_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
@@ -247,7 +269,7 @@ pub async fn compute_node_serve(
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
-        client_addr.clone(),
+        advertise_addr.clone(),
         connector_params,
         stream_config,
         worker_id,
@@ -311,7 +333,7 @@ pub async fn compute_node_serve(
     join_handle_vec.push(join_handle);
 
     // Boot metrics service.
-    if opts.metrics_level > 0 {
+    if config.server.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
             registry.clone(),
@@ -319,7 +341,52 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(&client_addr).await.unwrap();
+    meta_client.activate(&advertise_addr).await.unwrap();
 
     (join_handle_vec, shutdown_send)
+}
+
+/// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
+/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
+/// for other system usage. Otherwise, it is not allowed to start.
+fn validate_compute_node_memory_config(
+    cn_total_memory_bytes: usize,
+    embedded_compactor_enabled: bool,
+    storage_config: &StorageConfig,
+) {
+    let storage_memory_mb = {
+        let total_memory = storage_config.block_cache_capacity_mb
+            + storage_config.meta_cache_capacity_mb
+            + storage_config.shared_buffer_capacity_mb
+            + storage_config.file_cache.total_buffer_capacity_mb;
+        if embedded_compactor_enabled {
+            total_memory + storage_config.compactor_memory_limit_mb
+        } else {
+            total_memory
+        }
+    };
+    if storage_memory_mb << 20 > cn_total_memory_bytes {
+        panic!(
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    } else if (storage_memory_mb + MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20
+        >= cn_total_memory_bytes
+    {
+        panic!(
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+            convert(cn_total_memory_bytes as _),
+            convert((storage_memory_mb << 20) as _)
+        );
+    }
+}
+
+/// Checks whether an embedded compactor starts with a compute node.
+fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: bool) -> bool {
+    // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
+    // along with the compute node.
+    state_store_url == "hummock+memory"
+        || state_store_url.starts_with("hummock+disk")
+        || disable_remote_compactor
 }

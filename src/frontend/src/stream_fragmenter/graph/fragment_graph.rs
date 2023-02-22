@@ -53,9 +53,6 @@ pub struct StreamFragmentEdge {
     /// Dispatch strategy for the fragment.
     pub dispatch_strategy: DispatchStrategy,
 
-    /// Whether the two linked nodes should be placed on the same worker node
-    pub same_worker_node: bool,
-
     /// A unique identifier of this edge. Generally it should be exchange node's operator id. When
     /// rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
     /// virtual links generated.
@@ -111,7 +108,7 @@ impl StreamFragmentGraph {
             edges: self.edges.values().cloned().collect(),
             env: Some(self.env.clone()),
             // To be filled later
-            dependent_table_ids: vec![],
+            dependent_relation_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,
         }
@@ -139,7 +136,6 @@ impl StreamFragmentGraph {
             upstream_id,
             downstream_id,
             dispatch_strategy: Some(edge.dispatch_strategy),
-            same_worker_node: edge.same_worker_node,
             link_id: edge.link_id,
         };
 

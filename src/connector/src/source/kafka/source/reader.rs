@@ -29,7 +29,9 @@ use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
 use crate::source::monitor::SourceMetrics;
-use crate::source::{Column, SourceInfo, SplitId, SplitImpl, SplitMetaData};
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
+};
 
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
@@ -46,7 +48,10 @@ pub struct KafkaSplitReader {
     source_info: SourceInfo,
 }
 
-impl KafkaSplitReader {
+#[async_trait]
+impl SplitReader for KafkaSplitReader {
+    type Properties = KafkaProperties;
+
     async fn new(
         properties: KafkaProperties,
         splits: Vec<SplitImpl>,
@@ -135,6 +140,10 @@ impl KafkaSplitReader {
             metrics,
             source_info,
         })
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
