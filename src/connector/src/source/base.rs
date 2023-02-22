@@ -80,13 +80,60 @@ pub trait SplitEnumerator: Sized {
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
+    // There should be a 1-1 mapping between `source_id` & `fragment_id`
+    pub fragment_id: u32,
 }
 
 impl SourceInfo {
-    pub fn new(actor_id: u32, source_id: TableId) -> Self {
+    pub fn new(actor_id: u32, source_id: TableId, fragment_id: u32) -> Self {
         SourceInfo {
             actor_id,
             source_id,
+            fragment_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceErrorContext {
+    metrics: Arc<SourceMetrics>,
+    table_id: u32,
+    fragment_id: u32,
+}
+
+impl SourceErrorContext {
+    pub(crate) fn new(table_id: u32, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
+        Self {
+            metrics,
+            table_id,
+            fragment_id,
+        }
+    }
+
+    pub(crate) fn report_stream_source_error(&self, e: &RwError) {
+        // Do not report for batch
+        if self.fragment_id == u32::MAX {
+            return;
+        }
+        self.metrics
+            .user_source_error_count
+            .with_label_values(&[
+                "SourceError",
+                // TODO(jon-chuang): add the error msg truncator to truncate these
+                &e.inner().to_string(),
+                // Let's be a bit more specific for SourceExecutor
+                "SourceExecutor",
+                &self.fragment_id.to_string(),
+                &self.table_id.to_string(),
+            ])
+            .inc();
+    }
+
+    pub(crate) fn for_test() -> Self {
+        Self {
+            metrics: Arc::new(SourceMetrics::unused()),
+            table_id: u32::MAX,
+            fragment_id: u32::MAX,
         }
     }
 }
@@ -127,11 +174,11 @@ impl From<StreamChunk> for StreamChunkWithState {
     }
 }
 
-/// [`SplitReaderV2`] is a new abstraction of the external connector read interface which is
+/// [`SplitReader`] is a new abstraction of the external connector read interface which is
 /// responsible for parsing, it is used to read messages from the outside and transform them into a
 /// stream of parsed [`StreamChunk`]
 #[async_trait]
-pub trait SplitReaderV2: Sized {
+pub trait SplitReader: Sized {
     type Properties;
 
     async fn new(
@@ -231,7 +278,7 @@ impl SplitImpl {
     }
 }
 
-pub enum SplitReaderV2Impl {
+pub enum SplitReaderImpl {
     S3(Box<S3FileReader>),
     Dummy(Box<DummySplitReader>),
     Kinesis(Box<KinesisSplitReader>),

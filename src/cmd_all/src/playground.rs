@@ -216,7 +216,7 @@ pub async fn playground() -> Result<()> {
                     "docker-playground" | "online-docker-playground" => {
                         "/risingwave/bin".to_string()
                     }
-                    "playground" => std::env::var("PREFIX_BIN").expect("PREFIX_BIN not set"),
+                    "playground" => std::env::var("PREFIX_BIN").unwrap_or_default(),
                     _ => "".to_string(),
                 };
                 let cmd_path = Path::new(&prefix_bin)

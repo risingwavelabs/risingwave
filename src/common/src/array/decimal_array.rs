@@ -28,7 +28,7 @@ mod tests {
 
     use super::*;
     use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
-    use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+    use crate::util::iter_util::ZipEqFast;
 
     #[test]
     fn test_decimal_builder() {
@@ -38,7 +38,7 @@ mod tests {
             builder.append(*i);
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_debug(a.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -60,7 +60,7 @@ mod tests {
 
         assert_eq!(prost_array.values.len(), 1);
 
-        let decoded_array = ArrayImpl::from_protobuf(&prost_array, 4)
+        let decoded_array = ArrayImpl::from_protobuf(&prost_array, 8)
             .unwrap()
             .into_decimal();
 

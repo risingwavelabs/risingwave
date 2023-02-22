@@ -68,12 +68,7 @@ impl WithOptions {
 
     /// Parse the append only property from the options.
     pub fn append_only(&self) -> bool {
-        if let Some(val) = self.inner.get(options::APPEND_ONLY) {
-            if val.eq_ignore_ascii_case("true") {
-                return true;
-            }
-        }
-        false
+        self.value_eq_ignore_case(options::APPEND_ONLY, "true")
     }
 
     /// Get a subset of the options from the given keys.
@@ -95,6 +90,15 @@ impl WithOptions {
     /// Currently only `retention_seconds` is included.
     pub fn internal_table_subset(&self) -> Self {
         self.subset([options::RETENTION_SECONDS])
+    }
+
+    pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
+        if let Some(inner_val) = self.inner.get(key) {
+            if inner_val.eq_ignore_ascii_case(val) {
+                return true;
+            }
+        }
+        false
     }
 }
 

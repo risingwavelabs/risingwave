@@ -1,0 +1,87 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T rowsort
+values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('[1, true]');
+----
+1
+NULL
+[1,true]
+null
+true
+{"a":[2,true,"",{}]}
+
+statement ok
+create table t (v1 jsonb);
+
+statement ok
+insert into t values ('1'), ('true'), ('null'), (null);
+
+query T rowsort
+select * from t;
+----
+1
+NULL
+null
+true
+
+query T
+select * from t order by v1::varchar;
+----
+1
+null
+true
+NULL
+
+query T
+select 'true'::jsonb::bool;
+----
+t
+
+query I
+select '1'::jsonb::smallint;
+----
+1
+
+query I
+select '1'::jsonb::int;
+----
+1
+
+query I
+select '1'::jsonb::bigint;
+----
+1
+
+query R
+select '2.5'::jsonb::decimal;
+----
+2.5
+
+query R
+select '2.5'::jsonb::real;
+----
+2.5
+
+query R
+select '2.5'::jsonb::double precision;
+----
+2.5
+
+# This would fail after #5576 fixed
+# Because PG rounds differently for `decimal -> int` and `float8 -> int`
+query II
+select '2.5'::jsonb::smallint, '3.5'::jsonb::smallint;
+----
+2 3
+
+statement error cannot cast jsonb null to type boolean
+select 'null'::jsonb::bool;
+
+query T
+select null::jsonb::bool;
+----
+NULL
+
+statement ok
+drop table t;

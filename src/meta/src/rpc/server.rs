@@ -273,14 +273,14 @@ pub async fn start_service_as_election_follower(
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() =>  {
+                res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown sender dropped")
                     }
                 },
                 // shutdown service if follower becomes leader
-                res = follower_shutdown_rx =>  {
+                res = follower_shutdown_rx => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down follower services"),
                         Err(_) => tracing::error!("Follower service shutdown sender dropped")
@@ -471,6 +471,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),
+        stream_manager.clone(),
+        catalog_manager.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
@@ -531,6 +533,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let notification_mgr = env.notification_manager_ref();
     timer_manager.register_shutdown_callback(async move {
         notification_mgr.abort_all().await;
+        compactor_manager.abort_all_compactors();
     });
 
     tonic::transport::Server::builder()

@@ -218,7 +218,7 @@ mod tests {
 
     use super::*;
     use crate::executor::{ActorContext, Barrier, Executor, Mutation};
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]
     async fn test_configuration_change() {
@@ -230,7 +230,7 @@ mod tests {
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -238,7 +238,8 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(ctx.clone(), vec![(old, actor_id), (new, actor_id)]);
+        // old -> actor_id
+        // new -> actor_id
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
@@ -308,6 +309,7 @@ mod tests {
             (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
+                new_upstream_fragment_id: None,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }

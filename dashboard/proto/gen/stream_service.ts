@@ -5,16 +5,10 @@ import { Barrier, StreamActor } from "./stream_plan";
 
 export const protobufPackage = "stream_service";
 
-export interface HangingChannel {
-  upstream: ActorInfo | undefined;
-  downstream: ActorInfo | undefined;
-}
-
 /** Describe the fragments which will be running on this node */
 export interface UpdateActorsRequest {
   requestId: string;
   actors: StreamActor[];
-  hangingChannels: HangingChannel[];
 }
 
 export interface UpdateActorsResponse {
@@ -84,6 +78,7 @@ export interface BarrierCompleteResponse_CreateMviewProgress {
   chainActorId: number;
   done: boolean;
   consumedEpoch: number;
+  consumedRows: number;
 }
 
 export interface BarrierCompleteResponse_GroupedSstableInfo {
@@ -110,41 +105,8 @@ export interface WaitEpochCommitResponse {
   status: Status | undefined;
 }
 
-function createBaseHangingChannel(): HangingChannel {
-  return { upstream: undefined, downstream: undefined };
-}
-
-export const HangingChannel = {
-  fromJSON(object: any): HangingChannel {
-    return {
-      upstream: isSet(object.upstream) ? ActorInfo.fromJSON(object.upstream) : undefined,
-      downstream: isSet(object.downstream) ? ActorInfo.fromJSON(object.downstream) : undefined,
-    };
-  },
-
-  toJSON(message: HangingChannel): unknown {
-    const obj: any = {};
-    message.upstream !== undefined &&
-      (obj.upstream = message.upstream ? ActorInfo.toJSON(message.upstream) : undefined);
-    message.downstream !== undefined &&
-      (obj.downstream = message.downstream ? ActorInfo.toJSON(message.downstream) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<HangingChannel>, I>>(object: I): HangingChannel {
-    const message = createBaseHangingChannel();
-    message.upstream = (object.upstream !== undefined && object.upstream !== null)
-      ? ActorInfo.fromPartial(object.upstream)
-      : undefined;
-    message.downstream = (object.downstream !== undefined && object.downstream !== null)
-      ? ActorInfo.fromPartial(object.downstream)
-      : undefined;
-    return message;
-  },
-};
-
 function createBaseUpdateActorsRequest(): UpdateActorsRequest {
-  return { requestId: "", actors: [], hangingChannels: [] };
+  return { requestId: "", actors: [] };
 }
 
 export const UpdateActorsRequest = {
@@ -152,9 +114,6 @@ export const UpdateActorsRequest = {
     return {
       requestId: isSet(object.requestId) ? String(object.requestId) : "",
       actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
-      hangingChannels: Array.isArray(object?.hangingChannels)
-        ? object.hangingChannels.map((e: any) => HangingChannel.fromJSON(e))
-        : [],
     };
   },
 
@@ -166,11 +125,6 @@ export const UpdateActorsRequest = {
     } else {
       obj.actors = [];
     }
-    if (message.hangingChannels) {
-      obj.hangingChannels = message.hangingChannels.map((e) => e ? HangingChannel.toJSON(e) : undefined);
-    } else {
-      obj.hangingChannels = [];
-    }
     return obj;
   },
 
@@ -178,7 +132,6 @@ export const UpdateActorsRequest = {
     const message = createBaseUpdateActorsRequest();
     message.requestId = object.requestId ?? "";
     message.actors = object.actors?.map((e) => StreamActor.fromPartial(e)) || [];
-    message.hangingChannels = object.hangingChannels?.map((e) => HangingChannel.fromPartial(e)) || [];
     return message;
   },
 };
@@ -564,7 +517,7 @@ export const BarrierCompleteResponse = {
 };
 
 function createBaseBarrierCompleteResponse_CreateMviewProgress(): BarrierCompleteResponse_CreateMviewProgress {
-  return { chainActorId: 0, done: false, consumedEpoch: 0 };
+  return { chainActorId: 0, done: false, consumedEpoch: 0, consumedRows: 0 };
 }
 
 export const BarrierCompleteResponse_CreateMviewProgress = {
@@ -573,6 +526,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
       chainActorId: isSet(object.chainActorId) ? Number(object.chainActorId) : 0,
       done: isSet(object.done) ? Boolean(object.done) : false,
       consumedEpoch: isSet(object.consumedEpoch) ? Number(object.consumedEpoch) : 0,
+      consumedRows: isSet(object.consumedRows) ? Number(object.consumedRows) : 0,
     };
   },
 
@@ -581,6 +535,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
     message.chainActorId !== undefined && (obj.chainActorId = Math.round(message.chainActorId));
     message.done !== undefined && (obj.done = message.done);
     message.consumedEpoch !== undefined && (obj.consumedEpoch = Math.round(message.consumedEpoch));
+    message.consumedRows !== undefined && (obj.consumedRows = Math.round(message.consumedRows));
     return obj;
   },
 
@@ -591,6 +546,7 @@ export const BarrierCompleteResponse_CreateMviewProgress = {
     message.chainActorId = object.chainActorId ?? 0;
     message.done = object.done ?? false;
     message.consumedEpoch = object.consumedEpoch ?? 0;
+    message.consumedRows = object.consumedRows ?? 0;
     return message;
   },
 };

@@ -443,6 +443,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
+            ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
