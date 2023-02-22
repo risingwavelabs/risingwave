@@ -140,7 +140,9 @@ impl OptimizerContext {
             return;
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
-        optimizer_trace.push(str.into());
+        let string = str.into();
+        tracing::trace!("{}", string);
+        optimizer_trace.push(string);
         optimizer_trace.push("\n".to_string());
     }
 
