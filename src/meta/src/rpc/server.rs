@@ -20,6 +20,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -314,6 +315,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
+    let system_params_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
+    let system_params_reader: SystemParamsReader = system_params_manager.get_params().await.into();
+
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
@@ -360,8 +365,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
 
-    let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+        hummock_manager.clone(),
+        system_params_reader.checkpoint_frequency() as usize,
+    );
 
     let source_manager = Arc::new(
         SourceManager::new(
@@ -442,8 +449,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
-    let system_params_manager =
-        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -490,7 +495,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager);
+    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
