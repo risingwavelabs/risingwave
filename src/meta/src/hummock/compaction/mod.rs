@@ -15,6 +15,7 @@
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
+use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
@@ -121,12 +122,19 @@ impl CompactStatus {
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn LevelSelector>,
+        table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        let ret =
-            selector.pick_compaction(task_id, group, levels, &mut self.level_handlers, stats)?;
+        let ret = selector.pick_compaction(
+            task_id,
+            group,
+            levels,
+            &mut self.level_handlers,
+            stats,
+            table_id_to_options,
+        )?;
         let target_level_id = ret.input.target_level;
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {

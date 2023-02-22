@@ -133,9 +133,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
-        // Mark state as changed.
-        vars.state_changed = true;
-
         // Decompose the input chunk.
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
@@ -185,6 +182,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 &mut this.distinct_dedup_tables,
             )
             .await?;
+
+        // Mark state as changed.
+        vars.state_changed = true;
 
         Ok(())
     }
