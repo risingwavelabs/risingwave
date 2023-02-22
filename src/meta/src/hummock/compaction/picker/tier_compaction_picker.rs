@@ -368,10 +368,8 @@ pub mod tests {
         };
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert!(!is_l0_trivial_move(&ret));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
 
         // Cannot trivial move because sub-levels are overlapping
         let l0 = generate_l0_overlapping_sublevels(vec![
@@ -394,10 +392,8 @@ pub mod tests {
         // Cannot trivial move because latter sub-level is overlapping
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
         levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping as i32;
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert!(!is_l0_trivial_move(&ret));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
 
         // Cannot trivial move because former sub-level is overlapping
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
@@ -486,7 +482,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .sub_level_max_compaction_bytes(1)
+                .sub_level_max_compaction_bytes(250000)
                 .max_compaction_bytes(500000)
                 .build(),
         );

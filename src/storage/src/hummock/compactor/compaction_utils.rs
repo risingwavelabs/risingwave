@@ -122,7 +122,6 @@ pub struct TaskConfig {
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
     pub split_by_table: bool,
-    pub split_by_vnode_count: usize,
 }
 
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {

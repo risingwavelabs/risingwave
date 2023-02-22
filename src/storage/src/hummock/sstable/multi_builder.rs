@@ -71,9 +71,7 @@ where
     pub del_agg: Arc<RangeTombstonesCollector>,
     key_range: KeyRange,
     last_table_id: u32,
-    last_vnode_id: usize,
     split_by_table: bool,
-    split_by_vnode_count: usize,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -88,7 +86,6 @@ where
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
         split_by_table: bool,
-        split_by_vnode_count: usize,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
             UserKey::default()
@@ -107,8 +104,6 @@ where
             key_range,
             last_table_id: 0,
             split_by_table,
-            split_by_vnode_count,
-            last_vnode_id: 0,
         }
     }
 
@@ -124,8 +119,6 @@ where
             key_range: KeyRange::inf(),
             last_table_id: 0,
             split_by_table: false,
-            split_by_vnode_count: 0,
-            last_vnode_id: 0,
         }
     }
 
@@ -153,18 +146,9 @@ where
         is_new_user_key: bool,
     ) -> HummockResult<()> {
         let mut switch_builder = false;
-        if self.split_by_table {
-            if full_key.user_key.table_id.table_id != self.last_table_id {
-                self.last_table_id = full_key.user_key.table_id.table_id;
-                self.last_vnode_id = full_key.user_key.get_vnode_id();
-                switch_builder = true;
-            } else if self.split_by_vnode_count > 0 {
-                let vnode_id = full_key.user_key.get_vnode_id();
-                if vnode_id != self.last_vnode_id && vnode_id % self.split_by_vnode_count == 0 {
-                    switch_builder = true;
-                }
-                self.last_vnode_id = vnode_id;
-            }
+        if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
+            self.last_table_id = full_key.user_key.table_id.table_id;
+            switch_builder = true;
         }
         if let Some(builder) = self.current_builder.as_ref() {
             if is_new_user_key && (switch_builder || builder.reach_capacity()) {
@@ -438,7 +422,7 @@ mod tests {
             None,
             builder.build(0, false),
             KeyRange::inf(),
-            u64::MAX,
+            false,
         );
         builder
             .add_full_key(

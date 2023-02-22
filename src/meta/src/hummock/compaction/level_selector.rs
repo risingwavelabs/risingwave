@@ -501,7 +501,7 @@ pub mod tests {
                 right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,
-            table_ids: vec![],
+            table_ids: vec![table_prefix as u32],
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
@@ -713,6 +713,7 @@ pub mod tests {
                 3,
                 10,
             ))),
+            member_table_ids: vec![1],
             ..Default::default()
         };
 
@@ -737,6 +738,7 @@ pub mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::with_config(config)
             .max_bytes_for_level_base(100)
+            .sub_level_max_compaction_bytes(50)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let group_config = CompactionGroup::new(1, config.clone());

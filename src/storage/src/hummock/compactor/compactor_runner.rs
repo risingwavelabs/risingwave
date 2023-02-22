@@ -92,7 +92,6 @@ impl CompactorRunner {
                 stats_target_table_ids: Some(stats_target_table_ids),
                 task_type: task.task_type(),
                 split_by_table: true,
-                split_by_vnode_count: task.compact_guard_vnode_size as usize,
             },
         );
 
