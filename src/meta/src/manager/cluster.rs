@@ -27,7 +27,6 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
-use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::util::GlobalEventManager;
 use crate::{MetaError, MetaResult};
@@ -106,6 +105,10 @@ where
                 }
             }
         });
+    }
+    
+    pub async fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
+        self.core.read().await.count_worker_node()
     }
 
     /// A worker node will immediately register itself to meta when it bootstraps.
