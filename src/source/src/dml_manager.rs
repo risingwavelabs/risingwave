@@ -92,9 +92,18 @@ impl DmlManager {
                     // Register with the correct version. This happens when the following
                     // `DmlExecutor`s of this table is activated on this compute
                     // node.
-                    Ordering::Equal => handle.upgrade().with_context(|| {
-                        format!("fail to register reader for table with key `{table_id:?}`")
-                    })?,
+                    Ordering::Equal => handle
+                        .upgrade()
+                        .inspect(|handle| {
+                            assert_eq!(
+                                handle.column_descs(),
+                                column_descs,
+                                "dml handler registers with same version but different schema"
+                            )
+                        })
+                        .with_context(|| {
+                            format!("fail to register reader for table with key `{table_id:?}`")
+                        })?,
 
                     // A new version of the table is activated, overwrite the old reader.
                     Ordering::Greater => new_handle!(o),
