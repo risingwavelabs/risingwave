@@ -544,8 +544,12 @@ impl LogicalScan {
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {
-                return LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch();
+                let plan =
+                    LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch()?;
+                assert_eq!(plan.schema(), self.schema());
+                return required_order.enforce_if_not_satisfies(plan);
             }
+
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();

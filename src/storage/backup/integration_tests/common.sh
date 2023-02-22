@@ -14,11 +14,11 @@ function clean_all_data {
 }
 
 function clean_etcd_data() {
-  cargo make clean-etcd-data
+  cargo make clean-etcd-data 1>/dev/null 2>&1
 }
 
 function start_cluster() {
-  cargo make d ci-meta-backup-test
+  cargo make d ci-meta-backup-test 1>/dev/null 2>&1
 }
 
 function wait_cluster_ready() {
@@ -27,18 +27,18 @@ function wait_cluster_ready() {
 }
 
 function full_gc_sst() {
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0 1>/dev/null 2>&1
   # TODO #6482: wait full gc finish deterministically.
   # Currently have to wait long enough.
   sleep 30
 }
 
 function manual_compaction() {
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@"
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@" 1>/dev/null 2>&1
 }
 
 function start_etcd_minio() {
-  cargo make d ci-meta-backup-test-restore
+  cargo make d ci-meta-backup-test-restore 1>/dev/null 2>&1
 }
 
 function create_mvs() {
@@ -78,14 +78,28 @@ function restore() {
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
   --storage-directory backup \
-  --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+  --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  1>/dev/null
 }
 
 function execute_sql() {
   local sql
   sql=$1
-  echo "execute sql ${sql}"
-  echo "SET QUERY_MODE=distributed;${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
+  echo "${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
+}
+
+function execute_sql_and_expect() {
+  local sql
+  sql=$1
+  local expected
+  expected=$2
+
+  echo "execute SQL ${sql}"
+  echo "expected string in result: ${expected}"
+  query_result=$(execute_sql "${sql}")
+  printf "actual result:\n%s\n" "${query_result}"
+  result=$(echo "${query_result}" | grep "${expected}")
+  [ -n "${result}" ]
 }
 
 function get_max_committed_epoch() {

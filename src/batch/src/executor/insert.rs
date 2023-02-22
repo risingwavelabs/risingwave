@@ -107,7 +107,7 @@ impl InsertExecutor {
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+        let write_chunk = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
@@ -130,12 +130,9 @@ impl InsertExecutor {
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-            let notifier =
-                self.dml_manager
-                    .write_chunk(self.table_id, self.table_version_id, stream_chunk)?;
-            notifiers.push(notifier);
-
-            Ok(())
+            self.dml_manager
+                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
+                .await
         };
 
         #[for_await]
@@ -145,12 +142,12 @@ impl InsertExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                write_chunk(chunk)?;
+                notifiers.push(write_chunk(chunk).await?);
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            write_chunk(chunk)?;
+            notifiers.push(write_chunk(chunk).await?);
         }
 
         // Wait for all chunks to be taken / written.
