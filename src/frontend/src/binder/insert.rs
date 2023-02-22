@@ -247,7 +247,7 @@ impl Binder {
                 return exprs
                     .into_iter()
                     .zip_eq_fast(expected_types)
-                    .map(|(e, t)| e.cast_assign(t.clone()))
+                    .map(|(e, t)| e.cast_assign(t.clone()).map_err(Into::into))
                     .try_collect();
             }
             std::cmp::Ordering::Less => "INSERT has more expressions than target columns",
