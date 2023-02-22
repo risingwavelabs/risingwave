@@ -131,7 +131,7 @@ impl LogicalInsert {
         self.returning
     }
 
-    pub fn table_version_id(&self) -> u64 {
+    pub fn table_version_id(&self) -> TableVersionId {
         self.table_version_id
     }
 }

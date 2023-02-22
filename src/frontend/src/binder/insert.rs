@@ -32,6 +32,7 @@ pub struct BoundInsert {
     /// Id of the table to perform inserting.
     pub table_id: TableId,
 
+    /// Version id of the table.
     pub table_version_id: TableVersionId,
 
     /// Name of the table to perform inserting.
@@ -79,7 +80,7 @@ impl Binder {
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
-        let table_version_id = table_catalog.version_id().unwrap();
+        let table_version_id = table_catalog.version_id().expect("table must be versioned");
         let columns_to_insert = table_catalog
             .columns
             .clone()
