@@ -138,7 +138,7 @@ where
             .map(|v| v.as_scalar_ref_impl().try_into().unwrap());
 
         let r = self.eval_strict(v, p);
-        Ok(r.and_then(O::output_datum))
+        Ok(r.and_then(O::to_datum))
     }
 }
 
@@ -165,7 +165,7 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 trait AccessOutput: ArrayBuilder {
     fn return_type() -> DataType;
     fn output(&mut self, v: JsonbRef<'_>) -> crate::Result<()>;
-    fn output_datum(v: JsonbRef<'_>) -> Datum;
+    fn to_datum(v: JsonbRef<'_>) -> Datum;
     fn output_nullable(&mut self, v: Option<JsonbRef<'_>>) -> crate::Result<()> {
         match v {
             Some(v) => self.output(v)?,
@@ -185,7 +185,7 @@ impl AccessOutput for JsonbArrayBuilder {
         Ok(())
     }
 
-    fn output_datum(v: JsonbRef<'_>) -> Datum {
+    fn to_datum(v: JsonbRef<'_>) -> Datum {
         Some(v.to_owned_scalar().to_scalar_value())
     }
 }
@@ -208,7 +208,7 @@ impl AccessOutput for Utf8ArrayBuilder {
         Ok(())
     }
 
-    fn output_datum(v: JsonbRef<'_>) -> Datum {
+    fn to_datum(v: JsonbRef<'_>) -> Datum {
         match v.is_jsonb_null() {
             true => None,
             false => {
