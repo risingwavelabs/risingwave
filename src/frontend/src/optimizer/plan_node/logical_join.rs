@@ -24,17 +24,16 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
-    ToStream,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
-    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, ToStreamContext,
+    BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
+    LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
+    StreamDynamicFilter, StreamFilter, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -1058,7 +1057,40 @@ impl LogicalJoin {
 
         let logical_join = self.clone_with_left_right(left, right);
 
-        Ok(StreamHashJoin::new(logical_join, predicate).into())
+        // Convert to Hash Join for equal joins
+        // For inner joins, pull non-equal conditions to a filter operator on top of it
+        // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
+        // as opposed to the HashJoin, which applies the condition row-wise.
+        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
+        if pull_filter {
+            let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
+
+            // Temporarily remove output indices.
+            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
+            let eq_cond = EqJoinPredicate::new(
+                Condition::true_cond(),
+                predicate.eq_keys().to_vec(),
+                self.left().schema().len(),
+            );
+            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
+            let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
+            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
+            let plan = StreamFilter::new(logical_filter).into();
+            if self.output_indices() != &default_indices {
+                let logical_project = LogicalProject::with_mapping(
+                    plan,
+                    ColIndexMapping::with_remaining_columns(
+                        self.output_indices(),
+                        self.internal_column_num(),
+                    ),
+                );
+                Ok(StreamProject::new(logical_project).into())
+            } else {
+                Ok(plan)
+            }
+        } else {
+            Ok(StreamHashJoin::new(logical_join, predicate).into())
+        }
     }
 
     fn to_stream_dynamic_filter(
@@ -1643,7 +1675,12 @@ mod tests {
             eq_cond
         );
         assert_eq!(
-            *hash_join.eq_join_predicate().non_eq_cond().conjunctions.first().unwrap(),
+            *hash_join
+                .eq_join_predicate()
+                .non_eq_cond()
+                .conjunctions
+                .first()
+                .unwrap(),
             non_eq_cond
         );
     }
