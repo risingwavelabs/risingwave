@@ -70,7 +70,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_sink_handler() {
-        let sql_create_table = "create table t (v1 smallint);";
+        let sql_create_table = "create table t (v1 smallint primary key);";
         let sql_create_mv = "create materialized view mv as select v1 from t;";
         let sql_create_sink = "create sink snk from mv with( connector = 'mysql')";
         let sql_drop_sink = "drop sink snk;";
