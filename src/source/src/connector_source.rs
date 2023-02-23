@@ -108,7 +108,7 @@ impl ConnectorSource {
                     })
                     .collect_vec(),
             );
-            // TODO: is this reader split across multiple threads...? Realisticaly, we want
+            // TODO: is this reader split across multiple threads...? Realistically, we want
             // source_ctx to live in a single actor.
             let source_ctx = source_ctx.clone();
             async move {
