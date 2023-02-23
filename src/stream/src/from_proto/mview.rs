@@ -42,15 +42,13 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .collect();
 
         let table = node.get_table()?;
-        let handle_pk_conflict = node.get_handle_pk_conflict()?;
-        let conflict_behavior = match handle_pk_conflict {
-            risingwave_pb::stream_plan::HandleConflictBehavior::NoCheck => {
-                ConflictBehavior::NoCheck
-            }
-            risingwave_pb::stream_plan::HandleConflictBehavior::OverWrite => {
+
+        let conflict_behavior = match table.handle_pk_conflict() {
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
+            risingwave_pb::catalog::HandleConflictBehavior::OverWrite => {
                 ConflictBehavior::OverWrite
             }
-            risingwave_pb::stream_plan::HandleConflictBehavior::Ignore => {
+            risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
                 ConflictBehavior::IgnoreConflict
             }
         };
@@ -98,15 +96,12 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let handle_pk_conflict = node.get_handle_pk_conflict()?;
-        let conflict_behavior = match handle_pk_conflict {
-            risingwave_pb::stream_plan::HandleConflictBehavior::NoCheck => {
-                ConflictBehavior::NoCheck
-            }
-            risingwave_pb::stream_plan::HandleConflictBehavior::OverWrite => {
+        let conflict_behavior = match table.handle_pk_conflict() {
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
+            risingwave_pb::catalog::HandleConflictBehavior::OverWrite => {
                 ConflictBehavior::OverWrite
             }
-            risingwave_pb::stream_plan::HandleConflictBehavior::Ignore => {
+            risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
                 ConflictBehavior::IgnoreConflict
             }
         };
