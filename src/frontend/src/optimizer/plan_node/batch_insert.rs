@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
@@ -83,7 +82,7 @@ impl ToBatchProst for BatchInsert {
             .collect();
         NodeBody::Insert(InsertNode {
             table_id: self.logical.table_id().table_id(),
-            table_version_id: INITIAL_TABLE_VERSION_ID, // TODO: use correct version id
+            table_version_id: self.logical.table_version_id(),
             column_indices,
             row_id_index: self
                 .logical
