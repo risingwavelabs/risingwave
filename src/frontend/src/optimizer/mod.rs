@@ -227,16 +227,16 @@ impl PlanRoot {
                 vec![DagToTreeRule::create()],
                 ApplyOrder::TopDown,
             );
-        }
 
-        // Replace source to share source.
-        // Perform share source at the beginning so that we can benefit from predicate pushdown
-        // and column pruning for the share operator.
-        if for_stream {
-            plan = ShareSourceRewriter::share_source(plan);
-            if explain_trace {
-                ctx.trace("Share Source:");
-                ctx.trace(plan.explain_to_string().unwrap());
+            // Replace source to share source.
+            // Perform share source at the beginning so that we can benefit from predicate pushdown
+            // and column pruning for the share operator.
+            if for_stream {
+                plan = ShareSourceRewriter::share_source(plan);
+                if explain_trace {
+                    ctx.trace("Share Source:");
+                    ctx.trace(plan.explain_to_string().unwrap());
+                }
             }
         }
 

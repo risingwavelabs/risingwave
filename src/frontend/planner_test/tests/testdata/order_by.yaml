@@ -64,7 +64,7 @@
         └─BatchProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr1] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, $expr50(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr50, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, $expr49(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr49, t._row_id] }
     └─StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -133,7 +133,7 @@
         └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z] }
           └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, $expr69(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr69, t.z, t._row_id] }
+    StreamMaterialize { columns: [x, y, $expr68(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr68, t.z, t._row_id] }
     └─StreamProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by the number of an output column
