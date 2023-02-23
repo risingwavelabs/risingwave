@@ -18,7 +18,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
-use super::generic::GenericPlanRef;
 use super::{
     ExprRewritable, LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
     ToDistributedBatch,
@@ -79,12 +78,7 @@ impl ToBatchProst for BatchUpdate {
             .logical
             .exprs()
             .iter()
-            .map(|x| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(x.clone())
-                    .to_expr_proto()
-            })
+            .map(|x| x.to_expr_proto())
             .collect();
 
         NodeBody::Update(UpdateNode {
