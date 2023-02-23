@@ -26,7 +26,7 @@ pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
 /// The system parameter manager on worker nodes. It provides two methods for other components to
 /// read the latest system parameters:
 /// - `get_params` returns a reference to the latest parameters that is atomically updated.
-/// - `subscribe_params` returns a channel on which calling `recv` will get the latest parameters.
+/// - `watch_params` returns a channel on which calling `recv` will get the latest parameters.
 ///   Compared with `get_params`, the caller can be explicitly notified of parameter change.
 pub struct LocalSystemParamManager {
     /// The latest parameters.
@@ -41,7 +41,6 @@ pub struct LocalSystemParamManager {
 
 impl LocalSystemParamManager {
     pub fn new(params: SystemParamsReader) -> Self {
-        // Only care about latest params.
         let params = Arc::new(ArcSwap::from_pointee(params));
         let (tx, rx) = channel(params.clone());
         Self { params, tx, rx }
@@ -60,7 +59,7 @@ impl LocalSystemParamManager {
         }
     }
 
-    pub fn subscribe_parmams(&self) -> Receiver<SystemParamsReaderRef> {
+    pub fn watch_parmams(&self) -> Receiver<SystemParamsReaderRef> {
         self.rx.clone()
     }
 }
@@ -80,7 +79,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut params_rx = manager.subscribe_parmams();
+        let mut params_rx = manager.watch_parmams();
 
         manager.try_set_params(new_params.clone());
         params_rx.changed().await.unwrap();
