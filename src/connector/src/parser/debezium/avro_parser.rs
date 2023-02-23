@@ -76,12 +76,14 @@ impl DebeziumAvroParserConfig {
         let key_schema = Schema::parse_str(&raw_schema.content)
             .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
 
-        let (outer_schema, resolver) =
-            ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client).await?;
+        let resolver = ConfluentSchemaResolver::new(client);
+        let outer_schema = resolver
+            .get_by_subject_name(&format!("{}-value", kafka_topic))
+            .await?;
         let inner_schema = Self::extract_inner_schema(&outer_schema)?;
         Ok(Self {
             key_schema: Arc::new(key_schema),
-            outer_schema: Arc::new(outer_schema),
+            outer_schema,
             inner_schema: Arc::new(inner_schema),
             schema_resolver: Arc::new(resolver),
         })

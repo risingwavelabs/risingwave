@@ -235,6 +235,13 @@ impl fmt::Display for StreamMaterialize {
         if pk_column_names != order_descs {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
+
+        let pk_conflict_behavior = match self.table.handle_pk_conflict() {
+            true => "overwrite",
+            false => "no check",
+        };
+        builder.field("pk_conflict", &pk_conflict_behavior);
+
         builder.finish()
     }
 }

@@ -81,7 +81,9 @@ use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
 use crate::error::StorageResult;
-use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
+#[cfg(any(test, feature = "test"))]
+use crate::hummock::backup_reader::BackupReader;
+use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};

@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -31,6 +31,9 @@ use crate::user::UserId;
 pub struct BoundInsert {
     /// Id of the table to perform inserting.
     pub table_id: TableId,
+
+    /// Version id of the table.
+    pub table_version_id: TableVersionId,
 
     /// Name of the table to perform inserting.
     pub table_name: String,
@@ -77,6 +80,7 @@ impl Binder {
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
+        let table_version_id = table_catalog.version_id().expect("table must be versioned");
         let columns_to_insert = table_catalog
             .columns
             .clone()
@@ -220,6 +224,7 @@ impl Binder {
 
         let insert = BoundInsert {
             table_id,
+            table_version_id,
             table_name,
             owner,
             row_id_index,

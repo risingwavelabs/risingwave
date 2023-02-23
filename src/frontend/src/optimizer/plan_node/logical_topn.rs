@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 use crate::TableCatalog;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
