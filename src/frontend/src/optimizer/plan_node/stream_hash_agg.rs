@@ -79,6 +79,10 @@ impl StreamHashAgg {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
+
+    pub(crate) fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.logical.i2o_col_mapping()
+    }
 }
 
 impl fmt::Display for StreamHashAgg {

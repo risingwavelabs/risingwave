@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -57,7 +58,7 @@ impl BatchHashAgg {
         self.logical.group_key()
     }
 
-    fn to_two_phase_agg(&self, agg_distribution: Distribution) -> Result<PlanRef> {
+    fn to_two_phase_agg(&self) -> Result<PlanRef> {
         // Follow input distribution
         let new_input = self.input().to_distributed()?;
 
@@ -65,7 +66,11 @@ impl BatchHashAgg {
         let partial_agg: PlanRef = self.clone_with_input(new_input).into();
 
         // insert exchange
-        let exchange = BatchExchange::new(partial_agg, Order::any(), agg_distribution).into();
+        let exchange = RequiredDist::shard_by_key(
+            partial_agg.schema().len(),
+            &(0..self.group_key().len()).collect_vec(),
+        )
+        .enforce_if_not_satisfies(partial_agg, &Order::any())?;
 
         // insert total agg
         let total_agg_types = self
@@ -113,9 +118,8 @@ impl PlanTreeNodeUnary for BatchHashAgg {
 impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let agg_distribution = Distribution::HashShard((0..self.group_key().len()).collect());
-        if self.logical.should_two_phase_agg(&agg_distribution) {
-            self.to_two_phase_agg(agg_distribution)
+        if self.logical.should_two_phase_agg() {
+            self.to_two_phase_agg()
         } else {
             self.to_shuffle_agg()
         }

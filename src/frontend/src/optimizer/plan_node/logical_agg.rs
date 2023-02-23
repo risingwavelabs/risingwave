@@ -112,6 +112,7 @@ impl LogicalAgg {
         stream_input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
+        // Generate vnode via project
         let input_fields = stream_input.schema().fields();
         let input_col_num = input_fields.len();
 
@@ -133,6 +134,7 @@ impl LogicalAgg {
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs));
 
+        // Generate local agg step
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
@@ -140,7 +142,17 @@ impl LogicalAgg {
             LogicalAgg::new(self.agg_calls().to_vec(), local_group_key, project.into()),
             Some(vnode_col_idx),
         );
+        // Global group key excludes vnode.
+        let local_group_key_without_vnode =
+            &local_agg.group_key()[..local_agg.group_key().len() - 1];
+        let global_group_key = local_agg
+            .i2o_col_mapping()
+            .rewrite_dist_key(local_group_key_without_vnode)
+            .unwrap_or_else(|| panic!("some input group key could not be mapped"));
 
+        println!("global_group_key: {:?}", global_group_key);
+
+        // Generate global agg step
         if self.group_key().is_empty() {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
@@ -155,13 +167,12 @@ impl LogicalAgg {
                         )
                     })
                     .collect(),
-                self.group_key().to_vec(),
+                global_group_key,
                 exchange,
             ));
             Ok(global_agg.into())
         } else {
-            let group_key = (0..self.group_key().len()).collect_vec();
-            let exchange = RequiredDist::shard_by_key(input_col_num, &group_key)
+            let exchange = RequiredDist::shard_by_key(input_col_num, &global_group_key)
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
             // Local phase should have reordered the group keys into their required order.
             // we can just follow it.
@@ -177,7 +188,7 @@ impl LogicalAgg {
                             )
                         })
                         .collect(),
-                    group_key,
+                    global_group_key,
                     exchange,
                 ),
                 None,
@@ -190,7 +201,7 @@ impl LogicalAgg {
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         // Shuffle agg if group key is present.
         let input_dist = stream_input.distribution().clone();
-        if !self.group_key().is_empty() && !self.should_two_phase_agg(&input_dist) {
+        if !self.group_key().is_empty() && !self.should_two_phase_agg() {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -200,7 +211,6 @@ impl LogicalAgg {
             )
             .into());
         }
-
 
         let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
             Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
@@ -264,11 +274,14 @@ impl LogicalAgg {
             .get_enable_two_phase_agg()
     }
 
-    pub(crate) fn should_two_phase_agg(&self, agg_distribution: &Distribution) -> bool {
+    pub(crate) fn should_two_phase_agg(&self) -> bool {
+        let required_dist =
+            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
-            // If same distribution, we should not use two phase agg.
-            && self.input().distribution() != agg_distribution
+            // If input already satisfies required output distribution,
+            // we should not use two phase agg, even if forced.
+            && self.input().distribution().satisfies(&required_dist)
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

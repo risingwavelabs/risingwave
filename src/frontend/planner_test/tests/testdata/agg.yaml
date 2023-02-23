@@ -696,7 +696,7 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum(t.v2) filter((t.v2 < 5:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: force two phase aggregation
+- name: force two phase aggregation on satisfied dist should fail
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
@@ -704,19 +704,16 @@
     select min(v3), sum(v1) from t group by v1, v3, v2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [min(min(t.v3)), sum(sum(t.v1))] }
-      └─BatchHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [min(min(t.v3)), sum(sum(t.v1))] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3, t.v2) }
-          └─BatchHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [min(t.v3), sum(t.v1)] }
-            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+    └─BatchProject { exprs: [min(t.v3), sum(t.v1)] }
+      └─BatchHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [min(t.v3), sum(t.v1)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1, t.v2, t.v3) }
+          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [min, sum, t.v1(hidden), t.v3(hidden), t.v2(hidden)], pk_columns: [t.v1, t.v3, t.v2], pk_conflict: "no check" }
-    └─StreamProject { exprs: [min(min(t.v3)), sum(sum(t.v1)), t.v1, t.v3, t.v2] }
-      └─StreamHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [count, min(min(t.v3)), sum(sum(t.v1))] }
-        └─StreamExchange { dist: HashShard(t.v1, t.v3, t.v2) }
-          └─StreamHashAgg { group_key: [t.v1, t.v3, t.v2, $expr1], aggs: [count, min(t.v3), sum(t.v1)] }
-            └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
-              └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [min, sum, t.v1(hidden), t.v3(hidden), t.v2(hidden)], pk_columns: [t.v1, t.v3, t.v2] }
+    └─StreamProject { exprs: [min(t.v3), sum(t.v1), t.v1, t.v3, t.v2] }
+      └─StreamHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [count, min(t.v3), sum(t.v1)] }
+        └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
+          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: enable two phase aggregation
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1092,7 +1089,7 @@
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
             └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: correlated two phase agg https://github.com/risingwavelabs/risingwave/issues/7928
+- name: two phase agg with same dist https://github.com/risingwavelabs/risingwave/issues/7928
   sql: |
     set QUERY_MODE to DISTRIBUTED;
     set RW_FORCE_TWO_PHASE_AGG to TRUE;
@@ -1131,10 +1128,48 @@
     └─StreamProject { exprs: [1:Int32, lineitem.l_commitdate] }
       └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [count] }
         └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
-          └─StreamHashAgg { group_key: [lineitem.l_commitdate, $expr2], aggs: [count] }
-            └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate, Vnode(lineitem.l_orderkey) as $expr2] }
-              └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
-                └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
-                  └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate, $expr1], aggs: [count] }
-                    └─StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct, Vnode(lineitem.l_orderkey) as $expr1] }
-                      └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+          └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
+            └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
+              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+- name: two phase agg with different dist
+  sql: |
+    set QUERY_MODE to DISTRIBUTED;
+    set RW_FORCE_TWO_PHASE_AGG to TRUE;
+    CREATE TABLE lineitem (
+        l_orderkey BIGINT,
+        l_tax NUMERIC,
+        l_commitdate DATE,
+        l_shipinstruct VARCHAR,
+        PRIMARY KEY (l_orderkey)
+    );
+    SELECT
+        1 as col_0
+    FROM
+        (
+            SELECT
+                t_0.l_commitdate AS col_2
+            FROM
+                lineitem AS t_0
+            GROUP BY
+                t_0.l_tax,
+                t_0.l_shipinstruct,
+                t_0.l_orderkey,
+                t_0.l_commitdate
+        ) AS sq_1
+    GROUP BY
+        sq_1.col_2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [] }
+        └─BatchExchange { order: [], dist: HashShard(lineitem.l_commitdate) }
+          └─BatchHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [] }
+            └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], distribution: UpstreamHashShard(lineitem.l_orderkey) }
+  stream_plan: |
+    StreamMaterialize { columns: [col_0, lineitem.l_commitdate(hidden)], pk_columns: [lineitem.l_commitdate] }
+    └─StreamProject { exprs: [1:Int32, lineitem.l_commitdate] }
+      └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [count] }
+        └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
+          └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
+            └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
+              └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
