@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::Result;
-use risingwave_pb::meta::TelemetryInfoResponse;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
@@ -25,7 +24,7 @@ use super::{
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
-    async fn fetch_telemetry_info(&self) -> Result<TelemetryInfoResponse>;
+    async fn fetch_telemetry_info(&self) -> Result<(bool, String)>;
 }
 
 pub trait TelemetryReportCreator {
@@ -67,28 +66,17 @@ where
                 }
             }
             // fetch telemetry tracking_id and configs from the meta node
-            let (tracking_id, telemetry_enabled, should_kill_telemetry) =
-                match fetcher.fetch_telemetry_info().await {
-                    Ok(resp) => (
-                        resp.tracking_id,
-                        resp.telemetry_enabled,
-                        resp.should_kill_telemetry,
-                    ),
-                    Err(err) => {
-                        tracing::error!("Telemetry failed to get tracking_id, err {}", err);
-                        continue;
-                    }
-                };
+            let (telemetry_enabled, tracking_id) = match fetcher.fetch_telemetry_info().await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                    continue;
+                }
+            };
 
-            if should_kill_telemetry {
-                tracing::info!("Telemetry is shutdown due to meta resp");
-                return;
-            }
-
-            // wait for the next interval, do not exit current thread
             if !telemetry_enabled {
                 tracing::info!("Telemetry is not enabled");
-                continue;
+                return;
             }
 
             // create a report and serialize to json

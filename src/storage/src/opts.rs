@@ -83,6 +83,8 @@ impl Default for StorageOpts {
             backup_storage_url: Some(c.backup.storage_url.clone()),
             backup_storage_directory: Some(c.backup.storage_directory.clone()),
             state_store: None, // unused
+            telemetry_enabled: None,
+            telemetry_tracking_id: None,
         };
         Self::from((&c, &p.into()))
     }

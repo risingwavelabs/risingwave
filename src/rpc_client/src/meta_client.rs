@@ -931,9 +931,12 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<TelemetryInfoResponse> {
-        let info = self.get_telemetry_info().await?;
-        Ok(info)
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<(bool, String)> {
+        let params = self.get_system_params().await?;
+        Ok((
+            params.telemetry_enabled(),
+            params.telemetry_tracking_id().to_string(),
+        ))
     }
 }
 
@@ -1000,6 +1003,14 @@ impl SystemParamsReader {
 
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
+    }
+
+    pub fn telemetry_enabled(&self) -> bool {
+        self.prost.telemetry_enabled.unwrap()
+    }
+
+    pub fn telemetry_tracking_id(&self) -> &str {
+        self.prost.telemetry_tracking_id.as_ref().unwrap()
     }
 }
 

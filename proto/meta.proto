@@ -339,6 +339,8 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
+  optional bool telemetry_enabled = 10;
+  optional string telemetry_tracking_id = 11;
 }
 
 message GetSystemParamsRequest {}

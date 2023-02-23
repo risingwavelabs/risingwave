@@ -161,6 +161,8 @@ impl MetaOpts {
             data_directory: Some(self.data_directory.clone()),
             backup_storage_url: Some(self.backup_storage_url.clone()),
             backup_storage_directory: Some(self.backup_storage_directory.clone()),
+            telemetry_enabled: Some(self.telemetry_enabled),
+            telemetry_tracking_id: None,
         }
     }
 }

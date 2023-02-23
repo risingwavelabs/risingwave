@@ -40,6 +40,8 @@ macro_rules! for_all_undeprecated_params {
             { data_directory, IMMUTABLE },
             { backup_storage_url, IMMUTABLE },
             { backup_storage_directory, IMMUTABLE },
+            {telemetry_enabled, MUTABLE},
+            {telemetry_tracking_id, MUTABLE},
         }
     };
 }
@@ -160,6 +162,8 @@ mod tests {
             (DATA_DIRECTORY_KEY, "a"),
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
+            (TELEMETRY_ENABLED_KEY, "false"),
+            (TELEMETRY_TRACKING_ID_KEY, "a"),
         ];
 
         // To kv - missing field.
