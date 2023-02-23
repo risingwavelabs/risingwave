@@ -26,6 +26,9 @@ const SYSTEM_PARAMS_CF_NAME: &str = "cf/system_params";
 pub trait SystemParamsModel: Sized {
     fn cf_name() -> String;
     async fn get<S: MetaStore>(store: &S) -> MetadataModelResult<Option<Self>>;
+    async fn get_at_snapshot<S: MetaStore>(
+        store: &S::Snapshot,
+    ) -> MetadataModelResult<Option<Self>>;
     async fn insert<S: MetaStore>(&self, store: &S) -> MetadataModelResult<()>;
 }
 
@@ -42,6 +45,20 @@ impl SystemParamsModel for SystemParams {
         S: MetaStore,
     {
         let kvs = store.list_cf(&Self::cf_name()).await?;
+        if kvs.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(
+                system_params_from_kv(kvs).map_err(MetadataModelError::internal)?,
+            ))
+        }
+    }
+
+    async fn get_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Option<SystemParams>>
+    where
+        S: MetaStore,
+    {
+        let kvs = snapshot.list_cf(&SystemParams::cf_name()).await?;
         if kvs.is_empty() {
             Ok(None)
         } else {
@@ -73,21 +90,5 @@ impl Transactional for SystemParams {
 
     fn delete_in_transaction(&self, _trx: &mut Transaction) -> MetadataModelResult<()> {
         unreachable!()
-    }
-}
-
-pub async fn get_system_params_at_snapshot<S>(
-    snapshot: &S::Snapshot,
-) -> MetadataModelResult<Option<SystemParams>>
-where
-    S: MetaStore,
-{
-    let kvs = snapshot.list_cf(&SystemParams::cf_name()).await?;
-    if kvs.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(
-            system_params_from_kv(kvs).map_err(MetadataModelError::internal)?,
-        ))
     }
 }

@@ -27,7 +27,7 @@ pub type SystemParamsError = String;
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
 // Only includes undeprecated params.
-// Macro input is { field identifier, default value }
+// Macro input is { field identifier, type, default value }
 macro_rules! for_all_undeprecated_params {
     ($macro:ident) => {
         $macro! {
@@ -45,7 +45,7 @@ macro_rules! for_all_undeprecated_params {
 }
 
 // Only includes deprecated params. Used to define key constants.
-// Macro input is { field identifier, default value }
+// Macro input is { field identifier, type, default value }
 macro_rules! for_all_deprecated_params {
     ($macro:ident) => {
         $macro! {}
@@ -197,13 +197,25 @@ macro_rules! impl_set_system_param {
     };
 }
 
+macro_rules! impl_default_system_params {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        #[allow(clippy::needless_update)]
+        pub fn default_system_params() -> SystemParams {
+            SystemParams {
+                $(
+                    $field: Some($default),
+                )*
+                ..Default::default()
+            }
+        }
+    };
+}
+
 for_all_undeprecated_params!(impl_system_params_from_kv);
-
 for_all_undeprecated_params!(impl_system_params_to_kv);
-
 for_all_undeprecated_params!(impl_set_system_param);
-
 for_all_undeprecated_params!(impl_default_validation_on_set);
+for_all_undeprecated_params!(impl_default_system_params);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {
