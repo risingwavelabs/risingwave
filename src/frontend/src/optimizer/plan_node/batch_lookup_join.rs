@@ -29,6 +29,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone)]
 pub struct BatchLookupJoin {
@@ -199,12 +200,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -239,12 +235,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()

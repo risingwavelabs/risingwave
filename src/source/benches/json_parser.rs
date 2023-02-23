@@ -130,7 +130,7 @@ fn get_descs() -> Vec<SourceColumnDesc> {
 
 fn bench_json_parser(c: &mut Criterion) {
     let descs = get_descs();
-    let parser = JsonParser::new(descs.clone()).unwrap();
+    let parser = JsonParser::new_for_test(descs.clone()).unwrap();
     let records = generate_all_json();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

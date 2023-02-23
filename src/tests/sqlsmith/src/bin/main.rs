@@ -104,6 +104,6 @@ async fn main() {
     if let Some(outdir) = opt.generate {
         generate(&client, &opt.testdata, opt.count, &outdir).await;
     } else {
-        run(&client, &opt.testdata, opt.count).await;
+        run(&client, &opt.testdata, opt.count, None).await;
     }
 }

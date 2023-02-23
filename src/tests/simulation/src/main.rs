@@ -137,6 +137,7 @@ pub struct Args {
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
+    use std::env;
     use std::sync::Arc;
 
     use risingwave_simulation::client::RisingWave;
@@ -180,6 +181,7 @@ async fn main() {
         cluster.create_kafka_producer(&datadir).await;
     }
 
+    let seed = madsim::runtime::Handle::current().seed();
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
@@ -195,7 +197,13 @@ async fn main() {
                     )
                     .await;
                 } else {
-                    risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
+                    risingwave_sqlsmith::runner::run(
+                        rw.pg_client(),
+                        &args.files,
+                        count,
+                        Some(seed),
+                    )
+                    .await;
                 }
             })
             .await;
@@ -209,7 +217,8 @@ async fn main() {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
+                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir, Some(seed))
+                    .await;
             })
             .await;
         return;

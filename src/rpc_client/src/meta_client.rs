@@ -25,7 +25,7 @@ use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::system_param::system_params_to_kv;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -57,7 +57,7 @@ use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
-use risingwave_pb::meta::{SystemParams as ProstSystemParams, *};
+use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -70,7 +70,6 @@ use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Streaming};
-use tracing::warn;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -327,6 +326,20 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
+    pub async fn replace_table(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<CatalogVersion> {
+        let request = ReplaceTablePlanRequest {
+            table: Some(table),
+            fragment_graph: Some(graph),
+        };
+        let resp = self.inner.replace_table_plan(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok(resp.version)
+    }
+
     pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
@@ -561,6 +574,12 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        let request = CancelCreatingJobsRequest { infos };
+        let _ = self.inner.cancel_creating_jobs(request).await?;
+        Ok(())
+    }
+
     pub async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -761,6 +780,18 @@ impl MetaClient {
         let resp = self.inner.get_system_params(req).await?;
         Ok(resp.params.unwrap().into())
     }
+
+    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+        let req = SetSystemParamRequest { param, value };
+        self.inner.set_system_param(req).await?;
+        Ok(())
+    }
+
+    pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let req = GetDdlProgressRequest {};
+        let resp = self.inner.get_ddl_progress(req).await?;
+        Ok(resp.ddl_progress)
+    }
 }
 
 #[async_trait]
@@ -918,69 +949,6 @@ impl HummockMetaClient for MetaClient {
             })
             .await?;
         Ok(())
-    }
-}
-
-/// A wrapper for [`risingwave_pb::meta::SystemParams`] for 2 purposes:
-/// - Avoid misuse of deprecated fields by hiding their getters.
-/// - Abstract fallback logic for fields that might not be provided by meta service due to backward
-///   compatibility.
-pub struct SystemParamsReader {
-    prost: ProstSystemParams,
-}
-
-impl From<ProstSystemParams> for SystemParamsReader {
-    fn from(prost: ProstSystemParams) -> Self {
-        Self { prost }
-    }
-}
-
-impl SystemParamsReader {
-    pub fn barrier_interval_ms(&self) -> u32 {
-        self.prost.barrier_interval_ms.unwrap()
-    }
-
-    pub fn checkpoint_frequency(&self) -> u64 {
-        self.prost.checkpoint_frequency.unwrap()
-    }
-
-    pub fn sstable_size_mb(&self) -> u32 {
-        self.prost.sstable_size_mb.unwrap()
-    }
-
-    pub fn block_size_kb(&self) -> u32 {
-        self.prost.block_size_kb.unwrap()
-    }
-
-    pub fn bloom_false_positive(&self) -> f64 {
-        self.prost.bloom_false_positive.unwrap()
-    }
-
-    // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store(&self, from_local: String) -> String {
-        let from_prost = self.prost.state_store.as_ref().unwrap();
-        if from_prost.is_empty() {
-            warn!("--state-store is not specified on meta node, reading from CLI instead");
-            from_local
-        } else {
-            from_prost.clone()
-        }
-    }
-
-    pub fn data_directory(&self) -> &str {
-        self.prost.data_directory.as_ref().unwrap()
-    }
-
-    pub fn backup_storage_url(&self) -> &str {
-        self.prost.backup_storage_url.as_ref().unwrap()
-    }
-
-    pub fn backup_storage_directory(&self) -> &str {
-        self.prost.backup_storage_directory.as_ref().unwrap()
-    }
-
-    pub fn to_kv(&self) -> Vec<(String, String)> {
-        system_params_to_kv(&self.prost).unwrap()
     }
 }
 
@@ -1371,6 +1339,7 @@ macro_rules! for_all_meta_rpc {
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
@@ -1390,7 +1359,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
+            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1432,6 +1403,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
+            ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }
     };
 }

@@ -80,6 +80,7 @@ impl Binder {
             }
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
+            BinaryOperator::BitwiseXor => ExprType::Pow,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,

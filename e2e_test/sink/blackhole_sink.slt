@@ -1,5 +1,5 @@
 statement ok
-CREATE TABLE t5 (v1 int, v2 int);
+CREATE TABLE t5 (v1 int primary key, v2 int);
 
 statement ok
 CREATE MATERIALIZED VIEW mv5 AS SELECT * FROM t5;

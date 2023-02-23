@@ -55,6 +55,12 @@ sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
+echo "--- e2e, ci-3cn-1fe, udf"
+python3 e2e_test/udf/test.py &
+sleep 2
+sqllogictest -p 4566 -d dev './e2e_test/udf/python.slt'
+pkill python3
+
 echo "--- Kill cluster"
 cargo make ci-kill
 

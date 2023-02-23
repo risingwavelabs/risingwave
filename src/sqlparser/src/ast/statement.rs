@@ -89,12 +89,14 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,             // Keyword::JSON
-    DebeziumJson,     // Keyword::DEBEZIUM_JSON
-    Avro(AvroSchema), // Keyword::AVRO
-    Maxwell,          // Keyword::MAXWELL
-    CanalJson,        // Keyword::CANAL_JSON
-    Csv(CsvInfo),     // Keyword::CSV
+    Json,                   // Keyword::JSON
+    DebeziumJson,           // Keyword::DEBEZIUM_JSON
+    UpsertJson,             // Keyword::UPSERT_JSON
+    Avro(AvroSchema),       // Keyword::AVRO
+    UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
+    Maxwell,                // Keyword::MAXWELL
+    CanalJson,              // Keyword::CANAL_JSON
+    Csv(CsvInfo),           // Keyword::CSV
     Native,
     DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
 }
@@ -103,6 +105,8 @@ impl ParseTo for SourceSchema {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         let schema = if p.parse_keywords(&[Keyword::JSON]) {
             SourceSchema::Json
+        } else if p.parse_keywords(&[Keyword::UPSERT_JSON]) {
+            SourceSchema::UpsertJson
         } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
             impl_parse_to!(protobuf_schema: ProtobufSchema, p);
             SourceSchema::Protobuf(protobuf_schema)
@@ -111,6 +115,9 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::AVRO]) {
             impl_parse_to!(avro_schema: AvroSchema, p);
             SourceSchema::Avro(avro_schema)
+        } else if p.parse_keywords(&[Keyword::UPSERT_AVRO]) {
+            impl_parse_to!(avro_schema: AvroSchema, p);
+            SourceSchema::UpsertAvro(avro_schema)
         } else if p.parse_keywords(&[Keyword::MAXWELL]) {
             SourceSchema::Maxwell
         } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
@@ -123,7 +130,7 @@ impl ParseTo for SourceSchema {
             SourceSchema::DebeziumAvro(avro_schema)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
+                "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -135,13 +142,15 @@ impl fmt::Display for SourceSchema {
         match self {
             SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
             SourceSchema::Json => write!(f, "JSON"),
+            SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
             SourceSchema::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             SourceSchema::Native => write!(f, "NATIVE"),
-            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM {}", avro_schema),
+            SourceSchema::DebeziumAvro(avro_schema) => write!(f, "DEBEZIUM AVRO {}", avro_schema),
         }
     }
 }
@@ -188,28 +197,22 @@ impl fmt::Display for ProtobufSchema {
 }
 
 // sql_grammar!(AvroSchema {
-//     [Keyword::MESSAGE],
-//     message_name: AstString,
-//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
-//     row_schema_location: AstString,
+//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION, [Keyword::CONFLUENT, Keyword::SCHEMA,
+// Keyword::REGISTRY]],     row_schema_location: AstString,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AvroSchema {
-    pub message_name: AstString,
     pub row_schema_location: AstString,
     pub use_schema_registry: bool,
 }
 
 impl ParseTo for AvroSchema {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!([Keyword::MESSAGE], p);
-        impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
         impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
-            message_name,
             row_schema_location,
             use_schema_registry,
         })
@@ -219,8 +222,6 @@ impl ParseTo for AvroSchema {
 impl fmt::Display for AvroSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
-        impl_fmt_display!([Keyword::MESSAGE], v);
-        impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
         impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);

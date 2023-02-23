@@ -52,14 +52,19 @@ impl StreamTableScan {
         let batch_plan_id = ctx.next_plan_node_id();
 
         let distribution = {
-            let distribution_key = logical
-                .distribution_key()
-                .expect("distribution key of stream chain must exist in output columns");
-            if distribution_key.is_empty() {
-                Distribution::Single
-            } else {
-                // See also `BatchSeqScan::clone_with_dist`.
-                Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
+            match logical.distribution_key() {
+                Some(distribution_key) => {
+                    if distribution_key.is_empty() {
+                        Distribution::Single
+                    } else {
+                        // See also `BatchSeqScan::clone_with_dist`.
+                        Distribution::UpstreamHashShard(
+                            distribution_key,
+                            logical.table_desc().table_id,
+                        )
+                    }
+                }
+                None => Distribution::SomeShard,
             }
         };
         let base = PlanBase::new_stream(
@@ -241,12 +246,13 @@ impl ExprRewritable for StreamTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
+        Self::new_with_chain_type(
             self.logical
                 .rewrite_exprs(r)
                 .as_logical_scan()
                 .unwrap()
                 .clone(),
+            self.chain_type,
         )
         .into()
     }

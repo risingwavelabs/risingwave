@@ -30,7 +30,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::Order;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone)]
@@ -413,6 +413,7 @@ mod test {
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
+    use crate::Explain;
     #[tokio::test]
     /// Pruning
     /// ```text

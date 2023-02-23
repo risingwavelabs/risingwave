@@ -30,7 +30,9 @@ use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Direction;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, IndexRewriter};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
+};
 use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
@@ -296,9 +298,14 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
-                    AggCallState::ResultValue
-                }
+                AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp => AggCallState::ResultValue,
                 AggKind::ApproxCountDistinct => {
                     if !in_append_only {
                         // FIXME: now the approx count distinct on a non-append-only stream does not
@@ -601,7 +608,7 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self, ctx: OptimizerContextRef) -> ProstAggCall {
+    pub fn to_protobuf(&self) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -612,10 +619,7 @@ impl PlanAggCall {
                 .iter()
                 .map(PlanAggOrderByField::to_protobuf)
                 .collect(),
-            filter: self
-                .filter
-                .as_expr_unless_true()
-                .map(|x| ctx.expr_with_session_timezone(x).to_expr_proto()),
+            filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
         }
     }
 
@@ -639,6 +643,9 @@ impl PlanAggCall {
             }
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
+            }
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
+                panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
         };
         PlanAggCall {

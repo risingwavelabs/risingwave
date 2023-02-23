@@ -3563,7 +3563,7 @@ fn parse_create_index() {
 
 #[test]
 fn parse_grant() {
-    let sql = "GRANT SELECT, INSERT, UPDATE (shape, size), USAGE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON abc, def TO xyz, m WITH GRANT OPTION GRANTED BY jj";
+    let sql = "GRANT SELECT, INSERT, UPDATE (shape, size), EXECUTE, TEMPORARY, USAGE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON abc, def TO xyz, m WITH GRANT OPTION GRANTED BY jj";
     match verified_stmt(sql) {
         Statement::Grant {
             privileges,
@@ -3581,6 +3581,8 @@ fn parse_grant() {
                         Action::Update {
                             columns: Some(vec![Ident::new("shape"), Ident::new("size")])
                         },
+                        Action::Execute,
+                        Action::Temporary,
                         Action::Usage,
                         Action::Delete,
                         Action::Truncate,

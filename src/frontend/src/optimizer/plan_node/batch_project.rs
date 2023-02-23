@@ -19,13 +19,13 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
-use super::generic::GenericPlanRef;
 use super::{
     ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows
@@ -89,12 +89,7 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(|expr| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(expr.clone())
-                    .to_expr_proto()
-            })
+            .map(|expr| expr.to_expr_proto())
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
     }

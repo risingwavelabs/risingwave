@@ -24,12 +24,13 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition, Substitute};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -111,7 +112,7 @@ impl LogicalProject {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
+        self.core.fmt_with_name(f, name, self.base.schema())
     }
 
     pub fn is_identity(&self) -> bool {

@@ -42,6 +42,8 @@ where
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
+    fn cancel_creating_jobs_in_session(&self, session_id: SessionId);
+
     fn end_session(&self, session: &Self::Session);
 }
 
@@ -193,6 +195,10 @@ mod tests {
         }
 
         fn cancel_queries_in_session(&self, _session_id: SessionId) {
+            todo!()
+        }
+
+        fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
             todo!()
         }
 
