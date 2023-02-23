@@ -34,6 +34,7 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -104,7 +105,8 @@ impl LogicalAgg {
     }
 
     /// Generate plan for stateless/stateful 2-phase streaming agg.
-    /// Should only be used iff input is distributed. Input must be converted to stream form.
+    /// Should only be used iff input is distributed.
+    /// Input must be converted to stream form.
     fn gen_vnode_two_phase_streaming_agg_plan(
         &self,
         stream_input: PlanRef,
@@ -159,7 +161,6 @@ impl LogicalAgg {
             Ok(global_agg.into())
         } else {
             let group_key = (0..self.group_key().len()).collect_vec();
-
             let exchange = RequiredDist::shard_by_key(input_col_num, &group_key)
                 .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
             // Local phase should have reordered the group keys into their required order.
@@ -185,11 +186,11 @@ impl LogicalAgg {
         }
     }
 
+    /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         // Shuffle agg if group key is present.
-        // If we are forced to use two phase aggregation,
-        // we should not do shuffle aggregation.
-        if !self.group_key().is_empty() && !self.two_phase_agg_forced() {
+        let input_dist = stream_input.distribution().clone();
+        if !self.group_key().is_empty() && !self.should_two_phase_agg(&input_dist) {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -200,9 +201,6 @@ impl LogicalAgg {
             .into());
         }
 
-        // now only simple agg (either single or two phase).
-        let input_dist = stream_input.distribution().clone();
-        let input_append_only = stream_input.append_only();
 
         let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
             Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
@@ -220,6 +218,7 @@ impl LogicalAgg {
 
         // stateless 2-phase simple agg
         // can be applied on stateless simple agg calls with input distributed by any shard
+        let input_append_only = stream_input.append_only();
         let all_local_are_stateless = self.agg_calls().iter().all(|c| {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
@@ -249,7 +248,7 @@ impl LogicalAgg {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
-    pub(crate) fn two_phase_agg_forced(&self) -> bool {
+    fn two_phase_agg_forced(&self) -> bool {
         self.base
             .ctx()
             .session_ctx()
@@ -263,6 +262,13 @@ impl LogicalAgg {
             .session_ctx()
             .config()
             .get_enable_two_phase_agg()
+    }
+
+    pub(crate) fn should_two_phase_agg(&self, agg_distribution: &Distribution) -> bool {
+        self.can_two_phase_agg()
+            && self.two_phase_agg_forced()
+            // If same distribution, we should not use two phase agg.
+            && self.input().distribution() != agg_distribution
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
