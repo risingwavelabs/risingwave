@@ -122,7 +122,7 @@ impl ToBatchProst for BatchHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             group_key: self
                 .group_key()
