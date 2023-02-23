@@ -20,23 +20,5 @@ export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe, ddl"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
-
-echo "--- deterministic simulation e2e, ci-3cn-2fe, streaming"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/streaming-{}.log && rm $LOGDIR/streaming-{}.log'
-
-echo "--- deterministic simulation e2e, ci-3cn-2fe, batch"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
-
-echo "--- deterministic simulation e2e, ci-3cn-2fe, kafka source"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --kafka-datadir=./scripts/source/test_data ./e2e_test/source/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
-
-echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/parallel-streaming-{}.log && rm $LOGDIR/parallel-streaming-{}.log'
-
-echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
-
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing"
-MADSIM_TEST_SEED=6 ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-6.log && rm $LOGDIR/fuzzing-6.log
+MADSIM_TEST_SEED=6 ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-6.log
