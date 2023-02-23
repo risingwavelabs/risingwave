@@ -193,6 +193,8 @@ where
         // database and schemas.
         user_core.increase_ref_count(database.owner, 1 + schemas_added.len());
 
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
         let mut version = self
             .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
             .await;
@@ -631,24 +633,23 @@ where
         }
     }
 
-    pub async fn cancel_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn cancel_create_table_procedure(&self, table: &Table) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !database_core.tables.contains_key(&table.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(table.id);
-            for &dependent_relation_id in &table.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
-            }
-            user_core.decrease_ref(table.owner);
-            Ok(())
-        } else {
-            unreachable!("table must not exist and must be in creating procedure");
+        assert!(
+            !database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must not exit and be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(table.id);
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
         }
+        user_core.decrease_ref(table.owner);
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1035,29 +1036,24 @@ where
         }
     }
 
-    pub async fn cancel_create_table_procedure_with_source(
-        &self,
-        source: &Source,
-        table: &Table,
-    ) -> MetaResult<()> {
+    pub async fn cancel_create_table_procedure_with_source(&self, source: &Source, table: &Table) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let table_key = (table.database_id, table.schema_id, table.name.clone());
-        if !database_core.sources.contains_key(&source.id)
-            && !database_core.tables.contains_key(&table.id)
-            && database_core.has_in_progress_creation(&source_key)
-            && database_core.has_in_progress_creation(&table_key)
-        {
-            database_core.unmark_creating(&source_key);
-            database_core.unmark_creating(&table_key);
-            database_core.unmark_creating_streaming_job(table.id);
-            user_core.decrease_ref_count(source.owner, 2); // source and table
-            Ok(())
-        } else {
-            unreachable!("source must not exist and must be in creating procedure");
-        }
+        assert!(
+            database_core.sources.contains_key(&source.id)
+                && !database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&source_key)
+                && database_core.has_in_progress_creation(&table_key),
+            "table and source must not exit and be in creating procedure"
+        );
+
+        database_core.unmark_creating(&source_key);
+        database_core.unmark_creating(&table_key);
+        database_core.unmark_creating_streaming_job(table.id);
+        user_core.decrease_ref_count(source.owner, 2); // source and table
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1232,29 +1228,24 @@ where
         }
     }
 
-    pub async fn cancel_create_index_procedure(
-        &self,
-        index: &Index,
-        index_table: &Table,
-    ) -> MetaResult<()> {
+    pub async fn cancel_create_index_procedure(&self, index: &Index, index_table: &Table) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !database_core.indexes.contains_key(&index.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(index_table.id);
-            for &dependent_relation_id in &index_table.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
-            }
-            // index table and index.
-            user_core.decrease_ref_count(index.owner, 2);
-            Ok(())
-        } else {
-            unreachable!("index must not exist and must be in creating procedure");
+        assert!(
+            database_core.indexes.contains_key(&index.id)
+                && database_core.has_in_progress_creation(&key),
+            "index must not exist and be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(index_table.id);
+        for &dependent_relation_id in &index_table.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
         }
+        // index table and index.
+        user_core.decrease_ref_count(index.owner, 2);
     }
 
     pub async fn finish_create_index_procedure(
@@ -1361,24 +1352,23 @@ where
         }
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
+    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !database_core.sinks.contains_key(&sink.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(sink.id);
-            for &dependent_relation_id in &sink.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
-            }
-            user_core.decrease_ref(sink.owner);
-            Ok(())
-        } else {
-            unreachable!("sink must not exist and must be in creating procedure");
+        assert!(
+            database_core.sinks.contains_key(&sink.id)
+                && database_core.has_in_progress_creation(&key),
+            "sink must not exit and be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(sink.id);
+        for &dependent_relation_id in &sink.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
         }
+        user_core.decrease_ref(sink.owner);
     }
 
     pub async fn drop_sink(

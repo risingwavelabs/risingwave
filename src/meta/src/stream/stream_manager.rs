@@ -106,6 +106,7 @@ impl CreatingStreamingJobInfo {
 
     async fn delete_job(&self, job_id: TableId) {
         let mut jobs = self.streaming_jobs.lock().await;
+        tracing::info!("delete job: {}", job_id);
         jobs.remove(&job_id);
     }
 
@@ -321,6 +322,7 @@ where
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
