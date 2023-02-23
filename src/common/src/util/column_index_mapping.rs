@@ -235,13 +235,20 @@ impl ColIndexMapping {
             .filter_map(|(src, tar)| tar.map(|tar| (src, tar)))
     }
 
+    /// Try mapping the source index to the target index.
     pub fn try_map(&self, index: usize) -> Option<usize> {
         *self.map.get(index)?
     }
 
+    /// Try mapping all the source indices to the target indices. Returns `None` if any of the
+    /// indices is not mapped.
+    pub fn try_map_all(&self, indices: impl IntoIterator<Item = usize>) -> Option<Vec<usize>> {
+        indices.into_iter().map(|i| self.try_map(i)).collect()
+    }
+
     /// # Panics
     ///
-    /// Will panic if `index >= self.source_size()`
+    /// Will panic if `index >= self.source_size()` or `index` is not mapped.
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
     }

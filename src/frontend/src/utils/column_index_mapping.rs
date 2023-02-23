@@ -65,11 +65,9 @@ impl ColIndexMapping {
     }
 
     /// Rewrite the distribution key and will return None if **any** index of the key disappear
-    /// after the mapping
+    /// after the mapping.
     pub fn rewrite_dist_key(&self, key: &[usize]) -> Option<Vec<usize>> {
-        key.iter()
-            .map(|col_idx| self.try_map(*col_idx))
-            .collect::<Option<Vec<_>>>()
+        self.try_map_all(key.iter().copied())
     }
 
     /// Rewrite the provided distribution's field index. It will try its best to give the most
