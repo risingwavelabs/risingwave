@@ -106,7 +106,6 @@ impl CreatingStreamingJobInfo {
 
     async fn delete_job(&self, job_id: TableId) {
         let mut jobs = self.streaming_jobs.lock().await;
-        tracing::info!("delete job: {}", job_id);
         jobs.remove(&job_id);
     }
 
