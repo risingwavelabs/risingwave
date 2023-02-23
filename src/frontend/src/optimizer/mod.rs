@@ -56,7 +56,7 @@ use crate::optimizer::plan_node::{
     RewriteExprsRecursive,
 };
 use crate::optimizer::property::Distribution;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMappingRewriteExt, Condition};
 use crate::WithOptions;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.

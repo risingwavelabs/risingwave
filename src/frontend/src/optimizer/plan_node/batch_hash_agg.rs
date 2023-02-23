@@ -26,6 +26,7 @@ use super::{
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone)]
 pub struct BatchHashAgg {
