@@ -177,7 +177,7 @@
     └─BatchProject { exprs: [Case((t.v1 = 1:Int32), 1:Decimal, (t.v1 = 2:Int32), 2:Decimal, 0.0:Decimal) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), 1:Decimal, (t.v1 = 2:Int32), 2:Decimal, 0.0:Decimal) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: case searched form without else
@@ -216,7 +216,7 @@
     └─BatchProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [Case((t.v1 = 1:Int32), null:Int32, t.v1) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -237,7 +237,7 @@
     └─BatchProject { exprs: [Coalesce(t.v1, 1:Int32) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [Coalesce(t.v1, 1:Int32) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -263,7 +263,7 @@
     └─BatchProject { exprs: [ConcatWs(t.v1, '1':Varchar) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [ConcatWs(t.v1, '1':Varchar) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -289,7 +289,7 @@
     └─BatchProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, '1':Varchar) as $expr1] }
       └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [ConcatWs('':Varchar, t.v1, t.v2::Varchar, t.v3::Varchar, '1':Varchar) as $expr1, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -442,7 +442,7 @@
     └─LogicalFilter { predicate: (t.v1 >= Now) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
@@ -456,7 +456,7 @@
     └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
@@ -467,7 +467,7 @@
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamDynamicFilter { predicate: (t.v2 >= now), output: [t.v1, t.v2, t._row_id] }
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t.v2, t._row_id] }
       | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -485,7 +485,7 @@
     create table t (v1 timestamp with time zone, v2 int);
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |
-    StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2] }
+    StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2], pk_conflict: "no check" }
     └─StreamProject { exprs: [max(t.v1), t.v2] }
       └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [max(t.v1), max(t.v1), t.v2] }
         ├─StreamProject { exprs: [max(t.v1), max(t.v1), t.v2] }
