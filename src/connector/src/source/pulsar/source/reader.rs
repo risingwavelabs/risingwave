@@ -27,12 +27,11 @@ use risingwave_common::try_match_expand;
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::monitor::SourceMetrics;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader, MAX_CHUNK_SIZE,
+    BoxSourceWithStateStream, Column, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReader, MAX_CHUNK_SIZE, SourceContext,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -44,8 +43,7 @@ pub struct PulsarSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: Arc<SourceContext>,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -98,8 +96,7 @@ impl SplitReader for PulsarSplitReader {
         props: PulsarProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: Arc<SourceContext>,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
@@ -157,8 +154,7 @@ impl SplitReader for PulsarSplitReader {
             split_id: split.id(),
             split,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 

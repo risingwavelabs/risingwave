@@ -31,10 +31,9 @@ use crate::parser::ParserConfig;
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::KinesisProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    BoxSourceWithStateStream, Column, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReader, SourceContext,
 };
 
 impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
@@ -51,8 +50,7 @@ pub struct KinesisSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: Arc<SourceContext>,
 }
 
 #[async_trait]
@@ -63,8 +61,7 @@ impl SplitReader for KinesisSplitReader {
         properties: KinesisProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: Arc<SourceContext>,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
@@ -108,8 +105,7 @@ impl SplitReader for KinesisSplitReader {
             end_position: split.end_position,
             split_id,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -299,7 +295,6 @@ mod tests {
             })],
             Default::default(),
             Default::default(),
-            Default::default(),
             None,
         )
         .await?
@@ -315,7 +310,6 @@ mod tests {
                 ),
                 end_position: KinesisOffset::None,
             })],
-            Default::default(),
             Default::default(),
             Default::default(),
             None,

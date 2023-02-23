@@ -28,9 +28,8 @@ use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
+    BoxSourceWithStateStream, Column, SplitId, SplitImpl, SplitMetaData, SplitReader, SourceContext,
 };
 
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
@@ -45,8 +44,7 @@ pub struct KafkaSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: Arc<SourceContext>,
 }
 
 #[async_trait]
@@ -57,8 +55,7 @@ impl SplitReader for KafkaSplitReader {
         properties: KafkaProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: Arc<SourceContext>,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut config = ClientConfig::new();
@@ -138,8 +135,7 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             split_id,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
             enable_upsert: properties
                 .upsert
                 .as_ref()

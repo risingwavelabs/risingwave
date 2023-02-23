@@ -27,9 +27,8 @@ use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
+    BoxSourceWithStateStream, Column, SplitId, SplitImpl, SplitMetaData, SplitReader, SourceContext,
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
@@ -41,8 +40,7 @@ pub struct CdcSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: Arc<SourceContext>,
 }
 
 #[async_trait]
@@ -54,9 +52,8 @@ impl SplitReader for CdcSplitReader {
         conn_props: CdcProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
-        _columns: Option<Vec<Column>>,
+        source_ctx: Arc<SourceContext>,
+        columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
         let split = splits.into_iter().next().unwrap();
@@ -68,8 +65,7 @@ impl SplitReader for CdcSplitReader {
                 conn_props,
                 split_id,
                 parser_config,
-                metrics,
-                source_info,
+                source_ctx,
             }),
             _ => Err(anyhow!(
                 "failed to create cdc split reader: invalid splis info"

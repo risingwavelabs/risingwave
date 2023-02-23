@@ -26,7 +26,7 @@ use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificPar
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, Column, ConnectorProperties, ConnectorState, SourceColumnDesc,
-    SourceInfo, SplitReaderImpl,
+    SourceInfo, SplitReaderImpl, SourceContext,
 };
 
 #[derive(Clone, Debug)]
@@ -83,8 +83,7 @@ impl ConnectorSource {
         &self,
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: Arc<SourceContext>,
     ) -> Result<BoxSourceWithStateStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
@@ -126,8 +125,7 @@ impl ConnectorSource {
                     props,
                     state,
                     parser_config,
-                    metrics,
-                    source_info,
+                    source_ctx,
                     data_gen_columns,
                 )
                 .await

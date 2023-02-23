@@ -18,8 +18,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use super::monitor::SourceMetrics;
-use super::{SourceInfo, SplitImpl, SplitReader};
+use super::{SplitImpl, SplitReader, SourceContext};
 use crate::parser::ParserConfig;
 use crate::source::{BoxSourceWithStateStream, Column};
 
@@ -36,8 +35,7 @@ impl SplitReader for DummySplitReader {
         _properties: Self::Properties,
         _state: Vec<SplitImpl>,
         _parser_config: ParserConfig,
-        _metrics: Arc<SourceMetrics>,
-        _source_info: SourceInfo,
+        _source_ctx: Arc<SourceContext>,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         Ok(Self {})

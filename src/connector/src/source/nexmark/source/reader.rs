@@ -29,14 +29,13 @@ use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
 use crate::source::data_gen_util::spawn_data_generation_stream;
-use crate::source::monitor::SourceMetrics;
 use crate::source::nexmark::source::combined_event::{
     combined_event_to_row, event_to_row, get_event_data_types, new_combined_event,
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
-    StreamChunkWithState,
+    BoxSourceWithStateStream, Column,  SplitId, SplitImpl, SplitMetaData, SplitReader,
+    StreamChunkWithState, SourceContext,
 };
 
 #[derive(Debug)]
@@ -51,8 +50,7 @@ pub struct NexmarkSplitReader {
 
     row_id_index: Option<usize>,
     split_id: SplitId,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: Arc<SourceContext>,
 }
 
 #[async_trait]
@@ -64,8 +62,7 @@ impl SplitReader for NexmarkSplitReader {
         properties: NexmarkProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: Arc<SourceContext>,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
@@ -104,8 +101,7 @@ impl SplitReader for NexmarkSplitReader {
             use_real_time: properties.use_real_time,
             min_event_gap_in_ns: properties.min_event_gap_in_ns,
             row_id_index,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -199,7 +195,6 @@ mod tests {
             let mut reader = NexmarkSplitReader::new(
                 props.clone(),
                 state,
-                Default::default(),
                 Default::default(),
                 Default::default(),
                 None,

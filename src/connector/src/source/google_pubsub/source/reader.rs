@@ -28,10 +28,9 @@ use super::TaggedReceivedMessage;
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::PubsubProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    BoxSourceWithStateStream, Column, SourceMessage, SplitId, SplitImpl, SplitMetaData,
+    SplitReader, SourceContext,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -44,8 +43,7 @@ pub struct PubsubSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: Arc<SourceContext>,
 }
 
 impl PubsubSplitReader {
@@ -120,8 +118,7 @@ impl SplitReader for PubsubSplitReader {
         properties: PubsubProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: Arc<SourceContext>,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(
@@ -171,8 +168,7 @@ impl SplitReader for PubsubSplitReader {
             split_id: split.id(),
             stop_offset,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
