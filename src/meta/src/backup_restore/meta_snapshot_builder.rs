@@ -22,9 +22,10 @@ use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 
-use crate::manager::model::get_system_params_at_snapshot;
+use crate::manager::model::SystemParamsModel;
 use crate::model::MetadataModel;
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
 
@@ -94,7 +95,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let function = Function::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-        let system_param = get_system_params_at_snapshot::<S>(&meta_store_snapshot)
+        let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
 
@@ -144,13 +145,13 @@ mod tests {
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot::MetaSnapshot;
     use risingwave_common::error::ToErrorStr;
+    use risingwave_common::system_param::default_system_params;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
     use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
     use crate::manager::model::SystemParamsModel;
     use crate::model::MetadataModel;
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
-    use crate::MetaOpts;
 
     #[tokio::test]
     async fn test_snapshot_builder() {
@@ -189,8 +190,7 @@ mod tests {
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("system params not found in meta store", err.to_error_str());
 
-        MetaOpts::test(true)
-            .init_system_params()
+        default_system_params()
             .insert(meta_store.deref())
             .await
             .unwrap();

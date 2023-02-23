@@ -35,6 +35,7 @@ use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
@@ -105,6 +106,7 @@ pub async fn rpc_serve(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
+    init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -138,6 +140,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 lease_interval_secs,
                 opts,
+                init_system_params,
             )
             .await
         }
@@ -150,6 +153,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 lease_interval_secs,
                 opts,
+                init_system_params,
             )
             .await
         }
@@ -163,6 +167,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
+    init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     let (svc_shutdown_tx, svc_shutdown_rx) = watch::channel(());
 
@@ -243,6 +248,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             address_info,
             max_heartbeat_interval,
             opts,
+            init_system_params,
             election_client,
             svc_shutdown_rx,
         )
@@ -303,12 +309,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
+    init_system_params: SystemParams,
     election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let init_system_params = opts.init_system_params();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -424,7 +430,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     // Initialize services.
     let backup_object_store = Arc::new(
         parse_remote_object_store(
-            &env.opts.backup_storage_url,
+            system_params_reader.backup_storage_url(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
         )
@@ -432,7 +438,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let backup_storage = Arc::new(
         ObjectStoreMetaSnapshotStorage::new(
-            &env.opts.backup_storage_directory,
+            system_params_reader.backup_storage_directory(),
             backup_object_store,
         )
         .await?,

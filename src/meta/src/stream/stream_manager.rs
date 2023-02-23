@@ -479,6 +479,8 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
+    use risingwave_common::system_param::default_system_params;
+    use risingwave_common::system_param::reader::SystemParamsReader;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
@@ -639,6 +641,7 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
+            let system_params = SystemParamsReader::from(default_system_params());
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -669,8 +672,10 @@ mod tests {
             )
             .await?;
 
-            let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+            let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+                hummock_manager.clone(),
+                system_params.checkpoint_frequency() as usize,
+            );
 
             let source_manager = Arc::new(
                 SourceManager::new(
