@@ -91,7 +91,7 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.
-    pub fn replace_source_stream(&mut self, data_stream: BoxSourceWithStateStream) {
+    pub fn replace_data_stream(&mut self, data_stream: BoxSourceWithStateStream) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,

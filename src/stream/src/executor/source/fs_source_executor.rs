@@ -188,7 +188,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
             .await?;
-        stream.replace_source_stream(reader);
+        stream.replace_data_stream(reader);
 
         self.stream_source_core.stream_source_splits = target_state
             .into_iter()

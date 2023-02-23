@@ -111,8 +111,8 @@ impl DmlExecutor {
                 Either::Left(msg) => {
                     // Stream messages.
                     if let Message::Barrier(barrier) = &msg {
-                        // We should deal with barrier messages here to pause or resume the data
-                        // from DML.
+                        // We should handle barrier messages here to pause or resume the data from
+                        // DML.
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),

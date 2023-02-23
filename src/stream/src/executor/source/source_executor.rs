@@ -179,7 +179,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
             .await?;
-        stream.replace_source_stream(reader);
+        stream.replace_data_stream(reader);
 
         self.stream_source_core
             .as_mut()
