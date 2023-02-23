@@ -41,6 +41,7 @@ pub struct KafkaSplitReader {
     stop_offset: Option<i64>,
     bytes_per_second: usize,
     max_num_messages: usize,
+    enable_upsert: bool,
 
     split_id: SplitId,
     parser_config: ParserConfig,
@@ -139,6 +140,11 @@ impl SplitReader for KafkaSplitReader {
             parser_config,
             metrics,
             source_info,
+            enable_upsert: properties
+                .upsert
+                .as_ref()
+                .filter(|x| *x == "true")
+                .is_some(),
         })
     }
 
@@ -174,7 +180,12 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                res.push(SourceMessage::from(msg));
+                if self.enable_upsert {
+                    res.push(SourceMessage::from_kafka_message_upsert(msg));
+                } else {
+                    res.push(SourceMessage::from(msg));
+                }
+
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
                         tracing::debug!(
