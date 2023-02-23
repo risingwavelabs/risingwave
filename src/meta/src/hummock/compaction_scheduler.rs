@@ -19,7 +19,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::compact_task::{self, TaskStatus};
+use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
@@ -171,8 +171,10 @@ where
             async move {
                 // we must assign true to `stopped` before waking up `compaction_resume_notifier`.
                 self.stopped.store(true, Ordering::Release);
+                let _ = sched_channel_closed
+                    .request_tx
+                    .send((1, TaskType::TypeUnspecified));
                 self.compaction_resume_notifier.notify_waiters();
-                sched_channel_closed.request_tx.closed().await;
             },
             handle,
         );
@@ -375,6 +377,9 @@ where
         task_type: compact_task::TaskType,
         sched_channel: &Arc<CompactionRequestChannel>,
     ) -> bool {
+        if task_type == TaskType::TypeUnspecified {
+            return false;
+        }
         sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
         sched_channel.unschedule(compaction_group, task_type);
 
