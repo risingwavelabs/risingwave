@@ -14,8 +14,10 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -502,9 +504,11 @@ where
 
         let mut stream_job = StreamingJob::Table(None, req.table.unwrap());
         let fragment_graph = req.fragment_graph.unwrap();
+        let table_col_index_mapping =
+            ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
 
         let (ctx, table_fragments) = self
-            .prepare_replace_table(&mut stream_job, fragment_graph)
+            .prepare_replace_table(&mut stream_job, fragment_graph, table_col_index_mapping)
             .await?;
 
         let version = match self
@@ -847,9 +851,9 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
+        table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
         let id = stream_job.id();
-        let original_table = self.catalog_manager.get_table(id).await?;
 
         // 1. Get the env for streaming jobs.
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
@@ -864,7 +868,6 @@ where
         // 3. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let stream_job = &*stream_job;
-        let table = stream_job.table().unwrap();
 
         // 4. Mark current relation as "updating".
         self.catalog_manager
@@ -875,42 +878,15 @@ where
         // graph that contains all information needed for building the actor graph.
         let original_table_fragment = self.fragment_manager.get_mview_fragment(id.into()).await?;
 
-        let column_mapping: HashMap<_, _> = original_table
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(index, c)| {
-                let new_index = table
-                    .columns
-                    .iter()
-                    .position(|nc| {
-                        nc.get_column_desc().unwrap().column_id
-                            == c.get_column_desc().unwrap().column_id
-                    })
-                    .map(|i| i as u32);
-                (index as u32, new_index)
-            })
-            .collect();
-        let map = |index: &[u32]| -> Option<Vec<u32>> {
-            index
-                .iter()
-                .map(|i| column_mapping.get(i).copied().flatten())
-                .collect()
-        };
+        // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self
             .fragment_manager
             .get_downstream_chain_fragments(id.into())
             .await?
             .into_iter()
-            .map(|(d, f)| {
-                let d = DispatchStrategy {
-                    r#type: d.r#type,
-                    dist_key_indices: map(&d.dist_key_indices).unwrap(),
-                    output_indices: map(&d.output_indices).unwrap(),
-                };
-                (d, f)
-            })
-            .collect();
+            .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
+            .collect::<Option<_>>()
+            .context("failed to map columns")?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,
