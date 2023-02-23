@@ -82,9 +82,8 @@ impl StreamNode for StreamDml {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Dml(DmlNode {
-            // Meta will fill this table id.
-            table_id: 0,
-            table_version_id: INITIAL_TABLE_VERSION_ID, // TODO: use correct table version id
+            table_id: 0,                                // Meta will fill this table id.
+            table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),
         })
     }
