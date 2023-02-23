@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::backtrace::Backtrace;
+use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
+use std::time::{Duration, SystemTime};
 
 use memcomparable::Error as MemComparableError;
 use risingwave_pb::ProstFieldNotFound;
@@ -420,6 +422,43 @@ macro_rules! bail {
     ($fmt:expr, $($arg:tt)*) => {
         return Err($crate::error::anyhow_error!($fmt, $($arg)*).into())
     };
+}
+
+const ERROR_SUPRESSOR_RESET_TIME_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
+#[derive(Debug)]
+pub struct ErrorSuppressor {
+    max_unique: usize,
+    unique: HashSet<String>,
+    last_reset_time: SystemTime,
+}
+
+impl ErrorSuppressor {
+    pub fn new(max_unique: usize) -> Self {
+        Self {
+            max_unique,
+            last_reset_time: SystemTime::now(),
+            unique: Default::default(),
+        }
+    }
+
+    pub fn suppress_error(&mut self, error: &str) -> bool {
+        self.try_reset();
+        if self.unique.contains(error) {
+            false
+        } else if self.unique.len() < self.max_unique {
+            self.unique.insert(error.to_string());
+            false
+        } else {
+            // We have exceeded the capacity.
+            true
+        }
+    }
+
+    fn try_reset(&mut self) {
+        if self.last_reset_time.elapsed().unwrap() >= ERROR_SUPRESSOR_RESET_TIME_DURATION {
+            *self = Self::new(self.max_unique)
+        }
+    }
 }
 
 #[cfg(test)]
