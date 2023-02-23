@@ -25,6 +25,7 @@ use crate::optimizer::plan_node::{
     LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone)]
 pub struct BatchProjectSet {
