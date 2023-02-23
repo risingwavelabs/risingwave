@@ -192,12 +192,7 @@ impl StreamNode for StreamDeltaJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x)
-                        .to_expr_proto()
-                }),
+                .map(|x| x.to_expr_proto()),
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {

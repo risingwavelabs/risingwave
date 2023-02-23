@@ -119,18 +119,13 @@ impl ToBatchProst for BatchSortAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             group_key: self
                 .group_key()
                 .iter()
                 .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(*idx, DataType::Int32))))
-                .map(|expr| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(expr)
-                        .to_expr_proto()
-                })
+                .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
         })
     }

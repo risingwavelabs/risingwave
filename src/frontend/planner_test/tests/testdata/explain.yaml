@@ -37,6 +37,14 @@
 
     LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
 
+    Inline Session Timezone:
+
+    BatchValues { rows: [[1:Int32]] }
+
+    Const eval exprs:
+
+    BatchValues { rows: [[1:Int32]] }
+
     To Batch Physical Plan:
 
     BatchValues { rows: [[1:Int32]] }
@@ -50,7 +58,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 29,
+            "plan_node_id": 33,
             "plan_node_type": "BatchValues",
             "schema": [
               {
