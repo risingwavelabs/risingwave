@@ -19,7 +19,8 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceErrorContext, SourceInfo, SplitMetaData,
+    StreamChunkWithState,
 };
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -97,10 +98,16 @@ impl<S: StateStore> SourceExecutor<S> {
                 state,
                 column_ids,
                 source_desc.metrics.clone(),
-                SourceInfo::new(
+                SourceInfo::new_with_context(
                     self.ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id,
                     self.ctx.fragment_id,
+                    SourceErrorContext::new_with_suppressor(
+                        self.stream_source_core.as_ref().unwrap().source_id,
+                        self.ctx.fragment_id,
+                        self.metrics.clone(),
+                        self.ctx.error_suppressor.clone(),
+                    ),
                 ),
             )
             .await

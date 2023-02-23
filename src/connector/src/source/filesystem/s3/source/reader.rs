@@ -189,11 +189,6 @@ impl S3FileReader {
         for split in self.splits {
             let actor_id = self.source_info.actor_id.to_string();
             let source_id = self.source_info.source_id.to_string();
-            let error_ctx = SourceErrorContext::new(
-                self.source_info.source_id.table_id,
-                self.source_info.fragment_id,
-                self.metrics.clone(),
-            );
 
             let split_id = split.id();
 
@@ -205,7 +200,10 @@ impl S3FileReader {
                 self.source_info,
             );
 
-            let parser = ByteStreamSourceParserImpl::create(self.parser_config.clone(), error_ctx)?;
+            let parser = ByteStreamSourceParserImpl::create(
+                self.parser_config.clone(),
+                self.source_info.error_ctx().clone(),
+            )?;
             let msg_stream = parser.into_stream(Box::pin(data_stream));
             #[for_await]
             for msg in msg_stream {

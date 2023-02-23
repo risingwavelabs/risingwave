@@ -26,7 +26,8 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceFormat, SourceInfo, SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceColumnDesc, SourceErrorContext, SourceFormat, SourceInfo, SplitImpl,
+    SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::RowFormatType;
@@ -161,7 +162,16 @@ impl SourceExecutor {
                 Some(vec![self.split]),
                 self.column_ids,
                 self.metrics,
-                SourceInfo::new(u32::MAX, self.source_id, u32::MAX),
+                SourceInfo::new_with_context(
+                    u32::MAX,
+                    self.source_id,
+                    u32::MAX,
+                    SourceErrorContext::new(
+                        self.source_id.table_id,
+                        u32::MAX,
+                        self.metrics.clone(),
+                    ),
+                ),
             )
             .await?;
 

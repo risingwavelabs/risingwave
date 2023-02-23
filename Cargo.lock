@@ -5888,6 +5888,7 @@ dependencies = [
  "moka",
  "nexmark",
  "num-traits",
+ "parking_lot 0.12.1",
  "prometheus",
  "prost 0.11.6",
  "prost-reflect",

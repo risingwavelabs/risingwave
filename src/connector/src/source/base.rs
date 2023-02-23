@@ -21,10 +21,11 @@ use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, ErrorSuppressor, RwError};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -76,37 +77,71 @@ pub trait SplitEnumerator: Sized {
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     pub actor_id: u32,
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
+    error_ctx: SourceErrorContext,
 }
 
 impl SourceInfo {
     pub fn new(actor_id: u32, source_id: TableId, fragment_id: u32) -> Self {
+        let mut error_ctx = SourceErrorContext::for_test();
+        error_ctx.fragment_id = fragment_id;
+        error_ctx.table_id = source_id.table_id;
+        Self::new_with_context(actor_id, source_id, fragment_id, error_ctx)
+    }
+
+    pub fn new_with_context(
+        actor_id: u32,
+        source_id: TableId,
+        fragment_id: u32,
+        error_ctx: SourceErrorContext,
+    ) -> Self {
         SourceInfo {
             actor_id,
             source_id,
             fragment_id,
+            error_ctx,
         }
+    }
+
+    pub fn error_ctx(&self) -> &SourceErrorContext {
+        &self.error_ctx
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SourceErrorContext {
     metrics: Arc<SourceMetrics>,
     table_id: u32,
     fragment_id: u32,
+    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 
 impl SourceErrorContext {
-    pub(crate) fn new(table_id: u32, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
+    pub fn new(table_id: u32, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
         Self {
             metrics,
             table_id,
             fragment_id,
+            error_suppressor: None,
+        }
+    }
+
+    pub fn new_with_suppressor(
+        table_id: u32,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+    ) -> Self {
+        Self {
+            metrics,
+            table_id,
+            fragment_id,
+            error_suppressor: Some(error_suppressor),
         }
     }
 
@@ -115,18 +150,26 @@ impl SourceErrorContext {
         if self.fragment_id == u32::MAX {
             return;
         }
-        self.metrics
-            .user_source_error_count
-            .with_label_values(&[
-                "SourceError",
-                // TODO(jon-chuang): add the error msg truncator to truncate these
-                &e.inner().to_string(),
-                // Let's be a bit more specific for SourceExecutor
-                "SourceExecutor",
-                &self.fragment_id.to_string(),
-                &self.table_id.to_string(),
-            ])
-            .inc();
+        let err_string = e.inner().to_string();
+        if self.error_suppressor.is_none()
+            || !self
+                .error_suppressor
+                .map(|s| s.lock().suppress_error(&err_string))
+                .unwrap()
+        {
+            self.metrics
+                .user_source_error_count
+                .with_label_values(&[
+                    "SourceError",
+                    // TODO(jon-chuang): add the error msg truncator to truncate these
+                    &err_string,
+                    // Let's be a bit more specific for SourceExecutor
+                    "SourceExecutor",
+                    &self.fragment_id.to_string(),
+                    &self.table_id.to_string(),
+                ])
+                .inc();
+        }
     }
 
     pub(crate) fn for_test() -> Self {
@@ -134,6 +177,7 @@ impl SourceErrorContext {
             metrics: Arc::new(SourceMetrics::unused()),
             table_id: u32::MAX,
             fragment_id: u32::MAX,
+            error_suppressor: None,
         }
     }
 }
