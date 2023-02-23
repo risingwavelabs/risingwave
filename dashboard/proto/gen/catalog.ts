@@ -59,6 +59,47 @@ export function sinkTypeToJSON(object: SinkType): string {
   }
 }
 
+export const HandleConflictBehavior = {
+  NoCheck: "NoCheck",
+  OverWrite: "OverWrite",
+  Ignore: "Ignore",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof HandleConflictBehavior];
+
+export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
+  switch (object) {
+    case 0:
+    case "NoCheck":
+      return HandleConflictBehavior.NoCheck;
+    case 1:
+    case "OverWrite":
+      return HandleConflictBehavior.OverWrite;
+    case 2:
+    case "Ignore":
+      return HandleConflictBehavior.Ignore;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return HandleConflictBehavior.UNRECOGNIZED;
+  }
+}
+
+export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
+  switch (object) {
+    case HandleConflictBehavior.NoCheck:
+      return "NoCheck";
+    case HandleConflictBehavior.OverWrite:
+      return "OverWrite";
+    case HandleConflictBehavior.Ignore:
+      return "Ignore";
+    case HandleConflictBehavior.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /**
  * The rust prost library always treats uint64 as required and message as
  * optional. In order to allow `row_id_index` as an optional field, we wrap
@@ -210,7 +251,7 @@ export interface Table {
    */
   valueIndices: number[];
   definition: string;
-  handlePkConflict: boolean;
+  handlePkConflict: HandleConflictBehavior;
   readPrefixLenHint: number;
   watermarkIndices: number[];
   /**
@@ -838,7 +879,7 @@ function createBaseTable(): Table {
     rowIdIndex: undefined,
     valueIndices: [],
     definition: "",
-    handlePkConflict: false,
+    handlePkConflict: HandleConflictBehavior.NoCheck,
     readPrefixLenHint: 0,
     watermarkIndices: [],
     version: undefined,
@@ -880,7 +921,9 @@ export const Table = {
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflict: isSet(object.handlePkConflict)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflict)
+        : HandleConflictBehavior.NoCheck,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
       watermarkIndices: Array.isArray(object?.watermarkIndices)
         ? object.watermarkIndices.map((e: any) => Number(e))
@@ -942,7 +985,8 @@ export const Table = {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflict !== undefined &&
+      (obj.handlePkConflict = handleConflictBehaviorToJSON(message.handlePkConflict));
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     if (message.watermarkIndices) {
       obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
@@ -996,7 +1040,7 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflict = object.handlePkConflict ?? HandleConflictBehavior.NoCheck;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)

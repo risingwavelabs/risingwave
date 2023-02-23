@@ -25,6 +25,47 @@ import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
 
+export const HandleConflictBehavior = {
+  NoCheck: "NoCheck",
+  OverWrite: "OverWrite",
+  Ignore: "Ignore",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof HandleConflictBehavior];
+
+export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
+  switch (object) {
+    case 0:
+    case "NoCheck":
+      return HandleConflictBehavior.NoCheck;
+    case 1:
+    case "OverWrite":
+      return HandleConflictBehavior.OverWrite;
+    case 2:
+    case "Ignore":
+      return HandleConflictBehavior.Ignore;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return HandleConflictBehavior.UNRECOGNIZED;
+  }
+}
+
+export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
+  switch (object) {
+    case HandleConflictBehavior.NoCheck:
+      return "NoCheck";
+    case HandleConflictBehavior.OverWrite:
+      return "OverWrite";
+    case HandleConflictBehavior.Ignore:
+      return "Ignore";
+    case HandleConflictBehavior.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export const ChainType = {
   CHAIN_UNSPECIFIED: "CHAIN_UNSPECIFIED",
   /** CHAIN - CHAIN is corresponding to the chain executor. */
@@ -427,7 +468,7 @@ export interface MaterializeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  handlePkConflict: HandleConflictBehavior;
 }
 
 export interface AggCallState {
@@ -698,7 +739,7 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  handlePkConflict: HandleConflictBehavior;
 }
 
 /** Special node for shared state. LookupNode will join an arrangement with a stream. */
@@ -2084,7 +2125,7 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: false };
+  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: HandleConflictBehavior.NoCheck };
 }
 
 export const MaterializeNode = {
@@ -2095,7 +2136,9 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflict: isSet(object.handlePkConflict)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflict)
+        : HandleConflictBehavior.NoCheck,
     };
   },
 
@@ -2108,7 +2151,8 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflict !== undefined &&
+      (obj.handlePkConflict = handleConflictBehaviorToJSON(message.handlePkConflict));
     return obj;
   },
 
@@ -2117,7 +2161,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflict = object.handlePkConflict ?? HandleConflictBehavior.NoCheck;
     return message;
   },
 };
@@ -3079,7 +3123,12 @@ export const ArrangementInfo = {
 };
 
 function createBaseArrangeNode(): ArrangeNode {
-  return { tableInfo: undefined, distributionKey: [], table: undefined, handlePkConflict: false };
+  return {
+    tableInfo: undefined,
+    distributionKey: [],
+    table: undefined,
+    handlePkConflict: HandleConflictBehavior.NoCheck,
+  };
 }
 
 export const ArrangeNode = {
@@ -3088,7 +3137,9 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflict: isSet(object.handlePkConflict)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflict)
+        : HandleConflictBehavior.NoCheck,
     };
   },
 
@@ -3102,7 +3153,8 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflict !== undefined &&
+      (obj.handlePkConflict = handleConflictBehaviorToJSON(message.handlePkConflict));
     return obj;
   },
 
@@ -3113,7 +3165,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflict = object.handlePkConflict ?? HandleConflictBehavior.NoCheck;
     return message;
   },
 };
