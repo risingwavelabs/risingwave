@@ -21,4 +21,4 @@ export LOGDIR=.risingwave/log
 mkdir -p $LOGDIR
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing"
-MADSIM_TEST_SEED=6 ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-6.log
+MADSIM_TEST_SEED=6 ./risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
