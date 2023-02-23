@@ -99,7 +99,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 state,
                 column_ids,
                 source_desc.metrics.clone(),
-                SourceInfo::new(self.ctx.id, self.stream_source_core.source_id),
+                SourceInfo::new(
+                    self.ctx.id,
+                    self.stream_source_core.source_id,
+                    self.ctx.fragment_id,
+                ),
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;

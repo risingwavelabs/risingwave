@@ -544,8 +544,12 @@ impl LogicalScan {
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {
-                return LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch();
+                let plan =
+                    LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch()?;
+                assert_eq!(plan.schema(), self.schema());
+                return required_order.enforce_if_not_satisfies(plan);
             }
+
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
@@ -606,17 +610,7 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        // rewrite the condition before converting to batch as we will handle the expressions in a
-        // special way
-        let new_predicate = Condition {
-            conjunctions: self
-                .predicate()
-                .conjunctions
-                .iter()
-                .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
-                .collect(),
-        };
-        let new = self.clone_with_predicate(new_predicate);
+        let new = self.clone_with_predicate(self.predicate().clone());
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();

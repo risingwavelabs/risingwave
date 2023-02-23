@@ -319,7 +319,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
@@ -1196,6 +1196,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1231,6 +1232,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1303,6 +1305,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1340,6 +1343,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
