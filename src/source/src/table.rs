@@ -52,7 +52,6 @@ pub struct TableDmlHandle {
     core: RwLock<TableDmlHandleCore>,
 
     /// All columns in this table.
-    #[allow(dead_code)]
     column_descs: Vec<ColumnDesc>,
 }
 
@@ -122,6 +121,11 @@ impl TableDmlHandle {
                 }
             }
         }
+    }
+
+    /// Get the reference of all columns in this table.
+    pub(super) fn column_descs(&self) -> &[ColumnDesc] {
+        self.column_descs.as_ref()
     }
 }
 

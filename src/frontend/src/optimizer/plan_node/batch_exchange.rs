@@ -26,7 +26,7 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order, Order
 
 /// `BatchExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExchange {
     pub base: PlanBase,
     input: PlanRef,

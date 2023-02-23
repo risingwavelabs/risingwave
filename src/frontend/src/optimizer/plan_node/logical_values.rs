@@ -31,7 +31,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalValues {
     pub base: PlanBase,
     rows: Arc<[Vec<ExprImpl>]>,

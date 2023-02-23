@@ -54,7 +54,7 @@ impl From<SinkId> for u32 {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SinkType {
     /// The data written into the sink connector can only be INSERT. No UPDATE or DELETE is
     /// allowed.
