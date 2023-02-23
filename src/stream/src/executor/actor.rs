@@ -21,8 +21,8 @@ use futures::pin_mut;
 use hytra::TrAdder;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
@@ -41,7 +41,7 @@ pub struct ActorContext {
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
     streaming_metrics: Arc<StreamingMetrics>,
-    pub error_suppressor: Arc<Mutex<ErrorSuppressor>>
+    pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -73,7 +73,7 @@ impl ActorContext {
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
             streaming_metrics,
-            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors)))
+            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
         })
     }
 
@@ -91,7 +91,6 @@ impl ActorContext {
                     &self.fragment_id.to_string(),
                 ])
                 .inc();
-            
         }
     }
 
