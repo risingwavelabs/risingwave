@@ -252,6 +252,10 @@ pub struct StreamingConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    /// Max unique user stream errors per actor
+    #[serde(default = "default::streaming::unique_user_stream_errors")]
+    pub unique_user_stream_errors: usize,
 }
 
 impl Default for StreamingConfig {
@@ -635,6 +639,10 @@ mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::On
+        }
+
+        pub fn unique_user_stream_errors() -> usize {
+            10
         }
     }
 

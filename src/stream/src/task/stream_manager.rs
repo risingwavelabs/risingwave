@@ -607,6 +607,7 @@ impl LocalStreamManagerCore {
                 actor.fragment_id,
                 self.total_mem_val.clone(),
                 self.streaming_metrics.clone(),
+                self.config.unique_user_stream_errors,
             );
             let vnode_bitmap = actor
                 .vnode_bitmap

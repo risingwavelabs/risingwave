@@ -18,7 +18,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
-use super::generic::GenericPlanRef;
 use super::{
     ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
@@ -27,7 +26,7 @@ use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchFilter {
     pub base: PlanBase,
     logical: LogicalFilter,
@@ -80,10 +79,7 @@ impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
             search_condition: Some(
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(ExprImpl::from(self.logical.predicate().clone()))
-                    .to_expr_proto(),
+                ExprImpl::from(self.logical.predicate().clone()).to_expr_proto(),
             ),
         })
     }
