@@ -16,7 +16,7 @@
 
 use itertools::Itertools;
 use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaChaRng;
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Error;
