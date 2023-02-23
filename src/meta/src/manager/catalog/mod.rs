@@ -1041,7 +1041,7 @@ where
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let table_key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
-            database_core.sources.contains_key(&source.id)
+            !database_core.sources.contains_key(&source.id)
                 && !database_core.tables.contains_key(&table.id)
                 && database_core.has_in_progress_creation(&source_key)
                 && database_core.has_in_progress_creation(&table_key),
@@ -1232,7 +1232,7 @@ where
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
         assert!(
-            database_core.indexes.contains_key(&index.id)
+            !database_core.indexes.contains_key(&index.id)
                 && database_core.has_in_progress_creation(&key),
             "index must not exist and be in creating procedure"
         );
@@ -1356,7 +1356,7 @@ where
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         assert!(
-            database_core.sinks.contains_key(&sink.id)
+            !database_core.sinks.contains_key(&sink.id)
                 && database_core.has_in_progress_creation(&key),
             "sink must not exit and be in creating procedure"
         );
