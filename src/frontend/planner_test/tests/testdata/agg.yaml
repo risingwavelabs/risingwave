@@ -1131,7 +1131,7 @@
           └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
             └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
               └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
-- name: force two phase aggregation should succeed with hashshard
+- name: force two phase aggregation should succeed with hashshard, but not SomeShard.
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
