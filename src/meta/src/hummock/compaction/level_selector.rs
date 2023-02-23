@@ -245,7 +245,14 @@ impl DynamicLevelSelectorCore {
     /// This algorithm refers to the implementation in  `</>https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141</>`
     pub fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
         let ctx = self.calculate_level_base_size(levels);
+        self.compact_pending_bytes_needed_with_ctx(levels, &ctx)
+    }
 
+    pub fn compact_pending_bytes_needed_with_ctx(
+        &self,
+        levels: &Levels,
+        ctx: &SelectContext,
+    ) -> u64 {
         // l0
         let mut compact_pending_bytes = 0;
         let mut compact_to_next_level_bytes = 0;

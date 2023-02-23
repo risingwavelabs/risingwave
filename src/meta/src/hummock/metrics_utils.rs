@@ -23,11 +23,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
     HummockVersionStats,
 };
 
-use super::compaction::DynamicLevelSelectorCore;
+use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -232,13 +232,15 @@ pub fn trigger_lsm_stat(
     metrics: &MetaMetrics,
     compaction_config: Arc<CompactionConfig>,
     levels: &Levels,
-    compact_task: &mut CompactTask,
+    compaction_group_id: CompactionGroupId,
 ) {
-    let group_label = compact_task.compaction_group_id.to_string();
+    let group_label = compaction_group_id.to_string();
+    // compact_pending_bytes
+    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config.clone());
+    let ctx = dynamic_level_core.calculate_level_base_size(levels);
     {
-        // compact_pending_bytes
-        let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config);
-        let compact_pending_bytes_needed = dynamic_level_core.compact_pending_bytes_needed(levels);
+        let compact_pending_bytes_needed =
+            dynamic_level_core.compact_pending_bytes_needed_with_ctx(levels, &ctx);
 
         metrics
             .compact_pending_bytes
@@ -263,22 +265,18 @@ pub fn trigger_lsm_stat(
             .collect_vec();
 
         for (level_index, compression_ratio) in level_compression_ratio {
-            let compression_algorithm_label = if level_index == compact_task.target_level {
-                match compact_task.compression_algorithm {
-                    1 => "Lz4",
-                    2 => "Zstd",
-                    _ => "",
-                }
-            } else {
-                ""
-            };
+            let compression_algorithm_label = get_compression_algorithm(
+                compaction_config.as_ref(),
+                ctx.base_level,
+                level_index as usize,
+            );
 
             metrics
                 .compact_level_compression_ratio
                 .with_label_values(&[
                     &group_label,
                     &level_index.to_string(),
-                    compression_algorithm_label,
+                    &compression_algorithm_label,
                 ])
                 .set(compression_ratio);
         }
