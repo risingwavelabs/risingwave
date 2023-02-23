@@ -193,8 +193,6 @@ where
         // database and schemas.
         user_core.increase_ref_count(database.owner, 1 + schemas_added.len());
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
         let mut version = self
             .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
             .await;

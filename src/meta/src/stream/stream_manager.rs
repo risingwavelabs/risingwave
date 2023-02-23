@@ -322,7 +322,6 @@ where
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
