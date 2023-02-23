@@ -34,16 +34,13 @@ pub struct LocalSystemParamManager {
 
     /// Sender of the latest parameters.
     tx: Sender<SystemParamsReaderRef>,
-
-    /// Receiver of the latest parameters.
-    rx: Receiver<SystemParamsReaderRef>,
 }
 
 impl LocalSystemParamManager {
     pub fn new(params: SystemParamsReader) -> Self {
         let params = Arc::new(ArcSwap::from_pointee(params));
-        let (tx, rx) = channel(params.clone());
-        Self { params, tx, rx }
+        let (tx, _) = channel(params.clone());
+        Self { params, tx }
     }
 
     pub fn get_params(&self) -> SystemParamsReaderRef {
@@ -60,7 +57,7 @@ impl LocalSystemParamManager {
     }
 
     pub fn watch_parmams(&self) -> Receiver<SystemParamsReaderRef> {
-        self.rx.clone()
+        self.tx.subscribe()
     }
 }
 
