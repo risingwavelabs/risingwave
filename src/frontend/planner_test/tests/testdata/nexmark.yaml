@@ -279,14 +279,16 @@
           |   └─BatchHashAgg { group_key: [window_start, bid.auction], aggs: [count] }
           |     └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
           |       └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-          |         └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
+          |         └─BatchFilter { predicate: IsNotNull(bid.date_time) }
+          |           └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
           └─BatchProject { exprs: [max(count), window_start] }
             └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
               └─BatchExchange { order: [], dist: HashShard(window_start) }
                 └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
                   └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
                     └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-                      └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
+                      └─BatchFilter { predicate: IsNotNull(bid.date_time) }
+                        └─BatchScan { table: bid, columns: [bid.auction, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
     └─StreamProject { exprs: [bid.auction, count, window_start, window_start] }
@@ -297,7 +299,8 @@
           |   └─StreamAppendOnlyHashAgg { group_key: [window_start, bid.auction], aggs: [count, count] }
           |     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
           |       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-          |         └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+          |         └─StreamFilter { predicate: IsNotNull(bid.date_time) }
+          |           └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
           └─StreamProject { exprs: [max(count), window_start] }
             └─StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
               └─StreamExchange { dist: HashShard(window_start) }
@@ -305,7 +308,8 @@
                   └─StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count, count] }
                     └─StreamExchange { dist: HashShard(bid.auction, window_start) }
                       └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-                        └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+                        └─StreamFilter { predicate: IsNotNull(bid.date_time) }
+                          └─StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
@@ -328,9 +332,10 @@
 
     Fragment 2
       StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-        Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-          Upstream
-          BatchPlanNode
+        StreamFilter { predicate: IsNotNull(bid.date_time) }
+          Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+            Upstream
+            BatchPlanNode
 
     Fragment 3
       StreamProject { exprs: [bid.auction, window_start, count] }
@@ -340,9 +345,10 @@
 
     Fragment 4
       StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
-        Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-          Upstream
-          BatchPlanNode
+        StreamFilter { predicate: IsNotNull(bid.date_time) }
+          Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+            Upstream
+            BatchPlanNode
 
      Table 0 { columns: [bid_auction, count, window_start], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [2] }
      Table 1 { columns: [window_start, bid_auction, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
