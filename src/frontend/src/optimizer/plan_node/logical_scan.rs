@@ -39,7 +39,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -610,17 +610,7 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        // rewrite the condition before converting to batch as we will handle the expressions in a
-        // special way
-        let new_predicate = Condition {
-            conjunctions: self
-                .predicate()
-                .conjunctions
-                .iter()
-                .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
-                .collect(),
-        };
-        let new = self.clone_with_predicate(new_predicate);
+        let new = self.clone_with_predicate(self.predicate().clone());
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
