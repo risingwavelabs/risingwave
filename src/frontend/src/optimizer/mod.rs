@@ -703,7 +703,7 @@ impl PlanRoot {
             stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
         }
 
-        let handle_pk_conflict = match append_only {
+        let conflict_behavior = match append_only {
             true => ConflictBehavior::NoCheck,
             false => ConflictBehavior::OverWrite,
         };
@@ -714,7 +714,8 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            handle_pk_conflict,
+            !append_only,
+            conflict_behavior,
             row_id_index,
             version,
         )

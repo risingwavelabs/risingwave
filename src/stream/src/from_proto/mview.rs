@@ -43,7 +43,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let table = node.get_table()?;
 
-        let conflict_behavior = match table.handle_pk_conflict() {
+        let conflict_behavior = match table.handle_pk_conflict_behavior() {
             risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
             risingwave_pb::catalog::HandleConflictBehavior::OverWrite => {
                 ConflictBehavior::OverWrite
@@ -96,7 +96,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let conflict_behavior = match table.handle_pk_conflict() {
+        let conflict_behavior = match table.handle_pk_conflict_behavior() {
             risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
             risingwave_pb::catalog::HandleConflictBehavior::OverWrite => {
                 ConflictBehavior::OverWrite

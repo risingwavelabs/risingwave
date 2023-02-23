@@ -71,6 +71,7 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
+            false,
             ConflictBehavior::NoCheck,
             None,
             table_type,
@@ -93,7 +94,8 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: ConflictBehavior,
+        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
     ) -> Result<Self> {
@@ -106,6 +108,7 @@ impl StreamMaterialize {
             columns,
             definition,
             handle_pk_conflict,
+            conflict_behavior,
             row_id_index,
             TableType::Table,
             version,
@@ -153,6 +156,7 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
+        handle_pk_conflict: bool,
         conflict_behavior: ConflictBehavior,
         row_id_index: Option<usize>,
         table_type: TableType,
@@ -192,6 +196,7 @@ impl StreamMaterialize {
             row_id_index,
             value_indices,
             definition,
+            handle_pk_conflict,
             conflict_behavior_type,
             read_prefix_len_hint,
             version,
@@ -272,7 +277,8 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let handle_pk_conflict = self.table.conflict_behavior_type();
+        let handle_pk_conflict = self.table.handle_pk_conflict();
+        let handle_pk_conflict_behavior = self.table.conflict_behavior_type();
         ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
@@ -285,6 +291,7 @@ impl StreamNode for StreamMaterialize {
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
             handle_pk_conflict,
+            handle_pk_conflict_behavior,
         })
     }
 }
