@@ -60,6 +60,7 @@ export function sinkTypeToJSON(object: SinkType): string {
 }
 
 export const HandleConflictBehavior = {
+  NoCheck: "NoCheck",
   OverWrite: "OverWrite",
   Ignore: "Ignore",
   UNRECOGNIZED: "UNRECOGNIZED",
@@ -70,9 +71,12 @@ export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof 
 export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
   switch (object) {
     case 0:
+    case "NoCheck":
+      return HandleConflictBehavior.NoCheck;
+    case 1:
     case "OverWrite":
       return HandleConflictBehavior.OverWrite;
-    case 1:
+    case 2:
     case "Ignore":
       return HandleConflictBehavior.Ignore;
     case -1:
@@ -84,6 +88,8 @@ export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehav
 
 export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
   switch (object) {
+    case HandleConflictBehavior.NoCheck:
+      return "NoCheck";
     case HandleConflictBehavior.OverWrite:
       return "OverWrite";
     case HandleConflictBehavior.Ignore:
@@ -877,7 +883,7 @@ function createBaseTable(): Table {
     handlePkConflict: false,
     readPrefixLenHint: 0,
     watermarkIndices: [],
-    handlePkConflictBehavior: HandleConflictBehavior.OverWrite,
+    handlePkConflictBehavior: HandleConflictBehavior.NoCheck,
     version: undefined,
   };
 }
@@ -924,7 +930,7 @@ export const Table = {
         : [],
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.OverWrite,
+        : HandleConflictBehavior.NoCheck,
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -1041,7 +1047,7 @@ export const Table = {
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.OverWrite;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NoCheck;
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;
