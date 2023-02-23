@@ -52,7 +52,9 @@ enum DistId {
 /// Facts as the input of the scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Fact {
-    /// An edge in the stream graph.
+    /// An internal(building) fragment.
+    Fragment(Id),
+    /// An edge in the fragment graph.
     Edge {
         from: Id,
         to: Id,
@@ -80,10 +82,10 @@ crepe::crepe! {
     @input
     struct Input(Fact);
 
+    struct Fragment(Id);
     struct Edge(Id, Id, DispatcherType);
     struct ExternalReq(Id, DistId);
     struct SingletonReq(Id);
-    struct Fragment(Id);
     struct Requirement(Id, DistId);
 
     @output
@@ -93,13 +95,10 @@ crepe::crepe! {
     struct Failed(Id);
 
     // Extract facts.
+    Fragment(id) <- Input(f), let Fact::Fragment(id) = f;
     Edge(from, to, dt) <- Input(f), let Fact::Edge { from, to, dt } = f;
     ExternalReq(id, dist) <- Input(f), let Fact::ExternalReq { id, dist } = f;
     SingletonReq(id) <- Input(f), let Fact::SingletonReq(id) = f;
-
-    // Internal fragments.
-    Fragment(x) <- Edge(x, _, _), !ExternalReq(x, _);
-    Fragment(y) <- Edge(_, y, _), !ExternalReq(y, _);
 
     // Requirements from the facts.
     Requirement(x, d) <- ExternalReq(x, d);
@@ -270,8 +269,9 @@ impl Scheduler {
 
         let mut facts = Vec::new();
 
-        // Singletons
+        // Building fragments and Singletons
         for (&id, fragment) in graph.building_fragments() {
+            facts.push(Fact::Fragment(id));
             if fragment.is_singleton {
                 facts.push(Fact::SingletonReq(id));
             }
@@ -388,6 +388,37 @@ mod tests {
         assert!(!failed.is_empty());
     }
 
+    // 101
+    #[test]
+    fn test_single_fragment_hash() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Fragment(101.into()),
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::DefaultHash,
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 101
+    #[test]
+    fn test_single_fragment_singleton() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Fragment(101.into()),
+            Fact::SingletonReq(101.into()),
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::DefaultSingleton,
+        };
+
+        test_success(facts, expected);
+    }
+
     // 1 -|-> 101 -->
     //                103 --> 104
     // 2 -|-> 102 -->
@@ -395,6 +426,10 @@ mod tests {
     fn test_scheduling_mv_on_mv() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
+            Fact::Fragment(102.into()),
+            Fact::Fragment(103.into()),
+            Fact::Fragment(104.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::ExternalReq { id: 2.into(), dist: DistId::Singleton(2) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
@@ -421,6 +456,11 @@ mod tests {
     fn test_delta_join() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
+            Fact::Fragment(102.into()),
+            Fact::Fragment(103.into()),
+            Fact::Fragment(104.into()),
+            Fact::Fragment(105.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::ExternalReq { id: 2.into(), dist: DistId::Hash(2) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
@@ -451,6 +491,9 @@ mod tests {
     fn test_singleton_leaf() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
+            Fact::Fragment(102.into()),
+            Fact::Fragment(103.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
             Fact::SingletonReq(102.into()), // like `Now`
@@ -474,6 +517,7 @@ mod tests {
     fn test_upstream_hash_shard_failed() {
         #[rustfmt::skip]
         let facts = [
+            Fact::Fragment(101.into()),
             Fact::ExternalReq { id: 1.into(), dist: DistId::Hash(1) },
             Fact::ExternalReq { id: 2.into(), dist: DistId::Hash(2) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
