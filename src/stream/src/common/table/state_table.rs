@@ -485,13 +485,14 @@ impl<S: StateStore> StateTable<S> {
         &self,
         pk: impl Row,
     ) -> StreamExecutorResult<Option<CompactedRow>> {
-        let serialized_pk =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
         assert!(pk.len() <= self.pk_indices.len());
 
         if self.prefix_hint_len != 0 {
             debug_assert_eq!(self.prefix_hint_len, pk.len());
         }
+
+        let serialized_pk =
+            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
 
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
             Some(serialized_pk.slice(VirtualNode::SIZE..))

@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::mem::swap;
 use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
@@ -67,9 +66,7 @@ impl MemTable {
     }
 
     pub fn drain(&mut self) -> Self {
-        let mut temp = Self::new(self.is_consistent_op);
-        swap(&mut temp, self);
-        temp
+        std::mem::replace(self, Self::new(self.is_consistent_op))
     }
 
     pub fn is_dirty(&self) -> bool {

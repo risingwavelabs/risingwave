@@ -266,14 +266,14 @@ pub trait LocalStateStore: StaticSendSync {
     type FlushFuture<'a>: Future<Output = StorageResult<usize>> + Send + 'a;
 
     /// Point gets a value from the state store.
-    /// The result is based on a snapshot corresponding to the given `epoch`.
+    /// The result is based on the latest written snapshot.
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
-    /// in `key_range`) The returned iterator will iterate data based on a snapshot
-    /// corresponding to the given `epoch`.
+    /// in `key_range`) The returned iterator will iterate data based on the latest written
+    /// snapshot.
     fn iter(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
