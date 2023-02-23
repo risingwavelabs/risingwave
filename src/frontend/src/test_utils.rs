@@ -28,6 +28,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::Result;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -256,7 +257,12 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn replace_table(&self, table: ProstTable, _graph: StreamFragmentGraph) -> Result<()> {
+    async fn replace_table(
+        &self,
+        table: ProstTable,
+        _graph: StreamFragmentGraph,
+        _mapping: ColIndexMapping,
+    ) -> Result<()> {
         self.catalog.write().update_table(&table);
         Ok(())
     }

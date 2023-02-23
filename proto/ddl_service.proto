@@ -206,6 +206,8 @@ message ReplaceTablePlanRequest {
   catalog.Table table = 1;
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // The mapping from the old columns to the new columns of the table.
+  catalog.ColIndexMapping table_col_index_mapping = 3;
 }
 
 message ReplaceTablePlanResponse {

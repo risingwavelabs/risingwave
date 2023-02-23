@@ -939,33 +939,4 @@ where
 
         Ok(mview_fragment)
     }
-
-    // /// Get the dispatch strategies after the `Materialize` fragment of the specified table.
-    // pub async fn get_mview_dispatch_strategies(
-    //     &self,
-    //     table_id: TableId,
-    // ) -> MetaResult<HashMap<FragmentId, DispatchStrategy>> {
-    //     let map = &self.core.read().await.table_fragments;
-
-    //     let table_fragments = map
-    //         .get(&table_id)
-    //         .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-
-    //     let mview_fragment = table_fragments.mview_fragment().unwrap();
-    //     let dispatches: HashMap<_, _> = mview_fragment.actors[0]
-    //         .dispatcher
-    //         .iter()
-    //         .map(|d| {
-    //             let fragment_id = d.dispatcher_id as FragmentId;
-    //             let strategy = DispatchStrategy {
-    //                 r#type: d.r#type,
-    //                 dist_key_indices: d.dist_key_indices.clone(),
-    //                 output_indices: d.output_indices.clone(),
-    //             };
-    //             (fragment_id, strategy)
-    //         })
-    //         .collect();
-
-    //     Ok(dispatches)
-    // }
 }

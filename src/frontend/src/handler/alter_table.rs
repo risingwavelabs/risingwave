@@ -15,6 +15,7 @@
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -133,7 +134,9 @@ pub async fn handle_add_column(
         let catalog_writer = session.env().catalog_writer();
 
         // TODO: call replace_table RPC
-        catalog_writer.replace_table(table, graph).await?;
+        catalog_writer
+            .replace_table(table, graph, ColIndexMapping::identity(0))
+            .await?;
 
         // catalog_writer
         //     .drop_table(None, original_catalog.id())

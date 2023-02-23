@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::vec;
 
 use itertools::Itertools;
+use risingwave_pb::catalog::ColIndexMapping as ProstColIndexMapping;
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -265,6 +266,26 @@ impl ColIndexMapping {
 
     pub fn is_empty(&self) -> bool {
         self.target_size() == 0
+    }
+}
+
+impl ColIndexMapping {
+    pub fn to_protobuf(&self) -> ProstColIndexMapping {
+        ProstColIndexMapping {
+            target_size: self.target_size as u64,
+            map: self
+                .map
+                .iter()
+                .map(|x| x.map_or(-1, |x| x as i64))
+                .collect(),
+        }
+    }
+
+    pub fn from_protobuf(prost: ProstColIndexMapping) -> ColIndexMapping {
+        ColIndexMapping {
+            target_size: prost.target_size as usize,
+            map: prost.map.into_iter().map(|x| x.try_into().ok()).collect(),
+        }
     }
 }
 
