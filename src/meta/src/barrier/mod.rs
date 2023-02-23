@@ -560,7 +560,8 @@ where
             );
         }
         self.set_status(BarrierManagerStatus::Running).await;
-        let mut min_interval = tokio::time::interval(self.interval);
+        let mut min_interval_ms = self.interval.as_millis();
+        let mut min_interval = tokio::time::interval(Duration::from_millis(min_interval_ms));
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -579,9 +580,17 @@ where
                     tracing::info!("Barrier manager is stopped");
                     return;
                 }
-                // Checkpoint frequency change
+                // Checkpoint frequency / barrier interval change
                 notification = local_notification_rx.recv() => {
-                    self.handle_local_notification(notification.unwrap());
+                    if let LocalNotification::SystemParamsChange(p) = notification {
+                        self.scheduled_barriers
+                            .set_checkpoint_frequency(p.checkpoint_frequency() as usize);
+                        if p.barrier_interval_ms() != min_interval_ms {
+                            min_interval_ms = p.barrier_interval_ms();
+                            min_interval = tokio::time::interval(Duration::from_millis(min_interval_ms));
+                            min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                        }
+                    }
                 }
                 result = barrier_complete_rx.recv() => {
                     checkpoint_control.update_barrier_nums_metrics();
@@ -992,14 +1001,6 @@ where
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.tracker.lock().await.gen_ddl_progress()
-    }
-
-    /// Only handle `SystemParamsChange`.
-    fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::SystemParamsChange(p) = notification {
-            self.scheduled_barriers
-                .set_checkpoint_frequency(p.checkpoint_frequency() as usize)
-        }
     }
 }
 
