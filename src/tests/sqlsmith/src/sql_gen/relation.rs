@@ -137,7 +137,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // ... JOIN ON x=y AND false => ... JOIN ON x=y
             // We can use const folding, then remove the right expression,
             // if it evaluates to `false` after const folding.
-            if expr == Expr::Value(Value::Boolean(false)) {
+            if expr != Expr::Value(Value::Boolean(false)) {
                 join_on_expr = Expr::BinaryOp {
                     left: Box::new(join_on_expr),
                     op: BinaryOperator::And,
