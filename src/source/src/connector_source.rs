@@ -23,10 +23,9 @@ use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::util::select_all;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, Column, ConnectorProperties, ConnectorState, SourceColumnDesc,
-    SourceContext, SourceInfo, SplitReaderImpl,
+    SourceContext, SplitReaderImpl,
 };
 
 #[derive(Clone, Debug)]
@@ -87,7 +86,6 @@ impl ConnectorSource {
     ) -> Result<BoxSourceWithStateStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
-        let source_metrics = metrics.clone();
 
         let to_reader_splits = match splits {
             Some(vec_split_impl) => vec_split_impl
@@ -110,8 +108,9 @@ impl ConnectorSource {
                     })
                     .collect_vec(),
             );
-            let metrics = source_metrics.clone();
-
+            // TODO: is this reader split across multiple threads...? Realisticaly, we want
+            // source_ctx to live in a single actor.
+            let source_ctx = source_ctx.clone();
             async move {
                 // InnerConnectorSourceReader::new(props, split, columns, metrics,
                 // source_info).await

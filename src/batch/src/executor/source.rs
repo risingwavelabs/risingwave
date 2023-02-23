@@ -26,8 +26,7 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceContext, SourceFormat, SourceInfo, SplitImpl,
-    SplitMetaData,
+    ConnectorProperties, SourceColumnDesc, SourceContext, SourceFormat, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::RowFormatType;
@@ -156,11 +155,11 @@ impl Executor for SourceExecutor {
 impl SourceExecutor {
     #[try_stream(ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let mut source_ctx = Arc::new(SourceContext::new_with_suppressor(
-            self.ctx.id,
-            self.stream_source_core.as_ref().unwrap().source_id,
-            self.ctx.fragment_id,
-            source_desc.metrics.clone(),
+        let source_ctx = Arc::new(SourceContext::new(
+            u32::MAX,
+            self.source_id,
+            u32::MAX,
+            self.metrics,
         ));
         let stream = self
             .connector_source
