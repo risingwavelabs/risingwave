@@ -275,16 +275,15 @@ impl LogicalAgg {
     }
 
     pub(crate) fn should_two_phase_agg(&self) -> bool {
-        let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
-            // If input already satisfies required output distribution,
-            // we should not use two phase agg, even if forced.
-            && self.input().distribution().satisfies(&required_dist)
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
+        // If input already satisfies required output distribution,
+        // we should not use two phase agg.
+        let required_dist =
+            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
         !self.agg_calls().is_empty()
             && self.agg_calls().iter().all(|call| {
                 matches!(
@@ -296,6 +295,7 @@ impl LogicalAgg {
             })
             && !self.is_agg_result_affected_by_order()
             && self.two_phase_agg_enabled()
+            && self.input().distribution().satisfies(&required_dist)
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
