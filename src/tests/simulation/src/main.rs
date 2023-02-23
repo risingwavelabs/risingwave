@@ -217,8 +217,7 @@ async fn main() {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir)
-                    .await;
+                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
             })
             .await;
         return;
