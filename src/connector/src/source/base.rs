@@ -142,9 +142,11 @@ impl SourceErrorContext {
 pub enum SourceFormat {
     Invalid,
     Json,
+    UpsertJson,
     Protobuf,
     DebeziumJson,
     Avro,
+    UpsertAvro,
     Maxwell,
     CanalJson,
     Csv,

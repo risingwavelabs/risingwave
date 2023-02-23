@@ -327,6 +327,11 @@ impl TableCatalog {
         self.version.as_ref()
     }
 
+    /// Get the table's version id. Returns `None` if the table has no version field.
+    pub fn version_id(&self) -> Option<TableVersionId> {
+        self.version().map(|v| v.version_id)
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id,
