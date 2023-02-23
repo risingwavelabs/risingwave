@@ -323,7 +323,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let system_params_manager =
         Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
-    let system_params_reader: SystemParamsReader = system_params_manager.get_params().await.into();
+    let system_params_reader: SystemParamsReader =
+        system_params_manager.get_pb_params().await.into();
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
@@ -395,6 +396,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         fragment_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
+        system_params_manager.clone(),
         meta_metrics.clone(),
     ));
 

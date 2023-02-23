@@ -69,6 +69,7 @@ pub struct StorageOpts {
     pub backup_storage_directory: String,
 }
 
+// Should only be used in tests.
 impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();

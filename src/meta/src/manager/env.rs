@@ -14,7 +14,6 @@
 
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
 
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
@@ -58,8 +57,6 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
-    /// The interval of periodic barrier.
-    pub barrier_interval: Duration,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -100,7 +97,6 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,

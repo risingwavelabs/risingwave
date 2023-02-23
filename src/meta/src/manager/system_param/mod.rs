@@ -16,6 +16,7 @@ pub mod model;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::set_system_param;
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::RwLock;
@@ -53,8 +54,12 @@ impl<S: MetaStore> SystemParamManager<S> {
         })
     }
 
-    pub async fn get_params(&self) -> SystemParams {
+    pub async fn get_pb_params(&self) -> SystemParams {
         self.params.read().await.clone()
+    }
+
+    pub async fn get_params(&self) -> SystemParamsReader {
+        self.get_pb_params().await.into()
     }
 
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {

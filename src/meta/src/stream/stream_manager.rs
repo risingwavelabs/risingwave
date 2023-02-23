@@ -480,7 +480,6 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::system_param::default_system_params;
-    use risingwave_common::system_param::reader::SystemParamsReader;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
@@ -505,7 +504,7 @@ mod tests {
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::manager::{
         CatalogManager, CatalogManagerRef, ClusterManager, FragmentManager, MetaSrvEnv,
-        StreamingClusterInfo,
+        StreamingClusterInfo, SystemParamManager,
     };
     use crate::model::{ActorId, FragmentId};
     use crate::rpc::metrics::MetaMetrics;
@@ -641,7 +640,12 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
-            let system_params = SystemParamsReader::from(default_system_params());
+            let system_params_manager = Arc::new(
+                SystemParamManager::new(env.clone(), default_system_params())
+                    .await
+                    .unwrap(),
+            );
+            let system_params_reader = system_params_manager.get_params().await;
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -674,7 +678,7 @@ mod tests {
 
             let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
                 hummock_manager.clone(),
-                system_params.checkpoint_frequency() as usize,
+                system_params_reader.checkpoint_frequency() as usize,
             );
 
             let source_manager = Arc::new(
@@ -695,6 +699,7 @@ mod tests {
                 fragment_manager.clone(),
                 hummock_manager.clone(),
                 source_manager.clone(),
+                system_params_manager.clone(),
                 meta_metrics.clone(),
             ));
 

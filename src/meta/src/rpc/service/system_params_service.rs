@@ -46,7 +46,7 @@ where
         &self,
         _request: Request<GetSystemParamsRequest>,
     ) -> Result<Response<GetSystemParamsResponse>, Status> {
-        let params = Some(self.system_params_manager.get_params().await);
+        let params = Some(self.system_params_manager.get_pb_params().await);
         Ok(Response::new(GetSystemParamsResponse { params }))
     }
 
