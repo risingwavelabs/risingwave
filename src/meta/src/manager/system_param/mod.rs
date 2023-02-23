@@ -70,6 +70,14 @@ impl<S: MetaStore> SystemParamManager<S> {
 
         mem_txn.commit();
 
+        // Sync params to other managers on the meta node only once, since it's infallible.
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(super::LocalNotification::SystemParamsChange(
+                params.clone().into(),
+            ))
+            .await;
+
         Ok(())
     }
 

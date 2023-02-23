@@ -606,7 +606,7 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self, ctx: OptimizerContextRef) -> ProstAggCall {
+    pub fn to_protobuf(&self) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -617,10 +617,7 @@ impl PlanAggCall {
                 .iter()
                 .map(PlanAggOrderByField::to_protobuf)
                 .collect(),
-            filter: self
-                .filter
-                .as_expr_unless_true()
-                .map(|x| ctx.expr_with_session_timezone(x).to_expr_proto()),
+            filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
         }
     }
 
