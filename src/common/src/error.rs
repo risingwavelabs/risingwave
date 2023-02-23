@@ -31,6 +31,8 @@ use crate::util::value_encoding::error::ValueEncodingError;
 /// Header used to store serialized [`RwError`] in grpc status.
 pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
+const ERROR_SUPRESSOR_RESET_TIME_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
+
 pub trait Error = std::error::Error + Send + Sync + 'static;
 pub type BoxedError = Box<dyn Error>;
 
@@ -424,7 +426,6 @@ macro_rules! bail {
     };
 }
 
-const ERROR_SUPRESSOR_RESET_TIME_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 #[derive(Debug)]
 pub struct ErrorSuppressor {
     max_unique: usize,
