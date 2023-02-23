@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
 use std::future::Future;
 
 use tokio::task::JoinHandle;
+use tracing::info;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
@@ -33,6 +35,10 @@ impl CompactionExecutor {
             builder.enable_all().build().unwrap()
         };
 
+        info!(
+            "create tokio runtime with {} worker thread",
+            runtime.metrics().num_workers()
+        );
         Self {
             // Leak the runtime to avoid runtime shutting-down in the main async context.
             // TODO: may manually shutdown the runtime gracefully.

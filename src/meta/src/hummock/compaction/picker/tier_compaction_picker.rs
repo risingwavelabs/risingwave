@@ -81,6 +81,7 @@ impl TierCompactionPicker {
                     waiting_enough_files = false;
                     break;
                 }
+                println!("{} {}", other.sub_level_id, other.total_file_size);
 
                 if other.level_type == non_overlapping_type
                     && other.total_file_size > self.config.sub_level_max_compaction_bytes
@@ -122,7 +123,7 @@ impl TierCompactionPicker {
             // compact task never be trigger.
             if level.level_type == non_overlapping_type
                 && is_write_amp_large
-                && waiting_enough_files
+                && select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize
             {
                 stats.skip_by_write_amp_limit += 1;
                 continue;
@@ -217,8 +218,9 @@ impl CompactionPicker for TierCompactionPicker {
 pub mod tests {
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::compaction_group::hummock_version_ext::new_sub_level;
     use risingwave_pb::hummock::hummock_version::Levels;
-    use risingwave_pb::hummock::LevelType;
+    use risingwave_pb::hummock::{LevelType, OverlappingLevel};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::level_selector::tests::{
@@ -405,5 +407,46 @@ pub mod tests {
         assert_eq!(ret.input_levels.len(), 3);
         assert_eq!(ret.target_level, 0);
         assert_eq!(ret.target_sub_level_id, 0);
+    }
+
+    #[test]
+    fn test_write_amp_bug_skip() {
+        let l1 = new_sub_level(
+            1,
+            LevelType::Nonoverlapping,
+            vec![
+                generate_table(3, 1, 1, 50, 1),
+                generate_table(4, 1, 51, 100, 1),
+            ],
+        );
+        let l2 = new_sub_level(
+            2,
+            LevelType::Nonoverlapping,
+            vec![
+                generate_table(3, 1, 1, 50, 1),
+                generate_table(4, 1, 51, 200, 1),
+            ],
+        );
+        let levels = Levels {
+            l0: Some(OverlappingLevel {
+                total_file_size: l1.total_file_size + l2.total_file_size,
+                sub_levels: vec![l1, l2],
+            }),
+            levels: vec![],
+            ..Default::default()
+        };
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(4)
+                .sub_level_max_compaction_bytes(100)
+                .max_compaction_bytes(500000)
+                .build(),
+        );
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut local_stats = LocalPickerStatistic::default();
+        let mut picker =
+            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
     }
 }
