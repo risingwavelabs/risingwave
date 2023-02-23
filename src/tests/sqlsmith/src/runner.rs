@@ -30,10 +30,15 @@ use crate::{
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
     let mut rng = if let Some(seed) = seed {
+        tracing::info!("[SEED]: {:?}", seed);
         ChaChaRng::seed_from_u64(seed)
     } else {
         ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
     };
+    // print first 10 rng
+    for i in 0..100 {
+        tracing::info!("[next_u64]: {:?}", rng.next_u64());
+    }
     let (tables, base_tables, mviews, mut setup_sql) =
         create_tables(&mut rng, testdata, client).await;
     tracing::info!("Created tables");
