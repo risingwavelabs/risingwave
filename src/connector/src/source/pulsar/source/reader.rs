@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
@@ -30,8 +29,8 @@ use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader, MAX_CHUNK_SIZE, SourceContext,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, MAX_CHUNK_SIZE,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -43,7 +42,7 @@ pub struct PulsarSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -96,7 +95,7 @@ impl SplitReader for PulsarSplitReader {
         props: PulsarProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");

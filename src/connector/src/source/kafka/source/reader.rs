@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::mem::swap;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
@@ -29,7 +28,8 @@ use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SplitId, SplitImpl, SplitMetaData, SplitReader, SourceContext,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
@@ -44,7 +44,7 @@ pub struct KafkaSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
@@ -55,7 +55,7 @@ impl SplitReader for KafkaSplitReader {
         properties: KafkaProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut config = ClientConfig::new();

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -33,8 +32,8 @@ use crate::source::base::{SplitMetaData, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceMessage, SourceMeta,
-    SplitImpl, StreamChunkWithState, SourceContext,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitImpl,
+    StreamChunkWithState,
 };
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -46,7 +45,7 @@ pub struct S3FileReader {
     s3_client: s3_client::Client,
     splits: Vec<FsSplit>,
     parser_config: ParserConfig,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 impl S3FileReader {
@@ -55,7 +54,7 @@ impl S3FileReader {
         client_for_s3: s3_client::Client,
         bucket_name: String,
         split: FsSplit,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
         let source_id = source_ctx.source_info.source_id.to_string();
@@ -90,7 +89,8 @@ impl S3FileReader {
             batch_size += len;
             batch.push(msg);
             if batch.len() >= MAX_CHUNK_SIZE {
-                source_ctx.metrics
+                source_ctx
+                    .metrics
                     .partition_input_bytes
                     .with_label_values(&[&actor_id, &source_id, &split_id])
                     .inc_by(batch_size as u64);
@@ -100,7 +100,8 @@ impl S3FileReader {
             }
         }
         if !batch.is_empty() {
-            source_ctx.metrics
+            source_ctx
+                .metrics
                 .partition_input_bytes
                 .with_label_values(&[&actor_id, &source_id, &split_id])
                 .inc_by(batch_size as u64);
@@ -147,7 +148,7 @@ impl SplitReader for S3FileReader {
         props: S3Properties,
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
@@ -183,7 +184,7 @@ impl S3FileReader {
         for split in self.splits {
             let actor_id = self.source_ctx.source_info.actor_id.to_string();
             let source_id = self.source_ctx.source_info.source_id.to_string();
-            let error_ctx = self.source_ctx.source_info.error_ctx().clone();
+            let source_ctx = self.source_ctx.clone();
 
             let split_id = split.id();
 
@@ -194,10 +195,8 @@ impl S3FileReader {
                 self.source_ctx.clone(),
             );
 
-            let parser = ByteStreamSourceParserImpl::create(
-                self.parser_config.clone(),
-                error_ctx,
-            )?;
+            let parser =
+                ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)?;
             let msg_stream = parser.into_stream(Box::pin(data_stream));
             #[for_await]
             for msg in msg_stream {
@@ -255,15 +254,9 @@ mod tests {
             specific: SpecificParserConfig::Csv(csv_config),
         };
 
-        let reader = S3FileReader::new(
-            props,
-            splits,
-            config,
-            Default::default(),
-            None,
-        )
-        .await
-        .unwrap();
+        let reader = S3FileReader::new(props, splits, config, Default::default(), None)
+            .await
+            .unwrap();
 
         let msg_stream = reader.into_chunk_stream();
         #[for_await]

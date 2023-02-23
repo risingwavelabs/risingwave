@@ -77,6 +77,8 @@ pub trait SplitEnumerator: Sized {
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
+pub type SourceContextRef = Arc<SourceContext>;
+
 #[derive(Debug, Default)]
 pub struct SourceContext {
     pub source_info: SourceInfo,
@@ -84,10 +86,15 @@ pub struct SourceContext {
     error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
 }
 impl SourceContext {
-    pub fn new(actor_id: u32, table_id: TableId, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
+    pub fn new(
+        actor_id: u32,
+        table_id: TableId,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+    ) -> Self {
         Self {
             source_info: SourceInfo {
-                actor_id, 
+                actor_id,
                 source_id: table_id,
                 fragment_id,
             },
@@ -96,22 +103,8 @@ impl SourceContext {
         }
     }
 
-    pub fn new_with_suppressor(
-        actor_id: u32, 
-        table_id: TableId,
-        fragment_id: u32,
-        metrics: Arc<SourceMetrics>,
-        error_suppressor: Arc<Mutex<ErrorSuppressor>>,
-    ) -> Self {
-        Self {
-            source_info: SourceInfo {
-                actor_id, 
-                source_id: table_id,
-                fragment_id,
-            },
-            metrics,
-            error_suppressor: Some(error_suppressor),
-        }
+    pub fn add_suppressor(&mut self, error_suppressor: Arc<Mutex<ErrorSuppressor>>) {
+        self.error_suppressor = Some(error_suppressor)
     }
 
     pub(crate) fn report_stream_source_error(&self, e: &RwError) {
@@ -119,36 +112,37 @@ impl SourceContext {
         if self.source_info.fragment_id == u32::MAX {
             return;
         }
-        let err_string = e.inner().to_string();
-        if self.error_suppressor.is_none()
-            || !self
-                .error_suppressor
-                .map(|s| s.lock().suppress_error(&err_string))
-                .unwrap()
+        let mut err_str = e.inner().to_string();
+        if let Some(suppressor) = &self.error_suppressor && 
+            suppressor.lock().suppress_error(&err_str)
         {
-            self.metrics
-                .user_source_error_count
-                .with_label_values(&[
-                    "SourceError",
-                    // TODO(jon-chuang): add the error msg truncator to truncate these
-                    &err_string,
-                    // Let's be a bit more specific for SourceExecutor
-                    "SourceExecutor",
-                    &self.fragment_id.to_string(),
-                    &self.table_id.to_string(),
-                ])
-                .inc();
+            err_str = format!("error msg suppressed (due to per-actor error limit: {})", suppressor.lock().max());
         }
+        self.metrics
+            .user_source_error_count
+            .with_label_values(&[
+                "SourceError",
+                // TODO(jon-chuang): add the error msg truncator to truncate these
+                &err_str,
+                // Let's be a bit more specific for SourceExecutor
+                "SourceExecutor",
+                &self.source_info.fragment_id.to_string(),
+                &self.source_info.source_id.table_id.to_string(),
+            ])
+            .inc();
     }
 
-    pub(crate) fn for_test() -> Self {
-        Self {
-            metrics: Arc::new(SourceMetrics::unused()),
-            table_id: u32::MAX,
-            fragment_id: u32::MAX,
-            error_suppressor: None,
-        }
-    }
+    // pub(crate) fn for_test() -> Self {
+    //     Self {
+    //         source_info: SourceInfo {
+    //             actor_id: u32::MAX,
+    //             source_id: TableId { table_id: u32::MAX },
+    //             fragment_id: u32::MAX,
+    //         },
+    //         metrics: Arc::new(SourceMetrics::unused()),
+    //         error_suppressor: None,
+    //     }
+    // }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -157,43 +151,6 @@ pub struct SourceInfo {
     pub source_id: TableId,
     // There should be a 1-1 mapping between `source_id` & `fragment_id`
     pub fragment_id: u32,
-}
-
-impl SourceInfo {
-    pub fn new(actor_id: u32, source_id: TableId, fragment_id: u32) -> Self {
-        let mut error_ctx = SourceErrorContext::for_test();
-        error_ctx.fragment_id = fragment_id;
-        error_ctx.table_id = source_id.table_id;
-        Self::new_with_context(actor_id, source_id, fragment_id, error_ctx)
-    }
-
-    pub fn new_with_context(
-        actor_id: u32,
-        source_id: TableId,
-        fragment_id: u32,
-        error_ctx: SourceErrorContext,
-    ) -> Self {
-        SourceInfo {
-            actor_id,
-            source_id,
-            fragment_id,
-            error_ctx,
-        }
-    }
-
-    pub fn error_ctx(&self) -> &SourceErrorContext {
-        &self.error_ctx
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SourceErrorContext {
-    metrics: Arc<SourceMetrics>,
-    table_id: u32,
-    fragment_id: u32,
-}
-
-impl SourceErrorContext {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,7 +202,7 @@ pub trait SplitReader: Sized {
         properties: Self::Properties,
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 

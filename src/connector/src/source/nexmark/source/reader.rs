@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -34,8 +33,8 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column,  SplitId, SplitImpl, SplitMetaData, SplitReader,
-    StreamChunkWithState, SourceContext,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader, StreamChunkWithState,
 };
 
 #[derive(Debug)]
@@ -50,7 +49,7 @@ pub struct NexmarkSplitReader {
 
     row_id_index: Option<usize>,
     split_id: SplitId,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
@@ -62,7 +61,7 @@ impl SplitReader for NexmarkSplitReader {
         properties: NexmarkProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);

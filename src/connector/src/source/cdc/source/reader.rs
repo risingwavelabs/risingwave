@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -28,7 +27,8 @@ use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SplitId, SplitImpl, SplitMetaData, SplitReader, SourceContext,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
@@ -40,7 +40,7 @@ pub struct CdcSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
@@ -52,8 +52,8 @@ impl SplitReader for CdcSplitReader {
         conn_props: CdcProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
-        columns: Option<Vec<Column>>,
+        source_ctx: SourceContextRef,
+        _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
         let split = splits.into_iter().next().unwrap();

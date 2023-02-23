@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -29,8 +28,8 @@ use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SplitId, SplitImpl,
-    SplitMetaData, SplitReader, SourceContext,
+    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceContextRef, SplitId,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
@@ -41,7 +40,7 @@ pub struct DatagenSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
@@ -53,7 +52,7 @@ impl SplitReader for DatagenSplitReader {
         properties: DatagenProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut assigned_split = DatagenSplit::default();
@@ -136,7 +135,7 @@ impl SplitReader for DatagenSplitReader {
             assigned_split,
             split_id,
             parser_config,
-            source_ctx
+            source_ctx,
         })
     }
 

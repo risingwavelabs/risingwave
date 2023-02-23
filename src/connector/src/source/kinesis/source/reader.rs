@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -32,8 +31,8 @@ use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::KinesisProperties;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader, SourceContext,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
@@ -50,7 +49,7 @@ pub struct KinesisSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    source_ctx: Arc<SourceContext>,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
@@ -61,7 +60,7 @@ impl SplitReader for KinesisSplitReader {
         properties: KinesisProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        source_ctx: Arc<SourceContext>,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);

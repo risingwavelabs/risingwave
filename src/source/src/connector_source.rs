@@ -26,7 +26,7 @@ use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificPar
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, Column, ConnectorProperties, ConnectorState, SourceColumnDesc,
-    SourceInfo, SplitReaderImpl, SourceContext,
+    SourceContext, SourceInfo, SplitReaderImpl,
 };
 
 #[derive(Clone, Debug)]
@@ -121,14 +121,8 @@ impl ConnectorSource {
                         rw_columns: columns,
                     },
                 };
-                SplitReaderImpl::create(
-                    props,
-                    state,
-                    parser_config,
-                    source_ctx,
-                    data_gen_columns,
-                )
-                .await
+                SplitReaderImpl::create(props, state, parser_config, source_ctx, data_gen_columns)
+                    .await
             }
         }))
         .await?;
