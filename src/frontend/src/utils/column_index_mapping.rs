@@ -22,7 +22,7 @@ use crate::optimizer::property::{
     Distribution, FieldOrder, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
 };
 
-/// Extension trait for [`ColIndexMapping`] to rewrite properties of plan nodes.
+/// Extension trait for [`ColIndexMapping`] to rewrite frontend structures.
 #[easy_ext::ext(ColIndexMappingRewriteExt)]
 impl ColIndexMapping {
     /// Rewrite the provided order's field index. It will try its best to give the most accurate
