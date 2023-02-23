@@ -774,7 +774,8 @@ where
     }
 
     pub async fn get_index_table(&self, index_id: IndexId) -> MetaResult<TableId> {
-        let index = Index::select(self.env.meta_store(), &index_id).await?;
+        let guard = self.core.lock().await;
+        let index = guard.database.indexes.get(&index_id);
         if let Some(index) = index {
             Ok(index.index_table_id)
         } else {
