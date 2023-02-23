@@ -83,7 +83,10 @@ impl ActorContext {
         let mut err_str = err.to_string();
 
         if self.error_suppressor.lock().suppress_error(&err_str) {
-            err_str = format!("error msg suppressed (due to per-actor error limit: {})", self.error_suppressor.lock().max());
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                self.error_suppressor.lock().max()
+            );
         }
         self.streaming_metrics
             .user_compute_error_count

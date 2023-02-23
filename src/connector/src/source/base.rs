@@ -113,7 +113,7 @@ impl SourceContext {
             return;
         }
         let mut err_str = e.inner().to_string();
-        if let Some(suppressor) = &self.error_suppressor && 
+        if let Some(suppressor) = &self.error_suppressor &&
             suppressor.lock().suppress_error(&err_str)
         {
             err_str = format!("error msg suppressed (due to per-actor error limit: {})", suppressor.lock().max());
