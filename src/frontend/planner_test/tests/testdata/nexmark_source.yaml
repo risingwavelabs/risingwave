@@ -346,7 +346,7 @@
           |     └─StreamExchange { dist: HashShard(auction, window_start) }
           |       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
           |         └─StreamProject { exprs: [auction, date_time, _row_id] }
-          |           └─StreamShare { id = 1066 }
+          |           └─StreamShare { id = 1036 }
           |             └─StreamProject { exprs: [auction, date_time, _row_id] }
           |               └─StreamRowIdGen { row_id_index: 7 }
           |                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
@@ -358,7 +358,7 @@
                     └─StreamExchange { dist: HashShard(auction, window_start) }
                       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
                         └─StreamProject { exprs: [auction, date_time, _row_id] }
-                          └─StreamShare { id = 1066 }
+                          └─StreamShare { id = 1036 }
                             └─StreamProject { exprs: [auction, date_time, _row_id] }
                               └─StreamRowIdGen { row_id_index: 7 }
                                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
@@ -474,7 +474,7 @@
         └─StreamHashJoin { type: Inner, predicate: price = max(price), output: all }
           ├─StreamExchange { dist: HashShard(price) }
           | └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
-          |   └─StreamShare { id = 641 }
+          |   └─StreamShare { id = 611 }
           |     └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
           |       └─StreamRowIdGen { row_id_index: 7 }
           |         └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
@@ -483,7 +483,7 @@
               └─StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [count, max(price)] }
                 └─StreamExchange { dist: HashShard($expr1) }
                   └─StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, price, _row_id] }
-                    └─StreamShare { id = 641 }
+                    └─StreamShare { id = 611 }
                       └─StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
                         └─StreamRowIdGen { row_id_index: 7 }
                           └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
