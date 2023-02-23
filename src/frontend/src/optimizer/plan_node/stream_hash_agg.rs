@@ -22,6 +22,7 @@ use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, St
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
