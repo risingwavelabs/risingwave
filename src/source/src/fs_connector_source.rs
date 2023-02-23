@@ -19,9 +19,8 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceInfo, SplitReaderImpl,
+    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext, SplitReaderImpl,
 };
 
 #[derive(Clone, Debug)]
