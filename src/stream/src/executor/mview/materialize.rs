@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -56,7 +56,7 @@ pub struct MaterializeExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache,
-    handle_pk_conflict: bool,
+    conflict_behavior: ConflictBehavior,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
@@ -73,7 +73,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
@@ -92,7 +92,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch),
-            handle_pk_conflict,
+            conflict_behavior,
         }
     }
 
@@ -106,7 +106,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
@@ -137,12 +137,20 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch),
-            handle_pk_conflict,
+            conflict_behavior,
         }
     }
 
-    pub fn handle_conflict(&mut self) {
-        self.handle_pk_conflict = true;
+    pub fn overwrite_conflict_pk(&mut self) {
+        self.conflict_behavior = ConflictBehavior::OverWrite;
+    }
+
+    pub fn ignore_conflict_pk(&mut self) {
+        self.conflict_behavior = ConflictBehavior::IgnoreConflict;
+    }
+
+    pub fn do_not_check_conflicty(&mut self) {
+        self.conflict_behavior = ConflictBehavior::NoCheck;
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -162,8 +170,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    match self.handle_pk_conflict {
-                        true => {
+                    match self.conflict_behavior {
+                        ConflictBehavior::OverWrite => {
                             // create MaterializeBuffer from chunk
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
@@ -196,7 +204,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 None => continue,
                             }
                         }
-                        false => {
+                        ConflictBehavior::IgnoreConflict => {
+                            todo!()
+                        }
+                        ConflictBehavior::NoCheck => {
                             self.state_table.write_chunk(chunk.clone());
                             Message::Chunk(chunk)
                         }
@@ -512,7 +523,7 @@ mod tests {
 
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -585,7 +596,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                false,
+                ConflictBehavior::NoCheck,
             )
             .await,
         )
@@ -702,7 +713,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                true,
+                ConflictBehavior::OverWrite,
             )
             .await,
         )
@@ -835,7 +846,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                true,
+                ConflictBehavior::OverWrite,
             )
             .await,
         )

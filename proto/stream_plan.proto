@@ -182,7 +182,13 @@ message MaterializeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  HandleConflictBehavior handle_pk_conflict = 4;
+}
+
+enum HandleConflictBehavior{
+  NoCheck = 0;
+  OverWrite = 1;
+  Ignore = 2;
 }
 
 message AggCallState {
@@ -411,7 +417,7 @@ message ArrangeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  HandleConflictBehavior handle_pk_conflict = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

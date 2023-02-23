@@ -29,7 +29,7 @@ use risingwave_batch::executor::{
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+    ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
@@ -207,7 +207,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         all_column_ids.clone(),
         4,
         Arc::new(AtomicU64::new(0)),
-        false,
+        ConflictBehavior::NoCheck,
     )
     .await
     .boxed()
