@@ -29,6 +29,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone)]
 pub struct BatchLookupJoin {
