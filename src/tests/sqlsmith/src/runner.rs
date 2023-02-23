@@ -36,7 +36,7 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
         ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
     };
     // print first 10 rng
-    for i in 0..100 {
+    for _ in 0..100 {
         tracing::info!("[next_u64]: {:?}", rng.next_u64());
     }
     let (tables, base_tables, mviews, mut setup_sql) =
