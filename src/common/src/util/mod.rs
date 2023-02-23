@@ -20,7 +20,6 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
 pub mod addr;
-pub mod channel_util;
 pub mod chunk_coalesce;
 pub mod compress;
 pub mod encoding_for_comparison;

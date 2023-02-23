@@ -17,10 +17,9 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use risingwave_pb::meta::SystemParams;
-use tokio::sync::broadcast::{channel, Sender};
+use tokio::sync::watch::{channel, Receiver, Sender};
 
 use super::reader::SystemParamsReader;
-use crate::util::channel_util::broadcast::IgnoreLaggedReceiver;
 
 pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
 
@@ -28,23 +27,24 @@ pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
 /// read the latest system parameters:
 /// - `get_params` returns a reference to the latest parameters that is atomically updated.
 /// - `subscribe_params` returns a channel on which calling `recv` will get the latest parameters.
-///   Compared with `get_params`, the caller can be explicitly notifed of parameter change.
+///   Compared with `get_params`, the caller can be explicitly notified of parameter change.
 pub struct LocalSystemParamManager {
     /// The latest parameters.
     params: SystemParamsReaderRef,
 
     /// Sender of the latest parameters.
     tx: Sender<SystemParamsReaderRef>,
+
+    /// Receiver of the latest parameters.
+    rx: Receiver<SystemParamsReaderRef>,
 }
 
 impl LocalSystemParamManager {
     pub fn new(params: SystemParamsReader) -> Self {
         // Only care about latest params.
-        let (tx, _) = channel(1);
-        Self {
-            params: Arc::new(ArcSwap::from_pointee(params)),
-            tx,
-        }
+        let params = Arc::new(ArcSwap::from_pointee(params));
+        let (tx, rx) = channel(params.clone());
+        Self { params, tx, rx }
     }
 
     pub fn get_params(&self) -> SystemParamsReaderRef {
@@ -54,14 +54,14 @@ impl LocalSystemParamManager {
     pub fn try_set_params(&self, new_params: SystemParams) {
         let new_params_reader = SystemParamsReader::from(new_params);
         if self.params.load().deref().deref() != &new_params_reader {
-            self.params.store(Arc::new(new_params_reader.clone()));
+            self.params.store(Arc::new(new_params_reader));
             // Ignore no active receiver.
             let _ = self.tx.send(self.params.clone());
         }
     }
 
-    pub fn subscribe_parmams(&self) -> IgnoreLaggedReceiver<SystemParamsReaderRef> {
-        self.tx.subscribe().into()
+    pub fn subscribe_parmams(&self) -> Receiver<SystemParamsReaderRef> {
+        self.rx.clone()
     }
 }
 
@@ -83,11 +83,8 @@ mod tests {
         let mut params_rx = manager.subscribe_parmams();
 
         manager.try_set_params(new_params.clone());
-
-        assert_eq!(
-            **params_rx.recv().await.unwrap().load(),
-            new_params.clone().into()
-        );
+        params_rx.changed().await.unwrap();
+        assert_eq!(**params_rx.borrow().load(), new_params.clone().into());
         assert_eq!(**shared_params.load(), new_params.into());
     }
 }
