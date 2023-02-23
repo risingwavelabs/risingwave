@@ -81,7 +81,6 @@ impl TierCompactionPicker {
                     waiting_enough_files = false;
                     break;
                 }
-                println!("{} {}", other.sub_level_id, other.total_file_size);
 
                 if other.level_type == non_overlapping_type
                     && other.total_file_size > self.config.sub_level_max_compaction_bytes
