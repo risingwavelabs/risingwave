@@ -8,7 +8,7 @@
     └─BatchSort { order: [t.v1 DESC] }
       └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id], pk_conflict: "no check" }
     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: output names are not qualified after table names
   sql: |
@@ -59,13 +59,13 @@
     select * from t order by 1+1;
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
-    └─BatchExchange { order: [$expr1 ASC], dist: Single }
-      └─BatchSort { order: [$expr1 ASC] }
-        └─BatchProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr1] }
+    └─BatchExchange { order: [2:Int32 ASC], dist: Single }
+      └─BatchSort { order: [2:Int32 ASC] }
+        └─BatchProject { exprs: [t.v1, t.v2, 2:Int32] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, $expr48(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr48, t._row_id] }
-    └─StreamProject { exprs: [t.v1, t.v2, (1:Int32 + 1:Int32) as $expr1, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, 2:Int32(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [2:Int32, t._row_id], pk_conflict: "no check" }
+    └─StreamProject { exprs: [t.v1, t.v2, 2:Int32, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -80,7 +80,7 @@
       └─BatchTopN { order: "[t.v1 DESC]", limit: 5, offset: 0 }
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [t.v1, t.v2, t._row_id] }
       └─StreamTopN { order: "[t.v1 DESC]", limit: 5, offset: 0 }
         └─StreamExchange { dist: Single }
@@ -112,7 +112,7 @@
       └─BatchTopN { order: "[t.v1 DESC]", limit: 12, offset: 0 }
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [v1, t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [t.v1, t.v2, t._row_id] }
       └─StreamTopN { order: "[t.v1 DESC]", limit: 5, offset: 7 }
         └─StreamExchange { dist: Single }
@@ -133,7 +133,7 @@
         └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z] }
           └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, $expr67(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr67, t.z, t._row_id] }
+    StreamMaterialize { columns: [x, y, $expr72(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr72, t.z, t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by the number of an output column

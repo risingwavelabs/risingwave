@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
@@ -33,11 +33,12 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
 /// statements, the input relation would be [`super::LogicalValues`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
     pub base: PlanBase,
     table_name: String, // explain-only
     table_id: TableId,
+    table_version_id: TableVersionId,
     input: PlanRef,
     column_indices: Vec<usize>, // columns in which to insert
     row_id_index: Option<usize>,
@@ -50,6 +51,7 @@ impl LogicalInsert {
         input: PlanRef,
         table_name: String,
         table_id: TableId,
+        table_version_id: TableVersionId,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         returning: bool,
@@ -66,6 +68,7 @@ impl LogicalInsert {
             base,
             table_name,
             table_id,
+            table_version_id,
             input,
             column_indices,
             row_id_index,
@@ -78,6 +81,7 @@ impl LogicalInsert {
         input: PlanRef,
         table_name: String,
         table_id: TableId,
+        table_version_id: TableVersionId,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         returning: bool,
@@ -86,6 +90,7 @@ impl LogicalInsert {
             input,
             table_name,
             table_id,
+            table_version_id,
             column_indices,
             row_id_index,
             returning,
@@ -125,6 +130,10 @@ impl LogicalInsert {
     pub fn has_returning(&self) -> bool {
         self.returning
     }
+
+    pub fn table_version_id(&self) -> TableVersionId {
+        self.table_version_id
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
@@ -137,6 +146,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
             input,
             self.table_name.clone(),
             self.table_id,
+            self.table_version_id,
             self.column_indices.clone(),
             self.row_id_index,
             self.returning,
