@@ -57,17 +57,11 @@ impl BatchHashAgg {
         self.logical.group_key()
     }
 
-    fn must_two_phase_agg(&self, agg_distribution: &Distribution) -> bool {
-        self.logical.can_two_phase_agg()
-            && self.logical.two_phase_agg_forced()
-            && self.input().distribution() != agg_distribution
-    }
-
     fn to_two_phase_agg(&self, agg_distribution: Distribution) -> Result<PlanRef> {
         // Follow input distribution
         let new_input = self.input().to_distributed()?;
 
-        // partial agg step
+        // partial agg
         let partial_agg: PlanRef = self.clone_with_input(new_input).into();
 
         // insert exchange
@@ -120,7 +114,7 @@ impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let agg_distribution = Distribution::HashShard((0..self.group_key().len()).collect());
-        if self.must_two_phase_agg(&agg_distribution) {
+        if self.logical.should_two_phase_agg(&agg_distribution) {
             self.to_two_phase_agg(agg_distribution)
         } else {
             self.to_shuffle_agg()

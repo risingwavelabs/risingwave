@@ -708,8 +708,7 @@
       └─BatchHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [min(min(t.v3)), sum(sum(t.v1))] }
         └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3, t.v2) }
           └─BatchHashAgg { group_key: [t.v1, t.v3, t.v2], aggs: [min(t.v3), sum(t.v1)] }
-            └─BatchExchange { order: [], dist: HashShard(t.v1, t.v2, t.v3) }
-              └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [min, sum, t.v1(hidden), t.v3(hidden), t.v2(hidden)], pk_columns: [t.v1, t.v3, t.v2], pk_conflict: "no check" }
     └─StreamProject { exprs: [min(min(t.v3)), sum(sum(t.v1)), t.v1, t.v3, t.v2] }
