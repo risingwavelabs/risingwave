@@ -236,23 +236,29 @@ where
             if self.cache_key_serde.0.get_order_types()[0] == OrderType::Ascending {
                 if self.cache.is_middle_cache_full() {
                     let last_entry = self.cache.middle.last_entry().unwrap();
-                    let watermark_in_key = self
+                    let event_time_in_key = self
                         .cache_key_serde
                         .0
                         .deserialize_first(&last_entry.key().0)?;
 
-                    if let Some(watermark_in_key) = watermark_in_key {
-                        if watermark.val > watermark_in_key {
-                            // TODO(yuhao): range delete records above the watermark
+                    if let Some(event_time_in_key) = event_time_in_key {
+                        if watermark.val > event_time_in_key {
+                            // TODO(yuhao): handle records above the watermark
+                            Ok(Some(watermark))
+                        } else {
+                            Ok(None)
                         }
                     } else {
-                        // TODO(yuhao): handle null watermark
+                        // TODO(yuhao): handle null event time
+                        Ok(None)
                     }
+                } else {
+                    Ok(None)
                 }
             } else {
                 // TODO(yuhao): handle watermark in descending case
+                Ok(None)
             }
-            Ok(Some(watermark))
         } else {
             Ok(None)
         }

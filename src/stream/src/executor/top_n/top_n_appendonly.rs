@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::StateStore;
 
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
@@ -192,11 +192,36 @@ where
         &mut self,
         watermark: Watermark,
     ) -> StreamExecutorResult<Option<Watermark>> {
-        Ok(if watermark.col_idx == self.storage_key_indices[0] {
-            Some(watermark)
+        if watermark.col_idx == self.storage_key_indices[0] {
+            if self.cache.is_middle_cache_full() {
+                let last_entry = self.cache.middle.last_entry().unwrap();
+                let event_time_in_key = self
+                    .cache_key_serde
+                    .0
+                    .deserialize_first(&last_entry.key().0)?;
+
+                if let Some(event_time_in_key) = event_time_in_key {
+                    let event_time_order = self.cache_key_serde.0.get_order_types()[0];
+
+                    if (event_time_order == OrderType::Ascending
+                        && watermark.val > event_time_in_key)
+                        || (event_time_order == OrderType::Descending
+                            && watermark.val < event_time_in_key)
+                    {
+                        Ok(Some(watermark))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    // TODO(yuhao): handle null event time
+                    Ok(None)
+                }
+            } else {
+                Ok(None)
+            }
         } else {
-            None
-        })
+            Ok(None)
+        }
     }
 }
 
