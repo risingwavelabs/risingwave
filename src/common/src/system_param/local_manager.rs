@@ -24,6 +24,11 @@ use crate::util::channel_util::broadcast::IgnoreLaggedReceiver;
 
 pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
 
+/// The system parameter manager on worker nodes. It provides two methods for other components to
+/// read the latest system parameters:
+/// - `get_params` returns a reference to the latest parameters that is atomically updated.
+/// - `subscribe_params` returns a channel on which calling `recv` will get the latest parameters.
+///   Compared with `get_params`, the caller can be explicitly notifed of parameter change.
 pub struct LocalSystemParamManager {
     /// The latest parameters.
     params: SystemParamsReaderRef,
