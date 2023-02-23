@@ -303,7 +303,7 @@ steps:
 
   - label: "e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
-    depends_on: "build"
+    depends_on: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:

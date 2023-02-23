@@ -14,13 +14,13 @@
 
 use core::convert::Into;
 use core::fmt::Formatter;
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
-use crate::expr::{CorrelatedId, ExprImpl, ExprRewriter, SessionTimezone};
+use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
@@ -176,9 +176,8 @@ impl OptimizerContext {
         &self.normalized_sql
     }
 
-    pub fn expr_with_session_timezone(&self, expr: ExprImpl) -> ExprImpl {
-        let mut session_timezone = self.session_timezone.borrow_mut();
-        session_timezone.rewrite_expr(expr)
+    pub fn session_timezone(&self) -> RefMut<'_, SessionTimezone> {
+        self.session_timezone.borrow_mut()
     }
 
     /// Appends any information that the optimizer needs to alert the user about to the PG NOTICE
