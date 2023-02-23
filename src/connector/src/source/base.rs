@@ -131,18 +131,6 @@ impl SourceContext {
             ])
             .inc();
     }
-
-    // pub(crate) fn for_test() -> Self {
-    //     Self {
-    //         source_info: SourceInfo {
-    //             actor_id: u32::MAX,
-    //             source_id: TableId { table_id: u32::MAX },
-    //             fragment_id: u32::MAX,
-    //         },
-    //         metrics: Arc::new(SourceMetrics::unused()),
-    //         error_suppressor: None,
-    //     }
-    // }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
