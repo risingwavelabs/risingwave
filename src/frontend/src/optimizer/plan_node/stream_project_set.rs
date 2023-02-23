@@ -22,6 +22,7 @@ use risingwave_pb::stream_plan::ProjectSetNode;
 use super::{ExprRewritable, LogicalProjectSet, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {

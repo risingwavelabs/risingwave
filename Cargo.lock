@@ -5991,6 +5991,7 @@ dependencies = [
  "derivative",
  "downcast-rs",
  "dyn-clone",
+ "easy-ext",
  "enum-as-inner",
  "fixedbitset",
  "futures",

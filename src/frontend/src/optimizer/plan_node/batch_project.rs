@@ -25,6 +25,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows

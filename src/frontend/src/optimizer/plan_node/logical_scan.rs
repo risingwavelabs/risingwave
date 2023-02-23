@@ -39,7 +39,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

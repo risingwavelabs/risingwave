@@ -30,7 +30,10 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, ConnectedComponentLabeller};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay,
+    ConnectedComponentLabeller,
+};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
 ///

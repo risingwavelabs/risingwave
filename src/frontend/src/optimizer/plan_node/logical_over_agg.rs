@@ -29,7 +29,7 @@ use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, Win
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
