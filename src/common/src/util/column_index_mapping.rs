@@ -21,7 +21,7 @@ use itertools::Itertools;
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
 /// It is used in optimizer for transformation of column index.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ColIndexMapping {
     /// The size of the target space, i.e. target index is in the range `(0..target_size)`.
     target_size: usize,

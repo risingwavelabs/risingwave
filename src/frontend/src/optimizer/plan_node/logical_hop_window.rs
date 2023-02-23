@@ -33,7 +33,7 @@ use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
     pub base: PlanBase,
     pub(super) core: generic::HopWindow<PlanRef>,
@@ -179,7 +179,7 @@ impl LogicalHopWindow {
 
     fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::new(
-            self.input().clone(),
+            self.input(),
             self.core.time_col.clone(),
             self.core.window_slide,
             self.core.window_size,
@@ -251,7 +251,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             })
             .collect_vec();
         let new_hop = Self::new(
-            input.clone(),
+            input,
             time_col,
             self.core.window_slide,
             self.core.window_size,
@@ -382,7 +382,7 @@ impl ToStream for LogicalHopWindow {
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-        let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+        let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
         if !output_indices.contains(&input.schema().len())
             && !output_indices.contains(&(input.schema().len() + 1))

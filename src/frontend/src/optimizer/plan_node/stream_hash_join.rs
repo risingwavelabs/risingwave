@@ -35,7 +35,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashJoin {
     pub base: PlanBase,
     logical: LogicalJoin,

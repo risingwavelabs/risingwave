@@ -36,7 +36,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::WithOptions;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,

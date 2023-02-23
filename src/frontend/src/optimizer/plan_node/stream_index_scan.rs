@@ -29,7 +29,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request. Compared with `StreamTableScan`, it will reorder columns, and the chain node
 /// doesn't allow rearrange.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamIndexScan {
     pub base: PlanBase,
     logical: LogicalScan,

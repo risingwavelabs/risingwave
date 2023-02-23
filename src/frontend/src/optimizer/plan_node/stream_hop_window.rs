@@ -22,7 +22,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamHopWindow`] represents a hop window table function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,
