@@ -236,12 +236,7 @@ impl ToBatchProst for BatchHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x)
-                        .to_expr_proto()
-                }),
+                .map(|x| x.to_expr_proto()),
             output_indices: self
                 .logical
                 .output_indices()
