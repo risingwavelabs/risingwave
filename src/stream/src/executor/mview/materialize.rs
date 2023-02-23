@@ -187,7 +187,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .apply_changes(buffer, &self.state_table)
+                                .overwrite_conflict(buffer, &self.state_table)
                                 .await?;
 
                             // TODO(st1page): when materialize partial columns(), we should
@@ -220,7 +220,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .apply_changes_ignore(buffer, &self.state_table)
+                                .ignore_conflict(buffer, &self.state_table)
                                 .await?;
                             if self.state_table.value_indices().is_some() {
                                 panic!("materialize executor with data check can not handle only materialize partial columns")
@@ -453,7 +453,7 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub async fn apply_changes<'a, S: StateStore>(
+    pub async fn overwrite_conflict<'a, S: StateStore>(
         &mut self,
         changes: MaterializeBuffer,
         table: &StateTable<S>,
@@ -463,7 +463,7 @@ impl MaterializeCache {
             .await?;
 
         let mut fixed_changes = vec![];
-        // handle pk conflict
+        // overwrite pk conflict
         for (key, row_op) in changes.into_parts() {
             match row_op {
                 KeyOp::Insert(new_row) => {
@@ -500,7 +500,7 @@ impl MaterializeCache {
         Ok(fixed_changes)
     }
 
-    pub async fn apply_changes_ignore<'a, S: StateStore>(
+    pub async fn ignore_conflict<'a, S: StateStore>(
         &mut self,
         changes: MaterializeBuffer,
         table: &StateTable<S>,
@@ -510,7 +510,7 @@ impl MaterializeCache {
             .await?;
 
         let mut fixed_changes = vec![];
-        // handle pk conflict
+        // ignore pk conflict
         for (key, row_op) in changes.into_parts() {
             match row_op {
                 KeyOp::Insert(new_row) => {
@@ -528,9 +528,12 @@ impl MaterializeCache {
                         None => (), // delete a nonexistent value
                     };
                 }
-                KeyOp::Update((_, _)) => match self.force_get(&key) {
+                KeyOp::Update((_, new_row)) => match self.force_get(&key) {
                     Some(_) => (),
-                    None => (),
+                    None => {
+                        fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone())));
+                        self.put(key, Some(CompactedRow { row: new_row }));
+                    }
                 },
             }
         }
@@ -1295,6 +1298,7 @@ mod tests {
             _ => unreachable!(),
         }
 
+        materialize_executor.next().await.transpose().unwrap();
         // materialize_executor.next().await.transpose().unwrap();
         // Second stream chunk. We check the existence of (7) -> (7,8)
         match materialize_executor.next().await.transpose().unwrap() {
@@ -1332,7 +1336,10 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                assert_eq!(row, None,);
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
+                );
             }
             _ => unreachable!(),
         }
