@@ -64,7 +64,7 @@ use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 /// the distribution property provided by a operator.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Distribution {
     /// There is only one partition. All records are placed on it.
     Single,
