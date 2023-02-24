@@ -133,6 +133,7 @@ pub enum Precedence {
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
+    UnaryPlusMinus,
     PostfixFactorial,
     Array,
     DoubleColon, // 50 in upstream
@@ -527,7 +528,7 @@ impl Parser {
                 } else {
                     UnaryOperator::Minus
                 };
-                let mut sub_expr = self.parse_subexpr(Precedence::PlusMinus)?;
+                let mut sub_expr = self.parse_subexpr(Precedence::UnaryPlusMinus)?;
                 if let Expr::Value(Value::Number(ref mut s)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);
@@ -552,9 +553,11 @@ impl Parser {
                     Token::Tilde => UnaryOperator::PGBitwiseNot,
                     _ => unreachable!(),
                 };
+                // Counter-intuitively, `|/ 4 + 12` means `|/ (4+12)` rather than `(|/4) + 12` in
+                // PostgreSQL.
                 Ok(Expr::UnaryOp {
                     op,
-                    expr: Box::new(self.parse_subexpr(Precedence::PlusMinus)?),
+                    expr: Box::new(self.parse_subexpr(Precedence::Other)?),
                 })
             }
             Token::Number(_)
