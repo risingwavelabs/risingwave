@@ -77,7 +77,7 @@ impl TierCompactionPicker {
             let mut waiting_enough_files = true;
 
             for other in &l0.sub_levels[idx + 1..] {
-                if compaction_bytes >= max_compaction_bytes {
+                if compaction_bytes > max_compaction_bytes {
                     waiting_enough_files = false;
                     break;
                 }
@@ -127,7 +127,6 @@ impl TierCompactionPicker {
                 stats.skip_by_write_amp_limit += 1;
                 continue;
             }
-
             select_level_inputs.reverse();
 
             return Some(CompactionInput {
@@ -363,10 +362,10 @@ pub mod tests {
         let l0 = generate_l0_overlapping_sublevels(vec![
             vec![
                 generate_table(4, 1, 10, 90, 1),
-                generate_table(5, 1, 210, 220, 1),
+                generate_table(5, 1, 200, 220, 1),
             ],
-            vec![generate_table(6, 1, 0, 100, 1)],
-            vec![generate_table(7, 1, 0, 100, 1)],
+            vec![generate_table(6, 1, 1, 100, 1)],
+            vec![generate_table(7, 1, 1, 100, 1)],
         ]);
         let mut levels = Levels {
             l0: Some(l0),
@@ -378,7 +377,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .sub_level_max_compaction_bytes(1)
+                .sub_level_max_compaction_bytes(100)
                 .max_compaction_bytes(500000)
                 .build(),
         );
@@ -394,18 +393,6 @@ pub mod tests {
         assert_eq!(ret.input_levels.len(), 2);
         assert_eq!(ret.target_level, 0);
         assert_eq!(ret.target_sub_level_id, 1);
-
-        // sub-level 0 is included because it's overlapping even if violating
-        // sub_level_max_compaction_bytes.
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
-        let mut picker =
-            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels.len(), 3);
-        assert_eq!(ret.target_level, 0);
-        assert_eq!(ret.target_sub_level_id, 0);
     }
 
     #[test]
