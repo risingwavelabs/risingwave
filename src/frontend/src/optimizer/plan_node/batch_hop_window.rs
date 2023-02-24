@@ -28,7 +28,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,

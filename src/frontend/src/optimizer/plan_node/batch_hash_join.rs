@@ -34,7 +34,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and then probes with data from outer (left-side) relation to
 /// get output rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashJoin {
     pub base: PlanBase,
     logical: LogicalJoin,

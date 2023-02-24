@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use super::monitor::SourceMetrics;
-use super::{SourceInfo, SplitImpl, SplitReader};
+use super::{SourceContextRef, SplitImpl, SplitReader};
 use crate::parser::ParserConfig;
 use crate::source::{BoxSourceWithStateStream, Column};
 
@@ -36,8 +33,7 @@ impl SplitReader for DummySplitReader {
         _properties: Self::Properties,
         _state: Vec<SplitImpl>,
         _parser_config: ParserConfig,
-        _metrics: Arc<SourceMetrics>,
-        _source_info: SourceInfo,
+        _source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         Ok(Self {})

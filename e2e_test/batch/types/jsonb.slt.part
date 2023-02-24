@@ -83,19 +83,21 @@ select null::jsonb::bool;
 ----
 NULL
 
+# Example of accessing the boolean nested inside object and array
 query T
-select jsonb_array_element(jsonb_object_field('{"k2":[2,true,4]}', 'k2'), -2)::bool;
+select ('{"k2":[2,true,4]}'::jsonb -> 'k2' -> -2)::bool;
 ----
 t
 
+# But for text, avoid cast and use `->>` as the last access operator.
 # Note the difference between access text directly vs access jsonb then cast to text.
 query TTT
 with t(v1) as (values (null::jsonb), ('null'), ('true'), ('1'), ('"a"'), ('[]'), ('{}')),
      j(v1) as (select ('{"k":' || v1::varchar || '}')::jsonb from t)
 select
-    jsonb_object_field_text(v1, 'k'),
-    jsonb_object_field(v1, 'k')::varchar,
-    jsonb_typeof(jsonb_object_field(v1, 'k'))
+    v1 ->> 'k',
+    (v1 -> 'k')::varchar,
+    jsonb_typeof(v1 -> 'k')
 from j order by 2;
 ----
 a "a" string
@@ -107,7 +109,7 @@ true true boolean
 NULL NULL NULL
 
 query T
-select jsonb_array_element_text('true'::jsonb, 2);
+select 'true'::jsonb ->> 2;
 ----
 NULL
 
