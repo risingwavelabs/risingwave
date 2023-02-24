@@ -182,7 +182,6 @@ impl PulsarSplitReader {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
                 let msg = SourceMessage::from(msg?);
-                tracing::info!("got message {:?}", msg);
                 res.push(msg);
             }
             yield res;
