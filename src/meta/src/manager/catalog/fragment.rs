@@ -41,7 +41,7 @@ use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, TableFragments, ValTransaction,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::SplitAssignment;
+use crate::stream::{visit_stream_node, SplitAssignment};
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -269,7 +269,7 @@ where
         &self,
         table_id: TableId,
         dummy_table_id: TableId,
-        _merge_updates: &[MergeUpdate],
+        merge_updates: &[MergeUpdate],
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -287,19 +287,66 @@ where
 
         assert_eq!(table_fragment.state(), State::Initial);
         table_fragment.set_table_id(table_id);
-        table_fragment.set_state(State::Created); // directly set to `Created`
+
+        // Directly set to `Created` and `Running` state.
+        table_fragment.set_state(State::Created);
         table_fragment.update_actors_state(ActorState::Running);
 
         table_fragments.insert(table_id, table_fragment.clone());
 
+        // Update downstream `Merge`s.
+        let mut merge_updates: HashMap<_, _> = merge_updates
+            .iter()
+            .map(|update| (update.actor_id, update))
+            .collect();
+
+        let to_update_table_ids = table_fragments
+            .tree_ref()
+            .iter()
+            .filter(|(_, v)| {
+                v.actor_ids()
+                    .iter()
+                    .any(|&actor_id| merge_updates.contains_key(&actor_id))
+            })
+            .map(|(k, _)| *k)
+            .collect::<Vec<_>>();
+
+        for table_id in to_update_table_ids {
+            let mut table_fragment = table_fragments
+                .get_mut(table_id)
+                .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
+
+            for actor in table_fragment
+                .fragments
+                .values_mut()
+                .flat_map(|f| &mut f.actors)
+            {
+                if let Some(merge_update) = merge_updates.remove(&actor.actor_id) {
+                    assert!(merge_update.removed_upstream_actor_id.is_empty());
+                    assert!(merge_update.new_upstream_fragment_id.is_some());
+
+                    let stream_node = actor.nodes.as_mut().unwrap();
+                    visit_stream_node(stream_node, |body| {
+                        if let NodeBody::Merge(m) = body
+                           && m.upstream_fragment_id == merge_update.upstream_fragment_id
+                        {
+                            m.upstream_fragment_id = merge_update.new_upstream_fragment_id.unwrap();
+                            m.upstream_actor_id = merge_update.added_upstream_actor_id.clone();
+                        }
+                    });
+                }
+            }
+        }
+
+        assert!(merge_updates.is_empty());
+
+        // Commit changes and notify about the changes.
         commit_meta!(self, table_fragments)?;
 
         self.notify_fragment_mapping(&old_table_fragment, Operation::Delete)
             .await;
         self.notify_fragment_mapping(&table_fragment, Operation::Add)
             .await;
-
-        // TODO: should update merge executors.
 
         Ok(())
     }
@@ -613,26 +660,19 @@ where
             stream_node: &mut StreamNode,
             upstream_fragment_id: &FragmentId,
             upstream_actors_to_remove: &HashSet<ActorId>,
-            upstream_actors_to_create: &Vec<ActorId>,
+            upstream_actors_to_create: &[ActorId],
         ) {
-            if let Some(NodeBody::Merge(s)) = stream_node.node_body.as_mut() {
-                if s.upstream_fragment_id == *upstream_fragment_id {
-                    update_actors(
-                        s.upstream_actor_id.as_mut(),
-                        upstream_actors_to_remove,
-                        upstream_actors_to_create,
-                    );
+            visit_stream_node(stream_node, |body| {
+                if let NodeBody::Merge(s) = body {
+                    if s.upstream_fragment_id == *upstream_fragment_id {
+                        update_actors(
+                            s.upstream_actor_id.as_mut(),
+                            upstream_actors_to_remove,
+                            upstream_actors_to_create,
+                        );
+                    }
                 }
-            }
-
-            for child in &mut stream_node.input {
-                update_merge_node_upstream(
-                    child,
-                    upstream_fragment_id,
-                    upstream_actors_to_remove,
-                    upstream_actors_to_create,
-                );
-            }
+            });
         }
 
         let new_created_actors: HashSet<_> = reschedules
