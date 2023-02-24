@@ -306,11 +306,6 @@ impl RequiredDist {
         plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
-        println!("plan dist: {}", plan.distribution());
-        match self {
-            RequiredDist::ShardByKey(_) => println!("required dist: {}", self.to_dist()),
-            _ => println!("required dist: {:?}", self),
-        };
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {

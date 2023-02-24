@@ -151,8 +151,6 @@ impl LogicalAgg {
             .rewrite_dist_key(local_group_key_without_vnode)
             .unwrap_or_else(|| panic!("some input group key could not be mapped"));
 
-        println!("global_group_key: {:?}", global_group_key);
-
         // Generate global agg step
         if self.group_key().is_empty() {
             let exchange =
@@ -202,13 +200,7 @@ impl LogicalAgg {
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         // Shuffle agg if group key is present.
         let input_dist = stream_input.distribution().clone();
-        println!(
-            "should two phase agg: {}",
-            self.should_stream_two_phase_agg(&stream_input)
-        );
-        println!("group_key empty: {}", self.group_key().is_empty());
         if !self.group_key().is_empty() && !self.should_stream_two_phase_agg(&stream_input) {
-            println!("Generating stream hash agg");
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -230,7 +222,6 @@ impl LogicalAgg {
         // we can only generate stand alone plan for the simple agg
         let all_agg_calls_can_use_two_phase = self.can_two_phase_agg();
         if !all_agg_calls_can_use_two_phase {
-            println!("Generating single");
             return gen_single_plan(stream_input);
         }
 
@@ -245,7 +236,6 @@ impl LogicalAgg {
             && input_dist.satisfies(&RequiredDist::AnyShard)
             && self.group_key().is_empty()
         {
-            println!("Generating stateless agg");
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 
@@ -255,7 +245,6 @@ impl LogicalAgg {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
-                println!("Generating vnode two phase agg");
                 self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
             }
         }
@@ -289,10 +278,6 @@ impl LogicalAgg {
         // we should not use two phase agg.
         let required_dist =
             RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        println!(
-            "satisfies? {}",
-            stream_input.distribution().satisfies(&required_dist)
-        );
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
             && !stream_input.distribution().satisfies(&required_dist)
@@ -303,10 +288,6 @@ impl LogicalAgg {
         // we should not use two phase agg.
         let required_dist =
             RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        println!(
-            "satisfies? {}",
-            self.input().distribution().satisfies(&required_dist)
-        );
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
             && !self.input().distribution().satisfies(&required_dist)
