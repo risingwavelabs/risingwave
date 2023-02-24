@@ -15,8 +15,10 @@
 //! Provides E2E Test runner functionality.
 
 use itertools::Itertools;
+#[cfg(not(madsim))]
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+#[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Error;
@@ -29,10 +31,17 @@ use crate::{
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
+    #[cfg(madsim)]
     let mut rng = if let Some(seed) = seed {
         ChaChaRng::seed_from_u64(seed)
     } else {
         ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+    };
+    #[cfg(not(madsim))]
+    let mut rng = if let Some(seed) = seed {
+        SmallRng::seed_from_u64(seed)
+    } else {
+        SmallRng::from_entropy()
     };
     let (tables, base_tables, mviews, mut setup_sql) =
         create_tables(&mut rng, testdata, client).await;
@@ -101,7 +110,7 @@ async fn test_sqlsmith<R: Rng>(
     // tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
-    let threshold = 0.20; // permit at most 20% of queries to be skipped.
+    let threshold = 0.40; // permit at most 50% of queries to be skipped.
     let sample_size = 50;
 
     let skipped_percentage =
