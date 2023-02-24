@@ -29,11 +29,8 @@ use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, Wo
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
-use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
@@ -1129,11 +1126,7 @@ where
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_multiple_commands(vec![
-                Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
-                Command::RescheduleFragment(reschedule_fragment),
-                Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
-            ])
+            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
             .await?;
 
         Ok(())

@@ -154,7 +154,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
-    /// multiple commands is executed continuously and atomically.
+    /// multiple commands are executed continuously.
+    ///
+    /// TODO: atomicity of multiple commands is not guaranteed.
     pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         struct Context {
             collect_rx: oneshot::Receiver<MetaResult<()>>,
@@ -203,6 +205,13 @@ impl<S: MetaStore> BarrierScheduler<S> {
         }
 
         Ok(())
+    }
+
+    /// Run a command with a `Pause` command before and `Resume` command after it. Used for
+    /// configuration change.
+    pub async fn run_command_with_paused(&self, command: Command) -> MetaResult<()> {
+        self.run_multiple_commands(vec![Command::pause(), command, Command::resume()])
+            .await
     }
 
     /// Run a command and return when it's completely finished.

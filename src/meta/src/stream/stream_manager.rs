@@ -461,7 +461,7 @@ where
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_command(Command::ReplaceTable {
+            .run_command_with_paused(Command::ReplaceTable {
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
