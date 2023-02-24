@@ -419,7 +419,7 @@ SELECT jsonb_agg(q ORDER BY x NULLS FIRST, y)
 (1 row)
 
 -- jsonb extraction functions
-CREATE TEMP TABLE test_jsonb (
+CREATE TABLE test_jsonb (
        json_type text,
        test_json jsonb
 );
@@ -580,6 +580,8 @@ SELECT (test_json->>3) IS NULL AS expect_true FROM test_jsonb WHERE json_type = 
 -------------
  t
 (1 row)
+
+DROP TABLE test_jsonb;
 
 -- corner cases
 select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::text;
