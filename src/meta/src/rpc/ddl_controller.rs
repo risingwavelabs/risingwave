@@ -112,6 +112,10 @@ where
         Ok(())
     }
 
+    /// `run_command` spawns a tokio coroutine to execute the target ddl command. When the client
+    /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
+    /// a lot of logic for revert, status management, notification and so on, ensuring consistency
+    /// would be a huge hassle and pain if we don't spawn here.
     pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
         let ctrl = self.clone();
@@ -217,12 +221,13 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
-        let (ctx, table_fragments) = self
-            .prepare_stream_job(&mut stream_job, fragment_graph)
-            .await?;
-
-        let internal_tables = ctx.internal_tables();
+        let mut internal_tables = vec![];
         let result = try {
+            let (ctx, table_fragments) = self
+                .prepare_stream_job(&mut stream_job, fragment_graph)
+                .await?;
+
+            internal_tables = ctx.internal_tables();
             if let Some(source) = stream_job.source() {
                 self.source_manager.register_source(source).await?;
             }
@@ -324,63 +329,53 @@ where
             })
             .collect();
 
-        let res: MetaResult<(CreateStreamingJobContext, TableFragments)> = try {
-            let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
-                fragment_graph,
-                upstream_mview_fragments,
-            )?;
+        let complete_graph =
+            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?;
 
-            // 6. Build the actor graph.
-            let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
-            let actor_graph_builder =
-                ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+        // 6. Build the actor graph.
+        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let actor_graph_builder =
+            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
-            let ActorGraphBuildResult {
-                graph,
-                building_locations,
-                existing_locations,
-                dispatchers,
-                merge_updates,
-            } = actor_graph_builder
-                .generate_graph(self.env.id_gen_manager_ref(), stream_job)
-                .await?;
-            assert!(merge_updates.is_empty());
+        let ActorGraphBuildResult {
+            graph,
+            building_locations,
+            existing_locations,
+            dispatchers,
+            merge_updates,
+        } = actor_graph_builder
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .await?;
+        assert!(merge_updates.is_empty());
 
-            // 8. Build the table fragments structure that will be persisted in the stream manager,
-            // and the context that contains all information needed for building the
-            // actors on the compute nodes.
-            let table_fragments =
-                TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+        // 8. Build the table fragments structure that will be persisted in the stream manager,
+        // and the context that contains all information needed for building the
+        // actors on the compute nodes.
+        let table_fragments =
+            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
 
-            let ctx = CreateStreamingJobContext {
-                dispatchers,
-                upstream_mview_actors,
-                internal_tables,
-                building_locations,
-                existing_locations,
-                table_properties: stream_job.properties(),
-                definition: stream_job.mview_definition(),
-            };
-
-            // 9. Mark creating tables, including internal tables and the table of the stream job.
-            let creating_tables = ctx
-                .internal_tables()
-                .into_iter()
-                .chain(stream_job.table().cloned())
-                .collect_vec();
-
-            self.catalog_manager
-                .mark_creating_tables(&creating_tables)
-                .await;
-
-            (ctx, table_fragments)
+        let ctx = CreateStreamingJobContext {
+            dispatchers,
+            upstream_mview_actors,
+            internal_tables,
+            building_locations,
+            existing_locations,
+            table_properties: stream_job.properties(),
+            definition: stream_job.mview_definition(),
         };
-        if let Err(err) = &res {
-            tracing::error!("failed to build streaming graph for streaming job: {}", err);
-            self.cancel_stream_job(stream_job, vec![]).await;
-        }
 
-        res
+        // 9. Mark creating tables, including internal tables and the table of the stream job.
+        let creating_tables = ctx
+            .internal_tables()
+            .into_iter()
+            .chain(stream_job.table().cloned())
+            .collect_vec();
+
+        self.catalog_manager
+            .mark_creating_tables(&creating_tables)
+            .await;
+
+        Ok((ctx, table_fragments))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.
