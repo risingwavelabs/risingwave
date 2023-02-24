@@ -131,10 +131,6 @@ enum Precedence {
     Cmp,
     Between,
     Other,
-    BitwiseOr, // 21 in upstream
-    BitwiseXor,
-    BitwiseAnd, // 23 in upstream
-    BitwiseShift,
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
@@ -1392,11 +1388,13 @@ impl Parser {
                     _ => Ok(P::Zero),
                 }
             }
-            // test: 2 | 3 & 4
-            Token::Pipe => Ok(P::BitwiseOr),
-            Token::Sharp => Ok(P::BitwiseXor),
-            Token::Ampersand => Ok(P::BitwiseAnd),
-            Token::ShiftRight | Token::ShiftLeft => Ok(P::BitwiseShift),
+            // In some languages (incl. rust, c), bitwise operators have precedence:
+            //   or < xor < and < shift
+            // But in PostgreSQL, they are just left to right. So `2 | 3 & 4` is 0.
+            Token::Pipe => Ok(P::Other),
+            Token::Sharp => Ok(P::Other),
+            Token::Ampersand => Ok(P::Other),
+            Token::ShiftRight | Token::ShiftLeft => Ok(P::Other),
             Token::Plus | Token::Minus => Ok(P::PlusMinus),
             Token::Mul | Token::Div | Token::Mod => Ok(P::MulDiv),
             Token::Caret => Ok(P::Exp),
