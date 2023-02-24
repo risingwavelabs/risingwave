@@ -109,7 +109,7 @@ async fn test_sqlsmith<R: Rng>(
     // tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
-    let threshold = 0.40; // permit at most 50% of queries to be skipped.
+    let threshold = 0.40; // permit at most 40% of queries to be skipped.
     let sample_size = 50;
 
     let skipped_percentage =
