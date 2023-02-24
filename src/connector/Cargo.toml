@@ -36,6 +36,7 @@ google-cloud-pubsub = "0.7.0"
 http = "0.2"
 http-serde = "1.1.0"
 hyper = "0.14"
+hyper-tls = "0.5"
 itertools = "0.10"
 maplit = "1.0.2"
 moka = { version = "0.9", features = ["future"] }
