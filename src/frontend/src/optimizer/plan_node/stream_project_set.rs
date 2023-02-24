@@ -24,7 +24,7 @@ use crate::expr::{try_derive_watermark, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {
     pub base: PlanBase,
     logical: LogicalProjectSet,

@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchFilter {
     pub base: PlanBase,
     logical: LogicalFilter,

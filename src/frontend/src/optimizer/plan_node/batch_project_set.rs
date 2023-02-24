@@ -27,7 +27,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
     pub base: PlanBase,
     logical: LogicalProjectSet,

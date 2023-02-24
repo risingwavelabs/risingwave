@@ -36,7 +36,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
 /// column.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
     core: generic::ProjectSet<PlanRef>,

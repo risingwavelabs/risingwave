@@ -218,7 +218,11 @@ pub(crate) async fn resolve_source_schema(
 
             columns_extend(
                 columns,
-                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+                extract_protobuf_table_schema(
+                    protobuf_schema,
+                    with_properties.clone().into_iter().collect(),
+                )
+                .await?,
             );
 
             StreamSourceInfo {
@@ -504,7 +508,12 @@ pub async fn handle_create_source(
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let with_properties = handler_args.with_options.inner().clone();
+    let with_properties = handler_args
+        .with_options
+        .inner()
+        .clone()
+        .into_iter()
+        .collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -556,7 +565,7 @@ pub async fn handle_create_source(
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties,
+        properties: with_properties.into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
