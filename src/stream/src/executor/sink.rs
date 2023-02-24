@@ -54,11 +54,11 @@ async fn build_sink(
     ))
 }
 
-// Drop all the UPDATE/DELETE messages in this chunk.
+// Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
 fn force_append_only(chunk: StreamChunk, data_types: Vec<DataType>) -> Option<StreamChunk> {
     let mut builder = DataChunkBuilder::new(data_types, chunk.cardinality() + 1);
     for (op, row_ref) in chunk.rows() {
-        if op == Op::Insert {
+        if op == Op::Insert || op == Op::UpdateInsert {
             let finished = builder.append_one_row(row_ref.into_owned_row());
             assert!(finished.is_none());
         }
@@ -129,10 +129,10 @@ impl SinkExecutor {
 
                     if let Some(chunk) = visible_chunk {
                         // NOTE: We start the txn here because a force-append-only sink might
-                        // receive a data chunk full of UPDATE and DELETE messages and then drop all
-                        // of them. At this point (instead of the point above when we receive the
-                        // upstream data chunk), we make sure that we do have data to send out, and
-                        // we can thus mark the txn as started.
+                        // receive a data chunk full of DELETE messages and then drop all of them.
+                        // At this point (instead of the point above when we receive the upstream
+                        // data chunk), we make sure that we do have data to send out, and we can
+                        // thus mark the txn as started.
                         if !in_transaction {
                             sink.begin_epoch(epoch).await?;
                             in_transaction = true;
@@ -336,12 +336,13 @@ mod test {
             chunk_msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I I
+                + 3 4
                 + 5 6",
             )
         );
 
         // Should not receive the third stream chunk message because the force-append-only sink
-        // executor will drop all UPDATE and DELETE messages.
+        // executor will drop all DELETE messages.
 
         // The last barrier message.
         executor.next().await.unwrap().unwrap();
