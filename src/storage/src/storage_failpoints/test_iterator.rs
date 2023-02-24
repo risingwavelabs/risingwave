@@ -21,7 +21,7 @@ use crate::hummock::iterator::test_utils::{
 };
 use crate::hummock::iterator::{
     BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
-    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
+    UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::default_builder_opt_for_test;
@@ -280,22 +280,22 @@ async fn test_failpoints_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters = vec![
-        HummockIteratorUnion::Fourth(SstableIterator::new(
+        SstableIterator::new(
             sstable_store
                 .sstable(&table0.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-        )),
-        HummockIteratorUnion::Fourth(SstableIterator::new(
+        ),
+        SstableIterator::new(
             sstable_store
                 .sstable(&table1.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
-        )),
+        ),
     ];
 
     let mi = UnorderedMergeIteratorInner::new(iters);
@@ -348,20 +348,20 @@ async fn test_failpoints_backward_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters = vec![
-        HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
+        BackwardSstableIterator::new(
             sstable_store
                 .sstable(&table0.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
-        )),
-        HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
+        ),
+        BackwardSstableIterator::new(
             sstable_store
                 .sstable(&table1.get_sstable_info(), &mut stats)
                 .await
                 .unwrap(),
             sstable_store.clone(),
-        )),
+        ),
     ];
 
     let mi = UnorderedMergeIteratorInner::new(iters);
