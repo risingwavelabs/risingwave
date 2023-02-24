@@ -20,7 +20,7 @@ use crate::expr::{ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDispla
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EqJoinPredicate {
     /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,

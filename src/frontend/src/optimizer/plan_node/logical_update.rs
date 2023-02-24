@@ -34,7 +34,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// specified table.
 ///
 /// It corresponds to the `UPDATE` statements in SQL.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
     pub base: PlanBase,
     table_name: String, // explain-only

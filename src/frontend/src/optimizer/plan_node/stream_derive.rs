@@ -18,6 +18,7 @@ use super::generic::GenericPlanNode;
 use super::stream::*;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Distribution;
+use crate::utils::ColIndexMappingRewriteExt;
 
 impl GenericPlanNode for DynamicFilter {
     fn schema(&self) -> Schema {
