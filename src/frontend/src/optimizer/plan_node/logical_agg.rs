@@ -200,7 +200,7 @@ impl LogicalAgg {
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         // Shuffle agg if group key is present.
         let input_dist = stream_input.distribution().clone();
-        if !self.group_key().is_empty() && !self.should_stream_two_phase_agg(&stream_input) {
+        if !self.group_key().is_empty() && !self.should_two_phase_hash_agg(&input_dist) {
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -273,24 +273,20 @@ impl LogicalAgg {
             .get_enable_two_phase_agg()
     }
 
-    pub(crate) fn should_stream_two_phase_agg(&self, stream_input: &PlanRef) -> bool {
+    /// TODO(kwannoel):
+    /// Should two phase agg is dependent on whether we are distributing
+    /// on stream / batch.
+    /// This should be refactored accordingly after:
+    /// <https://github.com/risingwavelabs/risingwave/issues/8137>
+    /// [`Distribution`] must be either `batch` or `stream` dist, not logical dist.
+    pub(crate) fn should_two_phase_hash_agg(&self, input_dist: &Distribution) -> bool {
         // If input already satisfies required output distribution,
         // we should not use two phase agg.
         let required_dist =
             RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
-            && !stream_input.distribution().satisfies(&required_dist)
-    }
-
-    pub(crate) fn should_two_phase_agg(&self) -> bool {
-        // If input already satisfies required output distribution,
-        // we should not use two phase agg.
-        let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        self.can_two_phase_agg()
-            && self.two_phase_agg_forced()
-            && !self.input().distribution().satisfies(&required_dist)
+            && !input_dist.satisfies(&required_dist)
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

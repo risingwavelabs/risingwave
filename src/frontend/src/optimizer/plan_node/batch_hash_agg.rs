@@ -58,12 +58,9 @@ impl BatchHashAgg {
         self.logical.group_key()
     }
 
-    fn to_two_phase_agg(&self) -> Result<PlanRef> {
-        // Follow input distribution
-        let new_input = self.input().to_distributed()?;
-
-        // partial agg
-        let partial_agg: PlanRef = self.clone_with_input(new_input).into();
+    fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
+        // partial agg - follows input distribution
+        let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
 
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
@@ -91,11 +88,9 @@ impl BatchHashAgg {
         Ok(BatchHashAgg::new(total_agg_logical).into())
     }
 
-    fn to_shuffle_agg(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed_with_required(
-            &Order::any(),
-            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
-        )?;
+    fn to_shuffle_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
+        let new_input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
+            .enforce_if_not_satisfies(dist_input, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -118,10 +113,12 @@ impl PlanTreeNodeUnary for BatchHashAgg {
 impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        if self.logical.should_two_phase_agg() {
-            self.to_two_phase_agg()
+        let input = self.input().to_distributed()?;
+        let input_dist = input.distribution();
+        if self.logical.should_two_phase_hash_agg(input_dist) {
+            self.to_two_phase_agg(input)
         } else {
-            self.to_shuffle_agg()
+            self.to_shuffle_agg(input)
         }
     }
 }
