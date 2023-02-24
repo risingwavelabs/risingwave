@@ -73,7 +73,7 @@ impl PulsarAdminClient {
 
         if let Some(auth_token) = &self.auth_token {
             req.headers_mut()
-                .insert("Authorization", format!("{}", auth_token).parse().unwrap());
+                .insert("Authorization", auth_token.to_string().parse().unwrap());
         }
 
         client.request(req).await.map_err(|e| anyhow!(e))
