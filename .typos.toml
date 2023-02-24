@@ -15,4 +15,5 @@ extend-exclude = [
     "**/*.svg",
     "scripts",
     "src/frontend/planner_test/tests/testdata",
+    "src/tests/sqlsmith/tests/freeze",
 ]
