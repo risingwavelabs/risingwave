@@ -119,9 +119,8 @@ type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermar
 
 /// Reference:
 /// https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u8)]
-enum Precedence {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Precedence {
     Zero = 0,
     LogicalOr, // 5 in upstream
     LogicalXor,
@@ -410,11 +409,11 @@ impl Parser {
 
     /// Parse a new expression
     pub fn parse_expr(&mut self) -> Result<Expr, ParserError> {
-        self.parse_subexpr(0)
+        self.parse_subexpr(Precedence::Zero)
     }
 
     /// Parse tokens until the precedence changes
-    pub fn parse_subexpr(&mut self, precedence: u8) -> Result<Expr, ParserError> {
+    pub fn parse_subexpr(&mut self, precedence: Precedence) -> Result<Expr, ParserError> {
         debug!("parsing expr");
         let mut expr = self.parse_prefix()?;
         debug!("prefix: {:?}", expr);
@@ -484,7 +483,7 @@ impl Parser {
                 Keyword::INTERVAL => self.parse_literal_interval(),
                 Keyword::NOT => Ok(Expr::UnaryOp {
                     op: UnaryOperator::Not,
-                    expr: Box::new(self.parse_subexpr(Precedence::UnaryNot as u8)?),
+                    expr: Box::new(self.parse_subexpr(Precedence::UnaryNot)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
                 Keyword::ARRAY => {
@@ -528,7 +527,7 @@ impl Parser {
                 } else {
                     UnaryOperator::Minus
                 };
-                let mut sub_expr = self.parse_subexpr(Precedence::PlusMinus as u8)?;
+                let mut sub_expr = self.parse_subexpr(Precedence::PlusMinus)?;
                 if let Expr::Value(Value::Number(ref mut s)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);
@@ -555,7 +554,7 @@ impl Parser {
                 };
                 Ok(Expr::UnaryOp {
                     op,
-                    expr: Box::new(self.parse_subexpr(Precedence::PlusMinus as u8)?),
+                    expr: Box::new(self.parse_subexpr(Precedence::PlusMinus)?),
                 })
             }
             Token::Number(_)
@@ -1106,7 +1105,7 @@ impl Parser {
     }
 
     /// Parse an operator following an expression
-    pub fn parse_infix(&mut self, expr: Expr, precedence: u8) -> Result<Expr, ParserError> {
+    pub fn parse_infix(&mut self, expr: Expr, precedence: Precedence) -> Result<Expr, ParserError> {
         let tok = self.next_token();
         let regular_binary_operator = match &tok {
             Token::Spaceship => Some(BinaryOperator::Spaceship),
@@ -1311,9 +1310,9 @@ impl Parser {
     pub fn parse_between(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
         // Stop parsing subexpressions for <low> and <high> on tokens with
         // precedence lower than that of `BETWEEN`, such as `AND`, `IS`, etc.
-        let low = self.parse_subexpr(Precedence::Between as u8)?;
+        let low = self.parse_subexpr(Precedence::Between)?;
         self.expect_keyword(Keyword::AND)?;
-        let high = self.parse_subexpr(Precedence::Between as u8)?;
+        let high = self.parse_subexpr(Precedence::Between)?;
         Ok(Expr::Between {
             expr: Box::new(expr),
             negated,
@@ -1331,7 +1330,7 @@ impl Parser {
     }
 
     /// Get the precedence of the next token
-    pub fn get_next_precedence(&self) -> Result<u8, ParserError> {
+    pub fn get_next_precedence(&self) -> Result<Precedence, ParserError> {
         use Precedence as P;
 
         let token = self.peek_token();
@@ -1403,7 +1402,6 @@ impl Parser {
             Token::DoubleColon => Ok(P::DoubleColon),
             _ => Ok(P::Zero),
         }
-        .map(|p| p as u8)
     }
 
     /// Return the first non-whitespace token that has not yet been processed
