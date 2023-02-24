@@ -305,6 +305,7 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, 
             if let Some(e) = e.as_db_error()
                 && is_permissible_error(&e.to_string())
             {
+                tracing::info!("[SKIPPED ERROR]: {:?}", e);
                 return 1;
             }
             // consolidate error reason for deterministic test
