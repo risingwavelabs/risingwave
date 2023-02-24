@@ -132,6 +132,7 @@ impl BuildingFragment {
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
+                dml_node.table_version_id = job.table_version_id().unwrap();
             }
             _ => {}
         });
@@ -276,11 +277,11 @@ impl StreamFragmentGraph {
                 .unwrap();
         }
 
-        // Note: Here we directly use the field `dependent_table_ids` in the proto (resolved in
+        // Note: Here we directly use the field `dependent_relation_ids` in the proto (resolved in
         // frontend), instead of visiting the graph ourselves. Note that for creating table with a
         // connector, the source itself is NOT INCLUDED in this list.
         let dependent_relations = proto
-            .dependent_table_ids
+            .dependent_relation_ids
             .iter()
             .map(TableId::from)
             .collect();
@@ -417,6 +418,13 @@ impl CompleteStreamFragmentGraph {
                     .context("upstream materialized view fragment not found")?;
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
+                // TODO: only output the fields that are used by the downstream `Chain`.
+                // https://github.com/risingwavelabs/risingwave/issues/4529
+                let mview_output_indices = {
+                    let nodes = mview_fragment.actors[0].nodes.as_ref().unwrap();
+                    (0..nodes.fields.len() as u32).collect()
+                };
+
                 let edge = StreamFragmentEdge {
                     id: EdgeId::UpstreamExternal {
                         upstream_table_id,
@@ -426,7 +434,8 @@ impl CompleteStreamFragmentGraph {
                     // and the downstream `Chain` of the new materialized view.
                     dispatch_strategy: DispatchStrategy {
                         r#type: DispatcherType::NoShuffle as _,
-                        ..Default::default()
+                        dist_key_indices: vec![], // not used
+                        output_indices: mview_output_indices,
                     },
                 };
 
@@ -492,7 +501,8 @@ impl CompleteStreamFragmentGraph {
                 // and the downstream `Chain` of the new materialized view.
                 dispatch_strategy: DispatchStrategy {
                     r#type: DispatcherType::NoShuffle as _,
-                    ..Default::default()
+                    dist_key_indices: vec![], // not used
+                    output_indices: vec![],   // FIXME: should erase the changes of the schema
                 },
             };
 

@@ -172,6 +172,81 @@ impl JsonbRef<'_> {
         self.0.to_sql(&Type::JSONB, &mut output).unwrap();
         output.freeze().into()
     }
+
+    pub fn is_jsonb_null(&self) -> bool {
+        matches!(self.0, Value::Null)
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self.0 {
+            Value::Null => "null",
+            Value::Bool(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        }
+    }
+
+    pub fn array_len(&self) -> Result<usize, String> {
+        match self.0 {
+            Value::Array(v) => Ok(v.len()),
+            _ => Err(format!(
+                "cannot get array length of a jsonb {}",
+                self.type_name()
+            )),
+        }
+    }
+
+    pub fn as_bool(&self) -> Result<bool, String> {
+        match self.0 {
+            Value::Bool(v) => Ok(*v),
+            _ => Err(format!(
+                "cannot cast jsonb {} to type boolean",
+                self.type_name()
+            )),
+        }
+    }
+
+    /// Attempt to read jsonb as a JSON number.
+    ///
+    /// According to RFC 8259, only number within IEEE 754 binary64 (double precision) has good
+    /// interoperability. We do not support arbitrary precision like PostgreSQL `numeric` right now.
+    pub fn as_number(&self) -> Result<f64, String> {
+        match self.0 {
+            Value::Number(v) => v.as_f64().ok_or_else(|| "jsonb number out of range".into()),
+            _ => Err(format!(
+                "cannot cast jsonb {} to type number",
+                self.type_name()
+            )),
+        }
+    }
+
+    /// This is part of the `->>` or `#>>` syntax to access a child as string.
+    ///
+    /// * It is not `as_str`, because there is no runtime error when the jsonb type is not string.
+    /// * It is not same as [`Display`] or [`ToText`] (cast to string) in the following 2 cases:
+    ///   * Jsonb null is displayed as 4-letter `null` but treated as sql null here.
+    ///       * This function writes nothing and the caller is responsible for checking
+    ///         [`is_jsonb_null`] to differentiate it from an empty string.
+    ///   * Jsonb string is displayed with quotes but treated as its inner value here.
+    pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
+        match self.0 {
+            Value::String(v) => writer.write_str(v),
+            Value::Null => Ok(()),
+            Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
+                write!(writer, "{}", self.0)
+            }
+        }
+    }
+
+    pub fn access_object_field(&self, field: &str) -> Option<Self> {
+        self.0.get(field).map(Self)
+    }
+
+    pub fn access_array_element(&self, idx: usize) -> Option<Self> {
+        self.0.get(idx).map(Self)
+    }
 }
 
 #[derive(Debug)]

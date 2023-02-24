@@ -56,6 +56,8 @@ export interface SstableInfo {
   totalKeyCount: number;
   /** When a SST is divided, its divide_version will increase one. */
   divideVersion: number;
+  minEpoch: number;
+  maxEpoch: number;
 }
 
 export interface OverlappingLevel {
@@ -840,6 +842,8 @@ function createBaseSstableInfo(): SstableInfo {
     staleKeyCount: 0,
     totalKeyCount: 0,
     divideVersion: 0,
+    minEpoch: 0,
+    maxEpoch: 0,
   };
 }
 
@@ -854,6 +858,8 @@ export const SstableInfo = {
       staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
       divideVersion: isSet(object.divideVersion) ? Number(object.divideVersion) : 0,
+      minEpoch: isSet(object.minEpoch) ? Number(object.minEpoch) : 0,
+      maxEpoch: isSet(object.maxEpoch) ? Number(object.maxEpoch) : 0,
     };
   },
 
@@ -871,6 +877,8 @@ export const SstableInfo = {
     message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
     message.divideVersion !== undefined && (obj.divideVersion = Math.round(message.divideVersion));
+    message.minEpoch !== undefined && (obj.minEpoch = Math.round(message.minEpoch));
+    message.maxEpoch !== undefined && (obj.maxEpoch = Math.round(message.maxEpoch));
     return obj;
   },
 
@@ -886,6 +894,8 @@ export const SstableInfo = {
     message.staleKeyCount = object.staleKeyCount ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
     message.divideVersion = object.divideVersion ?? 0;
+    message.minEpoch = object.minEpoch ?? 0;
+    message.maxEpoch = object.maxEpoch ?? 0;
     return message;
   },
 };

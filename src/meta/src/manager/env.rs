@@ -68,7 +68,7 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
-
+    // TODO: this will be read from system param channel and should be removed to avoid misuse
     pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
@@ -116,6 +116,9 @@ pub struct MetaOpts {
 
     /// Storage needs to throttle write when l0 sub level number is greater than this.
     pub throttle_l0_sub_level_number: u32,
+
+    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -145,6 +148,7 @@ impl MetaOpts {
             data_directory: "hummock_001".to_string(),
             periodic_space_reclaim_compaction_interval_sec: 60,
             throttle_l0_sub_level_number: 1000,
+            periodic_ttl_reclaim_compaction_interval_sec: 60,
         }
     }
 

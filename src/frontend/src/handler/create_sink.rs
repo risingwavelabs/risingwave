@@ -26,6 +26,7 @@ use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -175,7 +176,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>');"#.to_string();
+                        mysql.password = '<password>', format = 'append_only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

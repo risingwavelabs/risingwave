@@ -19,7 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableVersionId, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
+    USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
@@ -287,9 +288,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = context.with_options().inner();
+    let properties = context.with_options().inner().clone().into_iter().collect();
 
-    let (mut columns, pk_column_ids, row_id_index) =
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     let definition = context.normalized_sql().to_owned();
@@ -297,9 +298,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        properties,
-        row_id_index,
-        &pk_column_ids,
+        &properties,
+        &mut row_id_index,
+        &mut pk_column_ids,
         true,
     )
     .await?;
@@ -381,7 +382,7 @@ fn gen_table_plan_inner(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let source = source_info.map(|source_info| ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name: name.clone(),
@@ -391,7 +392,7 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: context.with_options().inner().clone(),
+        properties: context.with_options().inner().clone().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: vec![],

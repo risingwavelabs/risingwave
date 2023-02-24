@@ -21,6 +21,7 @@ async-stream = "0.3"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 bytes = "1"
+derivative = "2"
 dyn-clone = "1"
 either = "1"
 enum-as-inner = "0.5"

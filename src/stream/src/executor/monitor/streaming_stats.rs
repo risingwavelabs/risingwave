@@ -52,6 +52,7 @@ pub struct StreamingMetrics {
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub join_may_exist_true_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
@@ -83,8 +84,8 @@ pub struct StreamingMetrics {
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
 
-    /// User error reporting
-    pub user_error_count: GenericCounterVec<AtomicU64>,
+    /// User compute error reporting
+    pub user_compute_error_count: GenericCounterVec<AtomicU64>,
 }
 
 impl StreamingMetrics {
@@ -266,7 +267,7 @@ impl StreamingMetrics {
 
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
-            "Join executor lookup miss duration",
+            "Join executor lookup miss count",
             &["actor_id", "side"],
             registry
         )
@@ -274,7 +275,7 @@ impl StreamingMetrics {
 
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
-            "Join executor lookup total operation",
+            "Join executor lookup total count",
             &["actor_id", "side"],
             registry
         )
@@ -282,7 +283,15 @@ impl StreamingMetrics {
 
         let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
-            "Join executor cache miss when insert operation",
+            "Count of cache miss when insert rows in join executor",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_may_exist_true_count = register_int_counter_vec_with_registry!(
+            "stream_join_may_exist_true_count",
+            "Count of may_exist's true returns of when insert rows in join executor",
             &["actor_id", "side"],
             registry
         )
@@ -433,9 +442,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let user_error_count = register_int_counter_vec_with_registry!(
-            "user_error_count",
-            "user errors in the system, queryable by tags",
+        let user_compute_error_count = register_int_counter_vec_with_registry!(
+            "user_compute_error_count",
+            "Compute errors in the system, queryable by tags",
             &["error_type", "error_msg", "executor_name", "fragment_id"],
             registry,
         )
@@ -468,6 +477,7 @@ impl StreamingMetrics {
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,
+            join_may_exist_true_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,
@@ -487,7 +497,7 @@ impl StreamingMetrics {
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
-            user_error_count,
+            user_compute_error_count,
         }
     }
 

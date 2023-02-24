@@ -301,6 +301,20 @@ fn build_type_derive_map() -> FuncSigMap {
     );
     // TODO: Support more `to_char` types.
     map.insert(E::ToChar, vec![T::Timestamp, T::Varchar], T::Varchar);
+    // array_to_string
+    map.insert(E::ArrayToString, vec![T::List, T::Varchar], T::Varchar);
+    map.insert(
+        E::ArrayToString,
+        vec![T::List, T::Varchar, T::Varchar],
+        T::Varchar,
+    );
+
+    map.insert(E::JsonbAccessInner, vec![T::Jsonb, T::Int32], T::Jsonb);
+    map.insert(E::JsonbAccessInner, vec![T::Jsonb, T::Varchar], T::Jsonb);
+    map.insert(E::JsonbAccessStr, vec![T::Jsonb, T::Int32], T::Varchar);
+    map.insert(E::JsonbAccessStr, vec![T::Jsonb, T::Varchar], T::Varchar);
+    map.insert(E::JsonbTypeof, vec![T::Jsonb], T::Varchar);
+    map.insert(E::JsonbArrayLength, vec![T::Jsonb], T::Int32);
 
     map
 }

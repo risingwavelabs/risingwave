@@ -163,6 +163,10 @@ pub struct MetaConfig {
     /// Storage needs to throttle write when l0 sub level number is greater than this.
     #[serde(default = "default::meta::throttle_l0_sub_level_number")]
     pub throttle_l0_sub_level_number: u32,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -210,6 +214,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    #[serde(default)]
+    pub distributed_query_limit: Option<u64>,
 }
 
 impl Default for BatchConfig {
@@ -249,6 +256,10 @@ pub struct StreamingConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    /// Max unique user stream errors per actor
+    #[serde(default = "default::streaming::unique_user_stream_errors")]
+    pub unique_user_stream_errors: usize,
 }
 
 impl Default for StreamingConfig {
@@ -346,10 +357,6 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
-
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
@@ -512,6 +519,10 @@ mod default {
         pub fn throttle_l0_sub_level_number() -> u32 {
             1000
         }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
+        }
     }
 
     pub mod server {
@@ -611,10 +622,6 @@ mod default {
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
         }
-
-        pub fn enable_state_store_v1() -> bool {
-            false
-        }
     }
 
     pub mod streaming {
@@ -640,6 +647,10 @@ mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::On
+        }
+
+        pub fn unique_user_stream_errors() -> usize {
+            10
         }
     }
 

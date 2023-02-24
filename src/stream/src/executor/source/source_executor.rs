@@ -19,7 +19,7 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitMetaData, StreamChunkWithState,
 };
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -27,7 +27,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::executor_core::StreamSourceCore;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::source::reader::SourceReaderStream;
+use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::throttler::SourceThrottlerImpl;
 use crate::executor::*;
 
@@ -86,25 +86,24 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        let mut source_ctx = SourceContext::new(
+            self.ctx.id,
+            self.stream_source_core.as_ref().unwrap().source_id,
+            self.ctx.fragment_id,
+            source_desc.metrics.clone(),
+        );
+        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
             .source
-            .stream_reader(
-                state,
-                column_ids,
-                source_desc.metrics.clone(),
-                SourceInfo::new(
-                    self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().source_id,
-                ),
-            )
+            .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
 
-    async fn apply_split_change(
+    async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut SourceReaderStream,
+        stream: &mut StreamReaderWithPause<BIASED>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -158,10 +157,10 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok((!no_change_flag).then_some(target_state))
     }
 
-    async fn replace_stream_reader_with_target_state(
+    async fn replace_stream_reader_with_target_state<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut SourceReaderStream,
+        stream: &mut StreamReaderWithPause<BIASED>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -174,7 +173,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
             .await?;
-        stream.replace_source_stream(reader);
+        stream.replace_data_stream(reader);
 
         self.stream_source_core
             .as_mut()
@@ -284,80 +283,94 @@ impl<S: StateStore> SourceExecutor<S> {
             .stack_trace("source_build_reader")
             .await?;
 
-        // Merge the chunks from source and the barriers into a single stream.
-        let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
+        // Merge the chunks from source and the barriers into a single stream. We prioritize
+        // barriers over source data chunks here.
+        let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
+        let mut stream = StreamReaderWithPause::<true>::new(barrier_stream, source_chunk_reader);
         // If `explicit_pause`, throttlers shouldn't resume source.
         let mut explicit_pause = false;
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
         if barrier.is_update() {
-            stream.pause_source();
+            stream.pause_stream();
             explicit_pause = true;
         }
+
         yield Message::Barrier(barrier);
 
         let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
-                Either::Left(barrier) => {
-                    for throttler in &mut self.throttlers {
-                        throttler.on_barrier();
-                    }
-                    if !explicit_pause
-                        && stream.paused()
-                        && self.throttlers.iter().all(|t| !t.should_pause())
-                    {
-                        stream.resume_source();
-                    }
-                    let epoch = barrier.epoch;
-
-                    if let Some(ref mutation) = barrier.mutation.as_deref() {
-                        match mutation {
-                            Mutation::SourceChangeSplit(actor_splits) => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?
-                            }
-                            Mutation::Pause => {
-                                stream.pause_source();
-                                explicit_pause = true;
-                            }
-                            Mutation::Resume => {
-                                stream.resume_source();
-                                explicit_pause = false;
-                            }
-                            Mutation::Update { actor_splits, .. } => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
-                            }
-                            _ => {}
+                Either::Left(msg) => match &msg {
+                    Message::Barrier(barrier) => {
+                        for throttler in &mut self.throttlers {
+                            throttler.on_barrier();
                         }
+                        if !explicit_pause
+                            && stream.paused()
+                            && self.throttlers.iter().all(|t| !t.should_pause())
+                        {
+                            stream.resume_stream();
+                        }
+                        let epoch = barrier.epoch;
+
+                        if let Some(ref mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::SourceChangeSplit(actor_splits) => {
+                                    self.apply_split_change(&source_desc, &mut stream, actor_splits)
+                                        .await?
+                                }
+                                Mutation::Pause => {
+                                    stream.pause_stream();
+                                    explicit_pause = true;
+                                }
+                                Mutation::Resume => {
+                                    stream.resume_stream();
+                                    explicit_pause = false;
+                                }
+                                Mutation::Update { actor_splits, .. } => {
+                                    self.apply_split_change(
+                                        &source_desc,
+                                        &mut stream,
+                                        actor_splits,
+                                    )
+                                    .await?;
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        self.take_snapshot_and_clear_cache(epoch).await?;
+
+                        self.metrics
+                            .source_row_per_barrier
+                            .with_label_values(&[
+                                self.ctx.id.to_string().as_str(),
+                                self.stream_source_core
+                                    .as_ref()
+                                    .unwrap()
+                                    .source_identify
+                                    .as_ref(),
+                            ])
+                            .inc_by(metric_row_per_barrier);
+                        metric_row_per_barrier = 0;
+
+                        yield msg;
                     }
-
-                    self.take_snapshot_and_clear_cache(epoch).await?;
-
-                    self.metrics
-                        .source_row_per_barrier
-                        .with_label_values(&[
-                            self.ctx.id.to_string().as_str(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_identify
-                                .as_ref(),
-                        ])
-                        .inc_by(metric_row_per_barrier);
-                    metric_row_per_barrier = 0;
-
-                    yield Message::Barrier(barrier);
-                }
+                    _ => {
+                        // For the source executor, the message we receive from this arm should
+                        // always be barrier message.
+                        unreachable!();
+                    }
+                },
 
                 Either::Right(StreamChunkWithState {
                     chunk,
                     split_offset_mapping,
                 }) => {
                     if !stream.paused() && self.throttlers.iter().any(|t| t.should_pause()) {
-                        stream.pause_source();
+                        stream.pause_stream();
                     }
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
