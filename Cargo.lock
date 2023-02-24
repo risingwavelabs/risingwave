@@ -5680,6 +5680,7 @@ name = "risingwave_common"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "arrow-array",
  "arrow-schema",
  "async-trait",
