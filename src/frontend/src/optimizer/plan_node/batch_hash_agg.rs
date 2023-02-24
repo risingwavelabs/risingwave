@@ -25,7 +25,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{ToLocalBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::ColIndexMappingRewriteExt;
 
