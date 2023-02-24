@@ -1036,7 +1036,7 @@
           └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
             └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: force two phase aggregation should succeed with UpstreamHashShard, but not SomeShard.
+- name: force two phase aggregation should succeed with UpstreamHashShard and SomeShard (batch only).
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
@@ -1137,5 +1137,27 @@
               └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
                 └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
                   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
-- name: two phase agg with hop window
-  sql: select 1
+- name: two phase agg on hop window input
+  sql: |
+    SET QUERY_MODE TO DISTRIBUTED;
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table bid(date_time TIMESTAMP, auction int);
+    SELECT
+      count(*) AS num,
+      window_start AS starttime_c
+    FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+    GROUP BY
+      bid.auction,
+      window_start
+    ) AS CountBids
+  batch_plan: |
+  stream_plan: |
+- name: two phase agg with stream SomeShard (via index)
+  sql: |
+    SET QUERY_MODE TO DISTRIBUTED;
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table t (id int primary key, col int);
+    create index idx on t(col);
+    select count(id), min(col) from idx group by int;
+  batch_plan: |
+  stream_plan: |
