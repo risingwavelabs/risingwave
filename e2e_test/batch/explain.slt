@@ -1,11 +1,11 @@
 statement ok
-create table t(v int);
+create table t (v int) with ( appendonly = 'true' );
 
 statement ok
 explain create index i on t(v);
 
 statement ok
-explain create sink sink_t from t with ( connector = 'kafka' )
+explain create sink sink_t from t with ( connector = 'kafka', format = 'append_only' )
 
 statement ok
 drop table t;

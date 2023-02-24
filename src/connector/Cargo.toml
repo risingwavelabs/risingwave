@@ -15,13 +15,14 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
+apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto/modify-decimal", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-trait = "0.1"
 aws-config = { workspace = true }
 aws-sdk-kinesis = { workspace = true } 
 aws-sdk-s3 = { workspace = true } 
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
+bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -51,6 +52,7 @@ risingwave_common = { path = "../common" }
 risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+rust_decimal = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
@@ -65,12 +67,10 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 rand = "0.8"
-rust_decimal = "1"
 tempfile = "3"
 wiremock = "0.5"

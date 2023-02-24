@@ -21,7 +21,7 @@ use lru::{DefaultHasher, LruCache};
 mod managed_lru;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 pub struct ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     /// An managed cache. Eviction depends on the node memory usage.
@@ -102,7 +102,7 @@ pub(super) fn cache_may_stale(
 ) -> bool {
     let current_is_subset = previous_vnode_bitmap
         .iter()
-        .zip_eq_debug(current_vnode_bitmap.iter())
+        .zip_eq_fast(current_vnode_bitmap.iter())
         .all(|(p, c)| p >= c);
 
     !current_is_subset

@@ -26,6 +26,7 @@ mod decimal_array;
 pub mod error;
 pub mod interval_array;
 mod iterator;
+mod jsonb_array;
 pub mod list_array;
 mod macros;
 mod primitive_array;
@@ -52,6 +53,7 @@ pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
+pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -64,7 +66,7 @@ pub use vis::{Vis, VisRef};
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
 use crate::types::*;
-use crate::util::iter_util::ZipEqDebug;
+use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -310,7 +312,7 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq_debug(visibility.iter()) {
+        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 builder.append(elem);
             }
@@ -343,6 +345,7 @@ macro_rules! for_all_variants {
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
             { List, list, ListArray, ListArrayBuilder },
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
@@ -378,6 +381,12 @@ impl From<BoolArray> for ArrayImpl {
 impl From<Utf8Array> for ArrayImpl {
     fn from(arr: Utf8Array) -> Self {
         Self::Utf8(arr)
+    }
+}
+
+impl From<JsonbArray> for ArrayImpl {
+    fn from(arr: JsonbArray) -> Self {
+        Self::Jsonb(arr)
     }
 }
 
@@ -646,7 +655,7 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
     }
 
@@ -674,6 +683,9 @@ impl ArrayImpl {
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
             ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            ProstArrayType::Jsonb => {
+                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
+            }
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),
@@ -742,7 +754,7 @@ mod tests {
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
-        for (a, b) in a.iter().zip_eq_debug(b.iter()) {
+        for (a, b) in a.iter().zip_eq_fast(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
                 _ => None,

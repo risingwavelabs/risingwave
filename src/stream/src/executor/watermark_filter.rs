@@ -18,7 +18,7 @@ use futures::future::join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
@@ -212,8 +212,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
                         let vnodes = table.get_vnodes();
-                        for vnode in vnodes.iter_ones() {
-                            let pk = Some(ScalarImpl::Int16(vnode as _));
+                        for vnode in vnodes.iter_vnodes() {
+                            let pk = Some(ScalarImpl::Int16(vnode.to_scalar()));
                             let row = [pk, Some(current_watermark.clone())];
                             // FIXME(yuhao): use upsert.
                             table.insert(row);

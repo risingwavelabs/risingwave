@@ -21,6 +21,7 @@ use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -55,7 +56,7 @@ use crate::manager::{
     SystemParamManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -276,14 +277,14 @@ pub async fn start_service_as_election_follower(
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 // shutdown service if all services should be shut down
-                res = svc_shutdown_rx.changed() =>  {
+                res = svc_shutdown_rx.changed() => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown sender dropped")
                     }
                 },
                 // shutdown service if follower becomes leader
-                res = follower_shutdown_rx =>  {
+                res = follower_shutdown_rx => {
                     match res {
                         Ok(_) => tracing::info!("Shutting down follower services"),
                         Err(_) => tracing::error!("Follower service shutdown sender dropped")
@@ -318,6 +319,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
+    let system_params_manager =
+        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
+    let system_params_reader: SystemParamsReader = system_params_manager.get_params().await.into();
+
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
@@ -342,7 +347,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     .await
     .unwrap();
 
-    let meta_member_srv = MetaMemberServiceImpl::new(match election_client {
+    let meta_member_srv = MetaMemberServiceImpl::new(match election_client.clone() {
         None => Either::Right(address_info.clone()),
         Some(election_client) => Either::Left(election_client),
     });
@@ -364,8 +369,10 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
     }
 
-    let (barrier_scheduler, scheduled_barriers) =
-        BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+        hummock_manager.clone(),
+        system_params_reader.checkpoint_frequency() as usize,
+    );
 
     let source_manager = Arc::new(
         SourceManager::new(
@@ -446,8 +453,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         backup_manager.clone(),
         compactor_manager.clone(),
     ));
-    let system_params_manager =
-        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
@@ -474,6 +479,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
         barrier_scheduler.clone(),
+        stream_manager.clone(),
+        catalog_manager.clone(),
         fragment_manager.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
@@ -492,8 +499,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
-    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
+    let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -512,8 +519,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let mut sub_tasks =
         hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
     sub_tasks.push(
-        ClusterManager::start_worker_num_monitor(
+        start_worker_info_monitor(
             cluster_manager.clone(),
+            election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
             meta_metrics.clone(),
         )
@@ -535,11 +543,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (abort_sender, abort_recv) = tokio::sync::oneshot::channel();
     let notification_mgr = env.notification_manager_ref();
-    let abort_notification_handler = tokio::spawn(async move {
+    let stream_abort_handler = tokio::spawn(async move {
         abort_recv.await.unwrap();
         notification_mgr.abort_all().await;
+        compactor_manager.abort_all_compactors();
     });
-    sub_tasks.push((abort_notification_handler, abort_sender));
+    sub_tasks.push((stream_abort_handler, abort_sender));
 
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled{

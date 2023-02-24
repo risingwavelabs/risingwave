@@ -154,8 +154,8 @@ export function tableFragments_StateToJSON(object: TableFragments_State): string
 export interface TableFragments_ActorStatus {
   /** Current on which parallel unit */
   parallelUnit:
-    | ParallelUnit
-    | undefined;
+  | ParallelUnit
+  | undefined;
   /** Current state */
   state: TableFragments_ActorStatus_ActorState;
 }
@@ -235,7 +235,7 @@ export const TableFragments_Fragment_FragmentDistributionType = {
 
 export type TableFragments_Fragment_FragmentDistributionType =
   typeof TableFragments_Fragment_FragmentDistributionType[
-    keyof typeof TableFragments_Fragment_FragmentDistributionType
+  keyof typeof TableFragments_Fragment_FragmentDistributionType
   ];
 
 export function tableFragments_Fragment_FragmentDistributionTypeFromJSON(
@@ -308,6 +308,20 @@ export interface FlushRequest {
 export interface FlushResponse {
   status: Status | undefined;
   snapshot: HummockSnapshot | undefined;
+}
+
+export interface CreatingJobInfo {
+  databaseId: number;
+  schemaId: number;
+  name: string;
+}
+
+export interface CancelCreatingJobsRequest {
+  infos: CreatingJobInfo[];
+}
+
+export interface CancelCreatingJobsResponse {
+  status: Status | undefined;
 }
 
 export interface ListTableFragmentsRequest {
@@ -413,21 +427,21 @@ export interface SubscribeResponse {
   operation: SubscribeResponse_Operation;
   version: number;
   info?:
-    | { $case: "database"; database: Database }
-    | { $case: "schema"; schema: Schema }
-    | { $case: "table"; table: Table }
-    | { $case: "source"; source: Source }
-    | { $case: "sink"; sink: Sink }
-    | { $case: "index"; index: Index }
-    | { $case: "view"; view: View }
-    | { $case: "function"; function: Function }
-    | { $case: "user"; user: UserInfo }
-    | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
-    | { $case: "node"; node: WorkerNode }
-    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
-    | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-    | { $case: "snapshot"; snapshot: MetaSnapshot }
-    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
+  | { $case: "database"; database: Database }
+  | { $case: "schema"; schema: Schema }
+  | { $case: "table"; table: Table }
+  | { $case: "source"; source: Source }
+  | { $case: "sink"; sink: Sink }
+  | { $case: "index"; index: Index }
+  | { $case: "view"; view: View }
+  | { $case: "function"; function: Function }
+  | { $case: "user"; user: UserInfo }
+  | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
+  | { $case: "node"; node: WorkerNode }
+  | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
+  | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
+  | { $case: "snapshot"; snapshot: MetaSnapshot }
+  | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
 }
 
 export const SubscribeResponse_Operation = {
@@ -620,6 +634,15 @@ export const TelemetryInfoResponse = {
     return message;
   },
 };
+
+export interface SetSystemParamRequest {
+  param: string;
+  /** None means set to default value. */
+  value?: string | undefined;
+}
+
+export interface SetSystemParamResponse {
+}
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
@@ -1122,6 +1145,86 @@ export const FlushResponse = {
       : undefined;
     message.snapshot = (object.snapshot !== undefined && object.snapshot !== null)
       ? HummockSnapshot.fromPartial(object.snapshot)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreatingJobInfo(): CreatingJobInfo {
+  return { databaseId: 0, schemaId: 0, name: "" };
+}
+
+export const CreatingJobInfo = {
+  fromJSON(object: any): CreatingJobInfo {
+    return {
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+    };
+  },
+
+  toJSON(message: CreatingJobInfo): unknown {
+    const obj: any = {};
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreatingJobInfo>, I>>(object: I): CreatingJobInfo {
+    const message = createBaseCreatingJobInfo();
+    message.databaseId = object.databaseId ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsRequest(): CancelCreatingJobsRequest {
+  return { infos: [] };
+}
+
+export const CancelCreatingJobsRequest = {
+  fromJSON(object: any): CancelCreatingJobsRequest {
+    return { infos: Array.isArray(object?.infos) ? object.infos.map((e: any) => CreatingJobInfo.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: CancelCreatingJobsRequest): unknown {
+    const obj: any = {};
+    if (message.infos) {
+      obj.infos = message.infos.map((e) => e ? CreatingJobInfo.toJSON(e) : undefined);
+    } else {
+      obj.infos = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsRequest>, I>>(object: I): CancelCreatingJobsRequest {
+    const message = createBaseCancelCreatingJobsRequest();
+    message.infos = object.infos?.map((e) => CreatingJobInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsResponse(): CancelCreatingJobsResponse {
+  return { status: undefined };
+}
+
+export const CancelCreatingJobsResponse = {
+  fromJSON(object: any): CancelCreatingJobsResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: CancelCreatingJobsResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsResponse>, I>>(object: I): CancelCreatingJobsResponse {
+    const message = createBaseCancelCreatingJobsResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
       : undefined;
     return message;
   },
@@ -1789,43 +1892,43 @@ export const SubscribeResponse = {
       info: isSet(object.database)
         ? { $case: "database", database: Database.fromJSON(object.database) }
         : isSet(object.schema)
-        ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
-        : isSet(object.table)
-        ? { $case: "table", table: Table.fromJSON(object.table) }
-        : isSet(object.source)
-        ? { $case: "source", source: Source.fromJSON(object.source) }
-        : isSet(object.sink)
-        ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
-        : isSet(object.index)
-        ? { $case: "index", index: Index.fromJSON(object.index) }
-        : isSet(object.view)
-        ? { $case: "view", view: View.fromJSON(object.view) }
-        : isSet(object.function)
-        ? { $case: "function", function: Function.fromJSON(object.function) }
-        : isSet(object.user)
-        ? { $case: "user", user: UserInfo.fromJSON(object.user) }
-        : isSet(object.parallelUnitMapping)
-        ? {
-          $case: "parallelUnitMapping",
-          parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
-        }
-        : isSet(object.node)
-        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
-        : isSet(object.hummockSnapshot)
-        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
-        : isSet(object.hummockVersionDeltas)
-        ? {
-          $case: "hummockVersionDeltas",
-          hummockVersionDeltas: HummockVersionDeltas.fromJSON(object.hummockVersionDeltas),
-        }
-        : isSet(object.snapshot)
-        ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
-        : isSet(object.metaBackupManifestId)
-        ? {
-          $case: "metaBackupManifestId",
-          metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
-        }
-        : undefined,
+          ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
+          : isSet(object.table)
+            ? { $case: "table", table: Table.fromJSON(object.table) }
+            : isSet(object.source)
+              ? { $case: "source", source: Source.fromJSON(object.source) }
+              : isSet(object.sink)
+                ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
+                : isSet(object.index)
+                  ? { $case: "index", index: Index.fromJSON(object.index) }
+                  : isSet(object.view)
+                    ? { $case: "view", view: View.fromJSON(object.view) }
+                    : isSet(object.function)
+                      ? { $case: "function", function: Function.fromJSON(object.function) }
+                      : isSet(object.user)
+                        ? { $case: "user", user: UserInfo.fromJSON(object.user) }
+                        : isSet(object.parallelUnitMapping)
+                          ? {
+                            $case: "parallelUnitMapping",
+                            parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+                          }
+                          : isSet(object.node)
+                            ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
+                            : isSet(object.hummockSnapshot)
+                              ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
+                              : isSet(object.hummockVersionDeltas)
+                                ? {
+                                  $case: "hummockVersionDeltas",
+                                  hummockVersionDeltas: HummockVersionDeltas.fromJSON(object.hummockVersionDeltas),
+                                }
+                                : isSet(object.snapshot)
+                                  ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
+                                  : isSet(object.metaBackupManifestId)
+                                    ? {
+                                      $case: "metaBackupManifestId",
+                                      metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
+                                    }
+                                    : undefined,
     };
   },
 
@@ -2503,6 +2606,53 @@ export const GetSystemParamsResponse = {
     message.params = (object.params !== undefined && object.params !== null)
       ? SystemParams.fromPartial(object.params)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamRequest(): SetSystemParamRequest {
+  return { param: "", value: undefined };
+}
+
+export const SetSystemParamRequest = {
+  fromJSON(object: any): SetSystemParamRequest {
+    return {
+      param: isSet(object.param) ? String(object.param) : "",
+      value: isSet(object.value) ? String(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SetSystemParamRequest): unknown {
+    const obj: any = {};
+    message.param !== undefined && (obj.param = message.param);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamRequest>, I>>(object: I): SetSystemParamRequest {
+    const message = createBaseSetSystemParamRequest();
+    message.param = object.param ?? "";
+    message.value = object.value ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamResponse(): SetSystemParamResponse {
+  return {};
+}
+
+export const SetSystemParamResponse = {
+  fromJSON(_: any): SetSystemParamResponse {
+    return {};
+  },
+
+  toJSON(_: SetSystemParamResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamResponse>, I>>(_: I): SetSystemParamResponse {
+    const message = createBaseSetSystemParamResponse();
     return message;
   },
 };
