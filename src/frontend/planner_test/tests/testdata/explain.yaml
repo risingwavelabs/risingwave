@@ -6,11 +6,6 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Share Source:
-
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
@@ -63,7 +58,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 34,
+            "plan_node_id": 33,
             "plan_node_type": "BatchValues",
             "schema": [
               {
@@ -104,13 +99,6 @@
     explain (logical, trace) select * from t1 join t2 on v1=v2;
   explain_output: |+
     Begin:
-
-    LogicalProject { exprs: [t1.v1, t2.v2] }
-    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id] }
-
-    Share Source:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
@@ -176,7 +164,7 @@
 - sql: |
     explain create table t (v1 int, v2 varchar);
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "overwrite" }
     └─StreamExchange { dist: HashShard(_row_id) }
       └─StreamRowIdGen { row_id_index: 2 }
         └─StreamDml { columns: [v1, v2, _row_id] }
@@ -184,7 +172,7 @@
 - sql: |
     explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) row format json;
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "overwrite" }
     └─StreamExchange { dist: HashShard(_row_id) }
       └─StreamRowIdGen { row_id_index: 2 }
         └─StreamDml { columns: [v1, v2, _row_id] }

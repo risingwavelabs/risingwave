@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
@@ -23,7 +23,7 @@ use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `ProstSource`, it only maintains information used during optimization.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
@@ -33,7 +33,7 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
     pub watermark_descs: Vec<WatermarkDesc>,
 }
 

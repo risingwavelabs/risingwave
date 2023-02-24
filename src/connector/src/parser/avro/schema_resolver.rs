@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use url::Url;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
-use crate::parser::schema_registry::Client;
+use crate::parser::schema_registry::{Client, ConfluentSchema};
 use crate::parser::util::download_from_http;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
@@ -89,20 +89,30 @@ pub struct ConfluentSchemaResolver {
 }
 
 impl ConfluentSchemaResolver {
-    // return the reader schema and a new `SchemaResolver`
-    pub async fn new(subject_name: &str, client: Client) -> Result<(Schema, Self)> {
-        let raw_schema = client.get_schema_by_subject(subject_name).await?;
+    async fn parse_and_cache_schema(&self, raw_schema: ConfluentSchema) -> Result<Arc<Schema>> {
         let schema = Schema::parse_str(&raw_schema.content)
             .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
-        let resolver = ConfluentSchemaResolver {
+        let schema = Arc::new(schema);
+        self.writer_schemas
+            .insert(raw_schema.id, Arc::clone(&schema))
+            .await;
+        Ok(schema)
+    }
+
+    /// Create a new `ConfluentSchemaResolver`
+    pub fn new(client: Client) -> Self {
+        ConfluentSchemaResolver {
             writer_schemas: Cache::new(u64::MAX),
             confluent_client: client,
-        };
-        resolver
-            .writer_schemas
-            .insert(raw_schema.id, Arc::new(schema.clone()))
-            .await;
-        Ok((schema, resolver))
+        }
+    }
+
+    pub async fn get_by_subject_name(&self, subject_name: &str) -> Result<Arc<Schema>> {
+        let raw_schema = self
+            .confluent_client
+            .get_schema_by_subject(subject_name)
+            .await?;
+        self.parse_and_cache_schema(raw_schema).await
     }
 
     // get the writer schema by id
@@ -111,15 +121,7 @@ impl ConfluentSchemaResolver {
             Ok(schema)
         } else {
             let raw_schema = self.confluent_client.get_schema_by_id(schema_id).await?;
-
-            let schema = Schema::parse_str(&raw_schema.content).map_err(|e| {
-                RwError::from(ProtocolError(format!("Avro schema parse error {}", e)))
-            })?;
-            let schema = Arc::new(schema);
-            self.writer_schemas
-                .insert(schema_id, Arc::clone(&schema))
-                .await;
-            Ok(schema)
+            self.parse_and_cache_schema(raw_schema).await
         }
     }
 }
