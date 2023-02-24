@@ -149,7 +149,7 @@ impl LogicalAgg {
         let global_group_key = local_agg
             .i2o_col_mapping()
             .rewrite_dist_key(local_group_key_without_vnode)
-            .unwrap_or_else(|| panic!("some input group key could not be mapped"));
+            .expect("some input group key could not be mapped");
 
         // Generate global agg step
         if self.group_key().is_empty() {
@@ -265,7 +265,7 @@ impl LogicalAgg {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 
-        // Vnode-based 2-phase simple agg
+        // Vnode-based 2-phase agg
         // can be applied on agg calls not affected by order,
         // with input distributed by dist_key.
         match input_dist {
