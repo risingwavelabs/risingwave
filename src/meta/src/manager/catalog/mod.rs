@@ -862,7 +862,7 @@ where
         user_core.ensure_user_id(source.owner)?;
 
         if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure");
+            bail!("source is in creating procedure");
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
