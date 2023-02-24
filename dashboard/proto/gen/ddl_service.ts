@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { ColIndexMapping, Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
 
@@ -206,7 +206,11 @@ export interface ReplaceTablePlanRequest {
     | Table
     | undefined;
   /** The new materialization plan, where all schema are updated. */
-  fragmentGraph: StreamFragmentGraph | undefined;
+  fragmentGraph:
+    | StreamFragmentGraph
+    | undefined;
+  /** The mapping from the old columns to the new columns of the table. */
+  tableColIndexMapping: ColIndexMapping | undefined;
 }
 
 export interface ReplaceTablePlanResponse {
@@ -1299,7 +1303,7 @@ export const DropIndexResponse = {
 };
 
 function createBaseReplaceTablePlanRequest(): ReplaceTablePlanRequest {
-  return { table: undefined, fragmentGraph: undefined };
+  return { table: undefined, fragmentGraph: undefined, tableColIndexMapping: undefined };
 }
 
 export const ReplaceTablePlanRequest = {
@@ -1307,6 +1311,9 @@ export const ReplaceTablePlanRequest = {
     return {
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
       fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+      tableColIndexMapping: isSet(object.tableColIndexMapping)
+        ? ColIndexMapping.fromJSON(object.tableColIndexMapping)
+        : undefined,
     };
   },
 
@@ -1315,6 +1322,9 @@ export const ReplaceTablePlanRequest = {
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    message.tableColIndexMapping !== undefined && (obj.tableColIndexMapping = message.tableColIndexMapping
+      ? ColIndexMapping.toJSON(message.tableColIndexMapping)
+      : undefined);
     return obj;
   },
 
@@ -1323,6 +1333,9 @@ export const ReplaceTablePlanRequest = {
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
       ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
+      : undefined;
+    message.tableColIndexMapping = (object.tableColIndexMapping !== undefined && object.tableColIndexMapping !== null)
+      ? ColIndexMapping.fromPartial(object.tableColIndexMapping)
       : undefined;
     return message;
   },
