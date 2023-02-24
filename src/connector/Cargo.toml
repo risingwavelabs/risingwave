@@ -22,6 +22,7 @@ aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true } 
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
+bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -66,7 +67,6 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 

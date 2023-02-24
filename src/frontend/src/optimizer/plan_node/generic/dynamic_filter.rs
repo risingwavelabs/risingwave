@@ -22,7 +22,7 @@ use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::utils::Condition;
 use crate::TableCatalog;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DynamicFilter<PlanRef> {
     /// The predicate (formed with exactly one of < , <=, >, >=)
     pub comparator: ExprType,

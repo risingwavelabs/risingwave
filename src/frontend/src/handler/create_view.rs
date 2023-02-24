@@ -85,7 +85,7 @@ pub async fn handle_create_view(
         schema_id,
         database_id,
         name: view_name,
-        properties: properties.inner().clone(),
+        properties: properties.inner().clone().into_iter().collect(),
         owner: session.user_id(),
         dependent_relations,
         sql: format!("{}", query),
