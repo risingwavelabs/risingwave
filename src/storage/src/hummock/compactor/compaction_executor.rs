@@ -34,6 +34,8 @@ impl CompactionExecutor {
             builder.enable_all().build().unwrap()
         };
 
+        #[cfg(all(tokio_unstable, not(loom)))]
+        #[cfg_attr(docsrs, doc(cfg(tokio_unstable)))]
         info!(
             "create tokio runtime with {} worker thread",
             runtime.metrics().num_workers()

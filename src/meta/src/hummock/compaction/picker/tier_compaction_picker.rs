@@ -386,7 +386,7 @@ pub mod tests {
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
         let mut picker =
-            TierCompactionPicker::new(config.clone(), Arc::new(RangeOverlapStrategy::default()));
+            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
