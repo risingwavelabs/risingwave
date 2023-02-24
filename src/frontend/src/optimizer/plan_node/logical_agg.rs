@@ -196,53 +196,65 @@ impl LogicalAgg {
         }
     }
 
+    fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
+            RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
+        ))
+        .into())
+    }
+
+    fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        Ok(StreamHashAgg::new(
+            self.clone_with_input(
+                RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
+                    .enforce_if_not_satisfies(stream_input, &Order::any())?,
+            ),
+            None,
+        )
+        .into())
+    }
+
+    /// See if all stream aggregation calls have a stateless local agg counterpart.
+    fn all_local_aggs_are_stateless(&self, stream_input_append_only: bool) -> bool {
+        self.agg_calls().iter().all(|c| {
+            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
+                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && stream_input_append_only)
+        })
+    }
+
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        // Shuffle agg if group key is present.
-        let input_dist = stream_input.distribution().clone();
-        if !self.group_key().is_empty() && !self.should_two_phase_hash_agg(&input_dist) {
-            return Ok(StreamHashAgg::new(
-                self.clone_with_input(
-                    RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
-                        .enforce_if_not_satisfies(stream_input, &Order::any())?,
-                ),
-                None,
-            )
-            .into());
+        let input_dist = stream_input.distribution();
+        // Shuffle agg
+        // If we have group key, and we won't use two phase agg optimization at all,
+        // we will always choose shuffle agg.
+        if !self.group_key().is_empty() && !self.should_vnode_two_phase_streaming_agg(input_dist) {
+            return self.gen_shuffle_plan(stream_input);
         }
 
-        let gen_single_plan = |stream_input: PlanRef| -> Result<PlanRef> {
-            Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
-                RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
-            ))
-            .into())
-        };
-
-        // some agg function can not rewrite to 2-phase agg
-        // we can only generate stand alone plan for the simple agg
+        // Standalone agg
+        // Some agg function cannot be rewritten to 2-phase agg
+        // we can only generate standalone plan for these
         let all_agg_calls_can_use_two_phase = self.can_two_phase_agg();
         if !all_agg_calls_can_use_two_phase {
-            return gen_single_plan(stream_input);
+            return self.gen_single_plan(stream_input);
         }
 
-        // stateless 2-phase simple agg
-        // can be applied on stateless simple agg calls with input distributed by any shard
-        let input_append_only = stream_input.append_only();
-        let all_local_are_stateless = self.agg_calls().iter().all(|c| {
-            matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
-                || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
-        });
-        if all_local_are_stateless
+        // Stateless 2-phase simple agg
+        // can be applied on stateless simple agg calls,
+        // with input distributed by [`Distribution::AnyShard`]
+        if self.all_local_aggs_are_stateless(stream_input.append_only())
             && input_dist.satisfies(&RequiredDist::AnyShard)
             && self.group_key().is_empty()
         {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 
-        // try to use the vnode-based 2-phase simple agg
-        // can be applied on agg calls not affected by order with input distributed by dist_key
-        match input_dist {
-            Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
+        // Vnode-based 2-phase simple agg
+        // can be applied on agg calls not affected by order,
+        // with input distributed by dist_key
+        match input_dist.clone() {
+            Distribution::Single | Distribution::SomeShard => self.gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
@@ -273,20 +285,13 @@ impl LogicalAgg {
             .get_enable_two_phase_agg()
     }
 
-    /// TODO(kwannoel):
-    /// Should two phase agg is dependent on whether we are distributing
-    /// on stream / batch.
-    /// This should be refactored accordingly after:
-    /// <https://github.com/risingwavelabs/risingwave/issues/8137>
-    /// [`Distribution`] must be either `batch` or `stream` dist, not logical dist.
-    pub(crate) fn should_two_phase_hash_agg(&self, input_dist: &Distribution) -> bool {
-        // If input already satisfies required output distribution,
-        // we should not use two phase agg.
-        let required_dist =
-            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+    fn should_vnode_two_phase_streaming_agg(&self, input_dist: &Distribution) -> bool {
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
-            && !input_dist.satisfies(&required_dist)
+            && !input_dist.satisfies(&RequiredDist::shard_by_key(
+                self.input().schema().len(),
+                self.group_key(),
+            ))
             && matches!(
                 input_dist,
                 Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _)
