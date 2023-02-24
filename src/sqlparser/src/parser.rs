@@ -133,7 +133,7 @@ pub enum Precedence {
     PlusMinus, // 30 in upstream
     MulDiv,    // 40 in upstream
     Exp,
-    UnaryPlusMinus,
+    UnaryPosNeg,
     PostfixFactorial,
     Array,
     DoubleColon, // 50 in upstream
@@ -528,7 +528,7 @@ impl Parser {
                 } else {
                     UnaryOperator::Minus
                 };
-                let mut sub_expr = self.parse_subexpr(Precedence::UnaryPlusMinus)?;
+                let mut sub_expr = self.parse_subexpr(Precedence::UnaryPosNeg)?;
                 if let Expr::Value(Value::Number(ref mut s)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);

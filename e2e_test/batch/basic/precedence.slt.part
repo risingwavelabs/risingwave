@@ -1,20 +1,20 @@
 query I
-select 2 + 2 ^ 2;
+select 2 + 2 ^ 2; -- power then plus
 ----
 6
 
 query I
-select 2 | 3 & 4;
+select 2 | 3 & 4; -- or then and
 ----
 0
 
 query I
-select -3 ^ 2;
+select -3 ^ 2; -- neg then power
 ----
 9
 
 query I
-select -3 * 2;
+select -3 * 2; -- neg then multiply
 ----
 -6
 
@@ -25,6 +25,6 @@ integer
 
 
 # query I
-# select @ 1 - 2;
+# select @ 1 - 2; -- minus then abs
 # ----
 # 1
