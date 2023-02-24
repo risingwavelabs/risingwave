@@ -60,9 +60,9 @@ export function sinkTypeToJSON(object: SinkType): string {
 }
 
 export const HandleConflictBehavior = {
-  NoCheck: "NoCheck",
-  OverWrite: "OverWrite",
-  Ignore: "Ignore",
+  NO_CHECK: "NO_CHECK",
+  OVERWRITE: "OVERWRITE",
+  IGNORE: "IGNORE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -71,14 +71,14 @@ export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof 
 export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
   switch (object) {
     case 0:
-    case "NoCheck":
-      return HandleConflictBehavior.NoCheck;
+    case "NO_CHECK":
+      return HandleConflictBehavior.NO_CHECK;
     case 1:
-    case "OverWrite":
-      return HandleConflictBehavior.OverWrite;
+    case "OVERWRITE":
+      return HandleConflictBehavior.OVERWRITE;
     case 2:
-    case "Ignore":
-      return HandleConflictBehavior.Ignore;
+    case "IGNORE":
+      return HandleConflictBehavior.IGNORE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -88,12 +88,12 @@ export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehav
 
 export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
   switch (object) {
-    case HandleConflictBehavior.NoCheck:
-      return "NoCheck";
-    case HandleConflictBehavior.OverWrite:
-      return "OverWrite";
-    case HandleConflictBehavior.Ignore:
-      return "Ignore";
+    case HandleConflictBehavior.NO_CHECK:
+      return "NO_CHECK";
+    case HandleConflictBehavior.OVERWRITE:
+      return "OVERWRITE";
+    case HandleConflictBehavior.IGNORE:
+      return "IGNORE";
     case HandleConflictBehavior.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -883,7 +883,7 @@ function createBaseTable(): Table {
     handlePkConflict: false,
     readPrefixLenHint: 0,
     watermarkIndices: [],
-    handlePkConflictBehavior: HandleConflictBehavior.NoCheck,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
     version: undefined,
   };
 }
@@ -930,7 +930,7 @@ export const Table = {
         : [],
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NoCheck,
+        : HandleConflictBehavior.NO_CHECK,
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -1047,7 +1047,7 @@ export const Table = {
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NoCheck;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;

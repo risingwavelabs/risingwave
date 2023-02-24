@@ -45,7 +45,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let conflict_behavior = match table.handle_pk_conflict_behavior() {
             risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
-            risingwave_pb::catalog::HandleConflictBehavior::OverWrite => {
+            risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
                 ConflictBehavior::OverWrite
             }
             risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
@@ -98,7 +98,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior = match table.handle_pk_conflict_behavior() {
             risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
-            risingwave_pb::catalog::HandleConflictBehavior::OverWrite => {
+            risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
                 ConflictBehavior::OverWrite
             }
             risingwave_pb::catalog::HandleConflictBehavior::Ignore => {

@@ -163,9 +163,9 @@ message Table {
 }
 
 enum HandleConflictBehavior {
-  NoCheck = 0;
-  OverWrite = 1;
-  Ignore = 2;
+  NO_CHECK = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message View {

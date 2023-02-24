@@ -26,9 +26,9 @@ import { ConnectorSplits } from "./source";
 export const protobufPackage = "stream_plan";
 
 export const HandleConflictBehavior = {
-  NoCheck: "NoCheck",
-  OverWrite: "OverWrite",
-  Ignore: "Ignore",
+  NO_CHECK: "NO_CHECK",
+  OVERWRITE: "OVERWRITE",
+  IGNORE: "IGNORE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -37,14 +37,14 @@ export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof 
 export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
   switch (object) {
     case 0:
-    case "NoCheck":
-      return HandleConflictBehavior.NoCheck;
+    case "NO_CHECK":
+      return HandleConflictBehavior.NO_CHECK;
     case 1:
-    case "OverWrite":
-      return HandleConflictBehavior.OverWrite;
+    case "OVERWRITE":
+      return HandleConflictBehavior.OVERWRITE;
     case 2:
-    case "Ignore":
-      return HandleConflictBehavior.Ignore;
+    case "IGNORE":
+      return HandleConflictBehavior.IGNORE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -54,12 +54,12 @@ export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehav
 
 export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
   switch (object) {
-    case HandleConflictBehavior.NoCheck:
-      return "NoCheck";
-    case HandleConflictBehavior.OverWrite:
-      return "OverWrite";
-    case HandleConflictBehavior.Ignore:
-      return "Ignore";
+    case HandleConflictBehavior.NO_CHECK:
+      return "NO_CHECK";
+    case HandleConflictBehavior.OVERWRITE:
+      return "OVERWRITE";
+    case HandleConflictBehavior.IGNORE:
+      return "IGNORE";
     case HandleConflictBehavior.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -2132,7 +2132,7 @@ function createBaseMaterializeNode(): MaterializeNode {
     columnOrders: [],
     table: undefined,
     handlePkConflict: false,
-    handlePkConflictBehavior: HandleConflictBehavior.NoCheck,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
   };
 }
 
@@ -2147,7 +2147,7 @@ export const MaterializeNode = {
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NoCheck,
+        : HandleConflictBehavior.NO_CHECK,
     };
   },
 
@@ -2172,7 +2172,7 @@ export const MaterializeNode = {
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     message.handlePkConflict = object.handlePkConflict ?? false;
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NoCheck;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     return message;
   },
 };
@@ -3139,7 +3139,7 @@ function createBaseArrangeNode(): ArrangeNode {
     distributionKey: [],
     table: undefined,
     handlePkConflict: false,
-    handlePkConflictBehavior: HandleConflictBehavior.NoCheck,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
   };
 }
 
@@ -3152,7 +3152,7 @@ export const ArrangeNode = {
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NoCheck,
+        : HandleConflictBehavior.NO_CHECK,
     };
   },
 
@@ -3180,7 +3180,7 @@ export const ArrangeNode = {
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     message.handlePkConflict = object.handlePkConflict ?? false;
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NoCheck;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     return message;
   },
 };
