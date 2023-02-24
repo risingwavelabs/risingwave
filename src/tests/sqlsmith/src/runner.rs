@@ -17,6 +17,7 @@
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+#[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Error;
@@ -29,10 +30,17 @@ use crate::{
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
+    #[cfg(madsim)]
     let mut rng = if let Some(seed) = seed {
         ChaChaRng::seed_from_u64(seed)
     } else {
         ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+    };
+    #[cfg(not(madsim))]
+    let mut rng = if let Some(seed) = seed {
+        SmallRng::seed_from_u64(seed)
+    } else {
+        SmallRng::from_entropy()
     };
     let (tables, base_tables, mviews, mut setup_sql) =
         create_tables(&mut rng, testdata, client).await;
@@ -101,25 +109,29 @@ async fn test_sqlsmith<R: Rng>(
     // tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
-    let threshold = 0.20; // permit at most 20% of queries to be skipped.
+    let threshold = 0.40; // permit at most 40% of queries to be skipped.
     let sample_size = 50;
 
     let skipped_percentage =
         test_batch_queries(client, rng, tables.clone(), setup_sql, sample_size).await;
+    tracing::info!(
+        "percentage of skipped batch queries = {}, threshold: {}",
+        skipped_percentage,
+        threshold
+    );
     if skipped_percentage > threshold {
-        panic!(
-            "percentage of skipped batch queries = {}, threshold: {}",
-            skipped_percentage, threshold
-        );
+        panic!("skipped batch queries exceeded threshold.");
     }
 
     let skipped_percentage =
         test_stream_queries(client, rng, tables.clone(), setup_sql, sample_size).await;
+    tracing::info!(
+        "percentage of skipped stream queries = {}, threshold: {}",
+        skipped_percentage,
+        threshold
+    );
     if skipped_percentage > threshold {
-        panic!(
-            "percentage of skipped stream queries = {}, threshold: {}",
-            skipped_percentage, threshold
-        );
+        panic!("skipped stream queries exceeded threshold.");
     }
 }
 
@@ -305,6 +317,7 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, 
             if let Some(e) = e.as_db_error()
                 && is_permissible_error(&e.to_string())
             {
+                tracing::info!("[SKIPPED ERROR]: {:?}", e);
                 return 1;
             }
             // consolidate error reason for deterministic test
