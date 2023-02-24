@@ -209,7 +209,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (
             SelectItem::ExprWithAlias {
                 expr,
-                alias: Ident::new(alias.clone()),
+                alias: Ident::new_safe(alias.clone()),
             },
             Column {
                 name: alias,
@@ -270,7 +270,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.bound_columns = group_by_cols.clone();
             group_by_cols
                 .into_iter()
-                .map(|c| Expr::Identifier(Ident::new(c.name)))
+                .map(|c| Expr::Identifier(Ident::new_safe(c.name)))
                 .collect_vec()
         } else {
             vec![]

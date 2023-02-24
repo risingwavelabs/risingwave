@@ -195,7 +195,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             name: name.to_string(),
             columns: schema,
         };
-        let name = ObjectName(vec![Ident::new(name)]);
+        let name = ObjectName(vec![Ident::new_safe(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,

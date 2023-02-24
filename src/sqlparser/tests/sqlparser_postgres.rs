@@ -78,7 +78,7 @@ fn parse_create_table_with_defaults() {
                     ColumnDef::new(
                         "last_name".into(),
                         DataType::Varchar,
-                        Some(ObjectName(vec![Ident::with_quote('"', "es_ES")])),
+                        Some(ObjectName(vec![Ident::new_with_quote_safe('"', "es_ES")])),
                         vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
@@ -619,9 +619,9 @@ fn parse_pg_bitwise_binary_ops() {
         let select = verified_only_select(&format!("SELECT a {} b", &str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("a"))),
+                left: Box::new(Expr::Identifier(Ident::new_safe("a"))),
                 op: op.clone(),
-                right: Box::new(Expr::Identifier(Ident::new("b"))),
+                right: Box::new(Expr::Identifier(Ident::new_safe("b"))),
             }),
             select.projection[0]
         );
@@ -643,7 +643,7 @@ fn parse_pg_unary_ops() {
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new("a"))),
+                expr: Box::new(Expr::Identifier(Ident::new_safe("a"))),
             }),
             select.projection[0]
         );
@@ -659,7 +659,7 @@ fn parse_pg_postfix_factorial() {
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: op.clone(),
-                expr: Box::new(Expr::Identifier(Ident::new("a"))),
+                expr: Box::new(Expr::Identifier(Ident::new_safe("a"))),
             }),
             select.projection[0]
         );
@@ -764,7 +764,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: false,
             temporary: false,
-            name: ObjectName(vec![Ident::new("add")]),
+            name: ObjectName(vec![Ident::new_safe("add")]),
             args: Some(vec![
                 OperateFunctionArg::unnamed(DataType::Int),
                 OperateFunctionArg::unnamed(DataType::Int),
@@ -787,7 +787,7 @@ fn parse_create_function() {
         Statement::CreateFunction {
             or_replace: true,
             temporary: false,
-            name: ObjectName(vec![Ident::new("add")]),
+            name: ObjectName(vec![Ident::new_safe("add")]),
             args: Some(vec![
                 OperateFunctionArg::with_name("a", DataType::Int),
                 OperateFunctionArg {
@@ -820,7 +820,7 @@ fn parse_drop_function() {
         Statement::DropFunction {
             if_exists: true,
             func_desc: vec![DropFunctionDesc {
-                name: ObjectName(vec![Ident::new("test_func")]),
+                name: ObjectName(vec![Ident::new_safe("test_func")]),
                 args: None
             }],
             option: None
@@ -833,7 +833,7 @@ fn parse_drop_function() {
         Statement::DropFunction {
             if_exists: true,
             func_desc: vec![DropFunctionDesc {
-                name: ObjectName(vec![Ident::new("test_func")]),
+                name: ObjectName(vec![Ident::new_safe("test_func")]),
                 args: Some(vec![
                     OperateFunctionArg::with_name("a", DataType::Int),
                     OperateFunctionArg {
@@ -855,7 +855,7 @@ fn parse_drop_function() {
             if_exists: true,
             func_desc: vec![
                 DropFunctionDesc {
-                    name: ObjectName(vec![Ident::new("test_func1")]),
+                    name: ObjectName(vec![Ident::new_safe("test_func1")]),
                     args: Some(vec![
                         OperateFunctionArg::with_name("a", DataType::Int),
                         OperateFunctionArg {
@@ -867,7 +867,7 @@ fn parse_drop_function() {
                     ]),
                 },
                 DropFunctionDesc {
-                    name: ObjectName(vec![Ident::new("test_func2")]),
+                    name: ObjectName(vec![Ident::new_safe("test_func2")]),
                     args: Some(vec![
                         OperateFunctionArg::with_name("a", DataType::Varchar),
                         OperateFunctionArg {
