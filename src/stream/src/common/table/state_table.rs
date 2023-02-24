@@ -845,7 +845,6 @@ impl<S: StateStore> StateTable<S> {
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
                 range_end.extend(&range_end_suffix);
-                trace!(table_id = %self.table_id, range_begin = ?range_begin, range_end = ?range_end, "delete range");
                 write_batch.delete_range(range_begin, range_end);
             }
         }
