@@ -115,20 +115,24 @@ async fn test_sqlsmith<R: Rng>(
 
     let skipped_percentage =
         test_batch_queries(client, rng, tables.clone(), setup_sql, sample_size).await;
+    tracing::info!(
+        "percentage of skipped batch queries = {}, threshold: {}",
+        skipped_percentage,
+        threshold
+    );
     if skipped_percentage > threshold {
-        panic!(
-            "percentage of skipped batch queries = {}, threshold: {}",
-            skipped_percentage, threshold
-        );
+        panic!("skipped batch queries exceeded threshold.");
     }
 
     let skipped_percentage =
         test_stream_queries(client, rng, tables.clone(), setup_sql, sample_size).await;
+    tracing::info!(
+        "percentage of skipped stream queries = {}, threshold: {}",
+        skipped_percentage,
+        threshold
+    );
     if skipped_percentage > threshold {
-        panic!(
-            "percentage of skipped stream queries = {}, threshold: {}",
-            skipped_percentage, threshold
-        );
+        panic!("skipped stream queries exceeded threshold.");
     }
 }
 
