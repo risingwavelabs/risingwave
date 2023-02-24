@@ -127,6 +127,7 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
+    /// The old table fragments to be replaced.
     pub old_table_fragments: TableFragments,
 
     /// The updates to be applied to the downstream chain actors. Used for schema change.

@@ -263,6 +263,8 @@ where
         Ok(())
     }
 
+    /// Called after the barrier collection of `ReplaceTable` command, which replaces the fragments
+    /// of this table, and updates the downstream Merge to have the new upstream fragments.
     pub async fn post_replace_table(
         &self,
         table_id: TableId,
@@ -273,17 +275,19 @@ where
 
         let mut table_fragments = BTreeMapTransaction::new(map);
 
+        // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
+        // with the real table ID, then replace the dummy table ID with the real table ID. This is a
+        // workaround for not having the version info in the fragment manager.
         let old_table_fragment = table_fragments
             .remove(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-
         let mut table_fragment = table_fragments
             .remove(dummy_table_id)
             .with_context(|| format!("table_fragment not exist: id={}", dummy_table_id))?;
 
         assert_eq!(table_fragment.state(), State::Initial);
         table_fragment.set_table_id(table_id);
-        table_fragment.set_state(State::Created);
+        table_fragment.set_state(State::Created); // directly set to `Created`
         table_fragment.update_actors_state(ActorState::Running);
 
         table_fragments.insert(table_id, table_fragment.clone());
@@ -932,7 +936,6 @@ where
         let table_fragments = map
             .get(&table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-
         let mview_fragment = table_fragments
             .mview_fragment()
             .with_context(|| format!("mview fragment not exist: id={}", table_id))?;

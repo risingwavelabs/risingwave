@@ -115,6 +115,12 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment(HashMap<FragmentId, Reschedule>),
 
+    /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
+    /// essentially switching the downstream of the old table fragments to the new ones, and
+    /// dropping the old table fragments. Used for table schema change.
+    ///
+    /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
+    /// of the Merge executors are changed additionally.
     ReplaceTable {
         old_table_fragments: TableFragments,
         new_table_fragments: TableFragments,
@@ -650,7 +656,7 @@ where
                     .post_replace_table(
                         old_table_fragments.table_id(),
                         new_table_fragments.table_id(),
-                        &*merge_updates,
+                        merge_updates,
                     )
                     .await?;
             }

@@ -488,7 +488,6 @@ impl CompleteStreamFragmentGraph {
                     original_upstream_fragment_id: original_table_fragment_id,
                     downstream_fragment_id: id,
                 },
-                // FIXME: !!!
                 dispatch_strategy: dispatch_strategy.clone(),
             };
 

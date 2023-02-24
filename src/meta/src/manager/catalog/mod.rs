@@ -784,14 +784,6 @@ where
         }
     }
 
-    pub async fn get_table(&self, table_id: TableId) -> MetaResult<Table> {
-        if let Some(table) = self.core.lock().await.database.get_table(table_id) {
-            Ok(table.clone())
-        } else {
-            bail!("table doesn't exist");
-        }
-    }
-
     pub async fn drop_index(
         &self,
         index_id: IndexId,
@@ -1472,15 +1464,18 @@ where
         let original_table = database_core
             .get_table(table.id)
             .context("table to alter must exist")?;
+
+        // Check whether the frontend is operating on the latest version of the table.
         if table.get_version()?.version != original_table.get_version()?.version + 1 {
             bail!("table version is stale");
         }
 
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        // occur after it's created. We may need to add a new tracker for `alter` procedure.
         if database_core.has_in_progress_creation(&key) {
             bail!("table is in altering procedure");
         } else {
             database_core.mark_creating(&key);
-            // database_core.mark_creating_streaming_job(table.id, key);
             Ok(())
         }
     }
@@ -1495,13 +1490,12 @@ where
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let key = (table.database_id, table.schema_id, table.name.clone());
 
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        // occur after it's created. We may need to add a new tracker for `alter` procedure.
         if tables.contains_key(&table.id)
             && database_core.in_progress_creation_tracker.contains(&key)
         {
             database_core.in_progress_creation_tracker.remove(&key);
-            // database_core
-            //     .in_progress_creation_streaming_job
-            //     .remove(&table.id);
 
             tables.insert(table.id, table.clone());
             commit_meta!(self, tables)?;
@@ -1523,6 +1517,8 @@ where
 
         assert!(table.dependent_relations.is_empty());
 
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         if database_core.tables.contains_key(&table.id)
             && database_core.has_in_progress_creation(&key)
         {

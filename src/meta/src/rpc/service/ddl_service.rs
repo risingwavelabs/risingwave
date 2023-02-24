@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
@@ -24,9 +22,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    DispatchStrategy, StreamFragmentGraph as StreamFragmentGraphProto,
-};
+use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -911,7 +907,10 @@ where
         assert!(dispatchers.is_empty());
 
         // 7. Assign a new dummy ID for the new table fragments.
-        // TODO
+        //
+        // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
+        // with the real table ID, then replace the dummy table ID with the real table ID. This is a
+        // workaround for not having the version info in the fragment manager.
         let dummy_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
 
         // 8. Build the table fragments structure that will be persisted in the stream manager, and
