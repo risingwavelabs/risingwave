@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
+
 use risingwave_storage::StateStoreImpl;
 use tokio::time::Instant;
 
 pub enum SourceThrottlerImpl {
-    MaxWaitBarrier(MaxWaitBarrierThrottler),
+    BarrierLatency(BarrierLatencyThrottler),
     StateStore(StateStoreImpl),
 }
 
@@ -24,12 +26,12 @@ pub enum SourceThrottlerImpl {
 /// some latencies in network and cost in meta.
 const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
-pub struct MaxWaitBarrierThrottler {
+pub struct BarrierLatencyThrottler {
     max_wait_barrier_time_ms: u128,
     last_barrier_time: Instant,
 }
 
-impl MaxWaitBarrierThrottler {
+impl BarrierLatencyThrottler {
     pub fn new(barrier_interval_ms: u128) -> Self {
         Self {
             max_wait_barrier_time_ms: barrier_interval_ms * WAIT_BARRIER_MULTIPLE_TIMES,
@@ -48,7 +50,7 @@ impl MaxWaitBarrierThrottler {
 impl SourceThrottlerImpl {
     pub fn should_pause(&self) -> bool {
         match self {
-            SourceThrottlerImpl::MaxWaitBarrier(inner) => inner.should_pause(),
+            SourceThrottlerImpl::BarrierLatency(inner) => inner.should_pause(),
             SourceThrottlerImpl::StateStore(inner) => {
                 if let Some(hummock) = inner.as_hummock() {
                     return hummock.need_write_throttling();
@@ -61,10 +63,19 @@ impl SourceThrottlerImpl {
     pub fn on_barrier(&mut self) {
         #[allow(clippy::single_match)]
         match self {
-            SourceThrottlerImpl::MaxWaitBarrier(inner) => {
+            SourceThrottlerImpl::BarrierLatency(inner) => {
                 inner.last_barrier_time = Instant::now();
             }
             _ => {}
+        }
+    }
+}
+
+impl Display for SourceThrottlerImpl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceThrottlerImpl::BarrierLatency(_) => write!(f, "MaxWaitBarrier"),
+            SourceThrottlerImpl::StateStore(_) => write!(f, "StateStore"),
         }
     }
 }

@@ -163,7 +163,7 @@ async fn compaction_test(
         data_directory: Some("hummock_001".to_string()),
         backup_storage_url: Some("memory".to_string()),
         backup_storage_directory: Some("backup".to_string()),
-        throttle_l0_sub_level_number: Some(1000000),
+        throttle_l0_sub_level_number: Some(10000),
         ..Default::default()
     }
     .into();

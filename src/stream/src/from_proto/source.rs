@@ -23,7 +23,7 @@ use super::*;
 use crate::executor::source::StreamSourceCore;
 use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::throttler::{MaxWaitBarrierThrottler, SourceThrottlerImpl};
+use crate::executor::throttler::{BarrierLatencyThrottler, SourceThrottlerImpl};
 use crate::executor::FsSourceExecutor;
 
 const FS_CONNECTORS: &[&str] = &["s3"];
@@ -46,8 +46,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .register_sender(params.actor_context.id, sender);
 
         let mut throttlers = vec![];
-        throttlers.push(SourceThrottlerImpl::MaxWaitBarrier(
-            MaxWaitBarrierThrottler::new(stream.config.barrier_interval_ms as u128),
+        throttlers.push(SourceThrottlerImpl::BarrierLatency(
+            BarrierLatencyThrottler::new(stream.config.barrier_interval_ms as u128),
         ));
         throttlers.push(SourceThrottlerImpl::StateStore(stream.state_store.clone()));
         if let Some(source) = &node.source_inner {

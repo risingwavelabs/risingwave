@@ -339,6 +339,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         if start_with_paused {
             stream.pause_stream();
             explicit_pause = true;
+            tracing::info!("{} has been paused by the first barrier", self.identity);
         }
 
         yield Message::Barrier(barrier);
@@ -357,6 +358,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             && self.throttlers.iter().all(|t| !t.should_pause())
                         {
                             stream.resume_stream();
+                            tracing::info!("{} has been resumed by throttlers", self.identity);
                         }
                         let epoch = barrier.epoch;
 
@@ -369,10 +371,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
                                 Mutation::Pause => {
                                     stream.pause_stream();
                                     explicit_pause = true;
+                                    tracing::info!("{} has been paused by barrier", self.identity);
                                 }
                                 Mutation::Resume => {
                                     stream.resume_stream();
                                     explicit_pause = false;
+                                    tracing::info!("{} has been resumed by barrier", self.identity);
                                 }
                                 Mutation::Update { actor_splits, .. } => {
                                     self.apply_split_change(
@@ -409,8 +413,18 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     chunk,
                     split_offset_mapping,
                 }) => {
-                    if !stream.paused() && self.throttlers.iter().any(|t| t.should_pause()) {
-                        stream.pause_stream();
+                    if !stream.paused() {
+                        for throttler in &self.throttlers {
+                            if throttler.should_pause() {
+                                stream.pause_stream();
+                                tracing::warn!(
+                                    "{} has been paused by throttler {}",
+                                    self.identity,
+                                    throttler
+                                );
+                                break;
+                            }
+                        }
                     }
                     // update split offset
                     if let Some(mapping) = split_offset_mapping {
