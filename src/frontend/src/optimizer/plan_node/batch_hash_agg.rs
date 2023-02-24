@@ -58,9 +58,7 @@ impl BatchHashAgg {
         self.logical.group_key()
     }
 
-    fn to_two_phase_agg(&self, input: PlanRef) -> Result<PlanRef> {
-        let dist_input = input.to_distributed()?;
-
+    fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
         // partial agg - follows input distribution
         let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
 

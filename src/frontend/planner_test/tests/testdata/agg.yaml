@@ -1143,21 +1143,63 @@
     SET RW_FORCE_TWO_PHASE_AGG=true;
     create table bid(date_time TIMESTAMP, auction int);
     SELECT
-      count(*) AS num,
-      window_start AS starttime_c
-    FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+      max(CountBids.num) AS maxn,
+      CountBids.starttime_c
+    FROM (
+      SELECT
+        count(*) AS num,
+        window_start AS starttime_c
+      FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+      GROUP BY
+        bid.auction,
+        window_start
+    ) as CountBids
     GROUP BY
-      bid.auction,
-      window_start
-    ) AS CountBids
+    CountBids.starttime_c;
   batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [max(max(sum0(count))), window_start] }
+      └─BatchHashAgg { group_key: [window_start], aggs: [max(max(sum0(count)))] }
+        └─BatchExchange { order: [], dist: HashShard(window_start) }
+          └─BatchHashAgg { group_key: [window_start], aggs: [max(sum0(count))] }
+            └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [sum0(count)] }
+              └─BatchExchange { order: [], dist: HashShard(bid.auction, window_start) }
+                └─BatchHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
+                  └─BatchHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start] }
+                    └─BatchFilter { predicate: IsNotNull(bid.date_time) }
+                      └─BatchScan { table: bid, columns: [bid.date_time, bid.auction], distribution: SomeShard }
   stream_plan: |
+    StreamMaterialize { columns: [maxn, starttime_c], pk_columns: [starttime_c], pk_conflict: "no check" }
+    └─StreamProject { exprs: [max(max(sum0(count))), window_start] }
+      └─StreamHashAgg { group_key: [window_start], aggs: [count, max(max(sum0(count)))] }
+        └─StreamExchange { dist: HashShard(window_start) }
+          └─StreamHashAgg { group_key: [window_start, $expr2], aggs: [count, max(sum0(count))] }
+            └─StreamProject { exprs: [bid.auction, window_start, sum0(count), Vnode(bid.auction, window_start) as $expr2] }
+              └─StreamProject { exprs: [bid.auction, window_start, sum0(count)] }
+                └─StreamHashAgg { group_key: [bid.auction, window_start], aggs: [count, sum0(count)] }
+                  └─StreamExchange { dist: HashShard(bid.auction, window_start) }
+                    └─StreamHashAgg { group_key: [bid.auction, window_start, $expr1], aggs: [count, count] }
+                      └─StreamProject { exprs: [bid.auction, window_start, bid._row_id, Vnode(bid._row_id) as $expr1] }
+                        └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
+                          └─StreamFilter { predicate: IsNotNull(bid.date_time) }
+                            └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - name: two phase agg with stream SomeShard (via index)
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
     create table t (id int primary key, col int);
     create index idx on t(col);
-    select count(id), min(col) from idx group by int;
+    with sq as (select id from idx) select count(*) from sq group by sq.id;
   batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [sum0(count)] }
+      └─BatchHashAgg { group_key: [idx.id], aggs: [sum0(count)] }
+        └─BatchExchange { order: [], dist: HashShard(idx.id) }
+          └─BatchHashAgg { group_key: [idx.id], aggs: [count] }
+            └─BatchScan { table: idx, columns: [idx.id], distribution: SomeShard }
   stream_plan: |
+    StreamMaterialize { columns: [count, idx.id(hidden)], pk_columns: [idx.id], pk_conflict: "no check" }
+    └─StreamProject { exprs: [count, idx.id] }
+      └─StreamHashAgg { group_key: [idx.id], aggs: [count, count] }
+        └─StreamExchange { dist: HashShard(idx.id) }
+          └─StreamTableScan { table: idx, columns: [idx.id], pk: [idx.id], dist: SomeShard }
