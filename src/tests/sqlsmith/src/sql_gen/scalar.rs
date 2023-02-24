@@ -89,7 +89,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             })),
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
+                let n = self.rng.gen_range(1..=4);
                 Expr::Array(Array {
                     elem: self.gen_simple_scalar_list(ty, n),
                     named: true,
@@ -108,6 +108,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a list of [`n`] simple scalar values of a specific [`type`].
+    #[allow(dead_code)]
     fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Vec<Expr> {
         (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }

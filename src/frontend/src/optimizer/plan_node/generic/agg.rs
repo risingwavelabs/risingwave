@@ -30,7 +30,9 @@ use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Direction;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, IndexRewriter};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
+};
 use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
@@ -39,7 +41,7 @@ use crate::TableCatalog;
 /// functions in the `SELECT` clause.
 ///
 /// The output schema will first include the group key and then the aggregation calls.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
     pub group_key: Vec<usize>,
@@ -462,7 +464,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 ///
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggOrderByField {
     pub input: InputRef,
     pub direction: Direction,
@@ -486,7 +488,7 @@ impl fmt::Debug for PlanAggOrderByField {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggOrderByFieldDisplay<'a> {
     pub plan_agg_order_by_field: &'a PlanAggOrderByField,
     pub input_schema: &'a Schema,
@@ -527,7 +529,7 @@ impl PlanAggOrderByField {
 
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
     pub agg_kind: AggKind,
@@ -606,7 +608,7 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self, ctx: OptimizerContextRef) -> ProstAggCall {
+    pub fn to_protobuf(&self) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -617,10 +619,7 @@ impl PlanAggCall {
                 .iter()
                 .map(PlanAggOrderByField::to_protobuf)
                 .collect(),
-            filter: self
-                .filter
-                .as_expr_unless_true()
-                .map(|x| ctx.expr_with_session_timezone(x).to_expr_proto()),
+            filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
         }
     }
 

@@ -28,6 +28,7 @@ use risingwave_connector::sink::{
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::derive::{derive_columns, derive_pk};
+use super::utils::IndicesDisplay;
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -35,7 +36,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::WithOptions;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
@@ -102,6 +103,14 @@ impl StreamSink {
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
 
+        if sink_type == SinkType::Upsert && pk.is_empty() {
+            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "No primary key for the upsert sink. Please include the primary key explicitly in sink definition or make the sink append-only.",
+            )))
+            .into());
+        }
+
         Ok(SinkDesc {
             id: SinkId::placeholder(),
             name,
@@ -140,7 +149,7 @@ impl StreamSink {
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    "Cannot force the sink to be append-only without \"format='append_only'\"in WITH options",
+                    "Cannot force the sink to be append-only without \"format='append_only'\"in WITH options.",
                 )))
                 .into())
             }
@@ -164,6 +173,33 @@ impl_plan_tree_node_for_unary! { StreamSink }
 impl fmt::Display for StreamSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSink");
+
+        let sink_type = if self.sink_desc.sink_type.is_append_only() {
+            "append-only"
+        } else {
+            "upsert"
+        };
+        let column_names = self
+            .sink_desc
+            .columns
+            .iter()
+            .map(|col| col.column_desc.name.clone())
+            .collect_vec()
+            .join(", ");
+        builder
+            .field("type", &format_args!("{}", sink_type))
+            .field("columns", &format_args!("[{}]", column_names));
+
+        if self.sink_desc.sink_type.is_upsert() {
+            builder.field(
+                "pk",
+                &IndicesDisplay {
+                    indices: &self.sink_desc.pk.iter().map(|k| k.column_idx).collect_vec(),
+                    input_schema: &self.base.schema,
+                },
+            );
+        }
+
         builder.finish()
     }
 }
