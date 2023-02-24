@@ -117,6 +117,32 @@ impl std::error::Error for ParserError {}
 
 type ColumnsDefTuple = (Vec<ColumnDef>, Vec<TableConstraint>, Vec<SourceWatermark>);
 
+/// Reference:
+/// https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-PRECEDENCE
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+enum Precedence {
+    Zero = 0,
+    LogicalOr, // 5 in upstream
+    LogicalXor,
+    LogicalAnd, // 10 in upstream
+    UnaryNot,   // 15 in upstream
+    Is,         // 17 in upstream
+    Cmp,
+    Between,
+    Other,
+    BitwiseOr, // 21 in upstream
+    BitwiseXor,
+    BitwiseAnd, // 23 in upstream
+    BitwiseShift,
+    PlusMinus, // 30 in upstream
+    MulDiv,    // 40 in upstream
+    Exp,
+    PostfixFactorial,
+    Array,
+    DoubleColon, // 50 in upstream
+}
+
 pub struct Parser {
     tokens: Vec<Token>,
     /// The index of the first unprocessed token in `self.tokens`
@@ -133,11 +159,6 @@ pub struct Parser {
 }
 
 impl Parser {
-    const BETWEEN_PREC: u8 = 21;
-    const PLUS_MINUS_PREC: u8 = 30;
-    const TIME_ZONE_PREC: u8 = 21;
-    const UNARY_NOT_PREC: u8 = 15;
-
     /// Parse the specified tokens
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser {
@@ -467,7 +488,7 @@ impl Parser {
                 Keyword::INTERVAL => self.parse_literal_interval(),
                 Keyword::NOT => Ok(Expr::UnaryOp {
                     op: UnaryOperator::Not,
-                    expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
+                    expr: Box::new(self.parse_subexpr(Precedence::UnaryNot as u8)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
                 Keyword::ARRAY => {
@@ -511,7 +532,7 @@ impl Parser {
                 } else {
                     UnaryOperator::Minus
                 };
-                let mut sub_expr = self.parse_subexpr(Self::PLUS_MINUS_PREC)?;
+                let mut sub_expr = self.parse_subexpr(Precedence::PlusMinus as u8)?;
                 if let Expr::Value(Value::Number(ref mut s)) = sub_expr {
                     if tok == Token::Minus {
                         *s = format!("-{}", s);
@@ -538,7 +559,7 @@ impl Parser {
                 };
                 Ok(Expr::UnaryOp {
                     op,
-                    expr: Box::new(self.parse_subexpr(Self::PLUS_MINUS_PREC)?),
+                    expr: Box::new(self.parse_subexpr(Precedence::PlusMinus as u8)?),
                 })
             }
             Token::Number(_)
@@ -1294,9 +1315,9 @@ impl Parser {
     pub fn parse_between(&mut self, expr: Expr, negated: bool) -> Result<Expr, ParserError> {
         // Stop parsing subexpressions for <low> and <high> on tokens with
         // precedence lower than that of `BETWEEN`, such as `AND`, `IS`, etc.
-        let low = self.parse_subexpr(Self::BETWEEN_PREC)?;
+        let low = self.parse_subexpr(Precedence::Between as u8)?;
         self.expect_keyword(Keyword::AND)?;
-        let high = self.parse_subexpr(Self::BETWEEN_PREC)?;
+        let high = self.parse_subexpr(Precedence::Between as u8)?;
         Ok(Expr::Between {
             expr: Box::new(expr),
             negated,
@@ -1315,41 +1336,17 @@ impl Parser {
 
     /// Get the precedence of the next token
     pub fn get_next_precedence(&self) -> Result<u8, ParserError> {
+        use Precedence as P;
+
         let token = self.peek_token();
         debug!("get_next_precedence() {:?}", token);
         match token {
-            Token::Word(w) if w.keyword == Keyword::OR => Ok(5),
-            Token::Word(w) if w.keyword == Keyword::AND => Ok(10),
-            Token::Word(w) if w.keyword == Keyword::XOR => Ok(24),
-
-            Token::Word(w) if w.keyword == Keyword::AT => {
-                match (self.peek_nth_token(1), self.peek_nth_token(2)) {
-                    (Token::Word(w), Token::Word(w2))
-                        if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
-                    {
-                        Ok(Self::TIME_ZONE_PREC)
-                    }
-                    _ => Ok(0),
-                }
-            }
-
-            Token::Word(w) if w.keyword == Keyword::NOT => match self.peek_nth_token(1) {
-                // The precedence of NOT varies depending on keyword that
-                // follows it. If it is followed by IN, BETWEEN, or LIKE,
-                // it takes on the precedence of those tokens. Otherwise it
-                // is not an infix operator, and therefore has zero
-                // precedence.
-                Token::Word(w) if w.keyword == Keyword::IN => Ok(Self::BETWEEN_PREC),
-                Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(Self::BETWEEN_PREC),
-                Token::Word(w) if w.keyword == Keyword::LIKE => Ok(Self::BETWEEN_PREC),
-                Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(Self::BETWEEN_PREC),
-                _ => Ok(0),
-            },
-            Token::Word(w) if w.keyword == Keyword::IS => Ok(17),
-            Token::Word(w) if w.keyword == Keyword::IN => Ok(Self::BETWEEN_PREC),
-            Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(Self::BETWEEN_PREC),
-            Token::Word(w) if w.keyword == Keyword::LIKE => Ok(Self::BETWEEN_PREC),
-            Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(Self::BETWEEN_PREC),
+            Token::Word(w) if w.keyword == Keyword::OR => Ok(P::LogicalOr),
+            Token::Word(w) if w.keyword == Keyword::XOR => Ok(P::LogicalXor),
+            Token::Word(w) if w.keyword == Keyword::AND => Ok(P::LogicalAnd),
+            Token::Word(w) if w.keyword == Keyword::IS => Ok(P::Is),
+            Token::Word(w) if w.keyword == Keyword::ISNULL => Ok(P::Is),
+            Token::Word(w) if w.keyword == Keyword::NOTNULL => Ok(P::Is),
             Token::Eq
             | Token::Lt
             | Token::LtEq
@@ -1357,22 +1354,58 @@ impl Parser {
             | Token::Gt
             | Token::GtEq
             | Token::DoubleEq
-            | Token::Tilde
+            | Token::Spaceship => Ok(P::Cmp),
+            Token::Word(w) if w.keyword == Keyword::NOT => match self.peek_nth_token(1) {
+                // The precedence of NOT varies depending on keyword that
+                // follows it. If it is followed by IN, BETWEEN, or LIKE,
+                // it takes on the precedence of those tokens. Otherwise it
+                // is not an infix operator, and therefore has zero
+                // precedence.
+                Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
+                Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
+                Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Between),
+                Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Between),
+                Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Between),
+                _ => Ok(P::Zero),
+            },
+            Token::Word(w) if w.keyword == Keyword::BETWEEN => Ok(P::Between),
+            Token::Word(w) if w.keyword == Keyword::IN => Ok(P::Between),
+            Token::Word(w) if w.keyword == Keyword::LIKE => Ok(P::Between),
+            Token::Word(w) if w.keyword == Keyword::ILIKE => Ok(P::Between),
+            Token::Word(w) if w.keyword == Keyword::SIMILAR => Ok(P::Between),
+            Token::Tilde
             | Token::TildeAsterisk
             | Token::ExclamationMarkTilde
             | Token::ExclamationMarkTildeAsterisk
-            | Token::Spaceship => Ok(20),
-            Token::Pipe => Ok(21),
-            Token::Caret | Token::Sharp | Token::ShiftRight | Token::ShiftLeft => Ok(22),
-            Token::Ampersand => Ok(23),
-            Token::Arrow | Token::LongArrow | Token::HashArrow | Token::HashLongArrow => Ok(25),
-            Token::Plus | Token::Minus => Ok(Self::PLUS_MINUS_PREC),
-            Token::Mul | Token::Div | Token::Mod | Token::Concat => Ok(40),
-            Token::DoubleColon => Ok(50),
-            Token::ExclamationMark => Ok(50),
-            Token::LBracket => Ok(50),
-            _ => Ok(0),
+            | Token::Concat
+            | Token::Arrow
+            | Token::LongArrow
+            | Token::HashArrow
+            | Token::HashLongArrow => Ok(P::Other),
+            Token::Word(w) if w.keyword == Keyword::AT => {
+                match (self.peek_nth_token(1), self.peek_nth_token(2)) {
+                    (Token::Word(w), Token::Word(w2))
+                        if w.keyword == Keyword::TIME && w2.keyword == Keyword::ZONE =>
+                    {
+                        Ok(P::Other)
+                    }
+                    _ => Ok(P::Zero),
+                }
+            }
+            // test: 2 | 3 & 4
+            Token::Pipe => Ok(P::BitwiseOr),
+            Token::Sharp => Ok(P::BitwiseXor),
+            Token::Ampersand => Ok(P::BitwiseAnd),
+            Token::ShiftRight | Token::ShiftLeft => Ok(P::BitwiseShift),
+            Token::Plus | Token::Minus => Ok(P::PlusMinus),
+            Token::Mul | Token::Div | Token::Mod => Ok(P::MulDiv),
+            Token::Caret => Ok(P::Exp),
+            Token::ExclamationMark => Ok(P::PostfixFactorial),
+            Token::LBracket => Ok(P::Array),
+            Token::DoubleColon => Ok(P::DoubleColon),
+            _ => Ok(P::Zero),
         }
+        .map(|p| p as u8)
     }
 
     /// Return the first non-whitespace token that has not yet been processed
