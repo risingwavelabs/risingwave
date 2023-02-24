@@ -23,7 +23,7 @@ use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceErrorContext};
+use crate::source::{SourceColumnDesc, SourceContextRef};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -31,15 +31,15 @@ impl_common_parser_logic!(JsonParser);
 #[derive(Debug)]
 pub struct JsonParser {
     rw_columns: Vec<SourceColumnDesc>,
-    error_ctx: SourceErrorContext,
+    source_ctx: SourceContextRef,
     enable_upsert: bool,
 }
 
 impl JsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, error_ctx: SourceErrorContext) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
         Ok(Self {
             rw_columns,
-            error_ctx,
+            source_ctx,
             enable_upsert: false,
         })
     }
@@ -47,18 +47,18 @@ impl JsonParser {
     pub fn new_for_test(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
         Ok(Self {
             rw_columns,
-            error_ctx: SourceErrorContext::for_test(),
+            source_ctx: Default::default(),
             enable_upsert: false,
         })
     }
 
     pub fn new_with_upsert(
         rw_columns: Vec<SourceColumnDesc>,
-        error_ctx: SourceErrorContext,
+        source_ctx: SourceContextRef,
     ) -> Result<Self> {
         Ok(Self {
             rw_columns,
-            error_ctx,
+            source_ctx,
             enable_upsert: true,
         })
     }
@@ -153,7 +153,6 @@ mod tests {
 
     use crate::common::UpsertMessage;
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
-    use crate::source::SourceErrorContext;
 
     fn get_payload() -> Vec<&'static [u8]> {
         vec![
@@ -182,7 +181,7 @@ mod tests {
             SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
         ];
 
-        let parser = JsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
+        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -281,7 +280,7 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int16, 1.into()),
             SourceColumnDesc::simple("v3", DataType::Varchar, 2.into()),
         ];
-        let parser = JsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
+        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 3);
 
         // Parse a correct record.
@@ -342,7 +341,7 @@ mod tests {
         .map(SourceColumnDesc::from)
         .collect_vec();
 
-        let parser = JsonParser::new(descs.clone(), SourceErrorContext::for_test()).unwrap();
+        let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
         let payload = br#"
         {
             "data": {
@@ -408,8 +407,7 @@ mod tests {
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
         ];
-        let parser =
-            JsonParser::new_with_upsert(descs.clone(), SourceErrorContext::for_test()).unwrap();
+        let parser = JsonParser::new_with_upsert(descs.clone(), Default::default()).unwrap();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in items {
             parser
