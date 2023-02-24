@@ -837,6 +837,9 @@ impl<S: StateStore> StateTable<S> {
         }
         if let Some(range_end_suffix) = range_end_suffix {
             let range_begin_suffix = vec![];
+            trace!(table_id = %self.table_id, range_end = ?range_end_suffix, vnodes = ?{
+                self.vnodes.iter_vnodes().collect_vec()
+            }, "delete range");
             for vnode in self.vnodes.iter_vnodes() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
