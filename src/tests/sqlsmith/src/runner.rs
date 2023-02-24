@@ -15,7 +15,6 @@
 //! Provides E2E Test runner functionality.
 
 use itertools::Itertools;
-#[cfg(not(madsim))]
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
