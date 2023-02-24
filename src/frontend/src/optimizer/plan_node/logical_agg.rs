@@ -222,6 +222,15 @@ impl LogicalAgg {
         })
     }
 
+    /// Generally used by two phase hash agg.
+    /// If input dist already satisfies hash agg distribution,
+    /// it will be more expensive to do two phase agg, should just do shuffle agg.
+    pub(crate) fn hash_agg_dist_satisfied_by_input_dist(&self, input_dist: &Distribution) -> bool {
+        let required_dist =
+            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+        input_dist.satisfies(&required_dist)
+    }
+
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input_dist = stream_input.distribution();
@@ -240,13 +249,11 @@ impl LogicalAgg {
             return self.gen_single_plan(stream_input);
         }
 
-        debug_assert!(
-            if !self.group_key().is_empty() {
-                self.must_try_two_phase_agg()
-            } else {
-                self.can_two_phase_agg()
-            }
-        );
+        debug_assert!(if !self.group_key().is_empty() {
+            self.must_try_two_phase_agg()
+        } else {
+            self.can_two_phase_agg()
+        });
 
         // Stateless 2-phase simple agg
         // can be applied on stateless simple agg calls,
@@ -260,12 +267,14 @@ impl LogicalAgg {
 
         // Vnode-based 2-phase simple agg
         // can be applied on agg calls not affected by order,
-        // with input distributed by dist_key
+        // with input distributed by dist_key.
         match input_dist {
-           Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _) if
-            !self.group_key().is_empty() => {
-               let dist_key = dist_key.clone();
-               return self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dist_key)
+            Distribution::HashShard(dist_key) | Distribution::UpstreamHashShard(dist_key, _)
+                if (!self.hash_agg_dist_satisfied_by_input_dist(input_dist)
+                    || self.group_key().is_empty()) =>
+            {
+                let dist_key = dist_key.clone();
+                return self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dist_key);
             }
             _ => {}
         }
