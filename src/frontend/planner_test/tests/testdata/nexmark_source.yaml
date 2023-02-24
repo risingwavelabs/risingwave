@@ -319,26 +319,24 @@
     ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [auction, count] }
-      └─BatchFilter { predicate: (count >= max(count)) }
-        └─BatchHashJoin { type: Inner, predicate: window_start = window_start, output: all }
-          ├─BatchExchange { order: [], dist: HashShard(window_start) }
-          | └─BatchProject { exprs: [auction, count, window_start] }
-          |   └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
-          |     └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
-          |       └─BatchExchange { order: [], dist: HashShard(auction) }
-          |         └─BatchProject { exprs: [auction, date_time] }
-          |           └─BatchFilter { predicate: IsNotNull(date_time) }
-          |             └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
-          └─BatchProject { exprs: [max(count), window_start] }
-            └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
-              └─BatchExchange { order: [], dist: HashShard(window_start) }
-                └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
-                  └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
-                    └─BatchExchange { order: [], dist: HashShard(auction) }
-                      └─BatchProject { exprs: [auction, date_time] }
-                        └─BatchFilter { predicate: IsNotNull(date_time) }
-                          └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+    └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }
+      ├─BatchExchange { order: [], dist: HashShard(window_start) }
+      | └─BatchProject { exprs: [auction, count, window_start] }
+      |   └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
+      |     └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
+      |       └─BatchExchange { order: [], dist: HashShard(auction) }
+      |         └─BatchProject { exprs: [auction, date_time] }
+      |           └─BatchFilter { predicate: IsNotNull(date_time) }
+      |             └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+      └─BatchProject { exprs: [max(count), window_start] }
+        └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
+          └─BatchExchange { order: [], dist: HashShard(window_start) }
+            └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
+              └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
+                └─BatchExchange { order: [], dist: HashShard(auction) }
+                  └─BatchProject { exprs: [auction, date_time] }
+                    └─BatchFilter { predicate: IsNotNull(date_time) }
+                      └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [auction, window_start, window_start#1], pk_conflict: "no check" }
     └─StreamProject { exprs: [auction, count, window_start, window_start] }
@@ -346,7 +344,7 @@
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
           | └─StreamProject { exprs: [auction, count, window_start] }
-          |   └─StreamShare { id = 1121 }
+          |   └─StreamShare { id = 1091 }
           |     └─StreamProject { exprs: [auction, window_start, count] }
           |       └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count, count] }
           |         └─StreamExchange { dist: HashShard(auction, window_start) }
@@ -359,7 +357,7 @@
             └─StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
               └─StreamExchange { dist: HashShard(window_start) }
                 └─StreamProject { exprs: [auction, window_start, count] }
-                  └─StreamShare { id = 1121 }
+                  └─StreamShare { id = 1091 }
                     └─StreamProject { exprs: [auction, window_start, count] }
                       └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count, count] }
                         └─StreamExchange { dist: HashShard(auction, window_start) }
