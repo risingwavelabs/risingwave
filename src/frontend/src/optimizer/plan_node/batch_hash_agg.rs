@@ -58,7 +58,9 @@ impl BatchHashAgg {
         self.logical.group_key()
     }
 
-    fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
+    fn to_two_phase_agg(&self, input: PlanRef) -> Result<PlanRef> {
+        let dist_input = input.to_distributed()?;
+
         // partial agg - follows input distribution
         let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
 
@@ -88,9 +90,10 @@ impl BatchHashAgg {
         Ok(BatchHashAgg::new(total_agg_logical).into())
     }
 
-    fn to_shuffle_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
-        let new_input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
-            .enforce_if_not_satisfies(dist_input, &Order::any())?;
+    fn to_shuffle_agg(&self) -> Result<PlanRef> {
+        let input = self.input();
+        let required_dist = RequiredDist::shard_by_key(input.schema().len(), self.group_key());
+        let new_input = input.to_distributed_with_required(&Order::any(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -110,16 +113,19 @@ impl PlanTreeNodeUnary for BatchHashAgg {
         Self::new(self.logical.clone_with_input(input))
     }
 }
+
 impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let input = self.input().to_distributed()?;
-        let input_dist = input.distribution();
-        if self.logical.should_two_phase_hash_agg(input_dist) {
-            self.to_two_phase_agg(input)
-        } else {
-            self.to_shuffle_agg(input)
+        if self.logical.two_phase_agg_forced() && self.logical.can_two_phase_agg() {
+            let input = self.input().to_distributed()?;
+            let input_dist = input.distribution();
+            let required_dist = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+            if !input_dist.satisfies(&required_dist) && matches!(input_dist, Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) | Distribution::SomeShard) {
+                return self.to_two_phase_agg(input);
+            }
         }
+        self.to_shuffle_agg()
     }
 }
 
