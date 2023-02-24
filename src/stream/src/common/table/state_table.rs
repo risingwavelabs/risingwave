@@ -23,7 +23,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
@@ -307,6 +307,31 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             Distribution::fallback(),
             None,
             false,
+            0,
+        )
+        .await
+    }
+
+    /// Create a state table without distribution, with given `prefix_hint_len`, used for unit
+    /// tests.
+    pub async fn new_without_distribution_with_prefix_hint_len(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        prefix_hint_len: usize,
+    ) -> Self {
+        Self::new_with_distribution_inner(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            None,
+            true,
+            prefix_hint_len,
         )
         .await
     }
@@ -331,6 +356,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             distribution,
             value_indices,
             true,
+            0,
         )
         .await
     }
@@ -353,6 +379,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             distribution,
             value_indices,
             false,
+            0,
         )
         .await
     }
@@ -370,6 +397,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         }: Distribution,
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
+        prefix_hint_len: usize,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
 
@@ -396,7 +424,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            prefix_hint_len: 0,
+            prefix_hint_len,
             vnodes,
             table_option: Default::default(),
             is_consistent_op,
@@ -812,7 +840,7 @@ impl<S: StateStore> StateTable<S> {
             } else {
                 vec![]
             };
-            for vnode in self.vnodes.iter_ones() {
+            for vnode in self.vnodes.iter_vnodes() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);

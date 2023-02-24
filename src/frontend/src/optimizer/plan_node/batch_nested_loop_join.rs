@@ -32,7 +32,7 @@ use crate::utils::ConditionDisplay;
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchNestedLoopJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -131,12 +131,7 @@ impl ToBatchProst for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.logical.join_type() as i32,
-            join_cond: Some(
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(ExprImpl::from(self.logical.on().clone()))
-                    .to_expr_proto(),
-            ),
+            join_cond: Some(ExprImpl::from(self.logical.on().clone()).to_expr_proto()),
             output_indices: self
                 .logical
                 .output_indices()

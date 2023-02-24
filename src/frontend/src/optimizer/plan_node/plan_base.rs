@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derivative::Derivative;
 use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
@@ -23,9 +24,14 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct PlanBase {
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub id: PlanNodeId,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk

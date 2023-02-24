@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -44,9 +42,9 @@ impl Rule for IndexDeltaJoinRule {
             }
         }
 
-        let input_left_dyn = match_through_exchange(Rc::clone(&join.inputs()[0]))?;
+        let input_left_dyn = match_through_exchange(join.inputs()[0].clone())?;
         let input_left = input_left_dyn.as_stream_table_scan()?;
-        let input_right_dyn = match_through_exchange(Rc::clone(&join.inputs()[1]))?;
+        let input_right_dyn = match_through_exchange(join.inputs()[1].clone())?;
         let input_right = input_right_dyn.as_stream_table_scan()?;
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
