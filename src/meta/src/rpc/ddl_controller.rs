@@ -221,12 +221,19 @@ where
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
-        let (ctx, table_fragments) = self
+        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+        let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
-        let internal_tables = ctx.internal_tables();
+        let mut internal_tables = vec![];
         let result = try {
+            let (ctx, table_fragments) = self
+                .build_stream_job(env, &stream_job, fragment_graph)
+                .await?;
+
+            internal_tables = ctx.internal_tables();
+
             if let Some(source) = stream_job.source() {
                 self.source_manager.register_source(source).await?;
             }
@@ -283,108 +290,105 @@ where
         Ok(version)
     }
 
-    /// `prepare_stream_job` prepares a stream job and returns the context and table fragments.
+    /// `prepare_stream_job` prepares a stream job and returns the stream fragment graph.
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
-        // 1. Get the env for streaming jobs.
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
-
-        // 2. Build fragment graph.
+    ) -> MetaResult<StreamFragmentGraph> {
+        // 1. Build fragment graph.
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
-        let default_parallelism = fragment_graph.default_parallelism();
-        let internal_tables = fragment_graph.internal_tables();
 
-        // 3. Set the graph-related fields and freeze the `stream_job`.
+        // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let dependent_relations = fragment_graph.dependent_relations().clone();
-        stream_job.set_dependent_relations(dependent_relations.clone());
-
-        let id = stream_job.id();
+        stream_job.set_dependent_relations(dependent_relations);
         let stream_job = &*stream_job;
 
-        // 4. Mark current relation as "creating" and add reference count to dependent relations.
+        // 3. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
             .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        let res: MetaResult<(CreateStreamingJobContext, TableFragments)> = try {
-            // 5. Resolve the upstream fragments, extend the fragment graph to a complete graph that
-            // contains all information needed for building the actor graph.
-            let upstream_mview_fragments = self
-                .fragment_manager
-                .get_upstream_mview_fragments(&dependent_relations)
-                .await;
-            let upstream_mview_actors = upstream_mview_fragments
-                .iter()
-                .map(|(&table_id, fragment)| {
-                    (
-                        table_id,
-                        fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
-                    )
-                })
-                .collect();
+        Ok(fragment_graph)
+    }
 
-            let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
-                fragment_graph,
-                upstream_mview_fragments,
-            )?;
+    /// `build_stream_job` builds a streaming job and returns the context and table fragments.
+    async fn build_stream_job(
+        &self,
+        env: StreamEnvironment,
+        stream_job: &StreamingJob,
+        fragment_graph: StreamFragmentGraph,
+    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
+        let id = stream_job.id();
+        let default_parallelism = fragment_graph.default_parallelism();
+        let internal_tables = fragment_graph.internal_tables();
 
-            // 6. Build the actor graph.
-            let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
-            let actor_graph_builder =
-                ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
+        // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
+        // contains all information needed for building the actor graph.
+        let upstream_mview_fragments = self
+            .fragment_manager
+            .get_upstream_mview_fragments(stream_job.dependent_relations())
+            .await;
+        let upstream_mview_actors = upstream_mview_fragments
+            .iter()
+            .map(|(&table_id, fragment)| {
+                (
+                    table_id,
+                    fragment.actors.iter().map(|a| a.actor_id).collect_vec(),
+                )
+            })
+            .collect();
 
-            let ActorGraphBuildResult {
-                graph,
-                building_locations,
-                existing_locations,
-                dispatchers,
-                merge_updates,
-            } = actor_graph_builder
-                .generate_graph(self.env.id_gen_manager_ref(), stream_job)
-                .await?;
-            assert!(merge_updates.is_empty());
+        let complete_graph =
+            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?;
 
-            // 8. Build the table fragments structure that will be persisted in the stream manager,
-            // and the context that contains all information needed for building the
-            // actors on the compute nodes.
-            let table_fragments =
-                TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
+        // 2. Build the actor graph.
+        let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
+        let actor_graph_builder =
+            ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
 
-            let ctx = CreateStreamingJobContext {
-                dispatchers,
-                upstream_mview_actors,
-                internal_tables,
-                building_locations,
-                existing_locations,
-                table_properties: stream_job.properties(),
-                definition: stream_job.mview_definition(),
-            };
+        let ActorGraphBuildResult {
+            graph,
+            building_locations,
+            existing_locations,
+            dispatchers,
+            merge_updates,
+        } = actor_graph_builder
+            .generate_graph(self.env.id_gen_manager_ref(), stream_job)
+            .await?;
+        assert!(merge_updates.is_empty());
 
-            // 9. Mark creating tables, including internal tables and the table of the stream job.
-            let creating_tables = ctx
-                .internal_tables()
-                .into_iter()
-                .chain(stream_job.table().cloned())
-                .collect_vec();
+        // 3. Build the table fragments structure that will be persisted in the stream manager,
+        // and the context that contains all information needed for building the
+        // actors on the compute nodes.
+        let table_fragments =
+            TableFragments::new(id.into(), graph, &building_locations.actor_locations, env);
 
-            self.catalog_manager
-                .mark_creating_tables(&creating_tables)
-                .await;
-
-            (ctx, table_fragments)
+        let ctx = CreateStreamingJobContext {
+            dispatchers,
+            upstream_mview_actors,
+            internal_tables,
+            building_locations,
+            existing_locations,
+            table_properties: stream_job.properties(),
+            definition: stream_job.mview_definition(),
         };
-        if let Err(err) = &res {
-            tracing::error!("failed to build streaming graph for streaming job: {}", err);
-            self.cancel_stream_job(stream_job, vec![]).await;
-        }
 
-        res
+        // 4. Mark creating tables, including internal tables and the table of the stream job.
+        let creating_tables = ctx
+            .internal_tables()
+            .into_iter()
+            .chain(stream_job.table().cloned())
+            .collect_vec();
+
+        self.catalog_manager
+            .mark_creating_tables(&creating_tables)
+            .await;
+
+        Ok((ctx, table_fragments))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.

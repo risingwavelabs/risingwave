@@ -824,12 +824,12 @@ where
     /// Get and filter the upstream `Materialize` fragments of the specified relations.
     pub async fn get_upstream_mview_fragments(
         &self,
-        dependent_relation_ids: &HashSet<TableId>,
+        dependent_relation_ids: impl IntoIterator<Item = TableId>,
     ) -> HashMap<TableId, Fragment> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
 
-        for &table_id in dependent_relation_ids {
+        for table_id in dependent_relation_ids.into_iter() {
             if let Some(table_fragments) = map.get(&table_id) && let Some(fragment) = table_fragments.mview_fragment() {
                 fragments.insert(table_id, fragment);
             }
