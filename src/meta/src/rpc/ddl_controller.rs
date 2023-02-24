@@ -330,7 +330,7 @@ where
         // contains all information needed for building the actor graph.
         let upstream_mview_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(stream_job.dependent_relations())
+            .get_upstream_mview_fragments(fragment_graph.dependent_relations())
             .await;
         let upstream_mview_actors = upstream_mview_fragments
             .iter()

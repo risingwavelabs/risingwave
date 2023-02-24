@@ -93,17 +93,6 @@ impl StreamingJob {
         }
     }
 
-    pub fn dependent_relations(&self) -> impl IntoIterator<Item = TableId> {
-        let ids = match self {
-            StreamingJob::MaterializedView(table) => table.dependent_relations.clone(),
-            StreamingJob::Sink(sink) => sink.dependent_relations.clone(),
-            StreamingJob::Table(_, _) => vec![],
-            StreamingJob::Index(_, index_table) => index_table.dependent_relations.clone(),
-        };
-
-        ids.into_iter().map(TableId::from)
-    }
-
     pub fn schema_id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.schema_id,
