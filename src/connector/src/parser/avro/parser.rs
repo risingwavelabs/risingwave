@@ -32,7 +32,7 @@ use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceErrorContext};
+use crate::source::{SourceColumnDesc, SourceContextRef};
 
 impl_common_parser_logic!(AvroParser);
 
@@ -42,7 +42,7 @@ pub struct AvroParser {
     key_schema: Option<Arc<Schema>>,
     schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
     rw_columns: Vec<SourceColumnDesc>,
-    error_ctx: SourceErrorContext,
+    source_ctx: SourceContextRef,
     upsert_primary_key_column_name: Option<String>,
 }
 
@@ -150,7 +150,7 @@ impl AvroParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         config: AvroParserConfig,
-        error_ctx: SourceErrorContext,
+        source_ctx: SourceContextRef,
     ) -> Result<Self> {
         let AvroParserConfig {
             schema,
@@ -163,7 +163,7 @@ impl AvroParser {
             key_schema,
             schema_resolver,
             rw_columns,
-            error_ctx,
+            source_ctx,
             upsert_primary_key_column_name,
         })
     }
@@ -310,7 +310,7 @@ mod test {
     };
     use crate::parser::avro::util::unix_epoch_days;
     use crate::parser::SourceStreamChunkBuilder;
-    use crate::source::{SourceColumnDesc, SourceErrorContext};
+    use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -368,7 +368,7 @@ mod test {
 
     async fn new_avro_parser_from_local(file_name: &str) -> error::Result<AvroParser> {
         let conf = new_avro_conf_from_local(file_name).await?;
-        AvroParser::new(Vec::default(), conf, SourceErrorContext::for_test())
+        AvroParser::new(Vec::default(), conf, Default::default())
     }
 
     #[tokio::test]

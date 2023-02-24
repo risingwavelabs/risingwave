@@ -41,7 +41,7 @@ use crate::TableCatalog;
 /// functions in the `SELECT` clause.
 ///
 /// The output schema will first include the group key and then the aggregation calls.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
     pub group_key: Vec<usize>,
@@ -464,7 +464,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 ///
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggOrderByField {
     pub input: InputRef,
     pub direction: Direction,
@@ -488,7 +488,7 @@ impl fmt::Debug for PlanAggOrderByField {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggOrderByFieldDisplay<'a> {
     pub plan_agg_order_by_field: &'a PlanAggOrderByField,
     pub input_schema: &'a Schema,
@@ -529,7 +529,7 @@ impl PlanAggOrderByField {
 
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
     pub agg_kind: AggKind,

@@ -70,7 +70,7 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
 ) -> PlanRef {
     let new_input = node.input().predicate_pushdown(pushed_predicate, ctx);
     let new_node = node.clone_with_input(new_input);
-    LogicalFilter::create(Rc::new(new_node), filter_predicate)
+    LogicalFilter::create(new_node.into(), filter_predicate)
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +82,7 @@ pub struct PredicatePushdownContext {
 impl PredicatePushdownContext {
     pub fn new(root: PlanRef) -> Self {
         let mut share_parent_counter = ShareParentCounter::default();
-        share_parent_counter.visit(root.clone());
+        share_parent_counter.visit(root);
         Self {
             share_predicate_map: Default::default(),
             share_parent_counter,

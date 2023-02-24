@@ -22,7 +22,7 @@ use crate::array::ArrayBuilderImpl;
 use crate::types::DataType;
 
 /// The field in the schema of the executor's return data
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
@@ -112,7 +112,7 @@ macro_rules! schema_unnamed {
 }
 
 /// the schema of the executor's return data
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }
