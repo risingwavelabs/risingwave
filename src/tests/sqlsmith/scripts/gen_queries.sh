@@ -32,18 +32,10 @@ generate_sqlsmith() {
     --generate "$OUTDIR/$1"
 }
 
-create_artifacts() {
-  cd $TESTS_FOLDER
-  zip -r "freeze.zip" freeze
-  rm -r freeze
-  cd -
-}
-
 main() {
   cd $RW_HOME
   build_madsim
   generate_deterministic
-  create_artifacts
   cd -
 }
 

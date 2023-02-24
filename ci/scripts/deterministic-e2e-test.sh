@@ -16,11 +16,6 @@ mkdir -p ./test_data
 unzip -o test_data.zip -d .
 cd ../../
 
-echo "--- Extract data for sqlsmith"
-cd ./src/tests/sqlsmith/tests
-unzip freeze.zip
-cd -
-
 export RUST_LOG=info
 export LOGDIR=.risingwave/log
 
