@@ -549,7 +549,7 @@ impl Parser {
                 self.prev_token();
                 Ok(Expr::Value(self.parse_value()?))
             }
-
+            Token::Parameter(number) => self.parse_param(number),
             Token::LParen => {
                 let expr =
                     if self.parse_keyword(Keyword::SELECT) || self.parse_keyword(Keyword::WITH) {
@@ -581,6 +581,14 @@ impl Parser {
         } else {
             Ok(expr)
         }
+    }
+
+    fn parse_param(&mut self, param: String) -> Result<Expr, ParserError> {
+        Ok(Expr::Parameter {
+            index: param.parse().map_err(|_| {
+                ParserError::ParserError(format!("Parameter symbol has a invalid index {}.", param))
+            })?,
+        })
     }
 
     /// Parses a field selection expression. See also [`Expr::FieldIdentifier`].
