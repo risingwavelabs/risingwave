@@ -132,6 +132,7 @@ impl LogicalAgg {
             .into(),
         );
         let vnode_col_idx = exprs.len() - 1;
+        // TODO(kwannoel): We should apply Project optimization rules here.
         let project = StreamProject::new(LogicalProject::new(stream_input, exprs));
 
         // Generate local agg step
