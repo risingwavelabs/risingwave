@@ -310,23 +310,9 @@ impl LogicalAgg {
             .get_enable_two_phase_agg()
     }
 
-    /// Must try two phase agg iff we are forced to,
-    /// and we can do so.
+    /// Must try two phase agg iff we are forced to, and we satisfy the constraints.
     fn must_try_two_phase_agg(&self) -> bool {
         self.two_phase_agg_forced() && self.can_two_phase_agg()
-    }
-
-    fn should_vnode_two_phase_streaming_agg(&self, input_dist: &Distribution) -> bool {
-        self.can_two_phase_agg()
-            && self.two_phase_agg_forced()
-            && !input_dist.satisfies(&RequiredDist::shard_by_key(
-                self.input().schema().len(),
-                self.group_key(),
-            ))
-            && matches!(
-                input_dist,
-                Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _)
-            )
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
