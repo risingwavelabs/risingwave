@@ -1183,7 +1183,7 @@
                         └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
                           └─StreamFilter { predicate: IsNotNull(bid.date_time) }
                             └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-- name: two phase agg with stream SomeShard (via index)
+- name: two phase agg with stream SomeShard (via index) should fail
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
