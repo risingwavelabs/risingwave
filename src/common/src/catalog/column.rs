@@ -83,7 +83,7 @@ impl std::fmt::Display for ColumnId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
@@ -234,7 +234,7 @@ impl From<&ColumnDesc> for ProstColumnDesc {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,

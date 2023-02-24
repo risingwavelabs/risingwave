@@ -38,7 +38,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
 ///
@@ -46,7 +46,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// of the cartesian product of the two inputs; precisely which subset depends on the join
 /// condition. In addition, the output columns are a subset of the columns of the left and
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
     pub base: PlanBase,
     core: generic::Join<PlanRef>,
@@ -250,8 +250,8 @@ impl LogicalJoin {
     /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::with_output_indices(
-            self.left().clone(),
-            self.right().clone(),
+            self.left(),
+            self.right(),
             self.join_type(),
             self.on().clone(),
             output_indices,
@@ -261,8 +261,8 @@ impl LogicalJoin {
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, cond: Condition) -> Self {
         Self::with_output_indices(
-            self.left().clone(),
-            self.right().clone(),
+            self.left(),
+            self.right(),
             self.join_type(),
             cond,
             self.output_indices().clone(),
