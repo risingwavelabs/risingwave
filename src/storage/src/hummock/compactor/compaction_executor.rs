@@ -15,7 +15,6 @@
 use std::future::Future;
 
 use tokio::task::JoinHandle;
-use tracing::info;
 
 /// `CompactionExecutor` is a dedicated runtime for compaction's CPU intensive jobs.
 pub struct CompactionExecutor {
