@@ -120,8 +120,16 @@ impl ToDistributedBatch for BatchHashAgg {
         if self.logical.two_phase_agg_forced() && self.logical.can_two_phase_agg() {
             let input = self.input().to_distributed()?;
             let input_dist = input.distribution();
-            let required_dist = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-            if !input_dist.satisfies(&required_dist) && matches!(input_dist, Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) | Distribution::SomeShard) {
+            let required_dist =
+                RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+            if !input_dist.satisfies(&required_dist)
+                && matches!(
+                    input_dist,
+                    Distribution::HashShard(_)
+                        | Distribution::UpstreamHashShard(_, _)
+                        | Distribution::SomeShard
+                )
+            {
                 return self.to_two_phase_agg(input);
             }
         }

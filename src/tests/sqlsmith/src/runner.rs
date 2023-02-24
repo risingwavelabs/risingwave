@@ -87,7 +87,8 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
-        let skipped = validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
+        let skipped =
+            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
         if skipped == 0 {
             generated_queries += 1;
             queries.push_str(&format!("{};\n", &sql));
@@ -101,7 +102,8 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
         let response = client.query(&sql, &[]).await;
-        let skipped = validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
+        let skipped =
+            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
         drop_mview_table(&table, client).await;
         if skipped == 0 {
             generated_queries += 1;

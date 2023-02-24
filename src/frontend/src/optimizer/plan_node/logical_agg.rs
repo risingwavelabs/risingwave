@@ -287,7 +287,10 @@ impl LogicalAgg {
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
             && !input_dist.satisfies(&required_dist)
-            && matches!(input_dist, Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _))
+            && matches!(
+                input_dist,
+                Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _)
+            )
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
