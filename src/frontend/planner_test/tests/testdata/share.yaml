@@ -130,7 +130,7 @@
           |       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
           |         └─StreamFilter { predicate: IsNotNull(date_time) }
           |           └─StreamProject { exprs: [auction, date_time, _row_id] }
-          |             └─StreamShare { id = 1313 }
+          |             └─StreamShare { id = 919 }
           |               └─StreamProject { exprs: [auction, date_time, _row_id] }
           |                 └─StreamFilter { predicate: IsNotNull(date_time) }
           |                   └─StreamRowIdGen { row_id_index: 7 }
@@ -144,7 +144,7 @@
                       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
                         └─StreamFilter { predicate: IsNotNull(date_time) }
                           └─StreamProject { exprs: [auction, date_time, _row_id] }
-                            └─StreamShare { id = 1313 }
+                            └─StreamShare { id = 919 }
                               └─StreamProject { exprs: [auction, date_time, _row_id] }
                                 └─StreamFilter { predicate: IsNotNull(date_time) }
                                   └─StreamRowIdGen { row_id_index: 7 }
