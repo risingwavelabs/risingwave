@@ -43,9 +43,9 @@ pub use self::query::{
 };
 pub use self::statement::*;
 pub use self::value::{DateTimeField, TrimWhereField, Value};
-use crate::{keywords::Keyword, tokenizer::Word};
+use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
-
+use crate::tokenizer::Word;
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -97,9 +97,9 @@ pub struct Ident {
 
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
-    /// In situations like construct a identifier from existing object 
-    /// names, we may prefer to use this 'cause the input string is 
-    /// guanteed to be not empty. 
+    /// In situations like construct a identifier from existing object
+    /// names, we may prefer to use this 'cause the input string is
+    /// guanteed to be not empty.
     pub fn new_safe<S>(value: S) -> Self
     where
         S: Into<String>,
@@ -111,19 +111,20 @@ impl Ident {
     }
 
     /// Create a new identifier from word
-    pub fn new_from_word(w: &Word) -> Result<Ident, ParserError>
-    {
-        if w.value.len() == 0 {
-            Err(ParserError::ParserError(format!("zero-length delimited identifier at or near \"{w}\"")))
+    pub fn new_from_word(w: &Word) -> Result<Ident, ParserError> {
+        if w.value.is_empty() {
+            Err(ParserError::ParserError(format!(
+                "zero-length delimited identifier at or near \"{w}\""
+            )))
         } else {
-                Ok(Ident {
+            Ok(Ident {
                 value: w.value.clone(),
                 quote_style: w.quote_style,
             })
         }
     }
 
-    /// Create a new quoted identifier with the given quote and value. 
+    /// Create a new quoted identifier with the given quote and value.
     /// the inputs are guanteed to be legal.
     pub fn new_with_quote_safe<S>(quote: char, value: S) -> Self
     where
@@ -135,19 +136,23 @@ impl Ident {
         }
     }
 
-    /// Create a new quoted identifier with the given quote and value. 
+    /// Create a new quoted identifier with the given quote and value.
     /// returns ParserError when the given string is empty or the given quote is illegal.
     pub fn new_with_quote_check<S>(quote: char, value: S) -> Result<Ident, ParserError>
     where
         S: Into<String>,
     {
-        let value_str= value.into();
-        if value_str.len() == 0 {
-            return Err(ParserError::ParserError(format!("zero-length delimited identifier at or near \"{value_str}\"")));
+        let value_str = value.into();
+        if value_str.is_empty() {
+            return Err(ParserError::ParserError(format!(
+                "zero-length delimited identifier at or near \"{value_str}\""
+            )));
         }
 
         if !(quote == '\'' || quote == '"' || quote == '`' || quote == '[') {
-            return Err(ParserError::ParserError("unexpected quote style".to_string()));
+            return Err(ParserError::ParserError(
+                "unexpected quote style".to_string(),
+            ));
         }
 
         Ok(Ident {

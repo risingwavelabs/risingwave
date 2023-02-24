@@ -804,7 +804,9 @@ fn parse_binary_some() {
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_safe("a"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new_safe("b"))))),
+            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new_safe(
+                "b"
+            ))))),
         }),
         select.projection[0]
     );
@@ -817,7 +819,9 @@ fn parse_binary_all() {
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_safe("a"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new_safe("b"))))),
+            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new_safe(
+                "b"
+            ))))),
         }),
         select.projection[0]
     );
@@ -1913,8 +1917,12 @@ fn parse_aggregate_with_order_by() {
         &Expr::Function(Function {
             name: ObjectName(vec![Ident::new_safe("STRING_AGG")]),
             args: vec![
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new_safe("a")))),
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new_safe("b")))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new_safe(
+                    "a"
+                )))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new_safe(
+                    "b"
+                )))),
             ],
             over: None,
             distinct: false,
@@ -2183,7 +2191,10 @@ fn parse_delimited_identifiers() {
     match only(select.from).relation {
         TableFactor::Table { name, alias } => {
             assert_eq!(vec![Ident::new_with_quote_safe('"', "a table")], name.0);
-            assert_eq!(Ident::new_with_quote_safe('"', "alias"), alias.unwrap().name);
+            assert_eq!(
+                Ident::new_with_quote_safe('"', "alias"),
+                alias.unwrap().name
+            );
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2209,7 +2220,10 @@ fn parse_delimited_identifiers() {
     );
     match &select.projection[2] {
         SelectItem::ExprWithAlias { expr, alias } => {
-            assert_eq!(&Expr::Identifier(Ident::new_with_quote_safe('"', "simple id")), expr);
+            assert_eq!(
+                &Expr::Identifier(Ident::new_with_quote_safe('"', "simple id")),
+                expr
+            );
             assert_eq!(&Ident::new_with_quote_safe('"', "column alias"), alias);
         }
         _ => panic!("Expected ExprWithAlias"),
@@ -2971,7 +2985,10 @@ fn parse_create_view_with_columns() {
             emit_mode,
         } => {
             assert_eq!("v", name.to_string());
-            assert_eq!(columns, vec![Ident::new_safe("has"), Ident::new_safe("cols")]);
+            assert_eq!(
+                columns,
+                vec![Ident::new_safe("has"), Ident::new_safe("cols")]
+            );
             assert_eq!(with_options, vec![]);
             assert_eq!("SELECT 1, 2", query.to_string());
             assert!(!materialized);
@@ -3153,7 +3170,10 @@ fn parse_drop_view() {
     let sql = "DROP VIEW myview";
     match verified_stmt(sql) {
         Statement::Drop(stmt) => {
-            assert_eq!(ObjectName(vec![Ident::new_safe("myview")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_safe("myview")]),
+                stmt.object_name
+            );
             assert_eq!(ObjectType::View, stmt.object_type);
         }
         _ => unreachable!(),
@@ -3165,7 +3185,10 @@ fn parse_materialized_drop_view() {
     let sql = "DROP MATERIALIZED VIEW mymview";
     match verified_stmt(sql) {
         Statement::Drop(stmt) => {
-            assert_eq!(ObjectName(vec![Ident::new_safe("mymview")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_safe("mymview")]),
+                stmt.object_name
+            );
             assert_eq!(ObjectType::MaterializedView, stmt.object_type);
         }
         _ => unreachable!(),
