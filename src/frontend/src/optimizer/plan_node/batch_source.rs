@@ -26,7 +26,7 @@ use super::{
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase,
     logical: LogicalSource,
@@ -103,7 +103,7 @@ impl ToBatchProst for BatchSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            properties: source_catalog.properties.clone(),
+            properties: source_catalog.properties.clone().into_iter().collect(),
             split: vec![],
         })
     }

@@ -48,7 +48,7 @@
 
 use std::cmp::min;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -150,7 +150,7 @@ impl Rule for IndexSelectionRule {
 }
 
 struct IndexPredicateRewriter<'a> {
-    p2s_mapping: &'a HashMap<usize, usize>,
+    p2s_mapping: &'a BTreeMap<usize, usize>,
     offset: usize,
 }
 impl ExprRewriter for IndexPredicateRewriter<'_> {
