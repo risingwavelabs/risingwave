@@ -41,6 +41,7 @@ use crate::ConnectorParams;
 pub const SINK_FORMAT_OPTION: &str = "format";
 pub const SINK_FORMAT_APPEND_ONLY: &str = "append_only";
 pub const SINK_FORMAT_DEBEZIUM: &str = "debezium";
+pub const SINK_FORMAT_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
 #[async_trait]
@@ -132,10 +133,14 @@ impl SinkImpl {
             SinkConfig::Kafka(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only Kafka sink
-                    SinkImpl::Kafka(Box::new(KafkaSink::<true>::new(*cfg, schema).await?))
+                    SinkImpl::Kafka(Box::new(
+                        KafkaSink::<true>::new(*cfg, schema, pk_indices).await?,
+                    ))
                 } else {
                     // Upsert Kafka sink
-                    SinkImpl::UpsertKafka(Box::new(KafkaSink::<false>::new(*cfg, schema).await?))
+                    SinkImpl::UpsertKafka(Box::new(
+                        KafkaSink::<false>::new(*cfg, schema, pk_indices).await?,
+                    ))
                 }
             }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
