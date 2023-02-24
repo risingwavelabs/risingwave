@@ -201,7 +201,10 @@ impl LogicalAgg {
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         // Shuffle agg if group key is present.
         let input_dist = stream_input.distribution().clone();
-        if !self.group_key().is_empty() && !self.should_two_phase_agg() {
+        println!("should two phase agg: {}", self.should_stream_two_phase_agg(&stream_input));
+        println!("group_key empty: {}", self.group_key().is_empty());
+        if !self.group_key().is_empty() && !self.should_stream_two_phase_agg(&stream_input) {
+            println!("Generating stream hash agg");
             return Ok(StreamHashAgg::new(
                 self.clone_with_input(
                     RequiredDist::shard_by_key(stream_input.schema().len(), self.group_key())
@@ -223,6 +226,7 @@ impl LogicalAgg {
         // we can only generate stand alone plan for the simple agg
         let all_agg_calls_can_use_two_phase = self.can_two_phase_agg();
         if !all_agg_calls_can_use_two_phase {
+            println!("Generating single");
             return gen_single_plan(stream_input);
         }
 
@@ -237,6 +241,7 @@ impl LogicalAgg {
             && input_dist.satisfies(&RequiredDist::AnyShard)
             && self.group_key().is_empty()
         {
+            println!("Generating stateless agg");
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 
@@ -246,6 +251,7 @@ impl LogicalAgg {
             Distribution::Single | Distribution::SomeShard => gen_single_plan(stream_input),
             Distribution::Broadcast => unreachable!(),
             Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
+                println!("Generating vnode two phase agg");
                 self.gen_vnode_two_phase_streaming_agg_plan(stream_input, &dists)
             }
         }
@@ -274,16 +280,30 @@ impl LogicalAgg {
             .get_enable_two_phase_agg()
     }
 
-    pub(crate) fn should_two_phase_agg(&self) -> bool {
-        self.can_two_phase_agg()
-            && self.two_phase_agg_forced()
-    }
-
-    pub(crate) fn can_two_phase_agg(&self) -> bool {
+    pub(crate) fn should_stream_two_phase_agg(&self, stream_input: &PlanRef) -> bool {
         // If input already satisfies required output distribution,
         // we should not use two phase agg.
         let required_dist =
             RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+        println!("satisfies? {}", stream_input.distribution().satisfies(&required_dist));
+        self.can_two_phase_agg()
+            && self.two_phase_agg_forced()
+            && !stream_input.distribution().satisfies(&required_dist)
+    }
+
+    pub(crate) fn should_two_phase_agg(&self) -> bool {
+        // If input already satisfies required output distribution,
+        // we should not use two phase agg.
+        let required_dist =
+            RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
+        println!("satisfies? {}", self.input().distribution().satisfies(&required_dist));
+        self.can_two_phase_agg()
+            && self.two_phase_agg_forced()
+            && !self.input().distribution().satisfies(&required_dist)
+    }
+
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
+
         !self.agg_calls().is_empty()
             && self.agg_calls().iter().all(|call| {
                 matches!(
@@ -295,7 +315,6 @@ impl LogicalAgg {
             })
             && !self.is_agg_result_affected_by_order()
             && self.two_phase_agg_enabled()
-            && self.input().distribution().satisfies(&required_dist)
     }
 
     // Check if the output of the aggregation needs to be sorted and return ordering req by group
