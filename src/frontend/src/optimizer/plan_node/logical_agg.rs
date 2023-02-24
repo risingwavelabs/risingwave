@@ -202,7 +202,10 @@ impl LogicalAgg {
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         // Shuffle agg if group key is present.
         let input_dist = stream_input.distribution().clone();
-        println!("should two phase agg: {}", self.should_stream_two_phase_agg(&stream_input));
+        println!(
+            "should two phase agg: {}",
+            self.should_stream_two_phase_agg(&stream_input)
+        );
         println!("group_key empty: {}", self.group_key().is_empty());
         if !self.group_key().is_empty() && !self.should_stream_two_phase_agg(&stream_input) {
             println!("Generating stream hash agg");
@@ -286,7 +289,10 @@ impl LogicalAgg {
         // we should not use two phase agg.
         let required_dist =
             RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        println!("satisfies? {}", stream_input.distribution().satisfies(&required_dist));
+        println!(
+            "satisfies? {}",
+            stream_input.distribution().satisfies(&required_dist)
+        );
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
             && !stream_input.distribution().satisfies(&required_dist)
@@ -297,14 +303,16 @@ impl LogicalAgg {
         // we should not use two phase agg.
         let required_dist =
             RequiredDist::shard_by_key(self.input().schema().len(), self.group_key());
-        println!("satisfies? {}", self.input().distribution().satisfies(&required_dist));
+        println!(
+            "satisfies? {}",
+            self.input().distribution().satisfies(&required_dist)
+        );
         self.can_two_phase_agg()
             && self.two_phase_agg_forced()
             && !self.input().distribution().satisfies(&required_dist)
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {
-
         !self.agg_calls().is_empty()
             && self.agg_calls().iter().all(|call| {
                 matches!(

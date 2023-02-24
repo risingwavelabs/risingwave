@@ -1080,7 +1080,7 @@
               └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
                 └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
                   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
-- name: force two phase aggregation should succeed with hashshard, but not SomeShard.
+- name: force two phase aggregation should succeed with UpstreamHashShard, but not SomeShard.
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
@@ -1101,7 +1101,7 @@
           └─StreamHashAgg { group_key: [t.v1, t.v3, t.v2, $expr1], aggs: [count, min(t.v3), sum(t.v1)] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: enable two phase aggregation
+- name: enable two phase aggregation with simple agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_ENABLE_TWO_PHASE_AGG=true;
@@ -1120,7 +1120,7 @@
           └─StreamHashAgg { group_key: [$expr1], aggs: [count, min(t.v1), sum(t.v2)] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: disable two phase aggregation
+- name: disable two phase aggregation with simple agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_ENABLE_TWO_PHASE_AGG=false;
@@ -1136,7 +1136,51 @@
       └─StreamGlobalSimpleAgg { aggs: [count, min(t.v1), sum(t.v2)] }
         └─StreamExchange { dist: Single }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: two phase agg with same dist should fail
+- name: force two phase agg with different distributions on inner and outer agg.
+  sql: |
+    set QUERY_MODE to DISTRIBUTED;
+    set RW_FORCE_TWO_PHASE_AGG to TRUE;
+    CREATE TABLE lineitem (
+        l_orderkey BIGINT,
+        l_tax NUMERIC,
+        l_commitdate DATE,
+        l_shipinstruct VARCHAR,
+        PRIMARY KEY (l_orderkey)
+    );
+    SELECT
+        1 as col_0
+    FROM
+        (
+            SELECT
+                t_0.l_commitdate AS col_2
+            FROM
+                lineitem AS t_0
+            GROUP BY
+                t_0.l_tax,
+                t_0.l_shipinstruct,
+                t_0.l_orderkey,
+                t_0.l_commitdate
+        ) AS sq_1
+    GROUP BY
+        sq_1.col_2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchHashAgg { group_key: [lineitem.l_commitdate], aggs: [] }
+        └─BatchExchange { order: [], dist: HashShard(lineitem.l_commitdate) }
+          └─BatchHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [] }
+            └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], distribution: UpstreamHashShard(lineitem.l_orderkey) }
+  stream_plan: |
+    StreamMaterialize { columns: [col_0, lineitem.l_commitdate(hidden)], pk_columns: [lineitem.l_commitdate] }
+    └─StreamProject { exprs: [1:Int32, lineitem.l_commitdate] }
+      └─StreamHashAgg { group_key: [lineitem.l_commitdate], aggs: [count] }
+        └─StreamExchange { dist: HashShard(lineitem.l_commitdate) }
+          └─StreamHashAgg { group_key: [lineitem.l_commitdate, $expr1], aggs: [count] }
+            └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate, Vnode(lineitem.l_orderkey) as $expr1] }
+              └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
+                └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
+                  └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
+- name: force two phase agg with same distribution.
   sql: |
     set QUERY_MODE to DISTRIBUTED;
     set RW_FORCE_TWO_PHASE_AGG to TRUE;
