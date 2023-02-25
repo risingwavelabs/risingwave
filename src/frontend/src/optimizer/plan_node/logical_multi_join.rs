@@ -41,7 +41,7 @@ use crate::utils::{
 /// of the cartesian product of all the inputs; The `LogicalMultiInnerJoin` is only supported
 /// for inner joins as it implicitly assumes commutativity. Non-inner joins should be
 /// expressed as 2-way `LogicalJoin`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
     pub base: PlanBase,
     inputs: Vec<PlanRef>,
@@ -52,7 +52,6 @@ pub struct LogicalMultiJoin {
     // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
-    #[expect(dead_code)]
     inner_o2i_mapping: Vec<(usize, usize)>,
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
@@ -77,7 +76,7 @@ impl fmt::Display for LogicalMultiJoin {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoinBuilder {
     output_indices: Vec<usize>,
     /// the predicates in the on condition, we do not use Condition here to emit unnecessary

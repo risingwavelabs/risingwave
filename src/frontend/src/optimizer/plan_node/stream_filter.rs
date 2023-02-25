@@ -24,7 +24,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFilter {
     pub base: PlanBase,
     logical: LogicalFilter,

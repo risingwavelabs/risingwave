@@ -116,9 +116,6 @@ pub struct StateTable<
     /// The epoch flush to the state store last time.
     epoch: Option<EpochPair>,
 
-    /// last watermark that is used to construct delete ranges in `ingest`.
-    last_watermark: Option<ScalarImpl>,
-
     /// latest watermark
     cur_watermark: Option<ScalarImpl>,
 
@@ -243,7 +240,6 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             vnode_col_idx_in_pk,
             value_indices,
             epoch: None,
-            last_watermark: None,
             cur_watermark: None,
             watermark_buffer_strategy: W::default(),
         }
@@ -431,7 +427,6 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             vnode_col_idx_in_pk: None,
             value_indices,
             epoch: None,
-            last_watermark: None,
             cur_watermark: None,
             watermark_buffer_strategy: W::default(),
         }
@@ -599,7 +594,6 @@ impl<S: StateStore> StateTable<S> {
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
         self.cur_watermark = None;
-        self.last_watermark = None;
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
@@ -743,11 +737,17 @@ impl<S: StateStore> StateTable<S> {
     }
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
         self.cur_watermark = Some(watermark);
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
+        trace!(
+            table_id = %self.table_id,
+            epoch = ?self.epoch,
+            "commit state table"
+        );
         let mem_table = self.mem_table.drain().into_parts();
         self.batch_write_rows(mem_table, new_epoch.prev).await?;
         self.update_epoch(new_epoch);
@@ -785,6 +785,10 @@ impl<S: StateStore> StateTable<S> {
                 None
             }
         };
+
+        watermark.as_ref().inspect(|watermark| {
+            trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
+        });
 
         let mut write_batch = self.local_store.start_write_batch(WriteOptions {
             epoch,
@@ -832,14 +836,10 @@ impl<S: StateStore> StateTable<S> {
             }
         }
         if let Some(range_end_suffix) = range_end_suffix {
-            let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
-                serialize_pk(
-                    row::once(Some(last_watermark.clone())),
-                    prefix_serializer.as_ref().unwrap(),
-                )
-            } else {
-                vec![]
-            };
+            let range_begin_suffix = vec![];
+            trace!(table_id = %self.table_id, range_end = ?range_end_suffix, vnodes = ?{
+                self.vnodes.iter_vnodes().collect_vec()
+            }, "delete range");
             for vnode in self.vnodes.iter_vnodes() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
@@ -1066,7 +1066,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         };
 
         trace!(
-            table_id = ?self.table_id(),
+            table_id = %self.table_id(),
             ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
             dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
             "storage_iter_with_prefix"

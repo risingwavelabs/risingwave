@@ -16,6 +16,7 @@ use anyhow::{anyhow, bail, Result};
 use http::{Response, StatusCode};
 use hyper::body::Buf;
 use hyper::{Body, Client, Uri};
+use hyper_tls::HttpsConnector;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::source::pulsar::topic::Topic;
@@ -23,12 +24,14 @@ use crate::source::pulsar::topic::Topic;
 #[derive(Debug, Default)]
 pub struct PulsarAdminClient {
     pub(crate) base_path: String,
+    pub(crate) auth_token: Option<String>,
 }
 
 impl PulsarAdminClient {
-    pub fn new(base_path: String) -> Self {
+    pub fn new(base_path: String, auth_token: Option<String>) -> Self {
         Self {
             base_path: base_path.trim_end_matches('/').to_string(),
+            auth_token,
         }
     }
 }
@@ -53,7 +56,7 @@ impl PulsarAdminClient {
     }
 
     pub async fn http_get(&self, topic: &Topic, api: &str) -> Result<Response<Body>> {
-        let client = Client::new();
+        let client = Client::builder().build::<_, hyper::Body>(HttpsConnector::new());
 
         let url = format!(
             "{}/{}/{}/{}",
@@ -62,9 +65,18 @@ impl PulsarAdminClient {
             topic.rest_path(),
             api
         );
+        let mut req = hyper::Request::builder()
+            .method("GET")
+            .uri(url.parse::<Uri>()?)
+            .body(Body::empty())
+            .unwrap();
 
-        let url: Uri = url.parse()?;
-        client.get(url).await.map_err(|e| anyhow!(e))
+        if let Some(auth_token) = &self.auth_token {
+            req.headers_mut()
+                .insert("Authorization", auth_token.to_string().parse().unwrap());
+        }
+
+        client.request(req).await.map_err(|e| anyhow!(e))
     }
 
     pub async fn get<T>(&self, topic: &Topic, api: &str) -> Result<T>
@@ -138,7 +150,7 @@ mod test {
         )
         .await;
 
-        let client = PulsarAdminClient::new(server.uri());
+        let client = PulsarAdminClient::new(server.uri(), None);
 
         let topic = parse_topic("public/default/t2").unwrap();
 

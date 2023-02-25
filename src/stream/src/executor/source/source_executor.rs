@@ -19,7 +19,7 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitMetaData, StreamChunkWithState,
 };
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
@@ -91,18 +91,16 @@ impl<S: StateStore> SourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        let mut source_ctx = SourceContext::new(
+            self.ctx.id,
+            self.stream_source_core.as_ref().unwrap().source_id,
+            self.ctx.fragment_id,
+            source_desc.metrics.clone(),
+        );
+        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
         source_desc
             .source
-            .stream_reader(
-                state,
-                column_ids,
-                source_desc.metrics.clone(),
-                SourceInfo::new(
-                    self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().source_id,
-                    self.ctx.fragment_id,
-                ),
-            )
+            .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)
     }
