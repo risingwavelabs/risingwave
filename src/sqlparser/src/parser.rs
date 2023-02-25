@@ -3412,9 +3412,13 @@ impl Parser {
                 };
                 let relation = self.parse_table_factor()?;
                 let join_constraint = self.parse_join_constraint(natural)?;
+                let join_operator = join_operator_type(join_constraint);
+                if let JoinOperator::Inner(JoinConstraint::None) = join_operator {
+                    return self.expected("join constraint after INNER JOIN", self.peek_token());
+                }
                 Join {
                     relation,
-                    join_operator: join_operator_type(join_constraint),
+                    join_operator,
                 }
             };
             joins.push(join);
