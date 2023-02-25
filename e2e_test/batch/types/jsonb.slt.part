@@ -6,10 +6,10 @@ values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('
 ----
 1
 NULL
-[1,true]
+[1, true]
 null
 true
-{"a":[2,true,"",{}]}
+{"a": [2, true, "", {}]}
 
 statement ok
 create table t (v1 jsonb);
