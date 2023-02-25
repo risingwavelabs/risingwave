@@ -110,6 +110,20 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
+message CreatingJobInfo {
+  uint32 database_id = 1;
+  uint32 schema_id = 2;
+  string name = 3;
+}
+
+message CancelCreatingJobsRequest {
+  repeated CreatingJobInfo infos = 1;
+}
+
+message CancelCreatingJobsResponse {
+  common.Status status = 1;
+}
+
 message ListTableFragmentsRequest {
   repeated uint32 table_ids = 1;
 }
@@ -133,6 +147,7 @@ message ListTableFragmentsResponse {
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 
@@ -145,9 +160,10 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
+  reserved 3;
+  reserved "system_params";
   common.Status status = 1;
   common.WorkerNode node = 2;
-  SystemParams system_params = 3;
 }
 
 message ActivateWorkerNodeRequest {
@@ -323,4 +339,23 @@ message SystemParams {
   optional string data_directory = 7;
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
+}
+
+message GetSystemParamsRequest {}
+
+message GetSystemParamsResponse {
+  SystemParams params = 1;
+}
+
+message SetSystemParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSystemParamResponse {}
+
+service SystemParamsService {
+  rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
+  rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
 }

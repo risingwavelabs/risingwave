@@ -29,6 +29,8 @@ use crate::vector_op::bitwise_op::general_bitnot;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
+use crate::vector_op::exp::exp_f64;
+use crate::vector_op::jsonb_info::{jsonb_array_length, jsonb_typeof};
 use crate::vector_op::length::{bit_length, length_default, octet_length};
 use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
@@ -288,18 +290,35 @@ pub fn new_unary_expr(
         (ProstType::Ceil, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
         }
-        (ProstType::Floor, _, _) => {
+        (ProstType::Floor, DataType::Float64, DataType::Float64) => {
             gen_round_expr! {"Floor", child_expr, return_type, floor_f64, floor_decimal}
         }
         (ProstType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
+        (ProstType::Exp, _, _) => Box::new(UnaryExpression::<F64Array, F64Array, _>::new(
+            child_expr,
+            return_type,
+            exp_f64,
+        )),
         (ProstType::ToTimestamp, DataType::Timestamptz, DataType::Float64) => {
             Box::new(UnaryExpression::<F64Array, I64Array, _>::new(
                 child_expr,
                 return_type,
                 f64_sec_to_timestamptz,
             ))
+        }
+        (ProstType::JsonbTypeof, DataType::Varchar, DataType::Jsonb) => {
+            UnaryBytesExpression::<JsonbArray, _>::new(child_expr, return_type, jsonb_typeof)
+                .boxed()
+        }
+        (ProstType::JsonbArrayLength, DataType::Int32, DataType::Jsonb) => {
+            UnaryExpression::<JsonbArray, I32Array, _>::new(
+                child_expr,
+                return_type,
+                jsonb_array_length,
+            )
+            .boxed()
         }
         (expr, ret, child) => {
             return Err(ExprError::UnsupportedFunction(format!(

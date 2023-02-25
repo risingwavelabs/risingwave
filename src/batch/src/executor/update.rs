@@ -18,7 +18,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -39,6 +39,7 @@ use crate::task::BatchTaskContext;
 pub struct UpdateExecutor {
     /// Target table id.
     table_id: TableId,
+    table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
@@ -49,8 +50,10 @@ pub struct UpdateExecutor {
 }
 
 impl UpdateExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
+        table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
@@ -69,6 +72,7 @@ impl UpdateExecutor {
 
         Self {
             table_id,
+            table_version_id,
             dml_manager,
             child,
             exprs,
@@ -109,7 +113,7 @@ impl UpdateExecutor {
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+        let write_chunk = |chunk: DataChunk| async {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -118,10 +122,9 @@ impl UpdateExecutor {
                 .collect_vec();
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
-            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
-            notifiers.push(notifier);
-
-            Ok(())
+            self.dml_manager
+                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
+                .await
         };
 
         #[for_await]
@@ -149,13 +152,13 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    write_chunk(chunk)?;
+                    notifiers.push(write_chunk(chunk).await?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            write_chunk(chunk)?;
+            notifiers.push(write_chunk(chunk).await?);
         }
 
         // Wait for all chunks to be taken / written.
@@ -202,6 +205,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
+            update_node.table_version_id,
             source.context().dml_manager(),
             child,
             exprs,
@@ -218,7 +222,9 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::Array;
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{
+        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+    };
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_source::dml_manager::DmlManager;
@@ -266,13 +272,14 @@ mod tests {
         // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
         // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
-            .register_reader(table_id, &column_descs)
+            .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
             .unwrap();
         let mut reader = reader.stream_reader().into_stream();
 
         // Update
         let update_executor = Box::new(UpdateExecutor::new(
             table_id,
+            INITIAL_TABLE_VERSION_ID,
             dml_manager,
             Box::new(mock_executor),
             exprs,

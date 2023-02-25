@@ -54,6 +54,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
+pub mod agg_common;
 pub mod aggregation;
 mod batch_query;
 mod chain;
@@ -84,6 +85,7 @@ mod sink;
 mod sort;
 mod sort_buffer;
 pub mod source;
+mod stream_reader;
 pub mod subtask;
 mod top_n;
 mod union;

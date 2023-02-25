@@ -15,8 +15,6 @@
 use std::cmp::Ordering;
 use std::collections::{HashSet, VecDeque};
 use std::iter::once;
-use std::ops::Bound::{Excluded, Included};
-use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -27,10 +25,10 @@ use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
+    bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
-use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
 
@@ -46,13 +44,16 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::utils::{
-    check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
+    check_subset_preserve_order, filter_single_sst, prune_nonoverlapping_ssts,
+    prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
     Sstable, SstableDeleteRangeIterator, SstableIterator,
 };
-use crate::monitor::{GetLocalMetricsGuard, HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{
+    GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
+};
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
@@ -461,10 +462,11 @@ impl HummockVersionReader {
 
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_ssts(
-                        level.table_infos.iter(),
+                    let single_table_key_range = table_key..=table_key;
+                    let sstable_infos = prune_overlapping_ssts(
+                        &level.table_infos,
                         read_options.table_id,
-                        &(table_key..=table_key),
+                        &single_table_key_range,
                     );
                     for sstable_info in sstable_infos {
                         stats_guard.local_stats.sub_iter_count += 1;
@@ -483,11 +485,7 @@ impl HummockVersionReader {
                     }
                 }
                 LevelType::Nonoverlapping => {
-                    let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord = user_key(&table.key_range.as_ref().unwrap().left)
-                            .cmp(encoded_user_key.as_ref());
-                        ord == Ordering::Less || ord == Ordering::Equal
-                    });
+                    let mut table_info_idx = search_sst_idx(&level.table_infos, &encoded_user_key);
                     if table_info_idx == 0 {
                         continue;
                     }
@@ -557,11 +555,6 @@ impl HummockVersionReader {
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
-                    continue;
-                }
-            }
 
             if !table_holder.value().meta.range_tombstone_list.is_empty()
                 && !read_options.ignore_range_tombstone
@@ -569,6 +562,12 @@ impl HummockVersionReader {
                 delete_range_iter
                     .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
             }
+            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
+                    continue;
+                }
+            }
+
             staging_sst_iter_count += 1;
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                 table_holder,
@@ -597,22 +596,10 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
-                debug_assert!(can_concat(&level.table_infos));
-                let start_table_idx = match encoded_user_key_range.start_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
-                    _ => 0,
-                };
-                let end_table_idx = match encoded_user_key_range.end_bound() {
-                    Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
-                    _ => level.table_infos.len().saturating_sub(1),
-                };
-                assert!(
-                    start_table_idx < level.table_infos.len()
-                        && end_table_idx < level.table_infos.len()
-                );
+                let table_infos =
+                    prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range);
 
-                let fetch_meta_req = level.table_infos[start_table_idx..=end_table_idx]
-                    .iter()
+                let fetch_meta_req = table_infos
                     .filter(|sstable_info| {
                         sstable_info
                             .table_ids
@@ -622,17 +609,16 @@ impl HummockVersionReader {
                     .collect_vec();
                 fetch_meta_reqs.push((level.level_type, fetch_meta_req));
             } else {
-                let table_infos = prune_ssts(
-                    level.table_infos.iter(),
+                let table_infos = prune_overlapping_ssts(
+                    &level.table_infos,
                     read_options.table_id,
                     &table_key_range,
                 );
-                if table_infos.is_empty() {
-                    continue;
-                }
                 // Overlapping
-                let fetch_meta_req = table_infos.into_iter().rev().collect_vec();
-                fetch_meta_reqs.push((level.level_type, fetch_meta_req));
+                let fetch_meta_req = table_infos.rev().collect_vec();
+                if !fetch_meta_req.is_empty() {
+                    fetch_meta_reqs.push((level.level_type, fetch_meta_req));
+                }
             }
         }
         let mut flatten_reqs = vec![];
@@ -763,5 +749,129 @@ impl HummockVersionReader {
             local_stats,
         )
         .into_stream())
+    }
+
+    // Note: this method will not check the kv tomestones and delete range tomestones
+    pub async fn may_exist(
+        &self,
+        table_key_range: TableKeyRange,
+        read_options: ReadOptions,
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+    ) -> StorageResult<bool> {
+        let table_id = read_options.table_id;
+        let mut table_counts = 0;
+        let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+        let mut stats_guard =
+            MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
+
+        // 1. check staging data
+        for imm in &imms {
+            if imm.range_exists(&table_key_range) {
+                return Ok(true);
+            }
+        }
+
+        let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
+        let encoded_user_key_range = (
+            user_key_range.0.as_ref().map(UserKey::encode),
+            user_key_range.1.as_ref().map(UserKey::encode),
+        );
+        let bloom_filter_prefix_hash = if let Some(prefix_hint) = read_options.prefix_hint {
+            Sstable::hash_for_bloom_filter(&prefix_hint, table_id.table_id)
+        } else {
+            // only use `table_key_range` to see whether all SSTs are filtered out
+            // without looking at bloom filter because prefix_hint is not provided
+            if !uncommitted_ssts.is_empty() {
+                // uncommitted_ssts is already pruned by `table_key_range` so no extra check is
+                // needed.
+                return Ok(true);
+            }
+            for level in committed_version.levels(table_id) {
+                match level.level_type() {
+                    LevelType::Overlapping | LevelType::Unspecified => {
+                        if prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range)
+                            .next()
+                            .is_some()
+                        {
+                            return Ok(true);
+                        }
+                    }
+                    LevelType::Nonoverlapping => {
+                        if prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range)
+                            .next()
+                            .is_some()
+                        {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+            return Ok(false);
+        };
+
+        // 2. order guarantee: imm -> sst
+        for local_sst in &uncommitted_ssts {
+            table_counts += 1;
+            if hit_sstable_bloom_filter(
+                self.sstable_store
+                    .sstable(local_sst, &mut stats_guard.local_stats)
+                    .await?
+                    .value(),
+                bloom_filter_prefix_hash,
+                &mut stats_guard.local_stats,
+            ) {
+                return Ok(true);
+            }
+        }
+
+        // 3. read from committed_version sst file
+        // Because SST meta records encoded key range,
+        // the filter key needs to be encoded as well.
+        assert!(committed_version.is_valid());
+        for level in committed_version.levels(table_id) {
+            if level.table_infos.is_empty() {
+                continue;
+            }
+            match level.level_type() {
+                LevelType::Overlapping | LevelType::Unspecified => {
+                    let sstable_infos =
+                        prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
+                    for sstable_info in sstable_infos {
+                        table_counts += 1;
+                        if hit_sstable_bloom_filter(
+                            self.sstable_store
+                                .sstable(sstable_info, &mut stats_guard.local_stats)
+                                .await?
+                                .value(),
+                            bloom_filter_prefix_hash,
+                            &mut stats_guard.local_stats,
+                        ) {
+                            return Ok(true);
+                        }
+                    }
+                }
+                LevelType::Nonoverlapping => {
+                    let table_infos =
+                        prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range);
+
+                    for table_info in table_infos {
+                        table_counts += 1;
+                        if hit_sstable_bloom_filter(
+                            self.sstable_store
+                                .sstable(table_info, &mut stats_guard.local_stats)
+                                .await?
+                                .value(),
+                            bloom_filter_prefix_hash,
+                            &mut stats_guard.local_stats,
+                        ) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+
+        stats_guard.local_stats.may_exist_check_sstable_count = table_counts;
+        Ok(false)
     }
 }

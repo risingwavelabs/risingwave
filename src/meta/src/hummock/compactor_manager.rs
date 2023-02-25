@@ -205,6 +205,14 @@ impl CompactorManager {
         rx
     }
 
+    /// Used when meta exiting to support graceful shutdown.
+    pub fn abort_all_compactors(&self) {
+        let mut policy = self.policy.write();
+        while let Some(compactor) = policy.next_compactor() {
+            policy.remove_compactor(compactor.context_id);
+        }
+    }
+
     pub fn pause_compactor(&self, context_id: HummockContextId) {
         let mut policy = self.policy.write();
         policy.pause_compactor(context_id);

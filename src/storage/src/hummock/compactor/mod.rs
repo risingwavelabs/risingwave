@@ -22,6 +22,7 @@ mod shared_buffer_compact;
 pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -52,7 +53,7 @@ use tokio::task::JoinHandle;
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions};
+use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_memory_use_for_compaction, generate_splits,
 };
@@ -728,7 +729,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
-        let builder_factory = RemoteBuilderFactory {
+        let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),
@@ -736,6 +737,7 @@ impl Compactor {
             remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
             sstable_writer_factory: writer_factory,
+            _phantom: PhantomData,
         };
 
         let mut sst_builder = CapacitySplitTableBuilder::new(

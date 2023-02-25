@@ -12,6 +12,53 @@ import {
 
 export const protobufPackage = "catalog";
 
+export const SinkType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  APPEND_ONLY: "APPEND_ONLY",
+  FORCE_APPEND_ONLY: "FORCE_APPEND_ONLY",
+  UPSERT: "UPSERT",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SinkType = typeof SinkType[keyof typeof SinkType];
+
+export function sinkTypeFromJSON(object: any): SinkType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return SinkType.UNSPECIFIED;
+    case 1:
+    case "APPEND_ONLY":
+      return SinkType.APPEND_ONLY;
+    case 2:
+    case "FORCE_APPEND_ONLY":
+      return SinkType.FORCE_APPEND_ONLY;
+    case 3:
+    case "UPSERT":
+      return SinkType.UPSERT;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SinkType.UNRECOGNIZED;
+  }
+}
+
+export function sinkTypeToJSON(object: SinkType): string {
+  switch (object) {
+    case SinkType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case SinkType.APPEND_ONLY:
+      return "APPEND_ONLY";
+    case SinkType.FORCE_APPEND_ONLY:
+      return "FORCE_APPEND_ONLY";
+    case SinkType.UPSERT:
+      return "UPSERT";
+    case SinkType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 /**
  * The rust prost library always treats uint64 as required and message as
  * optional. In order to allow `row_id_index` as an optional field, we wrap
@@ -35,6 +82,7 @@ export interface StreamSourceInfo {
   protoMessageName: string;
   csvDelimiter: number;
   csvHasHeader: boolean;
+  upsertAvroPrimaryKey: string;
 }
 
 export interface Source {
@@ -85,7 +133,7 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendOnly: boolean;
+  sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
@@ -332,6 +380,7 @@ function createBaseStreamSourceInfo(): StreamSourceInfo {
     protoMessageName: "",
     csvDelimiter: 0,
     csvHasHeader: false,
+    upsertAvroPrimaryKey: "",
   };
 }
 
@@ -344,6 +393,7 @@ export const StreamSourceInfo = {
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
       csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
       csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
+      upsertAvroPrimaryKey: isSet(object.upsertAvroPrimaryKey) ? String(object.upsertAvroPrimaryKey) : "",
     };
   },
 
@@ -355,6 +405,7 @@ export const StreamSourceInfo = {
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
     message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
     message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
+    message.upsertAvroPrimaryKey !== undefined && (obj.upsertAvroPrimaryKey = message.upsertAvroPrimaryKey);
     return obj;
   },
 
@@ -366,6 +417,7 @@ export const StreamSourceInfo = {
     message.protoMessageName = object.protoMessageName ?? "";
     message.csvDelimiter = object.csvDelimiter ?? 0;
     message.csvHasHeader = object.csvHasHeader ?? false;
+    message.upsertAvroPrimaryKey = object.upsertAvroPrimaryKey ?? "";
     return message;
   },
 };
@@ -508,7 +560,7 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
-    appendOnly: false,
+    sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
     definition: "",
@@ -531,7 +583,7 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
-      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -574,7 +626,7 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
-    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -597,7 +649,7 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendOnly = object.appendOnly ?? false;
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {

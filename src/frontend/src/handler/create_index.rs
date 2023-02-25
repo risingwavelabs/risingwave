@@ -32,9 +32,10 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
+use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -276,6 +277,8 @@ fn assemble_materialize(
     // LogicalProject(index_columns, include_columns)
     //   LogicalScan(table_desc)
 
+    let definition = context.normalized_sql().to_owned();
+
     let logical_scan = LogicalScan::create(
         table_name,
         false,
@@ -329,7 +332,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_index_plan(index_name)
+    .gen_index_plan(index_name, definition)
 }
 
 fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
@@ -416,6 +419,17 @@ pub async fn handle_create_index(
         index_name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
+
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                index.database_id,
+                index.schema_id,
+                index.name.clone(),
+            ));
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

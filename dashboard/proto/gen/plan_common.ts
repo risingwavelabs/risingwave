@@ -135,6 +135,9 @@ export const RowFormatType = {
   CANAL_JSON: "CANAL_JSON",
   CSV: "CSV",
   NATIVE: "NATIVE",
+  DEBEZIUM_AVRO: "DEBEZIUM_AVRO",
+  UPSERT_JSON: "UPSERT_JSON",
+  UPSERT_AVRO: "UPSERT_AVRO",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -169,6 +172,15 @@ export function rowFormatTypeFromJSON(object: any): RowFormatType {
     case 8:
     case "NATIVE":
       return RowFormatType.NATIVE;
+    case 9:
+    case "DEBEZIUM_AVRO":
+      return RowFormatType.DEBEZIUM_AVRO;
+    case 10:
+    case "UPSERT_JSON":
+      return RowFormatType.UPSERT_JSON;
+    case 11:
+    case "UPSERT_AVRO":
+      return RowFormatType.UPSERT_AVRO;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -196,6 +208,12 @@ export function rowFormatTypeToJSON(object: RowFormatType): string {
       return "CSV";
     case RowFormatType.NATIVE:
       return "NATIVE";
+    case RowFormatType.DEBEZIUM_AVRO:
+      return "DEBEZIUM_AVRO";
+    case RowFormatType.UPSERT_JSON:
+      return "UPSERT_JSON";
+    case RowFormatType.UPSERT_AVRO:
+      return "UPSERT_AVRO";
     case RowFormatType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

@@ -18,11 +18,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
+use async_stack_trace::StackTrace;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
@@ -36,7 +37,6 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -123,15 +123,9 @@ async fn flush_imms(
                 error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
             });
     }
-    compact(
-        compactor_context,
-        payload
-            .into_iter()
-            .map(|imm| vec![UncommittedData::Batch(imm)])
-            .collect(),
-        task_info.compaction_group_index,
-    )
-    .await
+    compact(compactor_context, payload, task_info.compaction_group_index)
+        .verbose_stack_trace("shared_buffer_compact")
+        .await
 }
 
 impl HummockEventHandler {
@@ -209,6 +203,7 @@ impl HummockEventHandler {
         epoch: HummockEpoch,
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
+        info_in_release!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
             newly_uploaded_sstables
                 .into_iter()
@@ -280,6 +275,7 @@ impl HummockEventHandler {
         new_sync_epoch: HummockEpoch,
         sync_result_sender: oneshot::Sender<HummockResult<SyncResult>>,
     ) {
+        info_in_release!("receive await sync epoch: {}", new_sync_epoch);
         // The epoch to sync has been committed already.
         if new_sync_epoch <= self.uploader.max_committed_epoch() {
             send_sync_result(
@@ -294,6 +290,11 @@ impl HummockEventHandler {
         }
         // The epoch has been synced
         if new_sync_epoch <= self.uploader.max_synced_epoch() {
+            info_in_release!(
+                "epoch {} has been synced. Current max_sync_epoch {}",
+                new_sync_epoch,
+                self.uploader.max_synced_epoch()
+            );
             if let Some(result) = self.uploader.get_synced_data(new_sync_epoch) {
                 let result = to_sync_result(result);
                 send_sync_result(sync_result_sender, result);
@@ -307,6 +308,12 @@ impl HummockEventHandler {
             }
             return;
         }
+
+        info_in_release!(
+            "awaiting for epoch to be synced: {}, max_synced_epoch: {}",
+            new_sync_epoch,
+            self.uploader.max_synced_epoch()
+        );
 
         // If the epoch is not synced, we add to the `pending_sync_requests` anyway. If the epoch is
         // not a checkpoint epoch, it will be clear with the max synced epoch bumps up.
@@ -328,6 +335,12 @@ impl HummockEventHandler {
     }
 
     fn handle_clear(&mut self, notifier: oneshot::Sender<()>) {
+        info!(
+            "handle clear event. max_committed_epoch: {}, max_synced_epoch: {}, max_sealed_epoch: {}",
+            self.uploader.max_committed_epoch(),
+            self.uploader.max_synced_epoch(),
+            self.uploader.max_sealed_epoch(),
+        );
         self.uploader.clear();
 
         for (epoch, result_sender) in self.pending_sync_requests.drain_filter(|_, _| true) {
@@ -404,6 +417,12 @@ impl HummockEventHandler {
                 self.pinned_version.load().max_committed_epoch(),
             ));
 
+        info_in_release!(
+            "update to hummock version: {}, epoch: {}",
+            new_pinned_version.id(),
+            new_pinned_version.max_committed_epoch()
+        );
+
         self.uploader.update_pinned_version(new_pinned_version);
     }
 }
@@ -476,6 +495,12 @@ impl HummockEventHandler {
 
                             let instance_id = self.generate_instance_id();
 
+                            info_in_release!(
+                                "new read version registered: table_id: {}, instance_id: {}",
+                                table_id,
+                                instance_id
+                            );
+
                             {
                                 let mut read_version_mapping_guard =
                                     self.read_version_mapping.write();
@@ -505,16 +530,24 @@ impl HummockEventHandler {
                             table_id,
                             instance_id,
                         } => {
+                            info_in_release!(
+                                "read version deregister: table_id: {}, instance_id: {}",
+                                table_id,
+                                instance_id
+                            );
                             let mut read_version_mapping_guard = self.read_version_mapping.write();
-                            read_version_mapping_guard
+                            let entry = read_version_mapping_guard
                                 .get_mut(&table_id)
                                 .unwrap_or_else(|| {
                                     panic!(
                                         "DestroyHummockInstance table_id {} instance_id {} fail",
                                         table_id, instance_id
                                     )
-                                })
-                                .remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
+                                });
+                            entry.remove(&instance_id).unwrap_or_else(|| panic!("DestroyHummockInstance inexist instance table_id {} instance_id {}",  table_id, instance_id));
+                            if entry.is_empty() {
+                                read_version_mapping_guard.remove(&table_id);
+                            }
                         }
                     }
                 }

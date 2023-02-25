@@ -343,13 +343,8 @@ impl HummockVersionUpdateExt for HummockVersion {
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId> {
         let mut ret = HashMap::new();
         for (compaction_group_id, levels) in &self.levels {
-            if let Some(ref l0) = levels.l0 {
-                for sub_level in l0.get_sub_levels() {
-                    update_compaction_group_info(sub_level, *compaction_group_id, &mut ret);
-                }
-            }
-            for level in levels.get_levels() {
-                update_compaction_group_info(level, *compaction_group_id, &mut ret);
+            for table_id in &levels.member_table_ids {
+                ret.insert(TableId::new(*table_id), *compaction_group_id);
             }
         }
         ret
@@ -372,18 +367,6 @@ impl HummockVersionUpdateExt for HummockVersion {
         }
         ret.retain(|_, v| v.len() != 1 || *v.values().next().unwrap() != 0);
         ret
-    }
-}
-
-fn update_compaction_group_info(
-    level: &Level,
-    compaction_group_id: CompactionGroupId,
-    compaction_group_info: &mut HashMap<TableId, CompactionGroupId>,
-) {
-    for table_info in level.get_table_infos() {
-        table_info.get_table_ids().iter().for_each(|table_id| {
-            compaction_group_info.insert(TableId::new(*table_id), compaction_group_id);
-        });
     }
 }
 
@@ -622,41 +605,6 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
     debug_assert!(can_concat(&operand.table_infos));
-}
-
-pub trait HummockVersionDeltaExt {
-    fn get_removed_sst_ids(&self) -> Vec<HummockSstableId>;
-    fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId>;
-}
-
-impl HummockVersionDeltaExt for HummockVersionDelta {
-    fn get_removed_sst_ids(&self) -> Vec<HummockSstableId> {
-        let mut ret = vec![];
-        for group_deltas in self.group_deltas.values() {
-            for group_delta in &group_deltas.group_deltas {
-                if let DeltaType::IntraLevel(intra_level) = group_delta.get_delta_type().unwrap() {
-                    for sst_id in &intra_level.removed_table_ids {
-                        ret.push(*sst_id);
-                    }
-                }
-            }
-        }
-        ret
-    }
-
-    fn get_inserted_sst_ids(&self) -> Vec<HummockSstableId> {
-        let mut ret = vec![];
-        for group_deltas in self.group_deltas.values() {
-            for group_delta in &group_deltas.group_deltas {
-                if let DeltaType::IntraLevel(intra_level) = group_delta.get_delta_type().unwrap() {
-                    for sst in &intra_level.inserted_table_infos {
-                        ret.push(sst.id);
-                    }
-                }
-            }
-        }
-        ret
-    }
 }
 
 #[cfg(test)]
