@@ -77,7 +77,9 @@ impl ExchangeSource for GrpcExchangeSource {
     fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
         async {
             let res = match self.stream.next().await {
-                None => return Ok(None),
+                None => {
+                    return Ok(None);
+                }
                 Some(r) => r,
             };
             let task_data = res?;

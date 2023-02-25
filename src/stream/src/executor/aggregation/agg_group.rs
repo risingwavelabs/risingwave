@@ -21,6 +21,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
@@ -115,6 +116,10 @@ impl<S: StateStore> AggGroup<S> {
         }
     }
 
+    pub(crate) fn is_uninitialized(&self) -> bool {
+        self.prev_outputs.is_none()
+    }
+
     /// Apply input chunk to all managed agg states.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
     pub fn apply_chunk(
@@ -125,8 +130,11 @@ impl<S: StateStore> AggGroup<S> {
         visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
         let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for ((state, storage), visibility) in
-            self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
+        for ((state, storage), visibility) in self
+            .states
+            .iter_mut()
+            .zip_eq_fast(storages)
+            .zip_eq_fast(visibilities)
         {
             state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
         }
@@ -140,7 +148,7 @@ impl<S: StateStore> AggGroup<S> {
         &self,
         storages: &mut [AggStateStorage<S>],
     ) -> StreamExecutorResult<()> {
-        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
+        futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
             |(state, storage)| match state {
                 AggState::Table(state) => Some(state.flush_state_if_needed(
                     must_match!(storage, AggStateStorage::Table { table } => table),
@@ -181,7 +189,7 @@ impl<S: StateStore> AggGroup<S> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
-                .zip_eq(storages)
+                .zip_eq_fast(storages)
                 .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
@@ -215,10 +223,8 @@ impl<S: StateStore> AggGroup<S> {
             self.group_key().is_some(),
             self.prev_outputs.is_some(),
         ) {
-            (0, 0, _, _) => {
-                // Previous state is empty, current state is also empty.
-                // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // While other aggs may not be `0`?
+            (0, 0, true, _) => {
+                // We never output any rows for row_count = 0 when group_key is_some
 
                 0
             }
@@ -227,7 +233,7 @@ impl<S: StateStore> AggGroup<S> {
                 // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
-                for (builder, new_value) in builders.iter_mut().zip_eq(curr_outputs.iter()) {
+                for (builder, new_value) in builders.iter_mut().zip_eq_fast(curr_outputs.iter()) {
                     trace!("append_datum (0 -> N): {:?}", new_value);
                     builder.append_datum(new_value);
                 }
@@ -241,7 +247,7 @@ impl<S: StateStore> AggGroup<S> {
 
                 for (builder, old_value) in builders
                     .iter_mut()
-                    .zip_eq(self.prev_outputs.as_ref().unwrap().iter())
+                    .zip_eq_fast(self.prev_outputs.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", old_value);
                     builder.append_datum(old_value);

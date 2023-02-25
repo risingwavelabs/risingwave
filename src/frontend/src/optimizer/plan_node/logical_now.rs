@@ -25,12 +25,11 @@ use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
-use crate::expr::ExprRewriter;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
     pub base: PlanBase,
 }
@@ -70,11 +69,7 @@ impl fmt::Display for LogicalNow {
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
 
-impl ExprRewritable for LogicalNow {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalNow {}
 
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(

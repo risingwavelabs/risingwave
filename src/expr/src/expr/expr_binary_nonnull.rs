@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use risingwave_common::array::{
-    Array, BoolArray, DecimalArray, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, StructArray, Utf8Array,
+    Array, BoolArray, DecimalArray, F64Array, I32Array, I64Array, IntervalArray, JsonbArrayBuilder,
+    ListArray, NaiveDateArray, NaiveDateTimeArray, StructArray, Utf8Array, Utf8ArrayBuilder,
 };
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
+use crate::expr::expr_jsonb_access::{
+    jsonb_array_element, jsonb_object_field, JsonbAccessExpression,
+};
 use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{template_fast, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
@@ -502,6 +505,7 @@ pub fn new_date_trunc_expr(
     }
 }
 
+/// Create a new binary expression.
 pub fn new_binary_expr(
     expr_type: Type,
     ret: DataType,
@@ -662,6 +666,9 @@ pub fn new_binary_expr(
                 },
             }
         }
+        Type::Pow => Box::new(BinaryExpression::<F64Array, F64Array, F64Array, _>::new(
+            l, r, ret, pow_f64,
+        )),
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
         Type::CastWithTimeZone => build_cast_with_time_zone_expr(ret, l, r)?,
@@ -676,6 +683,38 @@ pub fn new_binary_expr(
         )),
         Type::TumbleStart => new_tumble_start(l, r, ret)?,
         Type::ConcatOp => new_concat_op(l, r, ret),
+        Type::JsonbAccessInner => match r.return_type() {
+            DataType::Varchar => {
+                JsonbAccessExpression::<Utf8Array, JsonbArrayBuilder, _>::new_expr(
+                    l,
+                    r,
+                    jsonb_object_field,
+                )
+                .boxed()
+            }
+            DataType::Int32 => JsonbAccessExpression::<I32Array, JsonbArrayBuilder, _>::new_expr(
+                l,
+                r,
+                jsonb_array_element,
+            )
+            .boxed(),
+            t => return Err(ExprError::UnsupportedFunction(format!("jsonb -> {t}"))),
+        },
+        Type::JsonbAccessStr => match r.return_type() {
+            DataType::Varchar => JsonbAccessExpression::<Utf8Array, Utf8ArrayBuilder, _>::new_expr(
+                l,
+                r,
+                jsonb_object_field,
+            )
+            .boxed(),
+            DataType::Int32 => JsonbAccessExpression::<I32Array, Utf8ArrayBuilder, _>::new_expr(
+                l,
+                r,
+                jsonb_array_element,
+            )
+            .boxed(),
+            t => return Err(ExprError::UnsupportedFunction(format!("jsonb ->> {t}"))),
+        },
 
         tp => {
             return Err(ExprError::UnsupportedFunction(format!(

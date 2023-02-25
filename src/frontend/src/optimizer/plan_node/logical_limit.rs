@@ -20,14 +20,13 @@ use super::{
     gen_filter_and_pushdown, BatchLimit, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLimit {
     pub base: PlanBase,
     input: PlanRef,
@@ -100,11 +99,7 @@ impl ColPrunable for LogicalLimit {
     }
 }
 
-impl ExprRewritable for LogicalLimit {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalLimit {}
 
 impl PredicatePushdown for LogicalLimit {
     fn predicate_pushdown(

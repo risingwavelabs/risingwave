@@ -16,11 +16,11 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use crate::expr::{ExprType, FunctionCall, InputRef, InputRefDisplay};
+use crate::expr::{ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EqJoinPredicate {
     /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
@@ -241,6 +241,12 @@ impl EqJoinPredicate {
         }
 
         Self::new(self.other_cond, new_eq_keys, self.left_cols_num)
+    }
+
+    pub fn rewrite_exprs(&self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
+        let mut new = self.clone();
+        new.other_cond = new.other_cond.rewrite_expr(rewriter);
+        new
     }
 }
 

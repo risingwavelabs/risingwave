@@ -18,12 +18,16 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::generic::{GenericPlanRef, PlanAggCall};
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::generic::PlanAggCall;
+use super::{
+    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
+};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -73,7 +77,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
         // TODO: distinct agg cannot use 2-phase agg yet.
         if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
-            && self.logical.can_agg_two_phase()
+            && self.logical.can_two_phase_agg()
         {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();
@@ -110,7 +114,7 @@ impl ToBatchProst for BatchSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             // We treat simple agg as a special sort agg without group key.
             group_key: vec![],
@@ -126,5 +130,22 @@ impl ToLocalBatch for BatchSimpleAgg {
             RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchSimpleAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

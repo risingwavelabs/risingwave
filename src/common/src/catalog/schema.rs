@@ -15,14 +15,14 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::Field as ProstField;
+use risingwave_pb::plan_common::{ColumnDesc as ProstColumnDesc, Field as ProstField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::types::DataType;
 
 /// The field in the schema of the executor's return data
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
@@ -74,6 +74,17 @@ impl From<ColumnDesc> for Field {
     }
 }
 
+impl From<&ProstColumnDesc> for Field {
+    fn from(pb_column_desc: &ProstColumnDesc) -> Self {
+        Self {
+            data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
+            name: pb_column_desc.name.clone(),
+            sub_fields: pb_column_desc.field_descs.iter().map(Into::into).collect(),
+            type_name: pb_column_desc.type_name.clone(),
+        }
+    }
+}
+
 pub struct FieldDisplay<'a>(pub &'a Field);
 
 impl std::fmt::Debug for FieldDisplay<'_> {
@@ -101,7 +112,7 @@ macro_rules! schema_unnamed {
 }
 
 /// the schema of the executor's return data
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }

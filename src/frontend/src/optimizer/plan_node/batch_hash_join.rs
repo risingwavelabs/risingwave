@@ -22,18 +22,19 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanRef;
 use super::{
-    EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
-    ToDistributedBatch,
+    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ToBatchProst, ToDistributedBatch,
 };
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicateDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and then probes with data from outer (left-side) relation to
 /// get output rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -236,12 +237,7 @@ impl ToBatchProst for BatchHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x)
-                        .to_expr_proto()
-                }),
+                .map(|x| x.to_expr_proto()),
             output_indices: self
                 .logical
                 .output_indices()
@@ -260,5 +256,23 @@ impl ToLocalBatch for BatchHashJoin {
             .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
+    }
+}
+
+impl ExprRewritable for BatchHashJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+            self.eq_join_predicate.rewrite_exprs(r),
+        )
+        .into()
     }
 }

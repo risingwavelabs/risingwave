@@ -20,16 +20,18 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
-use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{ExprRewritable, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
     pub base: PlanBase,
     logical: LogicalScan,
@@ -239,6 +241,10 @@ impl ToBatchProst for BatchSeqScan {
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
                 ordered: !self.order().is_any(),
+                chunk_size: self
+                    .logical
+                    .chunk_size()
+                    .map(|chunk_size| ChunkSize { chunk_size }),
             })
         }
     }
@@ -260,5 +266,23 @@ impl ToLocalBatch for BatchSeqScan {
             Distribution::SomeShard
         };
         Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())
+    }
+}
+
+impl ExprRewritable for BatchSeqScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.scan_ranges.clone(),
+        )
+        .into()
     }
 }

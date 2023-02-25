@@ -16,10 +16,10 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
     pub base: PlanBase,
     input: PlanRef,
@@ -35,7 +35,6 @@ impl StreamRowIdGen {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
             input.watermark_columns().clone(),
         );
         Self {
@@ -77,3 +76,5 @@ impl StreamNode for StreamRowIdGen {
         })
     }
 }
+
+impl ExprRewritable for StreamRowIdGen {}

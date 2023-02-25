@@ -40,6 +40,7 @@ use crate::pg_message::{
 };
 use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
+use crate::types::Format;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -273,7 +274,6 @@ where
 
                 // Cancel request need this for identify and verification. According to postgres
                 // doc, it should be written to buffer after receive AuthenticationOk.
-                // let id = self.session_mgr.insert_session(session.clone());
                 self.stream
                     .write_no_flush(&BeMessage::BackendKeyData(session.id()))?;
 
@@ -312,6 +312,7 @@ where
     fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session_id = (m.target_process_id, m.target_secret_key);
         self.session_mgr.cancel_queries_in_session(session_id);
+        self.session_mgr.cancel_creating_jobs_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         Ok(())
     }
@@ -335,7 +336,7 @@ where
 
             // execute query
             let mut res = session
-                .run_one_query(stmt, false)
+                .run_one_query(stmt, Format::Text)
                 .await
                 .map_err(|err| PsqlError::QueryError(err))?;
 
@@ -459,13 +460,24 @@ where
                 .ok_or_else(PsqlError::no_statement)?
         };
 
+        let result_formats = msg
+            .result_format_codes
+            .iter()
+            .map(|&format_code| Format::from_i16(format_code))
+            .try_collect()?;
+        let param_formats = msg
+            .param_format_codes
+            .iter()
+            .map(|&format_code| Format::from_i16(format_code))
+            .try_collect()?;
+
         // 2. Instance the statement to get the portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = statement.instance(
             portal_name.clone(),
             &msg.params,
-            msg.result_format_code,
-            msg.param_format_code,
+            result_formats,
+            param_formats,
         )?;
 
         // 3. Insert the Portal.

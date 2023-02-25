@@ -19,6 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
+use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::MetaNodeConfig;
 
 pub struct MetaNodeService {
@@ -44,7 +45,7 @@ impl MetaNodeService {
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
-            .arg("--meta-endpoint")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--dashboard-host")
             .arg(format!(
@@ -131,6 +132,13 @@ impl Task for MetaNodeService {
             ctx.pb.set_message("started");
         } else {
             ctx.pb.set_message("user managed");
+            writeln!(
+                &mut ctx.log,
+                "Please use the following parameters to start the meta:\n{}\n{} {}\n\n",
+                get_program_env_cmd(&cmd),
+                get_program_name(&cmd),
+                get_program_args(&cmd)
+            )?;
         }
 
         Ok(())

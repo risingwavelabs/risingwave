@@ -31,7 +31,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalValues {
     pub base: PlanBase,
     rows: Arc<[Vec<ExprImpl>]>,
@@ -77,6 +77,10 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ExprRewritable for LogicalValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
         new.rows = new

@@ -20,7 +20,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
 use super::generic::GenericPlanRef;
-use crate::expr::Expr;
+use super::ExprRewritable;
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     EqJoinPredicate, EqJoinPredicateDisplay, LogicalJoin, PlanBase, PlanTreeNodeBinary,
@@ -28,8 +29,9 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -177,7 +179,11 @@ impl ToDistributedBatch for BatchLookupJoin {
         let input = self.input().to_distributed_with_required(
             &Order::any(),
             &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
-                self.eq_join_predicate.left_eq_indexes(),
+                self.eq_join_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .take(self.lookup_prefix_len)
+                    .collect(),
                 self.right_table_desc.table_id,
             )),
         )?;
@@ -194,12 +200,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -234,12 +235,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -279,5 +275,26 @@ impl ToLocalBatch for BatchLookupJoin {
             .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_distributed_lookup(input, false).into())
+    }
+}
+
+impl ExprRewritable for BatchLookupJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self {
+            base: self.base.clone_with_new_plan_id(),
+            logical: self
+                .logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+            eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
+            ..Self::clone(self)
+        }
+        .into()
     }
 }

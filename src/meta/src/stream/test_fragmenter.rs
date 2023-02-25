@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -33,10 +35,11 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::{MetaSrvEnv, StreamingJob};
+use crate::manager::{MetaSrvEnv, StreamingClusterInfo, StreamingJob};
 use crate::model::TableFragments;
-use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::{CreateStreamingJobContext, StreamFragmentGraph};
+use crate::stream::{
+    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
+};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -116,8 +119,8 @@ fn make_source_internal_table(id: u32) -> ProstTable {
     ];
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         pk: vec![ColumnOrder {
@@ -135,8 +138,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     }
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         pk: vec![ColumnOrder {
@@ -151,8 +154,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
 fn make_empty_table(id: u32) -> ProstTable {
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns: vec![],
         pk: vec![],
@@ -210,7 +213,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
-                column_indices: vec![0],
+                dist_key_indices: vec![0],
+                output_indices: vec![0, 1, 2],
             }),
         })),
         fields: vec![
@@ -256,6 +260,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             result_table: Some(make_empty_table(1)),
+            ..Default::default()
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -298,6 +303,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
             result_table: Some(make_empty_table(2)),
+            ..Default::default()
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -369,9 +375,9 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
-                column_indices: vec![],
+                dist_key_indices: vec![],
+                output_indices: vec![],
             }),
-            same_worker_node: false,
             link_id: 4,
             upstream_id: 1,
             downstream_id: 0,
@@ -379,9 +385,9 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
-                column_indices: vec![0],
+                dist_key_indices: vec![0],
+                output_indices: vec![],
             }),
-            same_worker_node: false,
             link_id: 1,
             upstream_id: 2,
             downstream_id: 1,
@@ -395,9 +401,35 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
-        dependent_table_ids: vec![],
+        dependent_relation_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+    }
+}
+
+fn make_cluster_info() -> StreamingClusterInfo {
+    let parallel_units = (0..8)
+        .map(|id| {
+            (
+                id,
+                ParallelUnit {
+                    id,
+                    worker_node_id: 0,
+                },
+            )
+        })
+        .collect();
+    let worker_nodes = std::iter::once((
+        0,
+        WorkerNode {
+            id: 0,
+            ..Default::default()
+        },
+    ))
+    .collect();
+    StreamingClusterInfo {
+        worker_nodes,
+        parallel_units,
     }
 }
 
@@ -409,28 +441,26 @@ async fn test_graph_builder() -> MetaResult<()> {
 
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
+    let internal_tables = fragment_graph.internal_tables();
 
-    let mut ctx = CreateStreamingJobContext {
-        internal_tables: fragment_graph.internal_tables(),
-        ..Default::default()
-    };
-
-    let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
-
-    let graph = actor_graph_builder
-        .generate_graph(env.id_gen_manager_ref(), &mut ctx)
+    let actor_graph_builder = ActorGraphBuilder::new(
+        CompleteStreamFragmentGraph::for_test(fragment_graph),
+        make_cluster_info(),
+        Some(NonZeroUsize::new(parallel_degree).unwrap()),
+    )?;
+    let ActorGraphBuildResult { graph, .. } = actor_graph_builder
+        .generate_graph(env.id_gen_manager_ref(), &job)
         .await?;
 
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, StreamEnvironment::default());
+    let table_fragments = TableFragments::for_test(TableId::default(), graph);
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
-    let internal_table_ids = ctx.internal_table_ids();
+
     assert_eq!(actors.len(), 9);
-    assert_eq!(barrier_inject_actor_ids, vec![1, 2, 3, 4]);
-    assert_eq!(sink_actor_ids, vec![9]);
-    assert_eq!(internal_table_ids.len(), 3);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(sink_actor_ids, vec![1]);
+    assert_eq!(internal_tables.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
         .fragments
@@ -443,26 +473,26 @@ async fn test_graph_builder() -> MetaResult<()> {
     assert!(fragment_upstreams.get(&3).unwrap().is_empty());
 
     let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(1, vec![5, 6, 7, 8]);
-    expected_downstream.insert(2, vec![5, 6, 7, 8]);
-    expected_downstream.insert(3, vec![5, 6, 7, 8]);
-    expected_downstream.insert(4, vec![5, 6, 7, 8]);
-    expected_downstream.insert(5, vec![9]);
-    expected_downstream.insert(6, vec![9]);
-    expected_downstream.insert(7, vec![9]);
-    expected_downstream.insert(8, vec![9]);
-    expected_downstream.insert(9, vec![]);
+    expected_downstream.insert(1, vec![]);
+    expected_downstream.insert(2, vec![1]);
+    expected_downstream.insert(3, vec![1]);
+    expected_downstream.insert(4, vec![1]);
+    expected_downstream.insert(5, vec![1]);
+    expected_downstream.insert(6, vec![2, 3, 4, 5]);
+    expected_downstream.insert(7, vec![2, 3, 4, 5]);
+    expected_downstream.insert(8, vec![2, 3, 4, 5]);
+    expected_downstream.insert(9, vec![2, 3, 4, 5]);
 
     let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(1, vec![]);
-    expected_upstream.insert(2, vec![]);
-    expected_upstream.insert(3, vec![]);
-    expected_upstream.insert(4, vec![]);
-    expected_upstream.insert(5, vec![1, 2, 3, 4]);
-    expected_upstream.insert(6, vec![1, 2, 3, 4]);
-    expected_upstream.insert(7, vec![1, 2, 3, 4]);
-    expected_upstream.insert(8, vec![1, 2, 3, 4]);
-    expected_upstream.insert(9, vec![5, 6, 7, 8]);
+    expected_upstream.insert(1, vec![2, 3, 4, 5]);
+    expected_upstream.insert(2, vec![6, 7, 8, 9]);
+    expected_upstream.insert(3, vec![6, 7, 8, 9]);
+    expected_upstream.insert(4, vec![6, 7, 8, 9]);
+    expected_upstream.insert(5, vec![6, 7, 8, 9]);
+    expected_upstream.insert(6, vec![]);
+    expected_upstream.insert(7, vec![]);
+    expected_upstream.insert(8, vec![]);
+    expected_upstream.insert(9, vec![]);
 
     for actor in actors {
         println!("actor_id = {}", actor.get_actor_id());

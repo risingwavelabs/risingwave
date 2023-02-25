@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
     pub base: PlanBase,
     left: PlanRef,
@@ -296,6 +296,10 @@ impl ColPrunable for LogicalApply {
 }
 
 impl ExprRewritable for LogicalApply {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
         new.on = new.on.rewrite_expr(r);

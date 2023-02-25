@@ -47,14 +47,14 @@ impl ComputeNodeService {
         config: &ComputeNodeConfig,
         hummock_in_memory_strategy: HummockInMemoryStrategy,
     ) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
             .arg(format!(
                 "{}:{}",
                 config.listen_address, config.exporter_port
             ))
-            .arg("--client-address")
+            .arg("--advertise-addr")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
             .arg("1")
@@ -82,25 +82,29 @@ impl ComputeNodeService {
         }
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
+        let provide_opendal = config.provide_opendal.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
         let is_shared_backend = match (
             config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
             provide_aws_s3.as_slice(),
+            provide_opendal.as_slice(),
         ) {
-            (true, [], []) => {
+            (true, [], [], []) => {
                 cmd.arg("--state-store").arg("in-memory");
                 false
             }
-            (true, _, _) => {
+            (true, _, _, _) => {
                 return Err(anyhow!(
                     "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
                 ));
             }
-            (false, provide_minio, provide_aws_s3) => add_storage_backend(
+            (_, provide_minio, provide_aws_s3, provide_opendal) => add_storage_backend(
                 &config.id,
+                provide_opendal,
                 provide_minio,
                 provide_aws_s3,
                 hummock_in_memory_strategy,

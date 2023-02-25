@@ -24,7 +24,7 @@ use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::RW_VERSION;
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -292,6 +292,18 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+        fn now() -> Handle {
+            Box::new(move |binder, mut inputs| {
+                binder.ensure_now_function_allowed()?;
+                if !binder.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
+                raw_call(ExprType::Now)(binder, inputs)
+            })
+        }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
@@ -315,9 +327,13 @@ impl Binder {
                         (1, raw_call(ExprType::Round)),
                     ]),
                 ),
+                ("pow", raw_call(ExprType::Pow)),
+                // "power" is the function name used in PG.
+                ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),
+                ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
                 (
                     "to_timestamp",
@@ -356,7 +372,16 @@ impl Binder {
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
+                ("array_join", raw_call(ExprType::ArrayToString)),
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
+                ("array_to_string", raw_call(ExprType::ArrayToString)),
+                // jsonb
+                ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
+                ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // System information operations.
                 (
                     "pg_typeof",
@@ -468,11 +493,7 @@ impl Binder {
                         .into())
                     }
                 })),
-                ("format_type", guard_by_len(2, raw(|_binder, _inputs| {
-                        // TODO
-                        // return null as an workaround for now
-                        Ok(ExprImpl::literal_null(DataType::Varchar))
-                }))),
+                ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),
@@ -493,20 +514,13 @@ impl Binder {
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RW-{}",
-                    RW_VERSION
+                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    RW_VERSION,
+                    GIT_SHA
                 )))),
                 // non-deterministic
-                ("now", raw(|binder, mut inputs|{
-                binder.ensure_now_function_allowed()?;
-                    if !binder.in_create_mv {
-                        inputs.push(ExprImpl::from(Literal::new(
-                            Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                            DataType::Timestamptz,
-                        )));
-                    }
-                    raw_call(ExprType::Now)(binder, inputs)
-                }))
+                ("now", now()),
+                ("current_timestamp", now())
             ]
             .into_iter()
             .collect()

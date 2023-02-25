@@ -19,14 +19,16 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
 use super::{
-    LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,
@@ -117,3 +119,5 @@ impl ToLocalBatch for BatchHopWindow {
         Ok(self.clone_with_input(new_input).into())
     }
 }
+
+impl ExprRewritable for BatchHopWindow {}

@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
@@ -31,7 +31,7 @@ use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalUnion` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUnion {
     pub base: PlanBase,
     core: generic::Union<PlanRef>,
@@ -109,11 +109,7 @@ impl ColPrunable for LogicalUnion {
     }
 }
 
-impl ExprRewritable for LogicalUnion {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalUnion {}
 
 impl PredicatePushdown for LogicalUnion {
     fn predicate_pushdown(

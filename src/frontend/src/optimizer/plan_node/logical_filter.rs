@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// true, filtering out the others.
 ///
 /// If the condition allows nulls, then a null value is treated the same as false.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFilter {
     pub base: PlanBase,
     core: generic::Filter<PlanRef>,
@@ -176,6 +176,10 @@ impl ColPrunable for LogicalFilter {
 }
 
 impl ExprRewritable for LogicalFilter {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
 
 use super::{ColumnDesc, ColumnId, TableId};
@@ -22,7 +23,7 @@ use crate::util::sort_util::OrderPair;
 /// Includes necessary information for compute node to access data of the table.
 ///
 /// It's a subset of `TableCatalog` in frontend. Refer to `TableCatalog` for more details.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
@@ -46,6 +47,9 @@ pub struct TableDesc {
 
     /// The prefix len of pk, used in bloom filter.
     pub read_prefix_len_hint: usize,
+
+    /// the column indices which could receive watermarks.
+    pub watermark_columns: FixedBitSet,
 }
 
 impl TableDesc {

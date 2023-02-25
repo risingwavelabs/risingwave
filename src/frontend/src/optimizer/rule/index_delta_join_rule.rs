@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -44,9 +42,9 @@ impl Rule for IndexDeltaJoinRule {
             }
         }
 
-        let input_left_dyn = match_through_exchange(Rc::clone(&join.inputs()[0]))?;
+        let input_left_dyn = match_through_exchange(join.inputs()[0].clone())?;
         let input_left = input_left_dyn.as_stream_table_scan()?;
-        let input_right_dyn = match_through_exchange(Rc::clone(&join.inputs()[1]))?;
+        let input_right_dyn = match_through_exchange(join.inputs()[1].clone())?;
         let input_right = input_right_dyn.as_stream_table_scan()?;
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
@@ -56,10 +54,6 @@ impl Rule for IndexDeltaJoinRule {
             table_scan: &StreamTableScan,
             chain_type: ChainType,
         ) -> Option<PlanRef> {
-            if table_scan.logical().indexes().is_empty() {
-                return None;
-            }
-
             for index in table_scan.logical().indexes() {
                 // Only full covering index can be used in delta join
                 if !index.full_covering() {
@@ -107,7 +101,30 @@ impl Rule for IndexDeltaJoinRule {
                 );
             }
 
-            None
+            // Primary table is also an index.
+            let primary_table = table_scan.logical();
+            if let Some(primary_table_distribution_key) = primary_table.distribution_key()
+                && primary_table_distribution_key == join_indices {
+                // Check join key is prefix of primary table order key
+                let primary_table_order_key_prefix = primary_table.table_desc().pk.iter()
+                    .map(|x| x.column_idx)
+                    .take(primary_table_distribution_key.len())
+                    .collect_vec();
+
+                if primary_table_order_key_prefix != join_indices {
+                    return None;
+                }
+
+                if chain_type != table_scan.chain_type() {
+                    Some(
+                        StreamTableScan::new_with_chain_type(table_scan.logical().clone(), chain_type).into()
+                    )
+                } else {
+                    Some(table_scan.clone().into())
+                }
+            } else {
+                None
+            }
         }
 
         // Delta join only needs to backfill one stream flow and others should be upstream only

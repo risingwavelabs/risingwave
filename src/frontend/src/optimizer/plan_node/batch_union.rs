@@ -18,12 +18,12 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UnionNode;
 
-use super::{PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{ExprRewritable, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchUnion` implements [`super::LogicalUnion`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUnion {
     pub base: PlanBase,
     logical: LogicalUnion,
@@ -100,3 +100,5 @@ impl ToLocalBatch for BatchUnion {
         Ok(self.clone_with_inputs(&new_inputs?))
     }
 }
+
+impl ExprRewritable for BatchUnion {}

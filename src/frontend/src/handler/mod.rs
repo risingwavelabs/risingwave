@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt};
 use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
-use pgwire::types::Row;
+use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
@@ -30,6 +30,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_system;
 mod alter_table;
 pub mod alter_user;
 mod create_database;
@@ -151,7 +152,7 @@ pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
-    format: bool,
+    formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
@@ -160,7 +161,7 @@ pub async fn handle(
             statement,
             analyze,
             options,
-        } => explain::handle_explain(handler_args, *statement, options, analyze),
+        } => explain::handle_explain(handler_args, *statement, options, analyze).await,
         Statement::CreateSource { stmt } => {
             create_source::handle_create_source(handler_args, stmt).await
         }
@@ -307,7 +308,7 @@ pub async fn handle(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(handler_args, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
             name,
@@ -316,10 +317,18 @@ pub async fn handle(
 
             with_options: _, // It is put in OptimizerContext
             or_replace,      // not supported
+            emit_mode,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
                     "CREATE OR REPLACE VIEW".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if emit_mode == Some(EmitMode::OnWindowClose) {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE MATERIALIZED VIEW EMIT ON WINDOW CLOSE".to_string(),
                     None.into(),
                 )
                 .into());
@@ -336,7 +345,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
             table_name,
@@ -367,6 +376,9 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::AddColumn { column_def },
         } => alter_table::handle_add_column(handler_args, name, column_def).await,
+        Statement::AlterSystem { param, value } => {
+            alter_system::handle_alter_system(handler_args, param, value).await
+        }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

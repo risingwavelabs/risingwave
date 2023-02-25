@@ -19,11 +19,16 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
 use super::generic::{GenericPlanRef, PlanAggCall};
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::ToLocalBatch;
+use super::{
+    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
+};
+use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -75,7 +80,40 @@ impl ToDistributedBatch for BatchHashAgg {
             &Order::any(),
             &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
         )?;
-        Ok(self.clone_with_input(new_input).into())
+        if self.logical.can_two_phase_agg() && self.logical.two_phase_agg_forced() {
+            // partial agg
+            let partial_agg: PlanRef = self.clone_with_input(new_input).into();
+
+            // insert exchange
+            let exchange = BatchExchange::new(
+                partial_agg,
+                Order::any(),
+                Distribution::HashShard((0..self.group_key().len()).collect()),
+            )
+            .into();
+
+            // insert total agg
+            let total_agg_types = self
+                .logical
+                .agg_calls()
+                .iter()
+                .enumerate()
+                .map(|(partial_output_idx, agg_call)| {
+                    agg_call.partial_to_total_agg_call(
+                        partial_output_idx + self.group_key().len(),
+                        false,
+                    )
+                })
+                .collect();
+            let total_agg_logical = LogicalAgg::new(
+                total_agg_types,
+                (0..self.group_key().len()).collect(),
+                exchange,
+            );
+            Ok(BatchHashAgg::new(total_agg_logical).into())
+        } else {
+            Ok(self.clone_with_input(new_input).into())
+        }
     }
 }
 
@@ -85,7 +123,7 @@ impl ToBatchProst for BatchHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             group_key: self
                 .group_key()
@@ -105,5 +143,22 @@ impl ToLocalBatch for BatchHashAgg {
             RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
+    }
+}
+
+impl ExprRewritable for BatchHashAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

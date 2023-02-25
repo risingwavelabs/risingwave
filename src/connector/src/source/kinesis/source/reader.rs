@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -31,8 +30,10 @@ use crate::parser::ParserConfig;
 use crate::source::kinesis::source::message::KinesisMessage;
 use crate::source::kinesis::split::KinesisOffset;
 use crate::source::kinesis::KinesisProperties;
-use crate::source::monitor::SourceMetrics;
-use crate::source::{Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData};
+use crate::source::{
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader,
+};
 
 impl_common_split_reader_logic!(KinesisSplitReader, KinesisProperties);
 
@@ -48,17 +49,18 @@ pub struct KinesisSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
-impl KinesisSplitReader {
+#[async_trait]
+impl SplitReader for KinesisSplitReader {
+    type Properties = KinesisProperties;
+
     async fn new(
         properties: KinesisProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
@@ -102,9 +104,12 @@ impl KinesisSplitReader {
             end_position: split.end_position,
             split_id,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
+        self.into_chunk_stream()
     }
 }
 
@@ -289,7 +294,6 @@ mod tests {
             })],
             Default::default(),
             Default::default(),
-            Default::default(),
             None,
         )
         .await?
@@ -305,7 +309,6 @@ mod tests {
                 ),
                 end_position: KinesisOffset::None,
             })],
-            Default::default(),
             Default::default(),
             Default::default(),
             None,

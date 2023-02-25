@@ -98,6 +98,7 @@ impl Configuration {
 /// | etcd           | 192.168.10.1  |
 /// | kafka-broker   | 192.168.11.1  |
 /// | kafka-producer | 192.168.11.2  |
+/// | s3             | 192.168.12.1  |
 /// | client         | 192.168.100.1 |
 /// | ctl            | 192.168.101.1 |
 pub struct Cluster {
@@ -162,6 +163,19 @@ impl Cluster {
             })
             .build();
 
+        // s3
+        handle
+            .create_node()
+            .name("s3")
+            .ip("192.168.12.1".parse().unwrap())
+            .init(move || async move {
+                aws_sdk_s3::server::SimServer::default()
+                    .with_bucket("hummock001")
+                    .serve("0.0.0.0:9301".parse().unwrap())
+                    .await
+            })
+            .build();
+
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -175,7 +189,7 @@ impl Cluster {
                 &conf.config_path,
                 "--listen-addr",
                 "0.0.0.0:5690",
-                "--meta-endpoint",
+                "--advertise-addr",
                 &format!("192.168.1.{i}:5690"),
                 "--backend",
                 "etcd",
@@ -199,9 +213,9 @@ impl Cluster {
                 "frontend-node",
                 "--config-path",
                 &conf.config_path,
-                "--host",
+                "--listen-addr",
                 "0.0.0.0:4566",
-                "--client-address",
+                "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
                 "--meta-addr",
                 "meta:5690",
@@ -220,14 +234,14 @@ impl Cluster {
                 "compute-node",
                 "--config-path",
                 &conf.config_path,
-                "--host",
+                "--listen-addr",
                 "0.0.0.0:5688",
-                "--client-address",
+                "--advertise-addr",
                 &format!("192.168.3.{i}:5688"),
                 "--meta-address",
                 "meta:5690",
                 "--state-store",
-                "hummock+memory-shared",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
             ]);
@@ -246,14 +260,14 @@ impl Cluster {
                 "compactor-node",
                 "--config-path",
                 &conf.config_path,
-                "--host",
+                "--listen-addr",
                 "0.0.0.0:6660",
-                "--client-address",
+                "--advertise-addr",
                 &format!("192.168.4.{i}:6660"),
                 "--meta-address",
                 "meta:5690",
                 "--state-store",
-                "hummock+memory-shared",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
@@ -430,7 +444,7 @@ impl Cluster {
     }
 
     /// Create a node for kafka producer and prepare data.
-    pub fn create_kafka_producer(&self, datadir: &str) {
+    pub async fn create_kafka_producer(&self, datadir: &str) {
         self.handle
             .create_node()
             .name("kafka-producer")
@@ -439,7 +453,9 @@ impl Cluster {
             .spawn(crate::kafka::producer(
                 "192.168.11.1:29092",
                 datadir.to_string(),
-            ));
+            ))
+            .await
+            .unwrap();
     }
 
     /// Create a kafka topic.
@@ -454,6 +470,44 @@ impl Cluster {
 
     pub fn config(&self) -> Configuration {
         self.config.clone()
+    }
+
+    /// Graceful shutdown all RisingWave nodes.
+    pub async fn graceful_shutdown(&self) {
+        let mut nodes = vec![];
+        let mut metas = vec![];
+        for i in 1..=self.config.meta_nodes {
+            metas.push(format!("meta-{i}"));
+        }
+        for i in 1..=self.config.frontend_nodes {
+            nodes.push(format!("frontend-{i}"));
+        }
+        for i in 1..=self.config.compute_nodes {
+            nodes.push(format!("compute-{i}"));
+        }
+        for i in 1..=self.config.compactor_nodes {
+            nodes.push(format!("compactor-{i}"));
+        }
+
+        tracing::info!("graceful shutdown");
+        let waiting_time = Duration::from_secs(10);
+        // shutdown frontends, computes, compactors
+        for node in &nodes {
+            self.handle.send_ctrl_c(node);
+        }
+        madsim::time::sleep(waiting_time).await;
+        // shutdown metas
+        for meta in &metas {
+            self.handle.send_ctrl_c(meta);
+        }
+        madsim::time::sleep(waiting_time).await;
+
+        // check all nodes are exited
+        for node in nodes.iter().chain(metas.iter()) {
+            if !self.handle.is_exit(node) {
+                panic!("failed to graceful shutdown {node} in {waiting_time:?}");
+            }
+        }
     }
 }
 

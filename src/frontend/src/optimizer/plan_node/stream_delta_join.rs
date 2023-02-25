@@ -21,17 +21,18 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::GenericPlanRef;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::Expr;
+use super::{ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -154,10 +155,23 @@ impl StreamNode for StreamDeltaJoin {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         let left = self.left();
         let right = self.right();
-        let left_table = left.as_stream_index_scan().unwrap();
-        let right_table = right.as_stream_index_scan().unwrap();
-        let left_table_desc = left_table.logical().table_desc();
-        let right_table_desc = right_table.logical().table_desc();
+
+        let left_table = if let Some(stream_index_scan) = left.as_stream_index_scan() {
+            stream_index_scan.logical()
+        } else if let Some(stream_table_scan) = left.as_stream_table_scan() {
+            stream_table_scan.logical()
+        } else {
+            unreachable!();
+        };
+        let left_table_desc = left_table.table_desc();
+        let right_table = if let Some(stream_index_scan) = right.as_stream_index_scan() {
+            stream_index_scan.logical()
+        } else if let Some(stream_table_scan) = right.as_stream_table_scan() {
+            stream_table_scan.logical()
+        } else {
+            unreachable!();
+        };
+        let right_table_desc = right_table.table_desc();
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
@@ -179,12 +193,7 @@ impl StreamNode for StreamDeltaJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x)
-                        .to_expr_proto()
-                }),
+                .map(|x| x.to_expr_proto()),
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
@@ -192,7 +201,6 @@ impl StreamNode for StreamDeltaJoin {
                 arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
                 // TODO: remove it
                 column_descs: left_table
-                    .logical()
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
@@ -204,7 +212,6 @@ impl StreamNode for StreamDeltaJoin {
                 arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
                 // TODO: remove it
                 column_descs: right_table
-                    .logical()
                     .column_descs()
                     .iter()
                     .map(ColumnDesc::to_protobuf)
@@ -218,5 +225,23 @@ impl StreamNode for StreamDeltaJoin {
                 .map(|&x| x as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamDeltaJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+            self.eq_join_predicate.rewrite_exprs(r),
+        )
+        .into()
     }
 }

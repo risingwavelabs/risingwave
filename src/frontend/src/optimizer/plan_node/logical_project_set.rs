@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{FunctionalDependencySet, Order};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -36,7 +36,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
 /// column.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
     core: generic::ProjectSet<PlanRef>,
@@ -258,6 +258,10 @@ impl ColPrunable for LogicalProjectSet {
 }
 
 impl ExprRewritable for LogicalProjectSet {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);

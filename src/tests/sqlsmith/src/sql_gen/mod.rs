@@ -26,6 +26,7 @@ use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 mod expr;
 pub use expr::print_function_table;
 
+mod insert;
 mod query;
 mod relation;
 mod scalar;
@@ -203,6 +204,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             columns: vec![],
             query,
             with_options: vec![],
+            emit_mode: None,
         };
         (mview, table)
     }

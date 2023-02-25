@@ -23,7 +23,6 @@ use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
-use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -38,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
 /// is used to distinguish between different `subset`s in `column_subsets`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
     pub base: PlanBase,
     core: generic::Expand<PlanRef>,
@@ -158,11 +157,7 @@ impl ColPrunable for LogicalExpand {
     }
 }
 
-impl ExprRewritable for LogicalExpand {
-    fn rewrite_exprs(&self, _r: &mut dyn ExprRewriter) -> PlanRef {
-        self.clone().into()
-    }
-}
+impl ExprRewritable for LogicalExpand {}
 
 impl PredicatePushdown for LogicalExpand {
     fn predicate_pushdown(

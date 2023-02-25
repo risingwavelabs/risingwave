@@ -19,11 +19,14 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
-use super::{LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, ToLocalBatch};
+use super::{
+    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch,
+    ToLocalBatch,
+};
 use crate::optimizer::property::{Distribution, Order};
 
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase,
     logical: LogicalSource,
@@ -100,8 +103,9 @@ impl ToBatchProst for BatchSource {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
-            properties: source_catalog.properties.clone(),
+            properties: source_catalog.properties.clone().into_iter().collect(),
             split: vec![],
         })
     }
 }
+impl ExprRewritable for BatchSource {}

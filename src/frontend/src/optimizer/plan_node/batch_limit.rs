@@ -18,12 +18,15 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
-use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    ExprRewritable, LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
+};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLimit {
     pub base: PlanBase,
     logical: LogicalLimit,
@@ -46,8 +49,15 @@ impl BatchLimit {
         let new_offset = 0;
         let logical_partial_limit = LogicalLimit::new(input, new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
-        let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_limit.into(), &Order::any())?;
+        let any_order = Order::any();
+        let ensure_single_dist = RequiredDist::single().enforce_if_not_satisfies(
+            batch_partial_limit.into(),
+            if self.order().field_order.is_empty() {
+                &any_order
+            } else {
+                self.order()
+            },
+        )?;
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_limit.into())
     }
@@ -94,3 +104,5 @@ impl ToLocalBatch for BatchLimit {
         self.two_phase_limit(self.input().to_local()?)
     }
 }
+
+impl ExprRewritable for BatchLimit {}

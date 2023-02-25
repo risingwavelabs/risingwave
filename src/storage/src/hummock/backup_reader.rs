@@ -26,7 +26,6 @@ use risingwave_backup::storage::{
     DummyMetaSnapshotStorage, MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage,
 };
 use risingwave_backup::MetaSnapshotId;
-use risingwave_common::config::RwConfig;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
@@ -42,20 +41,19 @@ type VersionHolder = (
 );
 
 pub async fn parse_meta_snapshot_storage(
-    config: &RwConfig,
+    storage_url: &str,
+    storage_directory: &str,
 ) -> StorageResult<MetaSnapshotStorageRef> {
     let backup_object_store = Arc::new(
         parse_remote_object_store(
-            &config.backup.storage_url,
+            storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
-            true,
             "Meta Backup",
         )
         .await,
     );
     let store = Arc::new(
-        ObjectStoreMetaSnapshotStorage::new(&config.backup.storage_directory, backup_object_store)
-            .await?,
+        ObjectStoreMetaSnapshotStorage::new(storage_directory, backup_object_store).await?,
     );
     Ok(store)
 }

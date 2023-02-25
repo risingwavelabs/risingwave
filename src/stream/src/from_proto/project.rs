@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use multimap::MultiMap;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan::ProjectNode;
 
@@ -42,7 +43,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             node.get_watermark_input_key()
                 .iter()
                 .map(|key| *key as usize)
-                .zip_eq(
+                .zip_eq_fast(
                     node.get_watermark_output_key()
                         .iter()
                         .map(|key| *key as usize),

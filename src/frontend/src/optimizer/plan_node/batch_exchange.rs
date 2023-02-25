@@ -18,13 +18,15 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
 /// `BatchExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExchange {
     pub base: PlanBase,
     input: PlanRef,
@@ -98,3 +100,5 @@ impl ToLocalBatch for BatchExchange {
         unreachable!()
     }
 }
+
+impl ExprRewritable for BatchExchange {}
