@@ -36,7 +36,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
+    Connection, Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
@@ -125,6 +125,12 @@ impl MetaClient {
         let request = CreateConnectionRequest { payload: Some(req) };
         let resp = self.inner.create_connection(request).await?;
         Ok(resp.connection_id)
+    }
+
+    pub async fn list_connections(&self, _name: &str) -> Result<Vec<Connection>> {
+        let request = ListConnectionRequest {};
+        let resp = self.inner.list_connections(request).await?;
+        Ok(resp.connections)
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
@@ -1433,6 +1439,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
+            ,{ ddl_client, list_connections, ListConnectionRequest, ListConnectionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

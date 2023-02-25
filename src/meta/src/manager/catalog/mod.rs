@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod connection;
 mod database;
 mod fragment;
 mod user;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+pub use connection::*;
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
@@ -33,7 +35,7 @@ use risingwave_common::catalog::{
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    connection, Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
@@ -58,6 +60,7 @@ pub type ViewId = u32;
 pub type FunctionId = u32;
 
 pub type UserId = u32;
+pub type ConnectionId = u32;
 
 /// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
 /// meta store.
@@ -102,18 +105,18 @@ pub struct CatalogManager<S: MetaStore> {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
-    // TODO(siyuan): persist to meta store
-    pub service_map: HashMap<String, Connection>,
+    pub connection: ConnectionManager,
 }
 
 impl CatalogManagerCore {
     async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
-        let user = UserManager::new(env, &database).await?;
+        let user = UserManager::new(env.clone(), &database).await?;
+        let connection = ConnectionManager::new(env).await?;
         Ok(Self {
             database,
             user,
-            service_map: HashMap::new(),
+            connection,
         })
     }
 }
@@ -335,14 +338,19 @@ where
     pub async fn create_connection(
         &self,
         service_name: &str,
-        payload: &connection::Payload,
-    ) -> MetaResult<u32> {
-        let core = &mut *self.core.lock().await;
-        // todo: save the connection to meta store
-        // core.service_map
-        //     .insert(service_name.to_string(), connection.clone());
+        connection: Connection,
+    ) -> MetaResult<()> {
+        let core = &mut self.core.lock().await.connection;
 
-        Ok(0)
+        let conn_id = connection.id;
+        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        // if there is a connection with the same service name, just overwrite it
+        connections.insert(conn_id, connection);
+        commit_meta!(self, connections)?;
+
+        core.connection_by_name
+            .insert(service_name.to_string(), conn_id);
+        Ok(())
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
@@ -890,6 +898,13 @@ where
             user_core.increase_ref(source.owner);
             Ok(())
         }
+    }
+
+    pub async fn get_connection_by_name(&self, name: &str) -> MetaResult<Connection> {
+        let core = &mut self.core.lock().await.connection;
+        core.get_connection_by_name(name)
+            .cloned()
+            .ok_or_else(|| anyhow!(format!("unknown service connection")).into())
     }
 
     pub async fn finish_create_source_procedure(
@@ -1470,6 +1485,10 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
+    }
+
+    pub async fn list_connections(&self) -> Vec<Connection> {
+        self.core.lock().await.connection.list_connections()
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {

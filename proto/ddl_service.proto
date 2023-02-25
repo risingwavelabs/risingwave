@@ -238,6 +238,7 @@ message GetDdlProgressResponse {
 
 message CreateConnectionRequest {
   message PrivateLink {
+    string provider = 1;
     string service_name = 2;
     repeated string availability_zones = 3;
   }
@@ -249,6 +250,15 @@ message CreateConnectionRequest {
 
 message CreateConnectionResponse {
   uint32 connection_id = 1;
+  // global catalog version
+  uint64 version = 2;
+}
+
+message  ListConnectionRequest {
+}
+
+message  ListConnectionResponse {
+  repeated catalog.Connection connections = 1;
   // global catalog version
   uint64 version = 2;
 }
@@ -277,4 +287,5 @@ service DdlService {
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
   rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
+  rpc ListConnections(ListConnectionRequest) returns (ListConnectionResponse);
 }

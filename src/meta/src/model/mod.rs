@@ -15,6 +15,7 @@
 mod barrier;
 mod catalog;
 mod cluster;
+mod connection;
 mod error;
 mod notification;
 mod stream;

@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
+use risingwave_connector::common::AwsPrivateLinks;
+use risingwave_connector::source::kafka::KAFKA_BROKER_KEY;
+use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Table};
+use risingwave_pb::catalog::{connection, Connection, Source, Table};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
@@ -79,6 +85,16 @@ where
             barrier_manager,
         }
     }
+}
+
+#[inline(always)]
+fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
+    with_properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq(KAFKA_CONNECTOR)
 }
 
 #[async_trait::async_trait]
@@ -169,6 +185,8 @@ where
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await?;
+
+        self.resolve_stream_source_info(&mut source).await?;
 
         if let Err(e) = self.source_manager.register_source(&source).await {
             self.catalog_manager
@@ -561,22 +579,25 @@ where
         if req.payload.is_none() {
             return Err(Status::invalid_argument("request is empty"));
         }
-        match req.payload.unwrap() {
-            create_connection_request::Payload::PrivateLink(req) => {
-                // todo: check if the private link service is already exists
 
+        match req.payload.unwrap() {
+            create_connection_request::Payload::PrivateLink(link) => {
+                // connection info will be updated if it already exists (upsert)
                 let cli = self.aws_client.as_ref().unwrap();
                 let private_link_svc = cli
-                    .create_aws_private_link(&req.service_name, &req.availability_zones)
+                    .create_aws_private_link(&link.service_name, &link.availability_zones)
                     .await?;
 
+                let id = self.gen_unique_id::<{ IdCategory::Connection }>().await?;
+                let connection = Connection {
+                    id,
+                    name: link.service_name.clone(),
+                    payload: Some(connection::Payload::PrivateLinkService(private_link_svc)),
+                };
+
                 // save private link info to catalog
-                let id = self
-                    .catalog_manager
-                    .create_connection(
-                        &req.service_name,
-                        &connection::Payload::PrivateLinkService(private_link_svc),
-                    )
+                self.catalog_manager
+                    .create_connection(&link.service_name, connection)
                     .await?;
 
                 Ok(Response::new(CreateConnectionResponse {
@@ -584,8 +605,18 @@ where
                     version: 0,
                 }))
             }
-            _ => Err(Status::invalid_argument("connection type is not supported")),
         }
+    }
+
+    async fn list_connections(
+        &self,
+        _request: Request<ListConnectionRequest>,
+    ) -> Result<Response<ListConnectionResponse>, Status> {
+        let conns = self.catalog_manager.list_connections().await;
+        Ok(Response::new(ListConnectionResponse {
+            connections: conns,
+            version: 0,
+        }))
     }
 }
 
@@ -593,6 +624,59 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
+    async fn resolve_stream_source_info(&self, source: &mut Source) -> MetaResult<()> {
+        let mut dns_entries = vec![];
+        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private_links";
+        if let Some(prop) = source.properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
+            let links: AwsPrivateLinks = serde_json::from_str(prop).unwrap();
+
+            // if private link is required, get connection info from catalog
+            for link in links.infos.iter() {
+                let conn = self
+                    .catalog_manager
+                    .get_connection_by_name(&link.service_name)
+                    .await?;
+
+                if let Some(payload) = conn.payload {
+                    match payload {
+                        connection::Payload::PrivateLinkService(svc) => {
+                            link.availability_zones.iter().for_each(|az| {
+                                svc.dns_entries.get(az).map_or((), |dns_name| {
+                                    dns_entries.push(format!("{}:{}", dns_name.clone(), link.port));
+                                });
+                            })
+                        }
+                    }
+                }
+            }
+        }
+
+        // store the rewrite rules in Source
+        if is_kafka_source(&source.properties) {
+            let servers = source
+                .properties
+                .get(KAFKA_BROKER_KEY)
+                .ok_or(MetaError::from(anyhow!(
+                    "Must specify '{}' in WITH clause",
+                    KAFKA_BROKER_KEY
+                )))?;
+
+            let broker_addrs = servers.split(',').collect::<Vec<&str>>();
+            let broker_rewrite_map = broker_addrs
+                .into_iter()
+                .map(|str| str.to_string())
+                .zip_eq(dns_entries.into_iter())
+                .collect::<HashMap<String, String>>();
+
+            tracing::info!("broker_rewrite_map: {:?}", broker_rewrite_map);
+            if let Some(info) = source.info.as_mut() {
+                info.kafka_rewrite_map = broker_rewrite_map;
+            }
+        }
+
+        Ok(())
+    }
+
     /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
     /// when it's not running.
     async fn check_barrier_manager_status(&self) -> MetaResult<()> {
