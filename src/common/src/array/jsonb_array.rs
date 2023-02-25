@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::types::{Scalar, ScalarImpl, ScalarRef};
+use crate::types::{Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,10 +31,6 @@ impl Scalar for JsonbVal {
 
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_> {
         JsonbRef(self.0.as_ref())
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Jsonb(self)
     }
 }
 

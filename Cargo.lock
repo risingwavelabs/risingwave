@@ -5680,6 +5680,7 @@ name = "risingwave_common"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "arrow-array",
  "arrow-schema",
  "async-trait",
@@ -5881,6 +5882,7 @@ dependencies = [
  "http",
  "http-serde",
  "hyper",
+ "hyper-tls",
  "itertools",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -5889,6 +5891,7 @@ dependencies = [
  "moka",
  "nexmark",
  "num-traits",
+ "parking_lot 0.12.1",
  "prometheus",
  "prost 0.11.6",
  "prost-reflect",
