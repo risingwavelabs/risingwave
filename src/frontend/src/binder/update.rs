@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName, SelectItem};
@@ -30,6 +30,9 @@ use crate::user::UserId;
 pub struct BoundUpdate {
     /// Id of the table to perform updating.
     pub table_id: TableId,
+
+    /// Version id of the table.
+    pub table_version_id: TableVersionId,
 
     /// Name of the table to perform updating.
     pub table_name: String,
@@ -68,6 +71,7 @@ impl Binder {
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
+        let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
         let table = self.bind_relation_by_name(name, None)?;
 
@@ -132,6 +136,7 @@ impl Binder {
 
         Ok(BoundUpdate {
             table_id,
+            table_version_id,
             table_name,
             owner,
             table,

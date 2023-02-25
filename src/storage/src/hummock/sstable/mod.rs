@@ -179,7 +179,7 @@ impl Sstable {
 
     #[inline]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size()
+        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
 
     #[cfg(test)]

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod local_manager;
+pub mod reader;
+
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::ops::RangeBounds;

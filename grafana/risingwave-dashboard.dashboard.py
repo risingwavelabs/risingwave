@@ -524,6 +524,15 @@ def section_cluster_node(panels):
                 )
             ],
         ),
+        panels.timeseries_count(
+            "Meta Cluster",
+            "",
+            [
+                panels.target(f"sum({metric('meta_num')}) by (worker_addr,role)",
+                              "{{worker_addr}} @ {{role}}")
+            ],
+            ["last"],
+        ),
     ]
 
 
@@ -1320,7 +1329,11 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{actor_id}} {{side}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
+                            "may_exist true when insert {{actor_id}} {{side}}",
                         ),
                     ],
                 ),
@@ -1461,15 +1474,25 @@ def section_streaming_errors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Errors",
+            "User Streaming Errors",
             [
                 panels.timeseries_count(
-                    "User Errors by Type",
+                    "Compute Errors by Type",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Source Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),

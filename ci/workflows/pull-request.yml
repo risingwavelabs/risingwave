@@ -171,6 +171,19 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
+  - label: "e2e java-binding test"
+    command: "ci/scripts/java-binding-test.sh -p ci-dev"
+    depends_on: "build"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 5
+    retry: *auto-retry
+
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
     depends_on: "build"

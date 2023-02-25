@@ -21,7 +21,7 @@ use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub enum OrderType {
     Ascending,
     Descending,
@@ -47,7 +47,7 @@ impl OrderType {
 /// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
 ///
 /// Corresponds to protobuf [`ColumnOrder`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OrderPair {
     pub column_idx: usize,
     pub order_type: OrderType,

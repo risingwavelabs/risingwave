@@ -175,8 +175,12 @@ impl Expression for ArrayToStringExpression {
         let array = self.array.eval_row(input)?;
         let delimiter = self.delimiter.eval_row(input)?;
 
-        let result = if let Some(array) = array && let Some(delimiter) = delimiter && let Some(e) = &self.null_string {
-            let null_string = e.eval_row(input)?;
+        let result = if let Some(array) = array && let Some(delimiter) = delimiter {
+            let null_string = if let Some(e) = &self.null_string {
+                e.eval_row(input)?
+            } else {
+                None
+            };
             let mut writer = String::new();
             if let Some(null_string) = null_string {
                 self.evaluate_with_nulls(array.as_scalar_ref_impl().into_list(), delimiter.as_utf8(), null_string.as_utf8(), &mut writer);

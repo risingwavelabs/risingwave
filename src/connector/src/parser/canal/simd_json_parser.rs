@@ -28,7 +28,7 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 use crate::parser::canal::operators::*;
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{SourceColumnDesc, SourceContextRef};
 use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
 
 const AFTER: &str = "data";
@@ -40,11 +40,15 @@ impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
 pub struct CanalJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
+    source_ctx: SourceContextRef,
 }
 
 impl CanalJsonParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        Ok(Self { rw_columns })
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            source_ctx,
+        })
     }
 
     #[allow(clippy::unused_async)]
@@ -255,7 +259,7 @@ mod tests {
             SourceColumnDesc::simple("win_rate", DataType::Float64, 5.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone()).unwrap();
+        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
@@ -332,7 +336,7 @@ mod tests {
             SourceColumnDesc::simple("v2", DataType::Int32, 1.into()),
         ];
 
-        let parser = CanalJsonParser::new(descs.clone()).unwrap();
+        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 

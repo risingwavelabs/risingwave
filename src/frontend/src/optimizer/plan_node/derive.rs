@@ -23,7 +23,7 @@ use super::PlanRef;
 use crate::optimizer::property::{Direction, FieldOrder, Order};
 
 pub(crate) fn derive_columns(
-    schema: &Schema,
+    input_schema: &Schema,
     out_names: Vec<String>,
     user_cols: &FixedBitSet,
 ) -> Result<Vec<ColumnCatalog>> {
@@ -39,7 +39,7 @@ pub(crate) fn derive_columns(
     }
 
     let mut out_name_iter = out_names.into_iter();
-    let columns = schema
+    let columns = input_schema
         .fields()
         .iter()
         .enumerate()
