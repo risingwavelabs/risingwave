@@ -531,13 +531,11 @@
     BatchProject { exprs: [test.a, test.b, test2.c] }
     └─BatchExchange { order: [test.a ASC], dist: Single }
       └─BatchSort { order: [test.a ASC] }
-        └─BatchProject { exprs: [test.a, test.b, test2.c, test.a] }
-          └─BatchFilter { predicate: (test.b <> test2.c) }
-            └─BatchHashJoin { type: Inner, predicate: test.a = test2.a, output: all }
-              ├─BatchExchange { order: [], dist: HashShard(test.a) }
-              | └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
-              └─BatchExchange { order: [], dist: HashShard(test2.a) }
-                └─BatchScan { table: test2, columns: [test2.a, test2.c], distribution: SomeShard }
+        └─BatchHashJoin { type: Inner, predicate: test.a = test2.a AND (test.b <> test2.c), output: [test.a, test.b, test2.c, test.a] }
+          ├─BatchExchange { order: [], dist: HashShard(test.a) }
+          | └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: HashShard(test2.a) }
+            └─BatchScan { table: test2, columns: [test2.a, test2.c], distribution: SomeShard }
 - name: Use lookup join with predicate
   sql: |
     create table t1 (v1 int, v2 int);
