@@ -28,8 +28,12 @@ pub enum ValueEncodingError {
     InvalidNaiveTimeEncoding(u32, u32),
     #[error("Invalid null tag value encoding: {0}")]
     InvalidTagEncoding(u8),
+    #[error("Invalid jsonb encoding")]
+    InvalidJsonbEncoding,
     #[error("Invalid struct encoding: {0}")]
     InvalidStructEncoding(crate::array::ArrayError),
     #[error("Invalid list encoding: {0}")]
     InvalidListEncoding(crate::array::ArrayError),
+    #[error("Invalid flag: {0}")]
+    InvalidFlag(u8),
 }

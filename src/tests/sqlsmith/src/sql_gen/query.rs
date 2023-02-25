@@ -116,7 +116,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with(&mut self) -> (Option<With>, Vec<Table>) {
-        match self.flip_coin() {
+        match self.rng.gen_bool(0.4) {
             true => (None, vec![]),
             false => {
                 let (with, tables) = self.gen_with_inner();
@@ -237,14 +237,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             return from;
         }
 
-        // Generate CROSS JOIN
+        // Generate one cross join at most.
         let mut lateral_contexts = vec![];
-        for _ in 0..self.tables.len() {
-            if self.flip_coin() {
-                let (table_with_join, mut table) = self.gen_from_relation();
-                from.push(table_with_join);
-                lateral_contexts.append(&mut table);
-            }
+        if self.flip_coin() {
+            let (table_with_join, mut table) = self.gen_from_relation();
+            from.push(table_with_join);
+            lateral_contexts.append(&mut table);
         }
         self.add_relations_to_context(lateral_contexts);
         from
@@ -259,12 +257,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
+    /// GROUP BY will constrain the generated columns.
     fn gen_group_by(&mut self) -> Vec<Expr> {
         let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
-            let n_group_by_cols = self.rng.gen_range(1..=available.len());
-            let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
+            let upper_bound = (available.len() + 1) / 2;
+            let n = self.rng.gen_range(1..=upper_bound);
+            let group_by_cols = available.drain(..n).collect_vec();
             self.bound_columns = group_by_cols.clone();
             group_by_cols
                 .into_iter()

@@ -12,30 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
+use maplit::hashmap;
 use nexmark::config::NexmarkConfig;
 use nexmark::event::EventType;
 use nexmark::EventGenerator;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::error::RwError;
 use tokio::time::Instant;
 
-use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::data_gen_util::spawn_data_generation_stream;
-use crate::source::monitor::SourceMetrics;
-use crate::source::nexmark::source::message::NexmarkMessage;
+use crate::source::nexmark::source::combined_event::{
+    combined_event_to_row, event_to_row, get_event_data_types, new_combined_event,
+};
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId,
-    SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader, StreamChunkWithState,
 };
-
-impl_common_split_reader_logic!(NexmarkSplitReader, NexmarkProperties);
 
 #[derive(Debug)]
 pub struct NexmarkSplitReader {
@@ -47,14 +47,13 @@ pub struct NexmarkSplitReader {
     min_event_gap_in_ns: u64,
     max_chunk_size: u64,
 
+    row_id_index: Option<usize>,
     split_id: SplitId,
-    parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for NexmarkSplitReader {
+impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
 
     #[allow(clippy::unused_async)]
@@ -62,8 +61,7 @@ impl SplitReaderV2 for NexmarkSplitReader {
         properties: NexmarkProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
@@ -86,6 +84,12 @@ impl SplitReaderV2 for NexmarkSplitReader {
             generator = generator.with_type_filter(*event_type);
         }
 
+        let row_id_index = parser_config
+            .common
+            .rw_columns
+            .into_iter()
+            .position(|column| column.is_row_id);
+
         Ok(NexmarkSplitReader {
             generator,
             assigned_split,
@@ -95,51 +99,39 @@ impl SplitReaderV2 for NexmarkSplitReader {
             event_type: properties.table_type,
             use_real_time: properties.use_real_time,
             min_event_gap_in_ns: properties.min_event_gap_in_ns,
-            parser_config,
-            metrics,
-            source_info,
+            row_id_index,
+            source_ctx,
         })
     }
 
     fn into_stream(self) -> BoxSourceWithStateStream {
-        self.into_chunk_stream()
+        // Will buffer at most 4 event chunks.
+        const BUFFER_SIZE: usize = 4;
+        spawn_data_generation_stream(self.into_chunk_stream(), BUFFER_SIZE).boxed()
     }
 }
 
 impl NexmarkSplitReader {
-    fn into_data_stream(self) -> BoxSourceStream {
-        // Will buffer at most 4 event chunks.
-        const BUFFER_SIZE: usize = 4;
-        spawn_data_generation_stream(self.into_data_stream_inner(), BUFFER_SIZE).boxed()
-    }
-
-    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn into_data_stream_inner(mut self) {
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    async fn into_chunk_stream(mut self) {
         let start_time = Instant::now();
         let start_offset = self.generator.global_offset();
         let start_ts = self.generator.timestamp();
+        let event_dtypes = get_event_data_types(self.event_type, self.row_id_index);
         loop {
-            let mut msgs: Vec<SourceMessage> = vec![];
-            while (msgs.len() as u64) < self.max_chunk_size {
+            let mut rows = vec![];
+            while (rows.len() as u64) < self.max_chunk_size {
                 if self.generator.global_offset() >= self.event_num {
                     break;
                 }
                 let event = self.generator.next().unwrap();
-                let event = match self.event_type {
-                    Some(_) => NexmarkMessage::new_single_event(
-                        self.split_id.clone(),
-                        self.generator.offset(),
-                        event,
-                    ),
-                    None => NexmarkMessage::new_combined_event(
-                        self.split_id.clone(),
-                        self.generator.offset(),
-                        event,
-                    ),
+                let row = match self.event_type {
+                    Some(_) => event_to_row(event, self.row_id_index),
+                    None => combined_event_to_row(new_combined_event(event), self.row_id_index),
                 };
-                msgs.push(event.into());
+                rows.push((Op::Insert, row));
             }
-            if msgs.is_empty() {
+            if rows.is_empty() {
                 break;
             }
             if self.use_real_time {
@@ -157,7 +149,12 @@ impl NexmarkSplitReader {
                 )
                 .await;
             }
-            yield msgs;
+            let mapping = hashmap! {self.split_id.clone() => self.generator.offset().to_string()};
+            let stream_chunk = StreamChunk::from_rows(&rows, &event_dtypes);
+            yield StreamChunkWithState {
+                chunk: stream_chunk,
+                split_offset_mapping: Some(mapping),
+            };
         }
 
         tracing::debug!(?self.event_type, "nexmark generator finished");
@@ -199,11 +196,10 @@ mod tests {
                 state,
                 Default::default(),
                 Default::default(),
-                Default::default(),
                 None,
             )
             .await?
-            .into_data_stream();
+            .into_stream();
             let _chunk = reader.next().await.unwrap()?;
         }
 

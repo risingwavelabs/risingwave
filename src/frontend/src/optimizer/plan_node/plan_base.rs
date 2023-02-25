@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derivative::Derivative;
 use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
@@ -23,9 +24,14 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct PlanBase {
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub id: PlanNodeId,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
@@ -76,7 +82,7 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
-        let watermark_cols = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -87,7 +93,7 @@ impl PlanBase {
             // Logical plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
-            watermark_columns: watermark_cols,
+            watermark_columns,
         }
     }
 
@@ -123,7 +129,7 @@ impl PlanBase {
     ) -> Self {
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let watermark_cols = FixedBitSet::with_capacity(schema.len());
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -134,7 +140,7 @@ impl PlanBase {
             // Batch plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
-            watermark_columns: watermark_cols,
+            watermark_columns,
         }
     }
 

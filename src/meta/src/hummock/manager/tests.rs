@@ -19,7 +19,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    get_compaction_group_ids, HummockVersionExt,
+};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 // use risingwave_hummock_sdk::key_range::KeyRange;
@@ -33,7 +35,7 @@ use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange, SstableInfo,
 };
 
-use crate::hummock::compaction::ManualCompactionOption;
+use crate::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
 use crate::hummock::{start_compaction_scheduler, CompactionScheduler, HummockManagerRef};
@@ -113,7 +115,10 @@ async fn test_hummock_compaction_task() {
 
     // No compaction task available.
     assert!(hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .is_none());
@@ -137,7 +142,10 @@ async fn test_hummock_compaction_task() {
 
     // Get a compaction task.
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -175,7 +183,10 @@ async fn test_hummock_compaction_task() {
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -437,6 +448,8 @@ async fn test_hummock_manager_basic() {
     );
 
     let mut epoch = 1;
+    let mut register_log_count = 0;
+    let mut commit_log_count = 0;
     let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
         let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
         register_sstable_infos_to_compaction_group(
@@ -455,14 +468,16 @@ async fn test_hummock_manager_basic() {
     };
 
     commit_one(epoch, hummock_manager.clone()).await;
+    register_log_count += 1;
+    commit_log_count += 1;
     epoch += 1;
 
-    let sync_group_version_id = FIRST_VERSION_ID;
+    let init_version_id = FIRST_VERSION_ID;
 
     // increased version id
     assert_eq!(
         hummock_manager.get_current_version().await.id,
-        sync_group_version_id + 1
+        init_version_id + commit_log_count + register_log_count
     );
 
     // min pinned version id if no clients
@@ -487,15 +502,19 @@ async fn test_hummock_manager_basic() {
             }
             Payload::PinnedVersion(version) => version,
         };
-        assert_eq!(version.get_id(), sync_group_version_id + 1);
+        assert_eq!(
+            version.get_id(),
+            init_version_id + commit_log_count + register_log_count
+        );
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            sync_group_version_id + 1
+            init_version_id + commit_log_count + register_log_count
         );
     }
 
     commit_one(epoch, hummock_manager.clone()).await;
-    // epoch += 1;
+    commit_log_count += 1;
+    register_log_count += 1;
 
     for _ in 0..2 {
         // should pin latest because deltas cannot contain INVALID_EPOCH
@@ -505,11 +524,14 @@ async fn test_hummock_manager_basic() {
             }
             Payload::PinnedVersion(version) => version,
         };
-        assert_eq!(version.get_id(), sync_group_version_id + 2);
+        assert_eq!(
+            version.get_id(),
+            init_version_id + commit_log_count + register_log_count
+        );
         // pinned by context_id_1
         assert_eq!(
             hummock_manager.get_min_pinned_version_id().await,
-            sync_group_version_id + 1
+            init_version_id + commit_log_count + register_log_count - 2,
         );
     }
 
@@ -524,7 +546,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        sync_group_version_id
+        commit_log_count + register_log_count - 2
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -532,7 +554,7 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        (sync_group_version_id as usize, 0)
+        ((commit_log_count + register_log_count - 2) as usize, 0)
     );
 
     hummock_manager
@@ -541,7 +563,7 @@ async fn test_hummock_manager_basic() {
         .unwrap();
     assert_eq!(
         hummock_manager.get_min_pinned_version_id().await,
-        sync_group_version_id + 2
+        init_version_id + commit_log_count + register_log_count
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -553,7 +575,7 @@ async fn test_hummock_manager_basic() {
     );
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        1
+        2
     );
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
@@ -561,7 +583,7 @@ async fn test_hummock_manager_basic() {
             .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
-        (1, 0)
+        (2, 0)
     );
 
     hummock_manager
@@ -701,7 +723,10 @@ async fn test_print_compact_task() {
 
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -857,7 +882,7 @@ async fn test_trigger_compaction_deterministic() {
     let _ = add_test_tables(&hummock_manager, context_id).await;
 
     let cur_version = hummock_manager.get_current_version().await;
-    let compaction_groups = hummock_manager.compaction_group_ids().await;
+    let compaction_groups = get_compaction_group_ids(&cur_version);
 
     let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
@@ -887,7 +912,10 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     // No compaction task available.
     assert!(hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .is_none());
@@ -912,7 +940,10 @@ async fn test_hummock_compaction_task_heartbeat() {
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -958,7 +989,10 @@ async fn test_hummock_compaction_task_heartbeat() {
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1005,7 +1039,10 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     // No compaction task available.
     assert!(hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .is_none());
@@ -1030,7 +1067,10 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     // Get a compaction task.
     let compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();
@@ -1110,7 +1150,7 @@ async fn test_extend_ssts_to_delete() {
     // Checkpoint
     assert_eq!(
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
-        3
+        6
     );
     assert_eq!(
         hummock_manager
@@ -1118,7 +1158,6 @@ async fn test_extend_ssts_to_delete() {
             .await,
         orphan_sst_num as usize
     );
-    // Another 3 SSTs from useless delta logs after checkpoint
     assert_eq!(
         hummock_manager.get_ssts_to_delete().await.len(),
         orphan_sst_num as usize + 3
@@ -1198,7 +1237,10 @@ async fn test_version_stats() {
         .add_compactor(worker_node.id, u64::MAX);
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(
+            StaticCompactionGroupId::StateDefault.into(),
+            &mut default_level_selector(),
+        )
         .await
         .unwrap()
         .unwrap();

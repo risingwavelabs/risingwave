@@ -14,15 +14,15 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
-use super::{LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamHopWindow`] represents a hop window table function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,
@@ -33,19 +33,26 @@ impl StreamHopWindow {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
+        let schema = logical.schema().clone();
 
         let i2o = logical.i2o_col_mapping();
         let dist = i2o.rewrite_provided_distribution(input.distribution());
 
+        let mut watermark_columns = i2o.rewrite_bitset(input.watermark_columns());
+        if watermark_columns.contains(logical.core.time_col.index) {
+            // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
+            watermark_columns.insert(schema.len() - 2); // window_start
+            watermark_columns.insert(schema.len() - 1); // window_end
+        }
+
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         Self { base, logical }
     }
@@ -85,3 +92,5 @@ impl StreamNode for StreamHopWindow {
         })
     }
 }
+
+impl ExprRewritable for StreamHopWindow {}

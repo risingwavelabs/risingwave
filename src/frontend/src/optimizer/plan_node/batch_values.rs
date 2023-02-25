@@ -19,7 +19,6 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
-use super::generic::GenericPlanRef;
 use super::{
     ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst,
     ToDistributedBatch,
@@ -28,7 +27,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchValues {
     pub base: PlanBase,
     logical: LogicalValues,
@@ -55,15 +54,7 @@ impl BatchValues {
     }
 
     fn row_to_protobuf(&self, row: &[ExprImpl]) -> ExprTuple {
-        let cells = row
-            .iter()
-            .map(|x| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(x.clone())
-                    .to_expr_proto()
-            })
-            .collect();
+        let cells = row.iter().map(|x| x.to_expr_proto()).collect();
         ExprTuple { cells }
     }
 }

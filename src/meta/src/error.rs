@@ -58,6 +58,12 @@ enum MetaErrorInner {
     #[error("Election failed: {0}")]
     Election(etcd_client::Error),
 
+    #[error("Cancelled: {0}")]
+    Cancelled(String),
+
+    #[error("SystemParams error: {0}")]
+    SystemParams(String),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -116,8 +122,16 @@ impl MetaError {
         MetaErrorInner::Duplicated(relation, name.into()).into()
     }
 
+    pub fn system_param<T: ToString>(s: T) -> Self {
+        MetaErrorInner::SystemParams(s.to_string()).into()
+    }
+
     pub fn unavailable(s: String) -> Self {
         MetaErrorInner::Unavailable(s).into()
+    }
+
+    pub fn cancelled(s: String) -> Self {
+        MetaErrorInner::Cancelled(s).into()
     }
 }
 
@@ -160,6 +174,7 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
             MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
+            MetaErrorInner::Cancelled(_) => tonic::Status::cancelled(err.to_string()),
             _ => tonic::Status::internal(err.to_string()),
         }
     }

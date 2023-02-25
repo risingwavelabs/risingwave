@@ -14,14 +14,15 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
     pub base: PlanBase,
     logical: LogicalTopN,
@@ -32,19 +33,22 @@ impl StreamTopN {
         assert!(logical.group_key().is_empty());
         assert!(logical.limit() > 0);
         let ctx = logical.base.ctx.clone();
+        let input = logical.input();
+        let schema = input.schema().clone();
         let dist = match logical.input().distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
+        let watermark_columns = FixedBitSet::with_capacity(schema.len());
 
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
-            logical.input().logical_pk().to_vec(),
+            schema,
+            input.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
             dist,
             false,
-            logical.input().watermark_columns().clone(),
+            watermark_columns,
         );
         StreamTopN { base, logical }
     }
@@ -110,3 +114,4 @@ impl StreamNode for StreamTopN {
         }
     }
 }
+impl ExprRewritable for StreamTopN {}

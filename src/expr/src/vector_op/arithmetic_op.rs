@@ -16,6 +16,7 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
+use num_traits::real::Real;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -106,6 +107,15 @@ pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
 
 pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
     Ok(Decimal::abs(&decimal))
+}
+
+pub fn pow_f64(l: OrderedF64, r: OrderedF64) -> Result<OrderedF64> {
+    let res = l.powf(r);
+    if res.is_infinite() {
+        Err(ExprError::NumericOutOfRange)
+    } else {
+        Ok(res)
+    }
 }
 
 #[inline(always)]
@@ -239,19 +249,14 @@ fn timestamptz_interval_inner(
     f: fn(i64, i64) -> Option<i64>,
 ) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
-    // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
-    // Daylight Saving.
-    // This is to keep consistent with `tumble_start` of RisingWave / `date_bin` of PostgreSQL.
-    if r.get_months() != 0 {
+    if r.get_months() != 0 || r.get_days() != 0 {
         return Err(ExprError::UnsupportedFunction(
-            "timestamp with time zone +/- interval of months".into(),
+            "timestamp with time zone +/- interval of days".into(),
         ));
     }
 
     let result: Option<i64> = try {
-        let d = (r.get_days() as i64).checked_mul(24 * 60 * 60 * 1_000_000)?;
-        let ms = r.get_ms().checked_mul(1000)?;
-        let delta_usecs = d.checked_add(ms)?;
+        let delta_usecs = r.get_ms().checked_mul(1000)?;
         f(l, delta_usecs)?
     };
 

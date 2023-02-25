@@ -17,8 +17,10 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
+use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
+use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::FrontendConfig;
 
 pub struct FrontendService {
@@ -65,14 +67,12 @@ impl FrontendService {
                 "Cannot configure node: no meta node found in this configuration."
             ));
         } else {
-            let meta_node = provide_meta_node.last().unwrap();
-            cmd.arg("--meta-addr")
-                .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
-            if provide_meta_node.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
-                // According to some heruistics, the last etcd node seems always to be elected as
-                // leader. Therefore we ensure compute node can start by using the last one.
-            }
+            cmd.arg("--meta-addr").arg(
+                provide_meta_node
+                    .iter()
+                    .map(|meta_node| format!("http://{}:{}", meta_node.address, meta_node.port))
+                    .join(","),
+            );
         }
 
         Ok(())
@@ -98,6 +98,13 @@ impl Task for FrontendService {
             ctx.pb.set_message("started");
         } else {
             ctx.pb.set_message("user managed");
+            writeln!(
+                &mut ctx.log,
+                "Please use the following parameters to start the frontend:\n{}\n{} {}\n\n",
+                get_program_env_cmd(&cmd),
+                get_program_name(&cmd),
+                get_program_args(&cmd)
+            )?;
         }
 
         Ok(())

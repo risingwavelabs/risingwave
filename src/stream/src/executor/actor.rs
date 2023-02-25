@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -22,6 +21,7 @@ use futures::pin_mut;
 use hytra::TrAdder;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
+use risingwave_common::error::ErrorSuppressor;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
@@ -35,13 +35,13 @@ use crate::task::{ActorId, SharedContext};
 /// Shared by all operators of an actor.
 pub struct ActorContext {
     pub id: ActorId,
-
-    // TODO: report errors and prompt the user.
-    pub errors: Mutex<HashMap<String, Vec<ExprError>>>,
+    pub fragment_id: u32,
 
     last_mem_val: Arc<AtomicUsize>,
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
+    streaming_metrics: Arc<StreamingMetrics>,
+    pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -50,30 +50,53 @@ impl ActorContext {
     pub fn create(id: ActorId) -> ActorContextRef {
         Arc::new(Self {
             id,
-            errors: Default::default(),
+            fragment_id: 0,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val: Arc::new(TrAdder::new()),
+            streaming_metrics: Arc::new(StreamingMetrics::unused()),
+            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
         })
     }
 
-    pub fn create_with_counter(id: ActorId, total_mem_val: Arc<TrAdder<i64>>) -> ActorContextRef {
+    pub fn create_with_metrics(
+        id: ActorId,
+        fragment_id: u32,
+        total_mem_val: Arc<TrAdder<i64>>,
+        streaming_metrics: Arc<StreamingMetrics>,
+        unique_user_errors: usize,
+    ) -> ActorContextRef {
         Arc::new(Self {
             id,
-            errors: Default::default(),
+            fragment_id,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             total_mem_val,
+            streaming_metrics,
+            error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
         })
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
         tracing::error!("Compute error: {}, executor: {identity}", err);
-        self.errors
-            .lock()
-            .entry(identity.to_owned())
-            .or_default()
-            .push(err);
+        let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
+        let mut err_str = err.to_string();
+
+        if self.error_suppressor.lock().suppress_error(&err_str) {
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                self.error_suppressor.lock().max()
+            );
+        }
+        self.streaming_metrics
+            .user_compute_error_count
+            .with_label_values(&[
+                "ExprError",
+                &err_str,
+                executor_name,
+                &self.fragment_id.to_string(),
+            ])
+            .inc();
     }
 
     pub fn store_mem_usage(&self, val: usize) {

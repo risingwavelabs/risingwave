@@ -32,6 +32,7 @@ use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -103,7 +104,7 @@ pub async fn handle_query(
     let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-    let (query, query_mode, output_schema) = {
+    let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
@@ -116,11 +117,12 @@ pub async fn handle_query(
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
-        );
-        let query = plan_fragmenter.split(plan)?;
+            plan,
+        )?;
         context.append_notice(&mut notice);
-        (query, query_mode, schema)
+        (plan_fragmenter, query_mode, schema)
     };
+    let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
     let pg_descs = output_schema
@@ -217,18 +219,35 @@ pub async fn handle_query(
         }
 
         // update some metrics
-        if query_mode == QueryMode::Local {
-            session
-                .env()
-                .frontend_metrics
-                .latency_local_execution
-                .observe(query_start_time.elapsed().as_secs_f64());
+        match query_mode {
+            QueryMode::Local => {
+                session
+                    .env()
+                    .frontend_metrics
+                    .latency_local_execution
+                    .observe(query_start_time.elapsed().as_secs_f64());
 
-            session
-                .env()
-                .frontend_metrics
-                .query_counter_local_execution
-                .inc();
+                session
+                    .env()
+                    .frontend_metrics
+                    .query_counter_local_execution
+                    .inc();
+            }
+            QueryMode::Distributed => {
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .query_latency
+                    .observe(query_start_time.elapsed().as_secs_f64());
+
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .completed_query_counter
+                    .inc();
+            }
         }
 
         Ok(())

@@ -19,7 +19,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 /// `Union` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Union<PlanRef> {
     pub all: bool,
     pub inputs: Vec<PlanRef>,

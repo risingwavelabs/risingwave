@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::ExprRewriter;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 ///
 /// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -40,19 +40,27 @@ impl StreamLocalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
+        let schema = logical.schema().clone();
         let input = logical.input();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
+        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
+        // Watermark column(s) must be in group key.
+        for (idx, input_idx) in logical.group_key().iter().enumerate() {
+            if input.watermark_columns().contains(*input_idx) {
+                watermark_columns.insert(idx);
+            }
+        }
+
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
+            schema,
             pk_indices,
             logical.functional_dependency().clone(),
             input_dist.clone(),
             input.append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         StreamLocalSimpleAgg { base, logical }
     }
@@ -87,7 +95,7 @@ impl StreamNode for StreamLocalSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             distribution_key: self
                 .distribution()
@@ -98,6 +106,24 @@ impl StreamNode for StreamLocalSimpleAgg {
             agg_call_states: vec![],
             result_table: None,
             is_append_only: self.input().append_only(),
+            distinct_dedup_tables: Default::default(),
         })
+    }
+}
+
+impl ExprRewritable for StreamLocalSimpleAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

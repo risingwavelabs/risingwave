@@ -40,4 +40,7 @@ pub struct PulsarProperties {
 
     #[serde(rename = "scan.startup.timestamp_millis", alias = "pulsar.time.offset")]
     pub time_offset: Option<String>,
+
+    #[serde(rename = "auth.token")]
+    pub auth_token: Option<String>,
 }

@@ -20,6 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     PlanTreeNodeBinary, PlanTreeNodeUnary,
@@ -95,8 +96,13 @@ impl Rule for TranslateApplyRule {
             // the domain. Distinct + Project + The Left of Apply
 
             // Use Share
-            let logical_share = LogicalShare::new(left);
-            left = logical_share.into();
+            left = if left.ctx().session_ctx().config().get_enable_share_plan() {
+                let logical_share = LogicalShare::new(left);
+                logical_share.into()
+            } else {
+                left
+            };
+
             let distinct = LogicalAgg::new(
                 vec![],
                 correlated_indices.clone().into_iter().collect_vec(),

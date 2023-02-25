@@ -545,7 +545,7 @@ impl PartialOrd for IntervalUnit {
             Some(Ordering::Equal)
         } else {
             let diff = *self - *other;
-            let days = (diff.months * 30 + diff.days) as i64;
+            let days = diff.months as i64 * 30 + diff.days as i64;
             Some((days * DAY_MS + diff.ms).cmp(&0))
         }
     }
@@ -686,11 +686,17 @@ impl Display for IntervalUnit {
             write(format_args!("{days} days"))?;
         }
         if self.ms != 0 || self.months == 0 && self.days == 0 {
-            let hours = self.ms / 1000 / 3600;
-            let minutes = (self.ms / 1000 / 60) % 60;
-            let seconds = self.ms % 60000 / 1000;
-            let secs_fract = self.ms % 1000;
-            write(format_args!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
+            let ms = self.ms.abs();
+            let hours = ms / 1000 / 3600;
+            let minutes = (ms / 1000 / 60) % 60;
+            let seconds = ms % 60000 / 1000;
+            let secs_fract = ms % 1000;
+
+            if self.ms < 0 {
+                write(format_args!("-{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
+            } else {
+                write(format_args!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
+            }
             if secs_fract != 0 {
                 let mut buf = [0u8; 4];
                 write!(buf.as_mut_slice(), ".{:03}", secs_fract).unwrap();
@@ -1122,6 +1128,15 @@ mod tests {
             "-1 years -2 mons 3 days"
         );
         assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
+        assert_eq!(
+            IntervalUnit::new(
+                -14,
+                3,
+                -(11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
+            )
+            .to_string(),
+            "-1 years -2 mons 3 days -11:45:14.233"
+        );
     }
 
     #[test]

@@ -15,11 +15,11 @@
 //! Converts between arrays and Apache Arrow arrays.
 use arrow_schema::Field;
 use chrono::{NaiveDateTime, NaiveTime};
-use itertools::Itertools;
 
 use super::column::Column;
 use super::*;
 use crate::types::struct_type::StructType;
+use crate::util::iter_util::ZipEqFast;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
 
@@ -179,7 +179,7 @@ fn get_field_vector_from_struct_type(struct_type: &StructType) -> Vec<Field> {
         struct_type
             .fields
             .iter()
-            .zip_eq(struct_type.field_names.clone())
+            .zip_eq_fast(struct_type.field_names.clone())
             .map(|(f, f_name)| Field::new(f_name, f.into(), true))
             .collect()
     }
@@ -443,6 +443,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
+            ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
@@ -469,15 +470,15 @@ impl From<&StructArray> for arrow_array::StructArray {
                 array
                     .field_arrays()
                     .iter()
-                    .zip_eq(array.children_array_types())
+                    .zip_eq_fast(array.children_array_types())
                     .map(|(arr, datatype)| (Field::new("", datatype.into(), true), (*arr).into()))
                     .collect()
             } else {
                 array
                     .field_arrays()
                     .iter()
-                    .zip_eq(array.children_array_types())
-                    .zip_eq(array.children_names())
+                    .zip_eq_fast(array.children_array_types())
+                    .zip_eq_fast(array.children_names())
                     .map(|((arr, datatype), field_name)| {
                         (Field::new(field_name, datatype.into(), true), (*arr).into())
                     })

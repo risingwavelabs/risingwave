@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -259,7 +259,7 @@ impl<S: StateStore> SortExecutor<S> {
             curr_vnode_bitmap.to_owned()
         };
         let mut values_per_vnode = Vec::new();
-        for owned_vnode in newly_owned_vnodes.iter_ones() {
+        for owned_vnode in newly_owned_vnodes.iter_vnodes() {
             let value_iter = self
                 .state_table
                 .iter_with_pk_range(
@@ -267,7 +267,7 @@ impl<S: StateStore> SortExecutor<S> {
                         Bound::<row::Empty>::Unbounded,
                         Bound::<row::Empty>::Unbounded,
                     ),
-                    VirtualNode::from_index(owned_vnode),
+                    owned_vnode,
                 )
                 .await?;
             let value_iter = Box::pin(value_iter);

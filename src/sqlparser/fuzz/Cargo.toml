@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2018"
 publish = false
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 honggfuzz = "0.5.54"
-sqlparser = { path = ".." }
 
 # Prevent this from interfering with workspaces
 [workspace]

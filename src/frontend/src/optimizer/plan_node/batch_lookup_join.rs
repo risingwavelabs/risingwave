@@ -29,8 +29,9 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -178,7 +179,11 @@ impl ToDistributedBatch for BatchLookupJoin {
         let input = self.input().to_distributed_with_required(
             &Order::any(),
             &RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
-                self.eq_join_predicate.left_eq_indexes(),
+                self.eq_join_predicate
+                    .left_eq_indexes()
+                    .into_iter()
+                    .take(self.lookup_prefix_len)
+                    .collect(),
                 self.right_table_desc.table_id,
             )),
         )?;
@@ -195,12 +200,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -235,12 +235,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
