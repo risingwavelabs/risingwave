@@ -41,8 +41,3 @@ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/freeze/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
-
-if [[ "$RUN_DETERMINISTIC_SQLSMITH" -eq "1" ]]; then
-  echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
-  seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
-fi
