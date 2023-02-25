@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
@@ -22,17 +21,18 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
+use pulsar::{
+    Authentication, Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor,
+};
 use risingwave_common::try_match_expand;
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::monitor::SourceMetrics;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReaderV2, MAX_CHUNK_SIZE,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, MAX_CHUNK_SIZE,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -44,8 +44,7 @@ pub struct PulsarSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -91,15 +90,14 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
 }
 
 #[async_trait]
-impl SplitReaderV2 for PulsarSplitReader {
+impl SplitReader for PulsarSplitReader {
     type Properties = PulsarProperties;
 
     async fn new(
         props: PulsarProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
@@ -110,10 +108,15 @@ impl SplitReaderV2 for PulsarSplitReader {
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let pulsar: Pulsar<_> = Pulsar::builder(service_url, TokioExecutor)
-            .build()
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let mut pulsar_builder = Pulsar::builder(service_url, TokioExecutor);
+        if let Some(auth_token) = props.auth_token {
+            pulsar_builder = pulsar_builder.with_auth(Authentication {
+                name: "token".to_string(),
+                data: Vec::from(auth_token),
+            });
+        }
+
+        let pulsar = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
@@ -157,8 +160,7 @@ impl SplitReaderV2 for PulsarSplitReader {
             split_id: split.id(),
             split,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -174,7 +176,8 @@ impl PulsarSplitReader {
         for msgs in self.consumer.ready_chunks(MAX_CHUNK_SIZE) {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
-                res.push(SourceMessage::from(msg?));
+                let msg = SourceMessage::from(msg?);
+                res.push(msg);
             }
             yield res;
         }

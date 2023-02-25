@@ -18,10 +18,11 @@ use super::{BarrierState, LocalBarrierManager};
 use crate::task::{ActorId, SharedContext};
 
 type ConsumedEpoch = u64;
+type ConsumedRows = u64;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) enum ChainState {
-    ConsumingUpstream(ConsumedEpoch),
+    ConsumingUpstream(ConsumedEpoch, ConsumedRows),
     Done,
 }
 
@@ -87,18 +88,28 @@ impl CreateMviewProgress {
         );
     }
 
-    /// Update the progress to `ConsumingUpstream(consumed_epoch)`. The epoch must be monotonically
-    /// increasing.
+    /// Update the progress to `ConsumingUpstream(consumed_epoch, consumed_rows)`. The epoch must be
+    /// monotonically increasing.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
-    pub fn update(&mut self, current_epoch: u64, consumed_epoch: ConsumedEpoch) {
+    /// `current_consumed_rows` is an accumulated value.
+    pub fn update(
+        &mut self,
+        current_epoch: u64,
+        consumed_epoch: ConsumedEpoch,
+        current_consumed_rows: ConsumedRows,
+    ) {
         match self.state {
-            Some(ChainState::ConsumingUpstream(last)) => {
+            Some(ChainState::ConsumingUpstream(last, last_consumed_rows)) => {
                 assert!(last < consumed_epoch);
+                assert!(last_consumed_rows <= current_consumed_rows);
             }
             Some(ChainState::Done) => unreachable!(),
             None => {}
-        }
-        self.update_inner(current_epoch, ChainState::ConsumingUpstream(consumed_epoch));
+        };
+        self.update_inner(
+            current_epoch,
+            ChainState::ConsumingUpstream(consumed_epoch, current_consumed_rows),
+        );
     }
 
     /// Finish the progress. If the progress is already finished, then perform no-op.

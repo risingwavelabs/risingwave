@@ -22,7 +22,7 @@ use futures_async_stream::for_await;
 use gen_iter::GenIter;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -77,11 +77,8 @@ impl<S: StateStore> SortBuffer<S> {
             Bound::<row::Empty>::Unbounded,
             Bound::<row::Empty>::Unbounded,
         );
-        let streams = stream::iter(vnodes.iter_ones())
-            .map(|vnode| {
-                let vnode = VirtualNode::from_index(vnode);
-                state_table.iter_with_pk_range(&pk_range, vnode)
-            })
+        let streams = stream::iter(vnodes.iter_vnodes())
+            .map(|vnode| state_table.iter_with_pk_range(&pk_range, vnode))
             .buffer_unordered(10)
             .try_collect::<Vec<_>>()
             .await?

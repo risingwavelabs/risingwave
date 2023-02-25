@@ -49,8 +49,8 @@ pub struct BuildFragmentGraphState {
     #[derivative(Default(value = "u32::MAX - 1"))]
     next_operator_id: u32,
 
-    /// dependent table ids
-    dependent_table_ids: HashSet<TableId>,
+    /// dependent relation ids: including tables and sources.
+    dependent_relation_ids: HashSet<TableId>,
 
     /// operator id to `LocalFragmentId` mapping used by share operator.
     share_mapping: HashMap<u32, LocalFragmentId>,
@@ -99,8 +99,8 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     let stream_node = plan_node.to_stream_prost(&mut state);
     generate_fragment_graph(&mut state, stream_node).unwrap();
     let mut fragment_graph = state.fragment_graph.to_protobuf();
-    fragment_graph.dependent_table_ids = state
-        .dependent_table_ids
+    fragment_graph.dependent_relation_ids = state
+        .dependent_relation_ids
         .into_iter()
         .map(|id| id.table_id)
         .collect();
@@ -139,7 +139,8 @@ fn rewrite_stream_node(
 
                 let strategy = DispatchStrategy {
                     r#type: DispatcherType::NoShuffle.into(),
-                    column_indices: vec![], // TODO: use distribution key
+                    dist_key_indices: vec![], // TODO: use distribution key
+                    output_indices: (0..(child_node.fields.len() as u32)).collect(),
                 };
                 Ok(StreamNode {
                     stream_key: child_node.stream_key.clone(),
@@ -229,8 +230,13 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
-        NodeBody::Source(_) => {
+        NodeBody::Source(src) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+            // Note: For creating table with connector, the source id is left with placeholder and
+            // should not be recorded in dependent relation ids.
+            if let Some(inner) = &src.source_inner && inner.source_id != TableId::placeholder().table_id {
+                state.dependent_relation_ids.insert(TableId::new(inner.source_id));
+            }
         }
 
         NodeBody::Materialize(_) => {
@@ -247,7 +253,7 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
             state
-                .dependent_table_ids
+                .dependent_relation_ids
                 .insert(TableId::new(node.table_id));
             current_fragment.upstream_table_ids.push(node.table_id);
             current_fragment.is_singleton = node.is_singleton;

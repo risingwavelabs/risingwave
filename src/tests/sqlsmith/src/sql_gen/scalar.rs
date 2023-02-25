@@ -41,9 +41,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // e.g. -1 becomes -(1).
         // See: https://github.com/risingwavelabs/risingwave/issues/4344
         match *typ {
-            T::Int64 => Expr::Nested(Box::new(Expr::Value(Value::Number(
-                self.gen_int(i64::MIN as isize, i64::MAX as isize),
-            )))),
+            T::Int64 => Expr::Nested(Box::new(Expr::TypedString {
+                data_type: AstDataType::BigInt,
+                value: self.gen_int(i64::MIN as isize, i64::MAX as isize),
+            })),
             T::Int32 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::Int,
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
@@ -88,7 +89,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             })),
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
+                let n = self.rng.gen_range(1..=4);
                 Expr::Array(Array {
                     elem: self.gen_simple_scalar_list(ty, n),
                     named: true,
@@ -107,6 +108,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a list of [`n`] simple scalar values of a specific [`type`].
+    #[allow(dead_code)]
     fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Vec<Expr> {
         (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }
