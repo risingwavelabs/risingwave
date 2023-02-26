@@ -467,6 +467,7 @@ pub(super) mod tests {
         default_builder_opt_for_test, gen_default_test_sstable, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
+    use crate::hummock::Sstable;
 
     #[tokio::test]
     async fn test_empty() {
@@ -559,7 +560,10 @@ pub(super) mod tests {
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            assert!(table.may_match(full_key.user_key.encode().as_slice()));
+            if table.has_bloom_filter() {
+                let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
+                assert!(table.may_match_hash(hash));
+            }
         }
     }
 

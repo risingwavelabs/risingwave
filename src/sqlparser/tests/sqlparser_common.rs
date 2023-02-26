@@ -72,7 +72,10 @@ fn parse_insert_values() {
                 assert_eq!(table_name.to_string(), expected_table_name);
                 assert_eq!(columns.len(), expected_columns.len());
                 for (index, column) in columns.iter().enumerate() {
-                    assert_eq!(column, &Ident::new(expected_columns[index].clone()));
+                    assert_eq!(
+                        column,
+                        &Ident::new_unchecked(expected_columns[index].clone())
+                    );
                 }
                 match &source.body {
                     SetExpr::Values(Values(values)) => assert_eq!(values.as_slice(), expected_rows),
@@ -154,7 +157,7 @@ fn parse_delete_statement() {
     match verified_stmt(sql) {
         Statement::Delete { table_name, .. } => {
             assert_eq!(
-                ObjectName(vec![Ident::with_quote('"', "table")]),
+                ObjectName(vec![Ident::with_quote_unchecked('"', "table")]),
                 table_name
             );
         }
@@ -173,11 +176,11 @@ fn parse_where_delete_statement() {
             selection,
             ..
         } => {
-            assert_eq!(ObjectName(vec![Ident::new("foo")]), table_name);
+            assert_eq!(ObjectName(vec![Ident::new_unchecked("foo")]), table_name);
 
             assert_eq!(
                 Expr::BinaryOp {
-                    left: Box::new(Expr::Identifier(Ident::new("name"))),
+                    left: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                     op: Eq,
                     right: Box::new(Expr::Value(number("5"))),
                 },
@@ -222,7 +225,7 @@ fn parse_select_distinct() {
     let select = verified_only_select(sql);
     assert_eq!(select.distinct, Distinct::Distinct);
     assert_eq!(
-        &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("name"))),
+        &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new_unchecked("name"))),
         only(&select.projection)
     );
 }
@@ -233,10 +236,10 @@ fn parse_select_distinct_on() {
     let select = verified_only_select(sql);
     assert_eq!(
         select.distinct,
-        Distinct::DistinctOn(vec![Expr::Identifier(Ident::new("id"))])
+        Distinct::DistinctOn(vec![Expr::Identifier(Ident::new_unchecked("id"))])
     );
     assert_eq!(
-        &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new("name"))),
+        &SelectItem::UnnamedExpr(Expr::Identifier(Ident::new_unchecked("name"))),
         only(&select.projection)
     );
 }
@@ -264,7 +267,7 @@ fn parse_select_wildcard() {
     let sql = "SELECT foo.* FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
-        &SelectItem::QualifiedWildcard(ObjectName(vec![Ident::new("foo")])),
+        &SelectItem::QualifiedWildcard(ObjectName(vec![Ident::new_unchecked("foo")])),
         only(&select.projection)
     );
 
@@ -272,8 +275,8 @@ fn parse_select_wildcard() {
     let select = verified_only_select(sql);
     assert_eq!(
         &SelectItem::QualifiedWildcard(ObjectName(vec![
-            Ident::new("myschema"),
-            Ident::new("mytable"),
+            Ident::new_unchecked("myschema"),
+            Ident::new_unchecked("mytable"),
         ])),
         only(&select.projection)
     );
@@ -308,7 +311,7 @@ fn parse_column_aliases() {
     {
         assert_eq!(&BinaryOperator::Plus, op);
         assert_eq!(&Expr::Value(number("1")), right.as_ref());
-        assert_eq!(&Ident::new("newname"), alias);
+        assert_eq!(&Ident::new_unchecked("newname"), alias);
     } else {
         panic!("Expected ExprWithAlias")
     }
@@ -338,7 +341,7 @@ fn parse_select_count_wildcard() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("COUNT")]),
+            name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
             over: None,
             distinct: false,
@@ -355,10 +358,10 @@ fn parse_select_count_distinct() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("COUNT")]),
+            name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::UnaryOp {
                 op: UnaryOperator::Plus,
-                expr: Box::new(Expr::Identifier(Ident::new("x"))),
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("x"))),
             }))],
             over: None,
             distinct: true,
@@ -421,7 +424,7 @@ fn parse_select_with_date_column_name() {
     let sql = "SELECT date";
     let select = verified_only_select(sql);
     assert_eq!(
-        &Expr::Identifier(Ident::new("date")),
+        &Expr::Identifier(Ident::new_unchecked("date")),
         expr_from_projection(only(&select.projection)),
     );
 }
@@ -434,7 +437,7 @@ fn parse_escaped_single_quote_string_predicate() {
     let ast = verified_only_select(sql);
     assert_eq!(
         Some(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("salary"))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("salary"))),
             op: NotEq,
             right: Box::new(Expr::Value(Value::SingleQuotedString(
                 "Jim's salary".to_string()
@@ -460,12 +463,12 @@ fn parse_compound_expr_1() {
     assert_eq!("a + b * c", &ast.to_string());
     assert_eq!(
         BinaryOp {
-            left: Box::new(Identifier(Ident::new("a"))),
+            left: Box::new(Identifier(Ident::new_unchecked("a"))),
             op: Plus,
             right: Box::new(BinaryOp {
-                left: Box::new(Identifier(Ident::new("b"))),
+                left: Box::new(Identifier(Ident::new_unchecked("b"))),
                 op: Multiply,
-                right: Box::new(Identifier(Ident::new("c")))
+                right: Box::new(Identifier(Ident::new_unchecked("c")))
             })
         },
         ast
@@ -482,12 +485,12 @@ fn parse_compound_expr_2() {
     assert_eq!(
         BinaryOp {
             left: Box::new(BinaryOp {
-                left: Box::new(Identifier(Ident::new("a"))),
+                left: Box::new(Identifier(Ident::new_unchecked("a"))),
                 op: Multiply,
-                right: Box::new(Identifier(Ident::new("b")))
+                right: Box::new(Identifier(Ident::new_unchecked("b")))
             }),
             op: Plus,
-            right: Box::new(Identifier(Ident::new("c")))
+            right: Box::new(Identifier(Ident::new_unchecked("c")))
         },
         ast
     );
@@ -503,12 +506,12 @@ fn parse_unary_math() {
         BinaryOp {
             left: Box::new(UnaryOp {
                 op: UnaryOperator::Minus,
-                expr: Box::new(Identifier(Ident::new("a"))),
+                expr: Box::new(Identifier(Ident::new_unchecked("a"))),
             }),
             op: BinaryOperator::Plus,
             right: Box::new(UnaryOp {
                 op: UnaryOperator::Minus,
-                expr: Box::new(Identifier(Ident::new("b"))),
+                expr: Box::new(Identifier(Ident::new_unchecked("b"))),
             }),
         },
         ast
@@ -520,7 +523,7 @@ fn parse_is_null() {
     use self::Expr::*;
     let sql = "a IS NULL";
     assert_eq!(
-        IsNull(Box::new(Identifier(Ident::new("a")))),
+        IsNull(Box::new(Identifier(Ident::new_unchecked("a")))),
         verified_expr(sql)
     );
 }
@@ -530,7 +533,7 @@ fn parse_is_not_null() {
     use self::Expr::*;
     let sql = "a IS NOT NULL";
     assert_eq!(
-        IsNotNull(Box::new(Identifier(Ident::new("a")))),
+        IsNotNull(Box::new(Identifier(Ident::new_unchecked("a")))),
         verified_expr(sql)
     );
 }
@@ -541,8 +544,8 @@ fn parse_is_distinct_from() {
     let sql = "a IS DISTINCT FROM b";
     assert_eq!(
         IsDistinctFrom(
-            Box::new(Identifier(Ident::new("a"))),
-            Box::new(Identifier(Ident::new("b")))
+            Box::new(Identifier(Ident::new_unchecked("a"))),
+            Box::new(Identifier(Ident::new_unchecked("b")))
         ),
         verified_expr(sql)
     );
@@ -553,8 +556,8 @@ fn parse_is_not_distinct_from() {
     let sql = "a IS NOT DISTINCT FROM b";
     assert_eq!(
         IsNotDistinctFrom(
-            Box::new(Identifier(Ident::new("a"))),
-            Box::new(Identifier(Ident::new("b")))
+            Box::new(Identifier(Ident::new_unchecked("a"))),
+            Box::new(Identifier(Ident::new_unchecked("b")))
         ),
         verified_expr(sql)
     );
@@ -643,7 +646,7 @@ fn parse_like() {
         let select = verified_only_select(sql);
         assert_eq!(
             Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("name"))),
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 op: if negated {
                     BinaryOperator::NotLike
                 } else {
@@ -663,7 +666,7 @@ fn parse_like() {
         let select = verified_only_select(sql);
         assert_eq!(
             Expr::IsNull(Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("name"))),
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 op: if negated {
                     BinaryOperator::NotLike
                 } else {
@@ -688,7 +691,7 @@ fn parse_ilike() {
         let select = verified_only_select(sql);
         assert_eq!(
             Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("name"))),
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 op: if negated {
                     BinaryOperator::NotILike
                 } else {
@@ -708,7 +711,7 @@ fn parse_ilike() {
         let select = verified_only_select(sql);
         assert_eq!(
             Expr::IsNull(Box::new(Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("name"))),
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("name"))),
                 op: if negated {
                     BinaryOperator::NotILike
                 } else {
@@ -733,7 +736,7 @@ fn parse_in_list() {
         let select = verified_only_select(sql);
         assert_eq!(
             Expr::InList {
-                expr: Box::new(Expr::Identifier(Ident::new("segment"))),
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("segment"))),
                 list: vec![
                     Expr::Value(Value::SingleQuotedString("HIGH".to_string())),
                     Expr::Value(Value::SingleQuotedString("MED".to_string())),
@@ -753,7 +756,7 @@ fn parse_in_subquery() {
     let select = verified_only_select(sql);
     assert_eq!(
         Expr::InSubquery {
-            expr: Box::new(Expr::Identifier(Ident::new("segment"))),
+            expr: Box::new(Expr::Identifier(Ident::new_unchecked("segment"))),
             subquery: Box::new(verified_query("SELECT segm FROM bar")),
             negated: false,
         },
@@ -768,9 +771,9 @@ fn parse_string_concat() {
     let select = verified_only_select(sql);
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Concat,
-            right: Box::new(Expr::Identifier(Ident::new("b"))),
+            right: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
         }),
         select.projection[0]
     );
@@ -788,9 +791,9 @@ fn parse_bitwise_ops() {
         let select = verified_only_select(&format!("SELECT a {} b", &str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::BinaryOp {
-                left: Box::new(Expr::Identifier(Ident::new("a"))),
+                left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
                 op: op.clone(),
-                right: Box::new(Expr::Identifier(Ident::new("b"))),
+                right: Box::new(Expr::Identifier(Ident::new_unchecked("b"))),
             }),
             select.projection[0]
         );
@@ -802,9 +805,11 @@ fn parse_binary_some() {
     let select = verified_only_select("SELECT a = SOME(b)");
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(
+                Ident::new_unchecked("b")
+            )))),
         }),
         select.projection[0]
     );
@@ -815,9 +820,11 @@ fn parse_binary_all() {
     let select = verified_only_select("SELECT a = ALL(b)");
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(
+                Ident::new_unchecked("b")
+            )))),
         }),
         select.projection[0]
     );
@@ -871,7 +878,7 @@ fn parse_between() {
         let select = verified_only_select(sql);
         assert_eq!(
             Expr::Between {
-                expr: Box::new(Expr::Identifier(Ident::new("age"))),
+                expr: Box::new(Expr::Identifier(Ident::new_unchecked("age"))),
                 low: Box::new(Expr::Value(number("25"))),
                 high: Box::new(Expr::Value(number("32"))),
                 negated,
@@ -920,7 +927,7 @@ fn parse_between_with_expr() {
                 expr: Box::new(Expr::BinaryOp {
                     left: Box::new(Expr::Value(number("1"))),
                     op: BinaryOperator::Plus,
-                    right: Box::new(Expr::Identifier(Ident::new("x"))),
+                    right: Box::new(Expr::Identifier(Ident::new_unchecked("x"))),
                 }),
                 low: Box::new(Expr::Value(number("1"))),
                 high: Box::new(Expr::Value(number("2"))),
@@ -938,17 +945,17 @@ fn parse_select_order_by() {
         assert_eq!(
             vec![
                 OrderByExpr {
-                    expr: Expr::Identifier(Ident::new("lname")),
+                    expr: Expr::Identifier(Ident::new_unchecked("lname")),
                     asc: Some(true),
                     nulls_first: None,
                 },
                 OrderByExpr {
-                    expr: Expr::Identifier(Ident::new("fname")),
+                    expr: Expr::Identifier(Ident::new_unchecked("fname")),
                     asc: Some(false),
                     nulls_first: None,
                 },
                 OrderByExpr {
-                    expr: Expr::Identifier(Ident::new("id")),
+                    expr: Expr::Identifier(Ident::new_unchecked("id")),
                     asc: None,
                     nulls_first: None,
                 },
@@ -970,12 +977,12 @@ fn parse_select_order_by_limit() {
     assert_eq!(
         vec![
             OrderByExpr {
-                expr: Expr::Identifier(Ident::new("lname")),
+                expr: Expr::Identifier(Ident::new_unchecked("lname")),
                 asc: Some(true),
                 nulls_first: None,
             },
             OrderByExpr {
-                expr: Expr::Identifier(Ident::new("fname")),
+                expr: Expr::Identifier(Ident::new_unchecked("fname")),
                 asc: Some(false),
                 nulls_first: None,
             },
@@ -993,12 +1000,12 @@ fn parse_select_order_by_nulls_order() {
     assert_eq!(
         vec![
             OrderByExpr {
-                expr: Expr::Identifier(Ident::new("lname")),
+                expr: Expr::Identifier(Ident::new_unchecked("lname")),
                 asc: Some(true),
                 nulls_first: Some(true),
             },
             OrderByExpr {
-                expr: Expr::Identifier(Ident::new("fname")),
+                expr: Expr::Identifier(Ident::new_unchecked("fname")),
                 asc: Some(false),
                 nulls_first: Some(false),
             },
@@ -1014,8 +1021,8 @@ fn parse_select_group_by() {
     let select = verified_only_select(sql);
     assert_eq!(
         vec![
-            Expr::Identifier(Ident::new("lname")),
-            Expr::Identifier(Ident::new("fname")),
+            Expr::Identifier(Ident::new_unchecked("lname")),
+            Expr::Identifier(Ident::new_unchecked("fname")),
         ],
         select.group_by
     );
@@ -1028,10 +1035,10 @@ fn parse_select_group_by_grouping_sets() {
     let select = verified_only_select(sql);
     assert_eq!(
         vec![
-            Expr::Identifier(Ident::new("size")),
+            Expr::Identifier(Ident::new_unchecked("size")),
             Expr::GroupingSets(vec![
-                vec![Expr::Identifier(Ident::new("brand"))],
-                vec![Expr::Identifier(Ident::new("size"))],
+                vec![Expr::Identifier(Ident::new_unchecked("brand"))],
+                vec![Expr::Identifier(Ident::new_unchecked("size"))],
                 vec![],
             ])
         ],
@@ -1045,10 +1052,10 @@ fn parse_select_group_by_rollup() {
     let select = verified_only_select(sql);
     assert_eq!(
         vec![
-            Expr::Identifier(Ident::new("size")),
+            Expr::Identifier(Ident::new_unchecked("size")),
             Expr::Rollup(vec![
-                vec![Expr::Identifier(Ident::new("brand"))],
-                vec![Expr::Identifier(Ident::new("size"))],
+                vec![Expr::Identifier(Ident::new_unchecked("brand"))],
+                vec![Expr::Identifier(Ident::new_unchecked("size"))],
             ])
         ],
         select.group_by
@@ -1061,10 +1068,10 @@ fn parse_select_group_by_cube() {
     let select = verified_only_select(sql);
     assert_eq!(
         vec![
-            Expr::Identifier(Ident::new("size")),
+            Expr::Identifier(Ident::new_unchecked("size")),
             Expr::Cube(vec![
-                vec![Expr::Identifier(Ident::new("brand"))],
-                vec![Expr::Identifier(Ident::new("size"))],
+                vec![Expr::Identifier(Ident::new_unchecked("brand"))],
+                vec![Expr::Identifier(Ident::new_unchecked("size"))],
             ])
         ],
         select.group_by
@@ -1078,7 +1085,7 @@ fn parse_select_having() {
     assert_eq!(
         Some(Expr::BinaryOp {
             left: Box::new(Expr::Function(Function {
-                name: ObjectName(vec![Ident::new("COUNT")]),
+                name: ObjectName(vec![Ident::new_unchecked("COUNT")]),
                 args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
                 over: None,
                 distinct: false,
@@ -1110,7 +1117,7 @@ fn parse_cast() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Cast {
-            expr: Box::new(Expr::Identifier(Ident::new("id"))),
+            expr: Box::new(Expr::Identifier(Ident::new_unchecked("id"))),
             data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
@@ -1140,7 +1147,7 @@ fn parse_try_cast() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::TryCast {
-            expr: Box::new(Expr::Identifier(Ident::new("id"))),
+            expr: Box::new(Expr::Identifier(Ident::new_unchecked("id"))),
             data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
@@ -1170,7 +1177,7 @@ fn parse_extract() {
     assert_eq!(
         &Expr::Extract {
             field: "YEAR".to_string(),
-            expr: Box::new(Expr::Identifier(Ident::new("d"))),
+            expr: Box::new(Expr::Identifier(Ident::new_unchecked("d"))),
         },
         expr_from_projection(only(&select.projection)),
     );
@@ -1839,16 +1846,16 @@ fn parse_named_argument_function() {
 
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("FUN")]),
+            name: ObjectName(vec![Ident::new_unchecked("FUN")]),
             args: vec![
                 FunctionArg::Named {
-                    name: Ident::new("a"),
+                    name: Ident::new_unchecked("a"),
                     arg: FunctionArgExpr::Expr(Expr::Value(Value::SingleQuotedString(
                         "1".to_owned()
                     ))),
                 },
                 FunctionArg::Named {
-                    name: Ident::new("b"),
+                    name: Ident::new_unchecked("b"),
                     arg: FunctionArgExpr::Expr(Expr::Value(Value::SingleQuotedString(
                         "2".to_owned()
                     ))),
@@ -1879,12 +1886,12 @@ fn parse_window_functions() {
     assert_eq!(5, select.projection.len());
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("row_number")]),
+            name: ObjectName(vec![Ident::new_unchecked("row_number")]),
             args: vec![],
             over: Some(WindowSpec {
                 partition_by: vec![],
                 order_by: vec![OrderByExpr {
-                    expr: Expr::Identifier(Ident::new("dt")),
+                    expr: Expr::Identifier(Ident::new_unchecked("dt")),
                     asc: Some(false),
                     nulls_first: None,
                 }],
@@ -1911,21 +1918,25 @@ fn parse_aggregate_with_order_by() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("STRING_AGG")]),
+            name: ObjectName(vec![Ident::new_unchecked("STRING_AGG")]),
             args: vec![
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("a")))),
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("b")))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                    Ident::new_unchecked("a")
+                ))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                    Ident::new_unchecked("b")
+                ))),
             ],
             over: None,
             distinct: false,
             order_by: vec![
                 OrderByExpr {
-                    expr: Expr::Identifier(Ident::new("b")),
+                    expr: Expr::Identifier(Ident::new_unchecked("b")),
                     asc: Some(true),
                     nulls_first: None,
                 },
                 OrderByExpr {
-                    expr: Expr::Identifier(Ident::new("a")),
+                    expr: Expr::Identifier(Ident::new_unchecked("a")),
                     asc: Some(false),
                     nulls_first: None,
                 }
@@ -1942,22 +1953,22 @@ fn parse_aggregate_with_filter() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("sum")]),
+            name: ObjectName(vec![Ident::new_unchecked("sum")]),
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                Expr::Identifier(Ident::new("a"))
+                Expr::Identifier(Ident::new_unchecked("a"))
             )),],
             over: None,
             distinct: false,
             order_by: vec![],
             filter: Some(Box::new(Expr::BinaryOp {
                 left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
-                    left: Box::new(Expr::Identifier(Ident::new("a"))),
+                    left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
                     op: BinaryOperator::Gt,
                     right: Box::new(Expr::Value(Value::Number("0".to_string())))
                 }))),
                 op: BinaryOperator::And,
                 right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
-                    Expr::Identifier(Ident::new("a"))
+                    Expr::Identifier(Ident::new_unchecked("a"))
                 )))))
             })),
         }),
@@ -2182,8 +2193,11 @@ fn parse_delimited_identifiers() {
     // check FROM
     match only(select.from).relation {
         TableFactor::Table { name, alias } => {
-            assert_eq!(vec![Ident::with_quote('"', "a table")], name.0);
-            assert_eq!(Ident::with_quote('"', "alias"), alias.unwrap().name);
+            assert_eq!(vec![Ident::with_quote_unchecked('"', "a table")], name.0);
+            assert_eq!(
+                Ident::with_quote_unchecked('"', "alias"),
+                alias.unwrap().name
+            );
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2191,14 +2205,14 @@ fn parse_delimited_identifiers() {
     assert_eq!(3, select.projection.len());
     assert_eq!(
         &Expr::CompoundIdentifier(vec![
-            Ident::with_quote('"', "alias"),
-            Ident::with_quote('"', "bar baz")
+            Ident::with_quote_unchecked('"', "alias"),
+            Ident::with_quote_unchecked('"', "bar baz")
         ]),
         expr_from_projection(&select.projection[0]),
     );
     assert_eq!(
         &Expr::Function(Function {
-            name: ObjectName(vec![Ident::with_quote('"', "myfun")]),
+            name: ObjectName(vec![Ident::with_quote_unchecked('"', "myfun")]),
             args: vec![],
             over: None,
             distinct: false,
@@ -2209,8 +2223,11 @@ fn parse_delimited_identifiers() {
     );
     match &select.projection[2] {
         SelectItem::ExprWithAlias { expr, alias } => {
-            assert_eq!(&Expr::Identifier(Ident::with_quote('"', "simple id")), expr);
-            assert_eq!(&Ident::with_quote('"', "column alias"), alias);
+            assert_eq!(
+                &Expr::Identifier(Ident::with_quote_unchecked('"', "simple id")),
+                expr
+            );
+            assert_eq!(&Ident::with_quote_unchecked('"', "column alias"), alias);
         }
         _ => panic!("Expected ExprWithAlias"),
     }
@@ -2228,15 +2245,15 @@ fn parse_parens() {
     assert_eq!(
         BinaryOp {
             left: Box::new(Nested(Box::new(BinaryOp {
-                left: Box::new(Identifier(Ident::new("a"))),
+                left: Box::new(Identifier(Ident::new_unchecked("a"))),
                 op: Plus,
-                right: Box::new(Identifier(Ident::new("b")))
+                right: Box::new(Identifier(Ident::new_unchecked("b")))
             }))),
             op: Minus,
             right: Box::new(Nested(Box::new(BinaryOp {
-                left: Box::new(Identifier(Ident::new("c"))),
+                left: Box::new(Identifier(Ident::new_unchecked("c"))),
                 op: Plus,
-                right: Box::new(Identifier(Ident::new("d")))
+                right: Box::new(Identifier(Ident::new_unchecked("d")))
             })))
         },
         verified_expr(sql)
@@ -2253,14 +2270,14 @@ fn parse_searched_case_expr() {
         &Case {
             operand: None,
             conditions: vec![
-                IsNull(Box::new(Identifier(Ident::new("bar")))),
+                IsNull(Box::new(Identifier(Ident::new_unchecked("bar")))),
                 BinaryOp {
-                    left: Box::new(Identifier(Ident::new("bar"))),
+                    left: Box::new(Identifier(Ident::new_unchecked("bar"))),
                     op: Eq,
                     right: Box::new(Expr::Value(number("0")))
                 },
                 BinaryOp {
-                    left: Box::new(Identifier(Ident::new("bar"))),
+                    left: Box::new(Identifier(Ident::new_unchecked("bar"))),
                     op: GtEq,
                     right: Box::new(Expr::Value(number("0")))
                 }
@@ -2286,7 +2303,7 @@ fn parse_simple_case_expr() {
     use self::Expr::{Case, Identifier};
     assert_eq!(
         &Case {
-            operand: Some(Box::new(Identifier(Ident::new("foo")))),
+            operand: Some(Box::new(Identifier(Ident::new_unchecked("foo")))),
             conditions: vec![Expr::Value(number("1"))],
             results: vec![Expr::Value(Value::SingleQuotedString("Y".to_string())),],
             else_result: Some(Box::new(Expr::Value(Value::SingleQuotedString(
@@ -2363,7 +2380,7 @@ fn parse_cross_join() {
     assert_eq!(
         Join {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Ident::new("t2")]),
+                name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
             },
             join_operator: JoinOperator::CrossJoin
@@ -2381,7 +2398,7 @@ fn parse_joins_on() {
     ) -> Join {
         Join {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Ident::new(relation.into())]),
+                name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
@@ -2432,7 +2449,7 @@ fn parse_joins_using() {
     ) -> Join {
         Join {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Ident::new(relation.into())]),
+                name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
@@ -2475,7 +2492,7 @@ fn parse_natural_join() {
     fn natural_join(f: impl Fn(JoinConstraint) -> JoinOperator) -> Join {
         Join {
             relation: TableFactor::Table {
-                name: ObjectName(vec![Ident::new("t2")]),
+                name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
             },
             join_operator: f(JoinConstraint::Natural),
@@ -2586,9 +2603,9 @@ fn parse_ctes() {
             assert_eq!(*exp, query.to_string());
             assert_eq!(
                 if i == 0 {
-                    Ident::new("a")
+                    Ident::new_unchecked("a")
                 } else {
-                    Ident::new("b")
+                    Ident::new_unchecked("b")
                 },
                 alias.name
             );
@@ -2633,7 +2650,7 @@ fn parse_cte_renamed_columns() {
     let sql = "WITH cte (col1, col2) AS (SELECT foo, bar FROM baz) SELECT * FROM cte";
     let query = verified_query(sql);
     assert_eq!(
-        vec![Ident::new("col1"), Ident::new("col2")],
+        vec![Ident::new_unchecked("col1"), Ident::new_unchecked("col2")],
         query
             .with
             .unwrap()
@@ -2661,8 +2678,8 @@ fn parse_recursive_cte() {
     assert_eq!(with.cte_tables.len(), 1);
     let expected = Cte {
         alias: TableAlias {
-            name: Ident::new("nums"),
-            columns: vec![Ident::new("val")],
+            name: Ident::new_unchecked("nums"),
+            columns: vec![Ident::new_unchecked("val")],
         },
         query: cte_query,
         from: None,
@@ -2971,7 +2988,10 @@ fn parse_create_view_with_columns() {
             emit_mode,
         } => {
             assert_eq!("v", name.to_string());
-            assert_eq!(columns, vec![Ident::new("has"), Ident::new("cols")]);
+            assert_eq!(
+                columns,
+                vec![Ident::new_unchecked("has"), Ident::new_unchecked("cols")]
+            );
             assert_eq!(with_options, vec![]);
             assert_eq!("SELECT 1, 2", query.to_string());
             assert!(!materialized);
@@ -3118,7 +3138,10 @@ fn parse_drop_table() {
         Statement::Drop(stmt) => {
             assert!(!stmt.if_exists);
             assert_eq!(ObjectType::Table, stmt.object_type);
-            assert_eq!(ObjectName(vec![Ident::new("foo")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("foo")]),
+                stmt.object_name
+            );
             assert_eq!(stmt.drop_mode, AstOption::None);
         }
         _ => unreachable!(),
@@ -3129,7 +3152,10 @@ fn parse_drop_table() {
         Statement::Drop(stmt) => {
             assert!(stmt.if_exists);
             assert_eq!(ObjectType::Table, stmt.object_type);
-            assert_eq!(ObjectName(vec![Ident::new("foo")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("foo")]),
+                stmt.object_name
+            );
             assert_eq!(stmt.drop_mode, AstOption::Some(DropMode::Cascade));
         }
         _ => unreachable!(),
@@ -3153,7 +3179,10 @@ fn parse_drop_view() {
     let sql = "DROP VIEW myview";
     match verified_stmt(sql) {
         Statement::Drop(stmt) => {
-            assert_eq!(ObjectName(vec![Ident::new("myview")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("myview")]),
+                stmt.object_name
+            );
             assert_eq!(ObjectType::View, stmt.object_type);
         }
         _ => unreachable!(),
@@ -3165,7 +3194,10 @@ fn parse_materialized_drop_view() {
     let sql = "DROP MATERIALIZED VIEW mymview";
     match verified_stmt(sql) {
         Statement::Drop(stmt) => {
-            assert_eq!(ObjectName(vec![Ident::new("mymview")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("mymview")]),
+                stmt.object_name
+            );
             assert_eq!(ObjectType::MaterializedView, stmt.object_type);
         }
         _ => unreachable!(),
@@ -3177,7 +3209,10 @@ fn parse_create_user() {
     let sql = "CREATE USER foo WITH NOSUPERUSER CREATEDB LOGIN PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'";
     match verified_stmt(sql) {
         Statement::CreateUser(stmt) => {
-            assert_eq!(ObjectName(vec![Ident::new("foo")]), stmt.user_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("foo")]),
+                stmt.user_name
+            );
             assert_eq!(
                 stmt.with_options.0,
                 vec![
@@ -3347,7 +3382,7 @@ fn lateral_derived() {
         } = join.relation
         {
             assert_eq!(lateral_in, lateral);
-            assert_eq!(Ident::new("orders"), alias.name);
+            assert_eq!(Ident::new_unchecked("orders"), alias.name);
             assert_eq!(
                 subquery.to_string(),
                 "SELECT * FROM orders WHERE orders.customer = customer.id LIMIT 3"
@@ -3526,19 +3561,19 @@ fn parse_create_index() {
     let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
     let indexed_columns = vec![
         OrderByExpr {
-            expr: Expr::Identifier(Ident::new("name")),
+            expr: Expr::Identifier(Ident::new_unchecked("name")),
             asc: None,
             nulls_first: None,
         },
         OrderByExpr {
-            expr: Expr::Identifier(Ident::new("age")),
+            expr: Expr::Identifier(Ident::new_unchecked("age")),
             asc: Some(false),
             nulls_first: None,
         },
     ];
 
-    let include_columns = vec![Ident::new("other")];
-    let distributed_columns = vec![Ident::new("name")];
+    let include_columns = vec![Ident::new_unchecked("other")];
+    let distributed_columns = vec![Ident::new_unchecked("name")];
     match verified_stmt(sql) {
         Statement::CreateIndex {
             name,
@@ -3579,7 +3614,10 @@ fn parse_grant() {
                         Action::Select { columns: None },
                         Action::Insert { columns: None },
                         Action::Update {
-                            columns: Some(vec![Ident::new("shape"), Ident::new("size")])
+                            columns: Some(vec![
+                                Ident::new_unchecked("shape"),
+                                Ident::new_unchecked("size")
+                            ])
                         },
                         Action::Execute,
                         Action::Temporary,

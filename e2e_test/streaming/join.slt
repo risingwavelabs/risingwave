@@ -179,7 +179,7 @@ statement ok
 create table t2 (uid int, name string);
 
 statement ok
-create materialized view v as SELECT event, t1.name FROM t1 INNER JOIN t2 WHERE t1.name=t2.name AND t1.event=concat('event_', array_join(array[t2.uid, t1.item_id], '_'));
+create materialized view v as SELECT event, t1.name FROM t1 INNER JOIN t2 ON t1.name=t2.name AND t1.event=concat('event_', array_join(array[t2.uid, t1.item_id], '_'));
 
 statement ok
 insert into t1 values (0, 0, 'event_0_0', 'a'), (1, NULL, 'event_1', 'b'), (2, 3, 'event_2_1', 'c');
