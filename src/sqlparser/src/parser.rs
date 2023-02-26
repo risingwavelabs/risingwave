@@ -4035,7 +4035,9 @@ impl Word {
     /// Convert a Word to a Identifier, return ParserError when the Word's value is a empty string.
     pub fn to_ident(&self) -> Result<Ident, ParserError> {
         if self.value.is_empty() {
-            parser_err!(format!("zero-length delimited identifier at or near \"{self}\""))
+            parser_err!(format!(
+                "zero-length delimited identifier at or near \"{self}\""
+            ))
         } else {
             Ok(Ident {
                 value: self.value.clone(),

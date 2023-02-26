@@ -108,7 +108,8 @@ impl Ident {
     }
 
     /// Create a new quoted identifier with the given quote and value.
-    /// the given value must not be a empty string and the given quote must be in ['\'', '"', '`', '['].
+    /// the given value must not be a empty string and the given quote must be in ['\'', '"', '`',
+    /// '['].
     pub fn with_quote_unchecked<S>(quote: char, value: S) -> Self
     where
         S: Into<String>,

@@ -72,7 +72,10 @@ fn parse_insert_values() {
                 assert_eq!(table_name.to_string(), expected_table_name);
                 assert_eq!(columns.len(), expected_columns.len());
                 for (index, column) in columns.iter().enumerate() {
-                    assert_eq!(column, &Ident::new_unchecked(expected_columns[index].clone()));
+                    assert_eq!(
+                        column,
+                        &Ident::new_unchecked(expected_columns[index].clone())
+                    );
                 }
                 match &source.body {
                     SetExpr::Values(Values(values)) => assert_eq!(values.as_slice(), expected_rows),
@@ -804,9 +807,9 @@ fn parse_binary_some() {
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new_unchecked(
-                "b"
-            ))))),
+            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(
+                Ident::new_unchecked("b")
+            )))),
         }),
         select.projection[0]
     );
@@ -819,9 +822,9 @@ fn parse_binary_all() {
         SelectItem::UnnamedExpr(Expr::BinaryOp {
             left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Eq,
-            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new_unchecked(
-                "b"
-            ))))),
+            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(
+                Ident::new_unchecked("b")
+            )))),
         }),
         select.projection[0]
     );
@@ -1917,12 +1920,12 @@ fn parse_aggregate_with_order_by() {
         &Expr::Function(Function {
             name: ObjectName(vec![Ident::new_unchecked("STRING_AGG")]),
             args: vec![
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new_unchecked(
-                    "a"
-                )))),
-                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new_unchecked(
-                    "b"
-                )))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                    Ident::new_unchecked("a")
+                ))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(
+                    Ident::new_unchecked("b")
+                ))),
             ],
             over: None,
             distinct: false,
@@ -3135,7 +3138,10 @@ fn parse_drop_table() {
         Statement::Drop(stmt) => {
             assert!(!stmt.if_exists);
             assert_eq!(ObjectType::Table, stmt.object_type);
-            assert_eq!(ObjectName(vec![Ident::new_unchecked("foo")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("foo")]),
+                stmt.object_name
+            );
             assert_eq!(stmt.drop_mode, AstOption::None);
         }
         _ => unreachable!(),
@@ -3146,7 +3152,10 @@ fn parse_drop_table() {
         Statement::Drop(stmt) => {
             assert!(stmt.if_exists);
             assert_eq!(ObjectType::Table, stmt.object_type);
-            assert_eq!(ObjectName(vec![Ident::new_unchecked("foo")]), stmt.object_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("foo")]),
+                stmt.object_name
+            );
             assert_eq!(stmt.drop_mode, AstOption::Some(DropMode::Cascade));
         }
         _ => unreachable!(),
@@ -3200,7 +3209,10 @@ fn parse_create_user() {
     let sql = "CREATE USER foo WITH NOSUPERUSER CREATEDB LOGIN PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'";
     match verified_stmt(sql) {
         Statement::CreateUser(stmt) => {
-            assert_eq!(ObjectName(vec![Ident::new_unchecked("foo")]), stmt.user_name);
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("foo")]),
+                stmt.user_name
+            );
             assert_eq!(
                 stmt.with_options.0,
                 vec![
@@ -3602,7 +3614,10 @@ fn parse_grant() {
                         Action::Select { columns: None },
                         Action::Insert { columns: None },
                         Action::Update {
-                            columns: Some(vec![Ident::new_unchecked("shape"), Ident::new_unchecked("size")])
+                            columns: Some(vec![
+                                Ident::new_unchecked("shape"),
+                                Ident::new_unchecked("size")
+                            ])
                         },
                         Action::Execute,
                         Action::Temporary,
