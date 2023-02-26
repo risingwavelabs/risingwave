@@ -21,13 +21,13 @@ use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
-use crate::source::kafka::KafkaProperties;
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReader,
@@ -36,7 +36,7 @@ use crate::source::{
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
 
 pub struct KafkaSplitReader {
-    consumer: StreamConsumer<DefaultConsumerContext>,
+    consumer: StreamConsumer<PrivateLinkConsumerContext>,
     start_offset: Option<i64>,
     stop_offset: Option<i64>,
     bytes_per_second: usize,
@@ -63,6 +63,7 @@ impl SplitReader for KafkaSplitReader {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.common.brokers;
+        let private_links = properties.common.private_link_dns_names.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
@@ -85,9 +86,10 @@ impl SplitReader for KafkaSplitReader {
             );
         }
 
-        let consumer: StreamConsumer = config
+        let client_ctx = PrivateLinkConsumerContext::new(bootstrap_servers, &private_links);
+        let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
-            .create_with_context(DefaultConsumerContext)
+            .create_with_context(client_ctx)
             .await
             .map_err(|e| anyhow!("failed to create kafka consumer: {}", e))?;
 

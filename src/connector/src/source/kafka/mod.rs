@@ -17,10 +17,12 @@ use std::time::Duration;
 use serde::Deserialize;
 
 pub mod enumerator;
+pub mod private_link;
 pub mod source;
 pub mod split;
 
 pub use enumerator::*;
+pub use private_link::*;
 pub use source::*;
 pub use split::*;
 

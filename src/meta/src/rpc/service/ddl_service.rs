@@ -681,11 +681,13 @@ where
                 )));
             }
 
-            // overwrite broker addresses in source properties with private link dns entries
+            // save private link dns names into source properties, which
+            // will be extracted into KafkaProperties
             tracing::info!("private link broker address: {:?}", dns_entries);
+            const PRIVATE_LINK_DNS_KEY: &str = "private.links.dns.names";
             source
                 .properties
-                .insert(broker_key.to_string(), dns_entries.join(","));
+                .insert(PRIVATE_LINK_DNS_KEY.to_string(), dns_entries.join(","));
 
             // store the rewrite mapping in Source
             let broker_rewrite_map = broker_addrs

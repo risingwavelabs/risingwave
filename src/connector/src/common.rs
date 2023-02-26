@@ -40,6 +40,9 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
+    #[serde(rename = "private.links.dns.names")]
+    pub private_link_dns_names: Option<String>,
+
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
