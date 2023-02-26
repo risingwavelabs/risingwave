@@ -359,6 +359,8 @@ pub enum Expr {
     Nested(Box<Expr>),
     /// A literal value, such as string, number, date or NULL
     Value(Value),
+    /// Parameter Symbol e.g. `$1`, `$1::int`
+    Parameter { index: u64 },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
@@ -465,6 +467,7 @@ impl fmt::Display for Expr {
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),
             Expr::Value(v) => write!(f, "{}", v),
+            Expr::Parameter { index } => write!(f, "${}", index),
             Expr::TypedString { data_type, value } => {
                 write!(f, "{}", data_type)?;
                 write!(f, " '{}'", &value::escape_single_quote_string(value))

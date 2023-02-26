@@ -1049,3 +1049,53 @@ fn parse_array() {
         )),
     );
 }
+
+#[test]
+fn parse_param_symbol() {
+    let select = verified_only_select("SELECT $1");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::Parameter { index: 1 }),
+        select.projection[0]
+    );
+
+    let select = verified_only_select("SELECT *, $2 FROM t WHERE a = $1");
+    assert_eq!(
+        Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Parameter { index: 1 })
+        },
+        select.selection.unwrap()
+    );
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::Parameter { index: 2 }),
+        select.projection[1]
+    );
+
+    let select = verified_only_select("SELECT CAST($4096 AS INT)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::Cast {
+            expr: Box::new(Expr::Parameter { index: 4096 }),
+            data_type: DataType::Int
+        }),
+        select.projection[0]
+    );
+
+    let select = verified_only_select("SELECT * FROM t WHERE a = CAST($1024 AS BIGINT)");
+    assert_eq!(
+        Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::Cast {
+                expr: Box::new(Expr::Parameter { index: 1024 }),
+                data_type: DataType::BigInt
+            })
+        },
+        select.selection.unwrap()
+    );
+
+    let query = verified_query("VALUES ($1)");
+    if let SetExpr::Values(values) = query.body {
+        assert_eq!(values.0[0][0], Expr::Parameter { index: 1 });
+    }
+}
