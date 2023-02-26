@@ -149,7 +149,7 @@
   sql: |
     create table t1(v1 int, v2 int);
     create table t2(v3 int, v4 int);
-    with cte as (select * from t1 join t2) select * from cte where v1 is null AND v2 is null AND v3 is null AND v4 is null;
+    with cte as (select * from t1 cross join t2) select * from cte where v1 is null AND v2 is null AND v3 is null AND v4 is null;
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) AND IsNull(t2.v3) AND IsNull(t2.v4) }
@@ -256,7 +256,7 @@
   sql: |
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone);
-    select * from t1 join t2 where v1 = v2 and v1 > now() + '1 hr';
+    select * from t1 cross join t2 where v1 = v2 and v1 > now() + '1 hr';
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
     ├─LogicalFilter { predicate: (t1.v1 > (Now + '01:00:00':Interval)) }
@@ -288,7 +288,7 @@
   sql: |
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone, v3 interval);
-    select * from t1 join t2 where v1 = v2 and v1 > now() + v3;
+    select * from t1 cross join t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan: |
     LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
@@ -314,7 +314,7 @@
   sql: |
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
-    select * from t1 join t2 where t1.v1 = t2.v1 and t1.v1 > 1000;
+    select * from t1 cross join t2 where t1.v1 = t2.v1 and t1.v1 > 1000;
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v1), output: all }
     ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v1 > 1000:Int32) }
@@ -342,7 +342,7 @@
   sql: |
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone);
-    select * from t1 join t2 where v1 = v2 and v1 > now();
+    select * from t1 cross join t2 where v1 = v2 and v1 > now();
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
     ├─LogicalFilter { predicate: (t1.v1 > Now) }

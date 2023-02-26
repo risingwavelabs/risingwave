@@ -2691,40 +2691,35 @@
                     └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: "no check" }
-    └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)] }
-      └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(partsupp.ps_suppkey)] }
+    └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
+      └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(distinct partsupp.ps_suppkey)] }
         └─StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
-          └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
-            └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [count] }
-              └─StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
-                ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
-                |   ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-                |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                |   └─StreamExchange { dist: HashShard(part.p_partkey) }
-                |     └─StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-                |       └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-                └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                  └─StreamProject { exprs: [supplier.s_suppkey] }
-                    └─StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-                      └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+          └─StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
+            ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+            | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
+            |   ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+            |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+            |   └─StreamExchange { dist: HashShard(part.p_partkey) }
+            |     └─StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND (Not((part.p_type >= 'SMALL PLATED':Varchar)) OR Not((part.p_type < 'SMALL PLATEE':Varchar))) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
+            |       └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+            └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
+              └─StreamProject { exprs: [supplier.s_suppkey] }
+                └─StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
+                  └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [p_brand, p_type, p_size, supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size], pk_conflict: "no check" }
           materialized table: 4294967294
-        StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(partsupp.ps_suppkey)] }
-          StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(partsupp.ps_suppkey)] }
+        StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
+          StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count, count(distinct partsupp.ps_suppkey)] }
               result table: 0, state tables: []
             StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
-      StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey] }
-        StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey], aggs: [count] }
-            result table: 1, state tables: []
-          StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
-              left table: 2, right table 4, left degree table: 3, right degree table: 5,
-            StreamExchange Hash([0]) from 2
-            StreamExchange Hash([0]) from 5
+      StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
+          left table: 2, right table 4, left degree table: 3, right degree table: 5,
+        StreamExchange Hash([0]) from 2
+        StreamExchange Hash([0]) from 5
 
     Fragment 2
       StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
@@ -2750,8 +2745,7 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [part_p_brand, part_p_type, part_p_size, count, count(partsupp_ps_suppkey)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4], distribution key: [0, 1, 2] }
-     Table 1 { columns: [part_p_brand, part_p_type, part_p_size, partsupp_ps_suppkey, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [3] }
+     Table 0 { columns: [part_p_brand, part_p_type, part_p_size, count, count(distinct partsupp_ps_suppkey)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4], distribution key: [0, 1, 2] }
      Table 2 { columns: [partsupp_ps_suppkey, part_p_brand, part_p_type, part_p_size, partsupp_ps_partkey, part_p_partkey], primary key: [$0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
      Table 3 { columns: [partsupp_ps_suppkey, partsupp_ps_partkey, part_p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
      Table 4 { columns: [supplier_s_suppkey], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
@@ -2814,24 +2808,22 @@
     └─BatchSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
-          └─BatchProject { exprs: [lineitem.l_extendedprice] }
-            └─BatchFilter { predicate: (lineitem.l_quantity < $expr1) }
-              └─BatchHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
-                ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                | └─BatchLookupJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey AND (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar), output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey] }
-                |   └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_partkey) }
-                |     └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice], distribution: SomeShard }
-                └─BatchProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity))) as $expr1] }
-                  └─BatchHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
-                    └─BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
-                      ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
-                      | └─BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
-                      |   └─BatchProject { exprs: [part.p_partkey] }
-                      |     └─BatchFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                      |       └─BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], distribution: UpstreamHashShard(part.p_partkey) }
-                      └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
-                        └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
-                          └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
+          └─BatchHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey AND (lineitem.l_quantity < $expr1), output: [lineitem.l_extendedprice] }
+            ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+            | └─BatchLookupJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey AND (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar), output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey] }
+            |   └─BatchExchange { order: [], dist: UpstreamHashShard(lineitem.l_partkey) }
+            |     └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice], distribution: SomeShard }
+            └─BatchProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity))) as $expr1] }
+              └─BatchHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity)] }
+                └─BatchHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity] }
+                  ├─BatchExchange { order: [], dist: HashShard(part.p_partkey) }
+                  | └─BatchSortAgg { group_key: [part.p_partkey], aggs: [] }
+                  |   └─BatchProject { exprs: [part.p_partkey] }
+                  |     └─BatchFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
+                  |       └─BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], distribution: UpstreamHashShard(part.p_partkey) }
+                  └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey) }
+                    └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) }
+                      └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [avg_yearly], pk_columns: [], pk_conflict: "no check" }
     └─StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32) as $expr2] }
@@ -3322,24 +3314,22 @@
         |   └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
         |     └─BatchScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], distribution: UpstreamHashShard(supplier.s_suppkey) }
         └─BatchExchange { order: [], dist: HashShard(partsupp.ps_suppkey) }
-          └─BatchProject { exprs: [partsupp.ps_suppkey] }
-            └─BatchFilter { predicate: ($expr1 > $expr2) }
-              └─BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM partsupp.ps_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM partsupp.ps_suppkey, output: all }
-                ├─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                | └─BatchProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty::Decimal as $expr1] }
-                |   └─BatchLookupJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_name >= 'forest':Varchar) AND (part.p_name < 'foresu':Varchar), output: all }
-                |     └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
-                |       └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                └─BatchProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity)) as $expr2] }
-                  └─BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
-                    └─BatchHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
-                      ├─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                      | └─BatchSortAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
-                      |   └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                      └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
-                        └─BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }
-                          └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) }
-                            └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], distribution: SomeShard }
+          └─BatchHashJoin { type: Inner, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM partsupp.ps_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM partsupp.ps_suppkey AND ($expr1 > $expr2), output: [partsupp.ps_suppkey] }
+            ├─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+            | └─BatchProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty::Decimal as $expr1] }
+            |   └─BatchLookupJoin { type: LeftSemi, predicate: partsupp.ps_partkey = part.p_partkey AND (part.p_name >= 'forest':Varchar) AND (part.p_name < 'foresu':Varchar), output: all }
+            |     └─BatchExchange { order: [], dist: UpstreamHashShard(partsupp.ps_partkey) }
+            |       └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+            └─BatchProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, (0.5:Decimal * sum(lineitem.l_quantity)) as $expr2] }
+              └─BatchHashAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [sum(lineitem.l_quantity)] }
+                └─BatchHashJoin { type: LeftOuter, predicate: partsupp.ps_partkey IS NOT DISTINCT FROM lineitem.l_partkey AND partsupp.ps_suppkey IS NOT DISTINCT FROM lineitem.l_suppkey, output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
+                  ├─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                  | └─BatchSortAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
+                  |   └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                  └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
+                    └─BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }
+                      └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) }
+                        └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden)], pk_columns: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], order_descs: [s_name, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], pk_conflict: "no check" }
     └─StreamHashJoin { type: LeftSemi, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [supplier.s_name, supplier.s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }

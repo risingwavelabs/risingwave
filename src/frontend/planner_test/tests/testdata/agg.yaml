@@ -779,13 +779,10 @@
             └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a, distinct_b_num, sum_c], pk_columns: [a], pk_conflict: "no check" }
-    └─StreamProject { exprs: [t.a, count(t.b), sum(sum(t.c))] }
-      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b), sum(sum(t.c))] }
+    └─StreamProject { exprs: [t.a, count(distinct t.b), sum(t.c)] }
+      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(distinct t.b), sum(t.c)] }
         └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamProject { exprs: [t.a, t.b, sum(t.c)] }
-            └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count, sum(t.c)] }
-              └─StreamExchange { dist: HashShard(t.a, t.b) }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct agg and non-disintct agg with intersected argument
   sql: |
     create table t(a int, b int, c int);
@@ -805,14 +802,10 @@
               └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a, distinct_b_num, distinct_c_sum, sum_c], pk_columns: [a], pk_conflict: "no check" }
-    └─StreamProject { exprs: [t.a, count(t.b) filter((flag = 1:Int64)), count(t.c) filter((flag = 0:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
-      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b) filter((flag = 1:Int64)), count(t.c) filter((flag = 0:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
+    └─StreamProject { exprs: [t.a, count(distinct t.b), count(distinct t.c), sum(t.c)] }
+      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(distinct t.b), count(distinct t.c), sum(t.c)] }
         └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamProject { exprs: [t.a, t.b, t.c, flag, sum(t.c)] }
-            └─StreamHashAgg { group_key: [t.a, t.b, t.c, flag], aggs: [count, sum(t.c)] }
-              └─StreamExchange { dist: HashShard(t.a, t.b, t.c, flag) }
-                └─StreamExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
-                  └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: distinct agg with filter
   sql: |
     create table t(a int, b int, c int);
@@ -830,13 +823,10 @@
             └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [a, count, sum], pk_columns: [a], pk_conflict: "no check" }
-    └─StreamProject { exprs: [t.a, count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
-      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
+    └─StreamProject { exprs: [t.a, count(distinct t.b) filter((t.b < 100:Int32)), sum(t.c)] }
+      └─StreamHashAgg { group_key: [t.a], aggs: [count, count(distinct t.b) filter((t.b < 100:Int32)), sum(t.c)] }
         └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamProject { exprs: [t.a, t.b, count filter((t.b < 100:Int32)), sum(t.c)] }
-            └─StreamHashAgg { group_key: [t.a, t.b], aggs: [count, count filter((t.b < 100:Int32)), sum(t.c)] }
-              └─StreamExchange { dist: HashShard(t.a, t.b) }
-                └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: non-distinct agg with filter
   sql: |
     create table t(a int, b int, c int);
