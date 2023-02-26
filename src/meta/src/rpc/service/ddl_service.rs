@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_connector::common::AwsPrivateLinks;
-use risingwave_connector::source::kafka::KAFKA_BROKER_KEY;
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -95,6 +95,15 @@ fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
         .unwrap_or(&"".to_string())
         .to_lowercase()
         .eq(KAFKA_CONNECTOR)
+}
+
+#[inline(always)]
+fn kafka_props_broker_key(with_properties: &HashMap<String, String>) -> &str {
+    if with_properties.contains_key(KAFKA_PROPS_BROKER_KEY) {
+        KAFKA_PROPS_BROKER_KEY
+    } else {
+        KAFKA_PROPS_BROKER_KEY_ALIAS
+    }
 }
 
 #[async_trait::async_trait]
@@ -626,7 +635,7 @@ where
 {
     async fn resolve_stream_source_info(&self, source: &mut Source) -> MetaResult<()> {
         let mut dns_entries = vec![];
-        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private_links";
+        const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private.links";
         if let Some(prop) = source.properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
             let links: AwsPrivateLinks = serde_json::from_str(prop).unwrap();
 
@@ -653,12 +662,13 @@ where
 
         // store the rewrite rules in Source
         if is_kafka_source(&source.properties) {
+            let broker_key = kafka_props_broker_key(&source.properties);
             let servers = source
                 .properties
-                .get(KAFKA_BROKER_KEY)
+                .get(broker_key)
+                .cloned()
                 .ok_or(MetaError::from(anyhow!(
-                    "Must specify '{}' in WITH clause",
-                    KAFKA_BROKER_KEY
+                    "Must specify brokers in WITH clause",
                 )))?;
 
             let broker_addrs = servers.split(',').collect::<Vec<&str>>();
@@ -670,18 +680,24 @@ where
                     broker_addrs,
                 )));
             }
+
+            // overwrite broker addresses in source properties with private link dns entries
+            tracing::info!("private link broker address: {:?}", dns_entries);
+            source
+                .properties
+                .insert(broker_key.to_string(), dns_entries.join(","));
+
+            // store the rewrite mapping in Source
             let broker_rewrite_map = broker_addrs
                 .into_iter()
                 .map(|str| str.to_string())
                 .zip_eq(dns_entries.into_iter())
                 .collect::<HashMap<String, String>>();
 
-            tracing::info!("broker_rewrite_map: {:?}", broker_rewrite_map);
             if let Some(info) = source.info.as_mut() {
                 info.kafka_rewrite_map = broker_rewrite_map;
             }
         }
-
         Ok(())
     }
 

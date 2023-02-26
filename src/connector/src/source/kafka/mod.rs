@@ -26,7 +26,8 @@ pub use split::*;
 
 use crate::common::KafkaCommon;
 pub const KAFKA_CONNECTOR: &str = "kafka";
-pub const KAFKA_BROKER_KEY: &str = "properties.bootstrap.server";
+pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
+pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {
