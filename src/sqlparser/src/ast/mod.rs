@@ -45,7 +45,6 @@ pub use self::statement::*;
 pub use self::value::{DateTimeField, TrimWhereField, Value};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
-use crate::tokenizer::Word;
 
 pub struct DisplaySeparated<'a, T>
 where
@@ -97,10 +96,8 @@ pub struct Ident {
 
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
-    /// In situations like construct a identifier from existing object
-    /// names, we may prefer to use this 'cause the input string is
-    /// guanteed to be not empty.
-    pub fn new_safe<S>(value: S) -> Self
+    /// the given value must not be a empty string.
+    pub fn new_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
     {
@@ -110,23 +107,9 @@ impl Ident {
         }
     }
 
-    /// Create a new identifier from word
-    pub fn new_from_word(w: &Word) -> Result<Ident, ParserError> {
-        if w.value.is_empty() {
-            Err(ParserError::ParserError(format!(
-                "zero-length delimited identifier at or near \"{w}\""
-            )))
-        } else {
-            Ok(Ident {
-                value: w.value.clone(),
-                quote_style: w.quote_style,
-            })
-        }
-    }
-
     /// Create a new quoted identifier with the given quote and value.
-    /// the inputs are guanteed to be legal.
-    pub fn new_with_quote_safe<S>(quote: char, value: S) -> Self
+    /// the given value must not be a empty string and the given quote must be in ['\'', '"', '`', '['].
+    pub fn with_quote_unchecked<S>(quote: char, value: S) -> Self
     where
         S: Into<String>,
     {
@@ -138,7 +121,7 @@ impl Ident {
 
     /// Create a new quoted identifier with the given quote and value.
     /// returns ParserError when the given string is empty or the given quote is illegal.
-    pub fn new_with_quote_check<S>(quote: char, value: S) -> Result<Ident, ParserError>
+    pub fn with_quote_check<S>(quote: char, value: S) -> Result<Ident, ParserError>
     where
         S: Into<String>,
     {
@@ -2266,27 +2249,27 @@ mod tests {
     fn test_grouping_sets_display() {
         // a and b in different group
         let grouping_sets = Expr::GroupingSets(vec![
-            vec![Expr::Identifier(Ident::new_safe("a"))],
-            vec![Expr::Identifier(Ident::new_safe("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("GROUPING SETS ((a), (b))", format!("{}", grouping_sets));
 
         // a and b in the same group
         let grouping_sets = Expr::GroupingSets(vec![vec![
-            Expr::Identifier(Ident::new_safe("a")),
-            Expr::Identifier(Ident::new_safe("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("GROUPING SETS ((a, b))", format!("{}", grouping_sets));
 
         // (a, b) and (c, d) in different group
         let grouping_sets = Expr::GroupingSets(vec![
             vec![
-                Expr::Identifier(Ident::new_safe("a")),
-                Expr::Identifier(Ident::new_safe("b")),
+                Expr::Identifier(Ident::new_unchecked("a")),
+                Expr::Identifier(Ident::new_unchecked("b")),
             ],
             vec![
-                Expr::Identifier(Ident::new_safe("c")),
-                Expr::Identifier(Ident::new_safe("d")),
+                Expr::Identifier(Ident::new_unchecked("c")),
+                Expr::Identifier(Ident::new_unchecked("d")),
             ],
         ]);
         assert_eq!(
@@ -2297,56 +2280,56 @@ mod tests {
 
     #[test]
     fn test_rollup_display() {
-        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new_safe("a"))]]);
+        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("ROLLUP (a)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![vec![
-            Expr::Identifier(Ident::new_safe("a")),
-            Expr::Identifier(Ident::new_safe("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("ROLLUP ((a, b))", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new_safe("a"))],
-            vec![Expr::Identifier(Ident::new_safe("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("ROLLUP (a, b)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new_safe("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new_safe("b")),
-                Expr::Identifier(Ident::new_safe("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new_safe("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("ROLLUP (a, (b, c), d)", format!("{}", rollup));
     }
 
     #[test]
     fn test_cube_display() {
-        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new_safe("a"))]]);
+        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("CUBE (a)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![vec![
-            Expr::Identifier(Ident::new_safe("a")),
-            Expr::Identifier(Ident::new_safe("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("CUBE ((a, b))", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new_safe("a"))],
-            vec![Expr::Identifier(Ident::new_safe("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("CUBE (a, b)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new_safe("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new_safe("b")),
-                Expr::Identifier(Ident::new_safe("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new_safe("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("CUBE (a, (b, c), d)", format!("{}", cube));
     }
@@ -2354,7 +2337,7 @@ mod tests {
     #[test]
     fn test_array_index_display() {
         let array_index = Expr::ArrayIndex {
-            obj: Box::new(Expr::Identifier(Ident::new_safe("v1"))),
+            obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));

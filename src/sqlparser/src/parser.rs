@@ -2505,7 +2505,7 @@ impl Parser {
         match self.next_token() {
             Token::Word(Word { value, keyword, .. }) if keyword == Keyword::NoKeyword => {
                 if self.peek_token() == Token::LParen {
-                    return self.parse_function(ObjectName(vec![Ident::new_safe(value)]));
+                    return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
                 }
                 Ok(Expr::Value(Value::SingleQuotedString(value)))
             }
@@ -2670,7 +2670,7 @@ impl Parser {
             //    character. When it sees such a <literal>, your DBMS will
             //    ignore the <separator> and treat the multiple strings as
             //    a single <literal>."
-            Token::SingleQuotedString(s) => Ok(Some(Ident::new_with_quote_safe('\'', s))),
+            Token::SingleQuotedString(s) => Ok(Some(Ident::with_quote_unchecked('\'', s))),
             not_an_ident => {
                 if after_as {
                     return self.expected("an identifier after AS", not_an_ident);
@@ -3996,8 +3996,16 @@ impl Parser {
 }
 
 impl Word {
+    /// Convert a Word to a Identifier, return ParserError when the Word's value is a empty string.
     pub fn to_ident(&self) -> Result<Ident, ParserError> {
-        Ident::new_from_word(self)
+        if self.value.is_empty() {
+            parser_err!(format!("zero-length delimited identifier at or near \"{self}\""))
+        } else {
+            Ok(Ident {
+                value: self.value.clone(),
+                quote_style: self.quote_style,
+            })
+        }
     }
 }
 
