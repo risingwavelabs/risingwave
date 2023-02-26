@@ -127,7 +127,7 @@ impl MetaClient {
         Ok(resp.connection_id)
     }
 
-    pub async fn list_connections(&self, _name: &str) -> Result<Vec<Connection>> {
+    pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
         let request = ListConnectionRequest {};
         let resp = self.inner.list_connections(request).await?;
         Ok(resp.connections)

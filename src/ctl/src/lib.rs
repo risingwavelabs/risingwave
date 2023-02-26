@@ -192,7 +192,19 @@ enum MetaCommands {
     /// backup meta by taking a meta snapshot
     BackupMeta,
     /// delete meta snapshots
-    DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
+    DeleteMetaSnapshots {
+        snapshot_ids: Vec<u64>,
+    },
+
+    CreateConnection {
+        #[clap(long, default_value = "aws")]
+        provider: String,
+        #[clap(long)]
+        service_name: String,
+        #[clap(long)]
+        availability_zones: String,
+    },
+    ListConnections,
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -294,6 +306,17 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
+        }
+        Commands::Meta(MetaCommands::CreateConnection {
+            provider,
+            service_name,
+            availability_zones,
+        }) => {
+            cmd_impl::meta::create_connection(context, provider, service_name, availability_zones)
+                .await?
+        }
+        Commands::Meta(MetaCommands::ListConnections) => {
+            cmd_impl::meta::list_connections(context).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

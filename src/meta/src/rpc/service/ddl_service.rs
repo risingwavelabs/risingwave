@@ -592,7 +592,7 @@ where
                 let connection = Connection {
                     id,
                     name: link.service_name.clone(),
-                    payload: Some(connection::Payload::PrivateLinkService(private_link_svc)),
+                    info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 
                 // save private link info to catalog
@@ -637,9 +637,9 @@ where
                     .get_connection_by_name(&link.service_name)
                     .await?;
 
-                if let Some(payload) = conn.payload {
-                    match payload {
-                        connection::Payload::PrivateLinkService(svc) => {
+                if let Some(info) = conn.info {
+                    match info {
+                        connection::Info::PrivateLinkService(svc) => {
                             link.availability_zones.iter().for_each(|az| {
                                 svc.dns_entries.get(az).map_or((), |dns_name| {
                                     dns_entries.push(format!("{}:{}", dns_name.clone(), link.port));

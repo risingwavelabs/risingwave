@@ -14,10 +14,12 @@
 
 mod backup_meta;
 mod cluster_info;
+mod connection;
 mod pause_resume;
 mod reschedule;
 
 pub use backup_meta::*;
 pub use cluster_info::*;
+pub use connection::*;
 pub use pause_resume::*;
 pub use reschedule::*;

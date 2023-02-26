@@ -90,7 +90,7 @@ message Connection {
 
   uint32 id = 1;
   string name = 2;
-  oneof payload {
+  oneof info {
     PrivateLinkService private_link_service = 3;
   }
 
