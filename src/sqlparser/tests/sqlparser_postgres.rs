@@ -1061,7 +1061,7 @@ fn parse_param_symbol() {
     let select = verified_only_select("SELECT *, $2 FROM t WHERE a = $1");
     assert_eq!(
         Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Eq,
             right: Box::new(Expr::Parameter { index: 1 })
         },
@@ -1084,7 +1084,7 @@ fn parse_param_symbol() {
     let select = verified_only_select("SELECT * FROM t WHERE a = CAST($1024 AS BIGINT)");
     assert_eq!(
         Expr::BinaryOp {
-            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            left: Box::new(Expr::Identifier(Ident::new_unchecked("a"))),
             op: BinaryOperator::Eq,
             right: Box::new(Expr::Cast {
                 expr: Box::new(Expr::Parameter { index: 1024 }),
