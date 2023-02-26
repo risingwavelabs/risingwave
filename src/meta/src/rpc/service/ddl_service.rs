@@ -36,7 +36,7 @@ use crate::manager::{
     MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
 };
 use crate::model::{StreamEnvironment, TableFragments};
-use crate::rpc::cloud_platform::AwsEc2Client;
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
@@ -662,6 +662,14 @@ where
                 )))?;
 
             let broker_addrs = servers.split(',').collect::<Vec<&str>>();
+            if broker_addrs.len() != dns_entries.len() {
+                return Err(MetaError::from(anyhow!(
+                    "The number of private link dns entries does not match the number of kafka brokers.\
+                     dns entries: {:?}, kafka brokers: {:?}",
+                    dns_entries,
+                    broker_addrs,
+                )));
+            }
             let broker_rewrite_map = broker_addrs
                 .into_iter()
                 .map(|str| str.to_string())

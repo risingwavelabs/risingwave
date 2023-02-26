@@ -52,7 +52,7 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamManager,
 };
-use crate::rpc::cloud_platform::AwsEc2Client;
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::backup_service::BackupServiceImpl;

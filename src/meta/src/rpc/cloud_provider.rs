@@ -41,12 +41,16 @@ impl AwsEc2Client {
             .create_vpc_endpoint(&self.vpc_id, service_name, &subnet_ids)
             .await?;
 
-        // todo: convert dns_names to a map index by availability zone
         let mut az_to_dns_map = HashMap::new();
-        for dns_name in dns_names {
-            let az = dns_name.split('.').next().unwrap();
-            az_to_dns_map.insert(az.to_string(), dns_name);
+        for dns_name in dns_names.iter() {
+            for az in availability_zones {
+                if dns_name.contains(az) {
+                    az_to_dns_map.insert(az.clone(), dns_name.clone());
+                    break;
+                }
+            }
         }
+        debug_assert!(az_to_dns_map.len() == availability_zones.len());
         Ok(PrivateLinkService {
             endpoint_id,
             dns_entries: az_to_dns_map,

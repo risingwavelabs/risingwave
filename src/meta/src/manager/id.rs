@@ -164,6 +164,7 @@ pub struct IdGeneratorManager<S> {
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
     compaction_group: Arc<StoredIdGenerator<S>>,
+    connection: Arc<StoredIdGenerator<S>>,
 }
 
 impl<S> IdGeneratorManager<S>
@@ -220,6 +221,9 @@ where
                 )
                 .await,
             ),
+            connection: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "connection", None).await,
+            ),
         }
     }
 
@@ -240,6 +244,7 @@ where
             IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
+            IdCategory::Connection => &self.connection,
             _ => unreachable!(),
         }
     }
