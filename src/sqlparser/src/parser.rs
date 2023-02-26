@@ -38,6 +38,7 @@ pub enum ParserError {
 }
 
 // Use `Parser::expected` instead, if possible
+#[macro_export]
 macro_rules! parser_err {
     ($MSG:expr) => {
         Err(ParserError::ParserError($MSG.to_string()))
@@ -299,7 +300,7 @@ impl Parser {
                 // Since there's no parenthesis, `w` must be a column or a table
                 // So what follows must be dot-delimited identifiers, e.g. `a.b.c.*`
                 let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
-                return self.word_concat_wildcard_expr(w.to_ident(), wildcard_expr);
+                return self.word_concat_wildcard_expr(w.to_ident()?, wildcard_expr);
             }
             Token::Mul => {
                 return Ok(WildcardOrExpr::Wildcard);
@@ -391,7 +392,7 @@ impl Parser {
         let mut id_parts = vec![];
         while self.consume_token(&Token::Period) {
             match self.next_token() {
-                Token::Word(w) => id_parts.push(w.to_ident()),
+                Token::Word(w) => id_parts.push(w.to_ident()?),
                 Token::Mul => {
                     return if id_parts.is_empty() {
                         Ok(WildcardOrExpr::Wildcard)
@@ -498,10 +499,10 @@ impl Parser {
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
                     Token::LParen | Token::Period => {
-                        let mut id_parts: Vec<Ident> = vec![w.to_ident()];
+                        let mut id_parts: Vec<Ident> = vec![w.to_ident()?];
                         while self.consume_token(&Token::Period) {
                             match self.next_token() {
-                                Token::Word(w) => id_parts.push(w.to_ident()),
+                                Token::Word(w) => id_parts.push(w.to_ident()?),
                                 unexpected => {
                                     return self
                                         .expected("an identifier or a '*' after '.'", unexpected);
@@ -516,7 +517,7 @@ impl Parser {
                             Ok(Expr::CompoundIdentifier(id_parts))
                         }
                     }
-                    _ => Ok(Expr::Identifier(w.to_ident())),
+                    _ => Ok(Expr::Identifier(w.to_ident()?)),
                 },
             }, // End of Token::Word
 
@@ -619,7 +620,7 @@ impl Parser {
         while self.consume_token(&Token::Period) {
             match self.next_token() {
                 Token::Word(w) => {
-                    idents.push(w.to_ident());
+                    idents.push(w.to_ident()?);
                 }
                 unexpected => {
                     return self.expected("an identifier after '.'", unexpected);
@@ -2474,11 +2475,11 @@ impl Parser {
         let token = self.peek_token();
         match (self.parse_value(), token) {
             (Ok(value), _) => Ok(SetVariableValue::Literal(value)),
-            (Err(_), Token::Word(ident)) => {
-                if ident.keyword == Keyword::DEFAULT {
+            (Err(_), Token::Word(w)) => {
+                if w.keyword == Keyword::DEFAULT {
                     Ok(SetVariableValue::Default)
                 } else {
-                    Ok(SetVariableValue::Ident(ident.to_ident()))
+                    Ok(SetVariableValue::Ident(w.to_ident()?))
                 }
             }
             (Err(_), unexpected) => self.expected("variable value", unexpected),
@@ -2536,7 +2537,7 @@ impl Parser {
         match self.next_token() {
             Token::Word(Word { value, keyword, .. }) if keyword == Keyword::NoKeyword => {
                 if self.peek_token() == Token::LParen {
-                    return self.parse_function(ObjectName(vec![Ident::new(value)]));
+                    return self.parse_function(ObjectName(vec![Ident::new_unchecked(value)]));
                 }
                 Ok(Expr::Value(Value::SingleQuotedString(value)))
             }
@@ -2687,7 +2688,7 @@ impl Parser {
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
             Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
-                Ok(Some(w.to_ident()))
+                Ok(Some(w.to_ident()?))
             }
             // MSSQL supports single-quoted strings as aliases for columns
             // We accept them as table aliases too, although MSSQL does not.
@@ -2701,7 +2702,7 @@ impl Parser {
             //    character. When it sees such a <literal>, your DBMS will
             //    ignore the <separator> and treat the multiple strings as
             //    a single <literal>."
-            Token::SingleQuotedString(s) => Ok(Some(Ident::with_quote('\'', s))),
+            Token::SingleQuotedString(s) => Ok(Some(Ident::with_quote_unchecked('\'', s))),
             not_an_ident => {
                 if after_as {
                     return self.expected("an identifier after AS", not_an_ident);
@@ -2752,7 +2753,7 @@ impl Parser {
                         break;
                     }
 
-                    idents.push(w.to_ident());
+                    idents.push(w.to_ident()?);
                 }
                 Token::EOF | Token::Eq => break,
                 _ => {}
@@ -2770,7 +2771,7 @@ impl Parser {
         loop {
             match self.next_token() {
                 Token::Word(w) => {
-                    idents.push(w.to_ident());
+                    idents.push(w.to_ident()?);
                 }
                 Token::EOF => break,
                 _ => {}
@@ -2783,7 +2784,7 @@ impl Parser {
     /// Parse a simple one-word identifier (possibly quoted, possibly a keyword)
     pub fn parse_identifier(&mut self) -> Result<Ident, ParserError> {
         match self.next_token() {
-            Token::Word(w) => Ok(w.to_ident()),
+            Token::Word(w) => Ok(w.to_ident()?),
             unexpected => self.expected("identifier", unexpected),
         }
     }
@@ -2794,7 +2795,7 @@ impl Parser {
             Token::Word(w) => {
                 match keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&w.keyword) {
                     true => parser_err!(format!("syntax error at or near \"{w}\"")),
-                    false => Ok(w.to_ident()),
+                    false => Ok(w.to_ident()?),
                 }
             }
             unexpected => self.expected("identifier", unexpected),
@@ -4031,10 +4032,17 @@ impl Parser {
 }
 
 impl Word {
-    pub fn to_ident(&self) -> Ident {
-        Ident {
-            value: self.value.clone(),
-            quote_style: self.quote_style,
+    /// Convert a Word to a Identifier, return ParserError when the Word's value is a empty string.
+    pub fn to_ident(&self) -> Result<Ident, ParserError> {
+        if self.value.is_empty() {
+            parser_err!(format!(
+                "zero-length delimited identifier at or near \"{self}\""
+            ))
+        } else {
+            Ok(Ident {
+                value: self.value.clone(),
+                quote_style: self.quote_style,
+            })
         }
     }
 }

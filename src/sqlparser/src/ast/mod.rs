@@ -96,7 +96,8 @@ pub struct Ident {
 
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
-    pub fn new<S>(value: S) -> Self
+    /// the given value must not be a empty string.
+    pub fn new_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
     {
@@ -106,17 +107,42 @@ impl Ident {
         }
     }
 
-    /// Create a new quoted identifier with the given quote and value. This function
-    /// panics if the given quote is not a valid quote character.
-    pub fn with_quote<S>(quote: char, value: S) -> Self
+    /// Create a new quoted identifier with the given quote and value.
+    /// the given value must not be a empty string and the given quote must be in ['\'', '"', '`',
+    /// '['].
+    pub fn with_quote_unchecked<S>(quote: char, value: S) -> Self
     where
         S: Into<String>,
     {
-        assert!(quote == '\'' || quote == '"' || quote == '`' || quote == '[');
         Ident {
             value: value.into(),
             quote_style: Some(quote),
         }
+    }
+
+    /// Create a new quoted identifier with the given quote and value.
+    /// returns ParserError when the given string is empty or the given quote is illegal.
+    pub fn with_quote_check<S>(quote: char, value: S) -> Result<Ident, ParserError>
+    where
+        S: Into<String>,
+    {
+        let value_str = value.into();
+        if value_str.is_empty() {
+            return Err(ParserError::ParserError(format!(
+                "zero-length delimited identifier at or near \"{value_str}\""
+            )));
+        }
+
+        if !(quote == '\'' || quote == '"' || quote == '`' || quote == '[') {
+            return Err(ParserError::ParserError(
+                "unexpected quote style".to_string(),
+            ));
+        }
+
+        Ok(Ident {
+            value: value_str,
+            quote_style: Some(quote),
+        })
     }
 
     /// Value after considering quote style
@@ -2224,27 +2250,27 @@ mod tests {
     fn test_grouping_sets_display() {
         // a and b in different group
         let grouping_sets = Expr::GroupingSets(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("GROUPING SETS ((a), (b))", format!("{}", grouping_sets));
 
         // a and b in the same group
         let grouping_sets = Expr::GroupingSets(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("GROUPING SETS ((a, b))", format!("{}", grouping_sets));
 
         // (a, b) and (c, d) in different group
         let grouping_sets = Expr::GroupingSets(vec![
             vec![
-                Expr::Identifier(Ident::new("a")),
-                Expr::Identifier(Ident::new("b")),
+                Expr::Identifier(Ident::new_unchecked("a")),
+                Expr::Identifier(Ident::new_unchecked("b")),
             ],
             vec![
-                Expr::Identifier(Ident::new("c")),
-                Expr::Identifier(Ident::new("d")),
+                Expr::Identifier(Ident::new_unchecked("c")),
+                Expr::Identifier(Ident::new_unchecked("d")),
             ],
         ]);
         assert_eq!(
@@ -2255,56 +2281,56 @@ mod tests {
 
     #[test]
     fn test_rollup_display() {
-        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new("a"))]]);
+        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("ROLLUP (a)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("ROLLUP ((a, b))", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("ROLLUP (a, b)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new("b")),
-                Expr::Identifier(Ident::new("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("ROLLUP (a, (b, c), d)", format!("{}", rollup));
     }
 
     #[test]
     fn test_cube_display() {
-        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new("a"))]]);
+        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("CUBE (a)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("CUBE ((a, b))", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("CUBE (a, b)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new("b")),
-                Expr::Identifier(Ident::new("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("CUBE (a, (b, c), d)", format!("{}", cube));
     }
@@ -2312,7 +2338,7 @@ mod tests {
     #[test]
     fn test_array_index_display() {
         let array_index = Expr::ArrayIndex {
-            obj: Box::new(Expr::Identifier(Ident::new("v1"))),
+            obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
