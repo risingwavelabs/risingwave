@@ -401,6 +401,10 @@ impl HummockVersionReader {
             state_store_metrics,
         }
     }
+
+    pub fn stats(&self) -> &Arc<HummockStateStoreMetrics> {
+        &self.state_store_metrics
+    }
 }
 
 impl HummockVersionReader {
