@@ -1,0 +1,24 @@
+- input: select 2 + 2 ^ 2
+  formatted_sql: SELECT 2 + 2 ^ 2
+  formatted_ast: |
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(Number("2")), op: Plus, right: BinaryOp { left: Value(Number("2")), op: BitwiseXor, right: Value(Number("2")) } })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+- input: select 2 | 3 & 4
+  formatted_sql: SELECT 2 | 3 & 4
+  formatted_ast: |
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: BinaryOp { left: Value(Number("2")), op: BitwiseOr, right: Value(Number("3")) }, op: BitwiseAnd, right: Value(Number("4")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+- input: select - 3 ^ 2
+  formatted_sql: SELECT -3 ^ 2
+  formatted_ast: |
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(Number("-3")), op: BitwiseXor, right: Value(Number("2")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+- input: select - 3 * 2
+  formatted_sql: SELECT -3 * 2
+  formatted_ast: |
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(BinaryOp { left: Value(Number("-3")), op: Multiply, right: Value(Number("2")) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+- input: select |/ 4 + 12
+  formatted_sql: SELECT |/ 4 + 12
+  formatted_ast: |
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(UnaryOp { op: PGSquareRoot, expr: BinaryOp { left: Value(Number("4")), op: Plus, right: Value(Number("12")) } })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })

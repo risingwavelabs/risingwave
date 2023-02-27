@@ -821,24 +821,21 @@ where
             .mview_actor_ids())
     }
 
-    /// Get the upstream `Materialize` fragments of the specified tables.
+    /// Get and filter the upstream `Materialize` fragments of the specified relations.
     pub async fn get_upstream_mview_fragments(
         &self,
-        upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
+        dependent_relation_ids: &HashSet<TableId>,
+    ) -> HashMap<TableId, Fragment> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
 
-        for &table_id in upstream_table_ids {
-            let table_fragments = map
-                .get(&table_id)
-                .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-            if let Some(fragment) = table_fragments.mview_fragment() {
+        for &table_id in dependent_relation_ids {
+            if let Some(table_fragments) = map.get(&table_id) && let Some(fragment) = table_fragments.mview_fragment() {
                 fragments.insert(table_id, fragment);
             }
         }
 
-        Ok(fragments)
+        fragments
     }
 
     /// Get the downstream `Chain` fragments of the specified table.

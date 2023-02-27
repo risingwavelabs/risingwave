@@ -15,6 +15,5 @@
 mod simd_json_parser;
 
 mod operators;
-mod util;
 
 pub use simd_json_parser::*;

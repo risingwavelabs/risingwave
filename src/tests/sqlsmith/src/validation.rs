@@ -32,7 +32,7 @@ fn is_numeric_out_of_range_err(db_error: &str) -> bool {
 
 /// Skip queries with unimplemented features
 fn is_unimplemented_error(db_error: &str) -> bool {
-    db_error.contains("Feature is not yet implemented")
+    db_error.contains("not yet implemented")
 }
 
 /// This error occurs because we test `implicit` casts as well,

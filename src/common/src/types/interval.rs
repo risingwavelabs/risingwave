@@ -545,7 +545,7 @@ impl PartialOrd for IntervalUnit {
             Some(Ordering::Equal)
         } else {
             let diff = *self - *other;
-            let days = (diff.months * 30 + diff.days) as i64;
+            let days = diff.months as i64 * 30 + diff.days as i64;
             Some((days * DAY_MS + diff.ms).cmp(&0))
         }
     }

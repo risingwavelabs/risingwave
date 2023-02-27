@@ -29,7 +29,7 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::OptimizerContextRef;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamNow {
     pub base: PlanBase,
 }

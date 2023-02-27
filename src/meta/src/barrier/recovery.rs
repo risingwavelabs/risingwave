@@ -301,7 +301,6 @@ where
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: node_actors.get(node_id).cloned().unwrap_or_default(),
-                    ..Default::default()
                 })
                 .await?;
         }

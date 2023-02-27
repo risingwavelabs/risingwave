@@ -779,11 +779,6 @@ impl HummockVersionReader {
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
-                    continue;
-                }
-            }
 
             if !table_holder.value().meta.range_tombstone_list.is_empty()
                 && !read_options.ignore_range_tombstone
@@ -791,6 +786,12 @@ impl HummockVersionReader {
                 delete_range_iter
                     .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
             }
+            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
+                    continue;
+                }
+            }
+
             staging_sst_iter_count += 1;
             staging_iters.push(HummockIteratorUnion::Third(SstableIterator::new(
                 table_holder,

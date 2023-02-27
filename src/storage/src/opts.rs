@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::RwConfig;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::meta::SystemParams;
-use risingwave_rpc_client::SystemParamsReader;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
@@ -55,7 +55,6 @@ pub struct StorageOpts {
     /// Max sub compaction task numbers
     pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
-    pub enable_state_store_v1: bool,
 
     pub file_cache_dir: String,
     pub file_cache_capacity_mb: usize,
@@ -112,7 +111,6 @@ impl From<(&RwConfig, &SystemParamsReader)> for StorageOpts {
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_sub_compaction: c.storage.max_sub_compaction,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
-            enable_state_store_v1: c.storage.enable_state_store_v1,
             file_cache_dir: c.storage.file_cache.dir.clone(),
             file_cache_capacity_mb: c.storage.file_cache.capacity_mb,
             file_cache_total_buffer_capacity_mb: c.storage.file_cache.total_buffer_capacity_mb,

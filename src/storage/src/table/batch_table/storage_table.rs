@@ -28,7 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
 };
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -391,9 +391,9 @@ impl<S: StateStore> StorageTable<S> {
             // distributed tables.
             assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
 
-            Either::Left(self.vnodes.high_ranges().map(|r| {
-                let start = Included(VirtualNode::from_index(*r.start()).to_be_bytes().to_vec());
-                let end = end_bound_of_prefix(&VirtualNode::from_index(*r.end()).to_be_bytes());
+            Either::Left(self.vnodes.vnode_ranges().map(|r| {
+                let start = Included(r.start().to_be_bytes().to_vec());
+                let end = end_bound_of_prefix(&r.end().to_be_bytes());
                 assert_matches!(end, Excluded(_) | Unbounded);
                 (start, end)
             }))
@@ -403,7 +403,7 @@ impl<S: StateStore> StorageTable<S> {
                 // If `vnode_hint` is set, we can only access this single vnode.
                 Some(vnode) => Either::Left(std::iter::once(vnode)),
                 // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.vnodes.iter_ones().map(VirtualNode::from_index)),
+                None => Either::Right(self.vnodes.iter_vnodes()),
             };
             Either::Right(
                 vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),

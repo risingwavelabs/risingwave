@@ -29,8 +29,8 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
-    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt,
+    get_compaction_group_ids, get_member_table_ids, try_get_compaction_group_id_by_table_id,
+    HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
@@ -44,6 +44,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
+    TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -56,8 +57,8 @@ use crate::hummock::compaction::{
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat,
+    trigger_lsm_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+    trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
@@ -732,6 +733,11 @@ where
         compaction_group_id: CompactionGroupId,
         selector: &mut Box<dyn LevelSelector>,
     ) -> Result<Option<CompactTask>> {
+        // TODO: `get_all_table_options` will hold catalog_manager async lock, to avoid holding the
+        // lock in compaction_guard, take out all table_options in advance there may be a
+        // waste of resources here, need to add a more efficient filter in catalog_manager
+        let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let compaction_statuses = &mut compaction.compaction_statuses;
@@ -777,12 +783,21 @@ where
         let can_trivial_move = matches!(selector.task_type(), compact_task::TaskType::Dynamic);
 
         let mut stats = LocalSelectorStatistic::default();
+        let member_table_ids = &current_version
+            .get_compaction_group_levels(compaction_group_id)
+            .member_table_ids;
+        let table_id_to_option: HashMap<u32, _> = all_table_id_to_option
+            .into_iter()
+            .filter(|(table_id, _)| member_table_ids.contains(table_id))
+            .collect();
+
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             &group_config,
             &mut stats,
             selector,
+            table_id_to_option.clone(),
         );
         stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
@@ -828,12 +843,15 @@ where
                 }
             }
 
-            compact_task.table_options = self
-                .catalog_manager
-                .get_table_options(&compact_task.existing_table_ids)
-                .await
-                .iter()
-                .map(|(k, v)| (*k, v.into()))
+            compact_task.table_options = table_id_to_option
+                .into_iter()
+                .filter_map(|(table_id, table_option)| {
+                    if compact_task.existing_table_ids.contains(&table_id) {
+                        return Some((table_id, TableOption::from(&table_option)));
+                    }
+
+                    None
+                })
                 .collect();
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
@@ -1123,7 +1141,6 @@ where
             for group_id in original_keys {
                 if !current_version.levels.contains_key(&group_id) {
                     compact_statuses.remove(group_id);
-                    compaction.compaction_selectors.remove(&group_id);
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
@@ -1266,9 +1283,10 @@ where
         if !deterministic_mode
             && matches!(compact_task.task_type(), compact_task::TaskType::Dynamic)
         {
+            // only try send Dynamic compaction
             self.try_send_compaction_request(
                 compact_task.compaction_group_id,
-                compact_task.task_type(),
+                compact_task::TaskType::Dynamic,
             );
         }
 
@@ -1924,7 +1942,7 @@ where
         &self.cluster_manager
     }
 
-    fn notify_last_version_delta(&self, versioning: &mut Versioning) {
+    fn notify_last_version_delta(&self, versioning: &Versioning) {
         self.env
             .notification_manager()
             .notify_hummock_without_version(
@@ -1938,6 +1956,54 @@ where
                         .clone()],
                 }),
             );
+    }
+
+    #[named]
+    pub async fn start_lsm_stat_report(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+        use crate::hummock::model::CompactionGroup;
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {
+                    },
+                    // Shutdown
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Lsm stat reporter is stopped");
+                        return;
+                    }
+                }
+
+                let id_to_config = hummock_manager.get_compaction_group_map().await;
+                let current_version = {
+                    let mut versioning_guard =
+                        write_lock!(hummock_manager.as_ref(), versioning).await;
+                    versioning_guard.deref_mut().current_version.clone()
+                };
+
+                let compaction_group_ids_from_version = get_compaction_group_ids(&current_version);
+                let default_config = CompactionConfigBuilder::new().build();
+                for compaction_group_id in &compaction_group_ids_from_version {
+                    let compaction_group_config = id_to_config
+                        .get(compaction_group_id)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            CompactionGroup::new(*compaction_group_id, default_config.clone())
+                        });
+
+                    trigger_lsm_stat(
+                        &hummock_manager.metrics,
+                        compaction_group_config.compaction_config(),
+                        current_version
+                            .get_compaction_group_levels(compaction_group_config.group_id()),
+                        compaction_group_config.group_id(),
+                    )
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 }
 

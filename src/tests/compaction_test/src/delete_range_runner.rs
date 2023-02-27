@@ -87,8 +87,7 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
     })
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
-    let mut config = load_config(&opts.config_path, NO_OVERRIDE);
-    config.storage.enable_state_store_v1 = false;
+    let config = load_config(&opts.config_path, NO_OVERRIDE);
     let compaction_config = CompactionConfigBuilder::new().build();
     compaction_test(compaction_config, config, &opts.state_store, 1000000, 800).await
 }
@@ -601,20 +600,14 @@ fn run_compactor_thread(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::config::{RwConfig, StorageConfig};
+    use risingwave_common::config::RwConfig;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 
     use super::compaction_test;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
-        let config = RwConfig {
-            storage: StorageConfig {
-                enable_state_store_v1: false,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        let config = RwConfig::default();
         let mut compaction_config = CompactionConfigBuilder::new().build();
         compaction_config.max_sub_compaction = 1;
         compaction_config.level0_tier_compact_file_number = 2;

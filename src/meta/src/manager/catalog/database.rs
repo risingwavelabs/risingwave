@@ -200,15 +200,10 @@ impl DatabaseManager {
         self.tables.values().cloned().collect_vec()
     }
 
-    pub fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
+    pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .filter_map(|(id, table)| {
-                if table_ids.contains(id) {
-                    return Some((*id, TableOption::build_table_option(&table.properties)));
-                }
-                None
-            })
+            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
             .collect()
     }
 

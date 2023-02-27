@@ -17,7 +17,7 @@ use risingwave_common::system_param::{system_params_from_kv, system_params_to_kv
 use risingwave_pb::meta::SystemParams;
 
 use crate::model::{MetadataModelError, MetadataModelResult, Transactional};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, Snapshot, Transaction};
 
 const SYSTEM_PARAMS_CF_NAME: &str = "cf/system_params";
 
@@ -73,5 +73,21 @@ impl Transactional for SystemParams {
 
     fn delete_in_transaction(&self, _trx: &mut Transaction) -> MetadataModelResult<()> {
         unreachable!()
+    }
+}
+
+pub async fn get_system_params_at_snapshot<S>(
+    snapshot: &S::Snapshot,
+) -> MetadataModelResult<Option<SystemParams>>
+where
+    S: MetaStore,
+{
+    let kvs = snapshot.list_cf(&SystemParams::cf_name()).await?;
+    if kvs.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(
+            system_params_from_kv(kvs).map_err(MetadataModelError::internal)?,
+        ))
     }
 }

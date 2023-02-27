@@ -19,12 +19,10 @@ use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, HangingChannel,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
@@ -334,48 +332,7 @@ where
             .chain(existing_locations.actor_infos())
             .collect_vec();
 
-        let building_actor_infos = building_locations.actor_info_map();
         let building_worker_actors = building_locations.worker_actors();
-        let existing_worker_actors = existing_locations.worker_actors();
-
-        // Hanging channels for each worker node.
-        let mut hanging_channels = {
-            // upstream_actor_id -> Vec<downstream_actor_info>
-            let up_id_to_down_info = dispatchers
-                .iter()
-                .map(|(&up_id, dispatchers)| {
-                    let down_infos = dispatchers
-                        .iter()
-                        .flat_map(|d| d.downstream_actor_id.iter())
-                        .map(|down_id| building_actor_infos[down_id].clone())
-                        .collect_vec();
-                    (up_id, down_infos)
-                })
-                .collect::<HashMap<_, _>>();
-
-            existing_worker_actors
-                .iter()
-                .map(|(&worker_id, up_ids)| {
-                    (
-                        worker_id,
-                        up_ids
-                            .iter()
-                            .flat_map(|up_id| {
-                                up_id_to_down_info[up_id]
-                                    .iter()
-                                    .map(|down_info| HangingChannel {
-                                        upstream: Some(ActorInfo {
-                                            actor_id: *up_id,
-                                            host: None,
-                                        }),
-                                        downstream: Some(down_info.clone()),
-                                    })
-                            })
-                            .collect_vec(),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-        };
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
@@ -402,23 +359,6 @@ where
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: stream_actors.clone(),
-                    hanging_channels: hanging_channels.remove(worker_id).unwrap_or_default(),
-                })
-                .await?;
-        }
-
-        // Build **remaining** hanging channels on compute nodes.
-        for (worker_id, hanging_channels) in hanging_channels {
-            let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(worker_node).await?;
-
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: vec![],
-                    hanging_channels,
                 })
                 .await?;
         }

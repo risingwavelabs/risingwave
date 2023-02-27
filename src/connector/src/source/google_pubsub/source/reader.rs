@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::{anyhow, ensure, Context, Result};
 use async_trait::async_trait;
 use chrono::{NaiveDateTime, TimeZone, Utc};
@@ -28,10 +26,9 @@ use super::TaggedReceivedMessage;
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::PubsubProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -44,8 +41,7 @@ pub struct PubsubSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 impl PubsubSplitReader {
@@ -120,8 +116,7 @@ impl SplitReader for PubsubSplitReader {
         properties: PubsubProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(
@@ -171,8 +166,7 @@ impl SplitReader for PubsubSplitReader {
             split_id: split.id(),
             stop_offset,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 

@@ -438,7 +438,7 @@ mod tests {
     use crate::executor::exchange::input::RemoteInput;
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Executor, Mutation};
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -536,7 +536,7 @@ mod tests {
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -544,10 +544,9 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(
-            ctx.clone(),
-            vec![(untouched, actor_id), (old, actor_id), (new, actor_id)],
-        );
+        // untouched -> actor_id
+        // old -> actor_id
+        // new -> actor_id
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 

@@ -31,7 +31,7 @@ use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalUnion` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUnion {
     pub base: PlanBase,
     core: generic::Union<PlanRef>,
