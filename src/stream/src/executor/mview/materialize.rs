@@ -141,18 +141,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         }
     }
 
-    pub fn overwrite_conflict_pk(&mut self) {
-        self.conflict_behavior = ConflictBehavior::OverWrite;
-    }
-
-    pub fn ignore_conflict_pk(&mut self) {
-        self.conflict_behavior = ConflictBehavior::IgnoreConflict;
-    }
-
-    pub fn do_not_check_conflicty(&mut self) {
-        self.conflict_behavior = ConflictBehavior::NoCheck;
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let data_types = self.schema().data_types().clone();
@@ -462,41 +450,7 @@ impl MaterializeCache {
         self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
             .await?;
 
-        let mut fixed_changes = vec![];
-        // overwrite pk conflict
-        for (key, row_op) in changes.into_parts() {
-            match row_op {
-                KeyOp::Insert(new_row) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => fixed_changes.push((
-                            key.clone(),
-                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
-                        )),
-                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
-                    };
-                    self.put(key, Some(CompactedRow { row: new_row }));
-                }
-                KeyOp::Delete(_) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => {
-                            fixed_changes.push((key.clone(), KeyOp::Delete(old_row.row.clone())));
-                        }
-                        None => (), // delete a nonexistent value
-                    };
-                    self.put(key, None);
-                }
-                KeyOp::Update((_, new_row)) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => fixed_changes.push((
-                            key.clone(),
-                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
-                        )),
-                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
-                    }
-                    self.put(key, Some(CompactedRow { row: new_row }));
-                }
-            }
-        }
+        let fixed_changes = self.handle_conflict_inner(changes, ConflictBehavior::OverWrite);
         Ok(fixed_changes)
     }
 
@@ -509,34 +463,8 @@ impl MaterializeCache {
         self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
             .await?;
 
-        let mut fixed_changes = vec![];
-        // ignore pk conflict
-        for (key, row_op) in changes.into_parts() {
-            match row_op {
-                KeyOp::Insert(new_row) => {
-                    match self.force_get(&key) {
-                        Some(_) => (),
-                        None => {
-                            fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone())));
-                            self.put(key, Some(CompactedRow { row: new_row }));
-                        }
-                    };
-                }
-                KeyOp::Delete(_) => {
-                    match self.force_get(&key) {
-                        Some(_) => (),
-                        None => (), // delete a nonexistent value
-                    };
-                }
-                KeyOp::Update((_, new_row)) => match self.force_get(&key) {
-                    Some(_) => (),
-                    None => {
-                        fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone())));
-                        self.put(key, Some(CompactedRow { row: new_row }));
-                    }
-                },
-            }
-        }
+        let fixed_changes = self.handle_conflict_inner(changes, ConflictBehavior::IgnoreConflict);
+
         Ok(fixed_changes)
     }
 
@@ -566,6 +494,100 @@ impl MaterializeCache {
         Ok(())
     }
 
+    fn handle_conflict_inner(
+        &mut self,
+        buffer: MaterializeBuffer,
+        conflict_behavior: ConflictBehavior,
+    ) -> Vec<(Vec<u8>, KeyOp)> {
+        let mut fixed_changes = vec![];
+        for (key, row_op) in buffer.into_parts() {
+            let mut update_cache = false;
+            match row_op {
+                KeyOp::Insert(new_row) => {
+                    match conflict_behavior {
+                        ConflictBehavior::OverWrite => {
+                            match self.force_get(&key) {
+                                Some(old_row) => fixed_changes.push((
+                                    key.clone(),
+                                    KeyOp::Update((old_row.row.clone(), new_row.clone())),
+                                )),
+                                None => fixed_changes
+                                    .push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                            };
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key) {
+                                Some(_) => (),
+                                None => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Insert(new_row.clone())));
+                                    update_cache = true;
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    if update_cache {
+                        self.put(key, Some(CompactedRow { row: new_row }));
+                    }
+                }
+                KeyOp::Delete(_) => {
+                    match conflict_behavior {
+                        ConflictBehavior::OverWrite => {
+                            match self.force_get(&key) {
+                                Some(old_row) => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Delete(old_row.row.clone())));
+                                }
+                                None => (), // delete a nonexistent value
+                            };
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => (),
+                        _ => unreachable!(),
+                    };
+
+                    if update_cache {
+                        self.put(key, None);
+                    }
+                }
+                KeyOp::Update((_, new_row)) => {
+                    match conflict_behavior {
+                        ConflictBehavior::OverWrite => {
+                            match self.force_get(&key) {
+                                Some(old_row) => fixed_changes.push((
+                                    key.clone(),
+                                    KeyOp::Update((old_row.row.clone(), new_row.clone())),
+                                )),
+                                None => fixed_changes
+                                    .push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                            }
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key) {
+                                Some(_) => (),
+                                None => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Insert(new_row.clone())));
+                                    update_cache = true;
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    if update_cache {
+                        self.put(key, Some(CompactedRow { row: new_row }));
+                    }
+                }
+            }
+        }
+        fixed_changes
+    }
+
     pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
         self.data.get(key).unwrap_or_else(|| {
             panic!(
@@ -583,6 +605,7 @@ impl MaterializeCache {
         self.data.evict()
     }
 }
+
 #[cfg(test)]
 mod tests {
 

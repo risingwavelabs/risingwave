@@ -714,7 +714,6 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            !append_only,
             conflict_behavior,
             row_id_index,
             version,

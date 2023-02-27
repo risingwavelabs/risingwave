@@ -115,8 +115,6 @@ pub struct TableCatalog {
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
-    pub handle_pk_conflict: bool,
-
     pub conflict_behavior_type: ConflictBehaviorType,
 
     pub read_prefix_len_hint: usize,
@@ -211,10 +209,6 @@ impl TableCatalog {
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
         self
-    }
-
-    pub fn handle_pk_conflict(&self) -> bool {
-        self.handle_pk_conflict
     }
 
     pub fn conflict_behavior_type(&self) -> ConflictBehaviorType {
@@ -364,7 +358,6 @@ impl TableCatalog {
                 .map(|i| ProstColumnIndex { index: i as _ }),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
-            handle_pk_conflict: self.handle_pk_conflict,
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
@@ -427,7 +420,6 @@ impl From<ProstTable> for TableCatalog {
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
-            handle_pk_conflict: tb.handle_pk_conflict,
         }
     }
 }
@@ -517,7 +509,6 @@ mod tests {
             fragment_id: 0,
             value_indices: vec![0],
             definition: "".into(),
-            handle_pk_conflict: false,
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
@@ -589,7 +580,6 @@ mod tests {
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
-                handle_pk_conflict: false
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
