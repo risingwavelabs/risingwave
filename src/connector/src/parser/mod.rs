@@ -32,7 +32,7 @@ use risingwave_pb::catalog::StreamSourceInfo;
 pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceErrorContext, SourceFormat,
+    BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceContextRef, SourceFormat,
     StreamChunkWithState,
 };
 
@@ -47,7 +47,6 @@ mod maxwell;
 mod protobuf;
 mod schema_registry;
 mod util;
-
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
     descs: Vec<SourceColumnDesc>,
@@ -335,30 +334,33 @@ impl ByteStreamSourceParserImpl {
         }
     }
 
-    pub fn create(parser_config: ParserConfig, error_ctx: SourceErrorContext) -> Result<Self> {
+    pub fn create(parser_config: ParserConfig, source_ctx: SourceContextRef) -> Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         match parser_config.specific {
             SpecificParserConfig::Csv(config) => {
-                CsvParser::new(rw_columns, config, error_ctx).map(Self::Csv)
+                CsvParser::new(rw_columns, config, source_ctx).map(Self::Csv)
             }
-            SpecificParserConfig::Avro(config) => {
-                AvroParser::new(rw_columns, config, error_ctx).map(Self::Avro)
+            SpecificParserConfig::Avro(config) | SpecificParserConfig::UpsertAvro(config) => {
+                AvroParser::new(rw_columns, config, source_ctx).map(Self::Avro)
             }
             SpecificParserConfig::Protobuf(config) => {
-                ProtobufParser::new(rw_columns, config, error_ctx).map(Self::Protobuf)
+                ProtobufParser::new(rw_columns, config, source_ctx).map(Self::Protobuf)
             }
-            SpecificParserConfig::Json => JsonParser::new(rw_columns, error_ctx).map(Self::Json),
+            SpecificParserConfig::Json => JsonParser::new(rw_columns, source_ctx).map(Self::Json),
+            SpecificParserConfig::UpsertJson => {
+                JsonParser::new_with_upsert(rw_columns, source_ctx).map(Self::Json)
+            }
             SpecificParserConfig::CanalJson => {
-                CanalJsonParser::new(rw_columns, error_ctx).map(Self::CanalJson)
+                CanalJsonParser::new(rw_columns, source_ctx).map(Self::CanalJson)
             }
             SpecificParserConfig::DebeziumJson => {
-                DebeziumJsonParser::new(rw_columns, error_ctx).map(Self::DebeziumJson)
+                DebeziumJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumJson)
             }
             SpecificParserConfig::Maxwell => {
-                MaxwellParser::new(rw_columns, error_ctx).map(Self::Maxwell)
+                MaxwellParser::new(rw_columns, source_ctx).map(Self::Maxwell)
             }
             SpecificParserConfig::DebeziumAvro(config) => {
-                DebeziumAvroParser::new(rw_columns, config, error_ctx).map(Self::DebeziumAvro)
+                DebeziumAvroParser::new(rw_columns, config, source_ctx).map(Self::DebeziumAvro)
             }
             SpecificParserConfig::Native => {
                 unreachable!("Native parser should not be created")
@@ -382,8 +384,10 @@ pub struct CommonParserConfig {
 pub enum SpecificParserConfig {
     Csv(CsvParserConfig),
     Avro(AvroParserConfig),
+    UpsertAvro(AvroParserConfig),
     Protobuf(ProtobufParserConfig),
     Json,
+    UpsertJson,
     DebeziumJson,
     Maxwell,
     CanalJson,
@@ -396,9 +400,11 @@ impl SpecificParserConfig {
     pub fn get_source_format(&self) -> SourceFormat {
         match self {
             SpecificParserConfig::Avro(_) => SourceFormat::Avro,
+            SpecificParserConfig::UpsertAvro(_) => SourceFormat::UpsertAvro,
             SpecificParserConfig::Csv(_) => SourceFormat::Csv,
             SpecificParserConfig::Protobuf(_) => SourceFormat::Protobuf,
             SpecificParserConfig::Json => SourceFormat::Json,
+            SpecificParserConfig::UpsertJson => SourceFormat::UpsertJson,
             SpecificParserConfig::DebeziumJson => SourceFormat::DebeziumJson,
             SpecificParserConfig::Maxwell => SourceFormat::Maxwell,
             SpecificParserConfig::CanalJson => SourceFormat::CanalJson,
@@ -418,8 +424,28 @@ impl SpecificParserConfig {
                 has_header: info.csv_has_header,
             }),
             SourceFormat::Avro => SpecificParserConfig::Avro(
-                AvroParserConfig::new(props, &info.row_schema_location, info.use_schema_registry)
-                    .await?,
+                AvroParserConfig::new(
+                    props,
+                    &info.row_schema_location,
+                    info.use_schema_registry,
+                    false,
+                    None,
+                )
+                .await?,
+            ),
+            SourceFormat::UpsertAvro => SpecificParserConfig::UpsertAvro(
+                AvroParserConfig::new(
+                    props,
+                    &info.row_schema_location,
+                    info.use_schema_registry,
+                    true,
+                    if info.upsert_avro_primary_key.is_empty() {
+                        None
+                    } else {
+                        Some(info.upsert_avro_primary_key.to_string())
+                    },
+                )
+                .await?,
             ),
             SourceFormat::Protobuf => SpecificParserConfig::Protobuf(
                 ProtobufParserConfig::new(
@@ -431,6 +457,7 @@ impl SpecificParserConfig {
                 .await?,
             ),
             SourceFormat::Json => SpecificParserConfig::Json,
+            SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
             SourceFormat::DebeziumJson => SpecificParserConfig::DebeziumJson,
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,

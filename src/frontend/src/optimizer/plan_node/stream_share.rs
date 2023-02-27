@@ -26,7 +26,7 @@ use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
     pub base: PlanBase,
     logical: LogicalShare,

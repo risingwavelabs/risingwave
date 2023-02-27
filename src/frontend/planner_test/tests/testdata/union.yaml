@@ -10,7 +10,7 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32] }
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32], pk_conflict: "no check" }
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(t1._row_id, null:Int64, 0:Int32) }
       | └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Int64, 0:Int32] }
@@ -20,7 +20,7 @@
           └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32] }
+      StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamUnion { all: true }
           StreamExchange Hash([3, 4, 5]) from 1
@@ -58,7 +58,7 @@
           └─BatchExchange { order: [], dist: Single }
             └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c] }
+    StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c], pk_conflict: "no check" }
     └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
@@ -71,7 +71,7 @@
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c] }
+      StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamProject { exprs: [t1.a, t1.b, t1.c] }
           StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
@@ -116,7 +116,7 @@
           └─BatchExchange { order: [], dist: Single }
             └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: UpstreamHashShard(t2.a) }
   stream_plan: |
-    StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c] }
+    StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c], pk_conflict: "no check" }
     └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
       └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
         └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
@@ -129,7 +129,7 @@
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c] }
+      StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamProject { exprs: [t1.a, t1.b, t1.c] }
           StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }

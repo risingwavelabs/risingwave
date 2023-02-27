@@ -23,7 +23,7 @@ use crate::util::sort_util::OrderPair;
 /// Includes necessary information for compute node to access data of the table.
 ///
 /// It's a subset of `TableCatalog` in frontend. Refer to `TableCatalog` for more details.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,

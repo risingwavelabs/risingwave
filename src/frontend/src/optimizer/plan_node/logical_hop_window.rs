@@ -22,24 +22,26 @@ use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::InputRef;
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::Order;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
     pub base: PlanBase,
     pub(super) core: generic::HopWindow<PlanRef>,
 }
 
 impl LogicalHopWindow {
+    /// just used in optimizer and the function will not check if the `time_col`'s value is NULL
+    /// compared with `LogicalHopWindow::create`
     fn new(
         input: PlanRef,
         time_col: InputRef,
@@ -117,13 +119,20 @@ impl LogicalHopWindow {
         self.core.into_parts()
     }
 
-    /// the function will check if the cond is bool expression
+    /// used for binder and planner. The function will add a filter operator to ignore records with
+    /// NULL time value. <https://github.com/risingwavelabs/risingwave/issues/8130>
     pub fn create(
         input: PlanRef,
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
     ) -> PlanRef {
+        let input = LogicalFilter::create_with_expr(
+            input,
+            FunctionCall::new(ExprType::IsNotNull, vec![time_col.clone().into()])
+                .unwrap()
+                .into(),
+        );
         Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
@@ -170,7 +179,7 @@ impl LogicalHopWindow {
 
     fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::new(
-            self.input().clone(),
+            self.input(),
             self.core.time_col.clone(),
             self.core.window_slide,
             self.core.window_size,
@@ -242,7 +251,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             })
             .collect_vec();
         let new_hop = Self::new(
-            input.clone(),
+            input,
             time_col,
             self.core.window_slide,
             self.core.window_size,
@@ -373,7 +382,7 @@ impl ToStream for LogicalHopWindow {
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
-        let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+        let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
         if !output_indices.contains(&input.schema().len())
             && !output_indices.contains(&(input.schema().len() + 1))

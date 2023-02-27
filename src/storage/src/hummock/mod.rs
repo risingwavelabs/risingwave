@@ -77,24 +77,18 @@ pub use validator::*;
 use value::*;
 
 use self::event_handler::ReadVersionMappingType;
-use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
+use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
-use crate::error::StorageResult;
 #[cfg(any(test, feature = "test"))]
 use crate::hummock::backup_reader::BackupReader;
 use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
-use crate::hummock::iterator::{
-    Backward, BackwardUserIteratorType, DirectedUserIteratorBuilder, DirectionEnum, Forward,
-    ForwardUserIteratorType, HummockIteratorDirection,
-};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
@@ -423,61 +417,6 @@ pub fn hit_sstable_bloom_filter(
     may_exist
 }
 
-/// Get `user_value` from `OrderSortedUncommittedData`. If not get successful, return None.
-pub async fn get_from_order_sorted_uncommitted_data(
-    sstable_store_ref: SstableStoreRef,
-    order_sorted_uncommitted_data: OrderSortedUncommittedData,
-    full_key: FullKey<&[u8]>,
-    local_stats: &mut StoreLocalStatistic,
-    read_options: &ReadOptions,
-) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
-    let mut table_counts = 0;
-    let epoch = full_key.epoch;
-    let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
-        Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
-    });
-
-    let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
-
-    for data_list in order_sorted_uncommitted_data {
-        for data in data_list {
-            match data {
-                UncommittedData::Batch(batch) => {
-                    assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
-
-                    if batch.epoch() <= min_epoch {
-                        continue;
-                    }
-
-                    if let Some(data) =
-                        get_from_batch(&batch, full_key.user_key.table_key, local_stats)
-                    {
-                        return Ok((Some(data), table_counts));
-                    }
-                }
-
-                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
-                    table_counts += 1;
-
-                    if let Some(data) = get_from_sstable_info(
-                        sstable_store_ref.clone(),
-                        &sst_info,
-                        full_key,
-                        read_options,
-                        dist_key_hash,
-                        local_stats,
-                    )
-                    .await?
-                    {
-                        return Ok((Some(data), table_counts));
-                    }
-                }
-            }
-        }
-    }
-    Ok((None, table_counts))
-}
-
 /// Get `user_value` from `SharedBufferBatch`
 pub fn get_from_batch(
     batch: &SharedBufferBatch,
@@ -491,32 +430,4 @@ pub fn get_from_batch(
         local_stats.get_shared_buffer_hit_counts += 1;
         v
     })
-}
-
-pub(crate) trait HummockIteratorType: 'static {
-    type Direction: HummockIteratorDirection;
-    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
-    type UserIteratorBuilder: DirectedUserIteratorBuilder<
-        Direction = Self::Direction,
-        SstableIteratorType = Self::SstableIteratorType,
-    >;
-
-    fn direction() -> DirectionEnum {
-        Self::Direction::direction()
-    }
-}
-
-pub(crate) struct ForwardIter;
-pub(crate) struct BackwardIter;
-
-impl HummockIteratorType for ForwardIter {
-    type Direction = Forward;
-    type SstableIteratorType = SstableIterator;
-    type UserIteratorBuilder = UserIterator<ForwardUserIteratorType>;
-}
-
-impl HummockIteratorType for BackwardIter {
-    type Direction = Backward;
-    type SstableIteratorType = BackwardSstableIterator;
-    type UserIteratorBuilder = BackwardUserIterator<BackwardUserIteratorType>;
 }

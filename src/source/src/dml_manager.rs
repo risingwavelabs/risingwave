@@ -92,9 +92,18 @@ impl DmlManager {
                     // Register with the correct version. This happens when the following
                     // `DmlExecutor`s of this table is activated on this compute
                     // node.
-                    Ordering::Equal => handle.upgrade().with_context(|| {
-                        format!("fail to register reader for table with key `{table_id:?}`")
-                    })?,
+                    Ordering::Equal => handle
+                        .upgrade()
+                        .inspect(|handle| {
+                            assert_eq!(
+                                handle.column_descs(),
+                                column_descs,
+                                "dml handler registers with same version but different schema"
+                            )
+                        })
+                        .with_context(|| {
+                            format!("fail to register reader for table with key `{table_id:?}`")
+                        })?,
 
                     // A new version of the table is activated, overwrite the old reader.
                     Ordering::Greater => new_handle!(o),
@@ -252,6 +261,26 @@ mod tests {
         // Should be able to write to the new version.
         dml_manager
             .write_chunk_ready(table_id, new_version_id, new_chunk())
+            .unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_bad_schema() {
+        let dml_manager = DmlManager::new();
+        let table_id = TableId::new(1);
+        let table_version_id = INITIAL_TABLE_VERSION_ID;
+
+        let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
+        let other_column_descs = vec![ColumnDesc::unnamed(101.into(), DataType::Float64)];
+
+        let _h = dml_manager
+            .register_reader(table_id, table_version_id, &column_descs)
+            .unwrap();
+
+        // Should panic as the schema is different.
+        let _h = dml_manager
+            .register_reader(table_id, table_version_id, &other_column_descs)
             .unwrap();
     }
 }

@@ -156,6 +156,18 @@ impl TryFrom<&RwAggFuncSig> for AggFuncSig {
     }
 }
 
+/// Function ban list.
+/// These functions should be generated eventually, by adding expression constraints.
+/// If we naively generate arguments for these functions, it will affect sqlsmith
+/// effectiveness, e.g. cause it to crash.
+static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
+    [
+        ExprType::Repeat, // FIXME: https://github.com/risingwavelabs/risingwave/issues/8003
+    ]
+    .into_iter()
+    .collect()
+});
+
 /// Table which maps functions' return types to possible function signatures.
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLock::new(|| {
@@ -165,6 +177,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
             func.inputs_type
                 .iter()
                 .all(|t| *t != DataTypeName::Timestamptz)
+                && !FUNC_BAN_LIST.contains(&func.func)
         })
         .filter_map(|func| func.try_into().ok())
         .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));

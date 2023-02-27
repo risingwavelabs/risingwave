@@ -37,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
 /// is used to distinguish between different `subset`s in `column_subsets`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
     pub base: PlanBase,
     core: generic::Expand<PlanRef>,

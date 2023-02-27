@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 ///
 /// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,

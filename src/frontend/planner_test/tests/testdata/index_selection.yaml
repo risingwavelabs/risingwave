@@ -613,7 +613,7 @@
     create table t1 (a int primary key);
     select * from t1 order by a limit 1;
   stream_plan: |
-    StreamMaterialize { columns: [a], pk_columns: [a] }
+    StreamMaterialize { columns: [a], pk_columns: [a], pk_conflict: "no check" }
     └─StreamProject { exprs: [t1.a] }
       └─StreamTopN { order: "[t1.a ASC]", limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }

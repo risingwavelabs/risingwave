@@ -17,7 +17,7 @@ use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::types::{Scalar, ScalarImpl, ScalarRef};
+use crate::types::{Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,10 +31,6 @@ impl Scalar for JsonbVal {
 
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_> {
         JsonbRef(self.0.as_ref())
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Jsonb(self)
     }
 }
 
@@ -93,7 +89,25 @@ impl Ord for JsonbRef<'_> {
 
 impl crate::types::to_text::ToText for JsonbRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        struct FmtToIoUnchecked<F>(F);
+        impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let s = unsafe { std::str::from_utf8_unchecked(buf) };
+                self.0.write_str(s).map_err(|_| std::io::ErrorKind::Other)?;
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // Use custom [`ToTextFormatter`] to serialize. If we are okay with the default, this can be
+        // just `write!(f, "{}", self.0)`
+        use serde::Serialize as _;
+        let mut ser =
+            serde_json::ser::Serializer::with_formatter(FmtToIoUnchecked(f), ToTextFormatter);
+        self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
     }
 
     fn write_with_type<W: std::fmt::Write>(
@@ -235,7 +249,8 @@ impl JsonbRef<'_> {
             Value::String(v) => writer.write_str(v),
             Value::Null => Ok(()),
             Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
-                write!(writer, "{}", self.0)
+                use crate::types::to_text::ToText as _;
+                self.write_with_type(&crate::types::DataType::Jsonb, writer)
             }
         }
     }
@@ -388,5 +403,40 @@ impl Array for JsonbArray {
     fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
         let array_builder = Self::Builder::new(capacity);
         super::ArrayBuilderImpl::Jsonb(array_builder)
+    }
+}
+
+/// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra
+/// space after `,` and `:` in array and object.
+struct ToTextFormatter;
+
+impl serde_json::ser::Formatter for ToTextFormatter {
+    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        if first {
+            Ok(())
+        } else {
+            writer.write_all(b", ")
+        }
+    }
+
+    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        if first {
+            Ok(())
+        } else {
+            writer.write_all(b", ")
+        }
+    }
+
+    fn begin_object_value<W>(&mut self, writer: &mut W) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        writer.write_all(b": ")
     }
 }

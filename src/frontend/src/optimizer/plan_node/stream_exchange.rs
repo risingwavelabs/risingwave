@@ -23,7 +23,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
     pub base: PlanBase,
     input: PlanRef,
