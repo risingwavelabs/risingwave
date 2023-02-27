@@ -356,6 +356,7 @@ mod test {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
 
