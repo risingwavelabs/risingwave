@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derivative::Derivative;
 use generic::PlanAggCall;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -34,7 +35,7 @@ use crate::TableCatalog;
 
 macro_rules! impl_node {
 ($base:ident, $($t:ident),*) => {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Node {
         $($t(Box<$t>),)*
     }
@@ -136,7 +137,7 @@ impl StreamPlanRef for PlanRef {
 
 /// Implements [`generic::Join`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DeltaJoin {
     pub core: generic::Join<PlanRef>,
 
@@ -146,7 +147,7 @@ pub struct DeltaJoin {
 }
 impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(DeltaJoin, core, left, right);
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DynamicFilter {
     pub core: generic::DynamicFilter<PlanRef>,
 }
@@ -156,32 +157,32 @@ impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(
     left,
     right
 );
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Exchange {
     pub dist: Distribution,
     pub input: PlanRef,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Exchange, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Expand {
     pub core: generic::Expand<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Expand, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Filter {
     pub core: generic::Filter<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GlobalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupTopN {
     pub core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
@@ -190,7 +191,7 @@ pub struct GroupTopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GroupTopN, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HashAgg {
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
@@ -202,7 +203,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HashAgg, core
 /// Implements [`generic::Join`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HashJoin {
     pub core: generic::Join<PlanRef>,
 
@@ -291,7 +292,7 @@ impl HashJoin {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HopWindow {
     pub core: generic::HopWindow<PlanRef>,
 }
@@ -301,7 +302,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HopWindow, co
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request. Compared with [`TableScan`], it will reorder columns, and the chain node
 /// doesn't allow rearrange.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IndexScan {
     pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
@@ -313,13 +314,13 @@ impl_plan_tree_node_v2_for_stream_leaf_node!(IndexScan);
 ///
 /// The output of `LocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `GlobalSimpleAgg` with `ManagedValueState`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(LocalSimpleAgg, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Materialize {
     /// Child of Materialize plan
     pub input: PlanRef,
@@ -327,7 +328,7 @@ pub struct Materialize {
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Materialize, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectSet {
     pub core: generic::ProjectSet<PlanRef>,
 }
@@ -335,7 +336,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 
 /// `Project` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Project {
     pub core: generic::Project<PlanRef>,
     watermark_derivations: Vec<(usize, usize)>,
@@ -343,14 +344,14 @@ pub struct Project {
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
 /// [`Sink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Sink {
     pub input: PlanRef,
     pub sink_desc: SinkDesc,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Source {
     pub core: generic::Source,
 }
@@ -359,7 +360,7 @@ impl_plan_tree_node_v2_for_stream_leaf_node!(Source);
 /// `TableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TableScan {
     pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
@@ -367,18 +368,25 @@ pub struct TableScan {
 impl_plan_tree_node_v2_for_stream_leaf_node!(TableScan);
 
 /// `TopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN {
     pub core: generic::TopN<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct PlanBase {
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub id: PlanNodeId,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub dist: Distribution,
     pub append_only: bool,
 }
@@ -741,7 +749,7 @@ pub fn to_stream_prost_body(
                     .map(|index| ColumnIndex { index: index as _ }),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
-                properties: me.properties.clone(),
+                properties: me.properties.clone().into_iter().collect(),
             });
             ProstNode::Source(SourceNode { source_inner })
         }

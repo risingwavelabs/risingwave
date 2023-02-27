@@ -40,6 +40,7 @@ pub struct AggExecutorArgs<S: StateStore> {
     pub storages: Vec<AggStateStorage<S>>,
     pub result_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
+    pub watermark_epoch: AtomicU64Ref,
 
     // extra
     pub extra: Option<AggExecutorArgsExtra>,
@@ -53,5 +54,4 @@ pub struct AggExecutorArgsExtra {
     // things only used by hash agg currently
     pub metrics: Arc<StreamingMetrics>,
     pub chunk_size: usize,
-    pub watermark_epoch: AtomicU64Ref,
 }

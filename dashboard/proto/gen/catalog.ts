@@ -123,6 +123,7 @@ export interface StreamSourceInfo {
   protoMessageName: string;
   csvDelimiter: number;
   csvHasHeader: boolean;
+  upsertAvroPrimaryKey: string;
 }
 
 export interface Source {
@@ -420,6 +421,7 @@ function createBaseStreamSourceInfo(): StreamSourceInfo {
     protoMessageName: "",
     csvDelimiter: 0,
     csvHasHeader: false,
+    upsertAvroPrimaryKey: "",
   };
 }
 
@@ -432,6 +434,7 @@ export const StreamSourceInfo = {
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
       csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
       csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
+      upsertAvroPrimaryKey: isSet(object.upsertAvroPrimaryKey) ? String(object.upsertAvroPrimaryKey) : "",
     };
   },
 
@@ -443,6 +446,7 @@ export const StreamSourceInfo = {
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
     message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
     message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
+    message.upsertAvroPrimaryKey !== undefined && (obj.upsertAvroPrimaryKey = message.upsertAvroPrimaryKey);
     return obj;
   },
 
@@ -454,6 +458,7 @@ export const StreamSourceInfo = {
     message.protoMessageName = object.protoMessageName ?? "";
     message.csvDelimiter = object.csvDelimiter ?? 0;
     message.csvHasHeader = object.csvHasHeader ?? false;
+    message.upsertAvroPrimaryKey = object.upsertAvroPrimaryKey ?? "";
     return message;
   },
 };

@@ -25,10 +25,11 @@ use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary
 use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::generic::AliasedExpr;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
     pub base: PlanBase,
     logical: LogicalProject,

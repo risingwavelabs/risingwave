@@ -19,9 +19,10 @@ use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamHopWindow`] represents a hop window table function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,
