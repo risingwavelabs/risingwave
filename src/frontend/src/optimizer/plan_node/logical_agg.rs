@@ -534,11 +534,15 @@ impl LogicalAggBuilder {
 
     /// Push a new planned agg call into the builder.
     /// Return an `InputRef` to that agg call.
+    /// For existing agg calls, return an `InputRef` to the existing one.
     fn push_agg_call(&mut self, agg_call: PlanAggCall) -> InputRef {
-        let idx = self.group_key.len() + self.agg_calls.len();
-        let ret_type = agg_call.return_type.clone();
+        if let Some((pos, existing)) = self.agg_calls.iter().find_position(|&c| c == &agg_call) {
+            return InputRef::new(self.group_key.len() + pos, existing.return_type.clone());
+        }
+        let index = self.group_key.len() + self.agg_calls.len();
+        let data_type = agg_call.return_type.clone();
         self.agg_calls.push(agg_call);
-        InputRef::new(idx, ret_type)
+        InputRef::new(index, data_type)
     }
 
     /// When there is an agg call, there are 3 things to do:
