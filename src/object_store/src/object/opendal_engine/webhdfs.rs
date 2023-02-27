@@ -19,8 +19,8 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 
 impl OpendalObjectStore {
-    /// create opendal hdfs engine.
-    pub fn new_webhdfs_engine(endpoint: String, root: String) -> ObjectResult<Self> {
+    /// create opendal webhdfs engine.
+`    pub fn new_webhdfs_engine(endpoint: String, root: String) -> ObjectResult<Self> {
         // Create webhdfs backend builder.
         let mut builder = Webhdfs::default();
         // Set the name node for webhdfs.
