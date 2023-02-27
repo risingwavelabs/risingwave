@@ -2,6 +2,8 @@
 --
 -- Show the minimum final price of all auctions.
 
+CREATE MATERIALIZED VIEW nexmark_q106
+AS
 SELECT
     MIN(final) AS min_final
 FROM
