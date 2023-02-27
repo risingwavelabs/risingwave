@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::catalog::Sink as ProstSink;
+use risingwave_pb::catalog::{Sink as ProstSink, SinkType as ProstSinkType};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -54,6 +54,45 @@ impl From<SinkId> for u32 {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SinkType {
+    /// The data written into the sink connector can only be INSERT. No UPDATE or DELETE is
+    /// allowed.
+    AppendOnly,
+    /// The input of the sink operator can be INSERT, UPDATE, or DELETE, but it must drop any
+    /// UPDATE or DELETE and write only INSERT into the sink connector.
+    ForceAppendOnly,
+    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    Upsert,
+}
+
+impl SinkType {
+    pub fn is_append_only(&self) -> bool {
+        self == &Self::AppendOnly || self == &Self::ForceAppendOnly
+    }
+
+    pub fn is_upsert(&self) -> bool {
+        self == &Self::Upsert
+    }
+
+    pub fn to_proto(self) -> ProstSinkType {
+        match self {
+            SinkType::AppendOnly => ProstSinkType::AppendOnly,
+            SinkType::ForceAppendOnly => ProstSinkType::ForceAppendOnly,
+            SinkType::Upsert => ProstSinkType::Upsert,
+        }
+    }
+
+    pub fn from_proto(pb: ProstSinkType) -> Self {
+        match pb {
+            ProstSinkType::AppendOnly => SinkType::AppendOnly,
+            ProstSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
+            ProstSinkType::Upsert => SinkType::Upsert,
+            ProstSinkType::Unspecified => unreachable!(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SinkCatalog {
     /// Id of the sink.
@@ -85,9 +124,6 @@ pub struct SinkCatalog {
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
-    /// Whether the sink is append-only.
-    pub append_only: bool,
-
     /// The properties of the sink.
     pub properties: HashMap<String, String>,
 
@@ -96,6 +132,11 @@ pub struct SinkCatalog {
 
     // Relations on which the sink depends.
     pub dependent_relations: Vec<TableId>,
+
+    // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
+    // based on both its own derivation on the append-only attribute and other user-specified
+    // options in `properties`.
+    pub sink_type: SinkType,
 }
 
 impl SinkCatalog {
@@ -119,15 +160,16 @@ impl SinkCatalog {
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
-            append_only: self.append_only,
             owner: self.owner.into(),
             properties: self.properties.clone(),
+            sink_type: self.sink_type.to_proto() as i32,
         }
     }
 }
 
 impl From<ProstSink> for SinkCatalog {
     fn from(pb: ProstSink) -> Self {
+        let sink_type = pb.get_sink_type().unwrap();
         SinkCatalog {
             id: pb.id.into(),
             name: pb.name.clone(),
@@ -142,7 +184,6 @@ impl From<ProstSink> for SinkCatalog {
             pk: pb.pk.iter().map(OrderPair::from_prost).collect_vec(),
             stream_key: pb.stream_key.iter().map(|k| *k as _).collect_vec(),
             distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            append_only: pb.append_only,
             properties: pb.properties.clone(),
             owner: pb.owner.into(),
             dependent_relations: pb
@@ -150,6 +191,7 @@ impl From<ProstSink> for SinkCatalog {
                 .into_iter()
                 .map(TableId::from)
                 .collect_vec(),
+            sink_type: SinkType::from_proto(sink_type),
         }
     }
 }

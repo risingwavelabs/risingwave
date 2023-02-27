@@ -116,6 +116,10 @@ impl<S: StateStore> AggGroup<S> {
         }
     }
 
+    pub(crate) fn is_uninitialized(&self) -> bool {
+        self.prev_outputs.is_none()
+    }
+
     /// Apply input chunk to all managed agg states.
     /// `visibilities` contains the row visibility of the input chunk for each agg call.
     pub fn apply_chunk(
@@ -219,10 +223,8 @@ impl<S: StateStore> AggGroup<S> {
             self.group_key().is_some(),
             self.prev_outputs.is_some(),
         ) {
-            (0, 0, _, _) => {
-                // Previous state is empty, current state is also empty.
-                // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // While other aggs may not be `0`?
+            (0, 0, true, _) => {
+                // We never output any rows for row_count = 0 when group_key is_some
 
                 0
             }

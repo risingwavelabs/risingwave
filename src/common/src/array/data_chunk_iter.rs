@@ -64,6 +64,22 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
             }
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if let Some(idx) = self.idx {
+            (
+                // if all following rows are invisible
+                0,
+                // if all following rows are visible
+                Some(std::cmp::min(
+                    self.chunk.capacity() - idx,
+                    self.chunk.cardinality(),
+                )),
+            )
+        } else {
+            (0, Some(0))
+        }
+    }
 }
 
 pub struct DataChunkRefIterWithHoles<'a> {
@@ -92,7 +108,15 @@ impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
             ret
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.chunk.capacity() - self.idx;
+        (size, Some(size))
+    }
 }
+
+impl ExactSizeIterator for DataChunkRefIterWithHoles<'_> {}
+unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 
 #[derive(Clone, Copy)]
 pub struct RowRef<'a> {
@@ -199,10 +223,5 @@ impl<'a> Iterator for RowRefIter<'a> {
     }
 }
 
+impl ExactSizeIterator for RowRefIter<'_> {}
 unsafe impl TrustedLen for RowRefIter<'_> {}
-
-impl ExactSizeIterator for RowRefIter<'_> {
-    fn len(&self) -> usize {
-        self.columns.len()
-    }
-}

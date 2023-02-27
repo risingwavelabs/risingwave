@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
 use risingwave_common::types::ScalarImpl;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -74,7 +74,7 @@ impl TableFunction for RegexpMatches {
 
         match bitmap {
             Some(bitmap) => {
-                for (text, visible) in text_arr.iter().zip_eq_debug(bitmap.iter()) {
+                for (text, visible) in text_arr.iter().zip_eq_fast(bitmap.iter()) {
                     let array = if !visible {
                         empty_array(self.return_type())
                     } else if let Some(text) = text {
@@ -123,21 +123,21 @@ pub fn new_regexp_matches(
     let Some(pattern_node) = args.next() else {
         bail!("Expected argument pattern");
     };
-    let mut pattern = match &pattern_node.rex_node {
-        Some(RexNode::Constant(pattern_value)) => {
-            let pattern_scalar = deserialize_datum(
+    let mut pattern = match &pattern_node.get_rex_node()? {
+        RexNode::Constant(pattern_value) => {
+            let pattern_datum = deserialize_datum(
                 pattern_value.get_body().as_slice(),
                 &DataType::from(pattern_node.get_return_type().unwrap()),
             )
-            .map_err(|e| ExprError::Internal(e.into()))?
-            .unwrap();
-            let ScalarImpl::Utf8(pattern) = pattern_scalar else {
-                bail!("Expected pattern to be an String");
-            };
-            pattern.to_string()
+            .map_err(|e| ExprError::Internal(e.into()))?;
+
+            match pattern_datum {
+                Some(ScalarImpl::Utf8(pattern)) => pattern.to_string(),
+                // NULL pattern
+                None => NULL_PATTERN.to_string(),
+                _ => bail!("Expected pattern to be an String"),
+            }
         }
-        // NULL pattern
-        None => NULL_PATTERN.to_string(),
         _ => {
             return Err(ExprError::UnsupportedFunction(
                 "non-constant pattern in regexp_match".to_string(),
@@ -146,23 +146,23 @@ pub fn new_regexp_matches(
     };
 
     let flags = if let Some(flags_node) = args.next() {
-        match &flags_node.rex_node {
-            Some(RexNode::Constant(flags_value)) => {
-                let flags_scalar = deserialize_datum(
+        match &flags_node.get_rex_node()? {
+            RexNode::Constant(flags_value) => {
+                let flags_datum = deserialize_datum(
                     flags_value.get_body().as_slice(),
                     &DataType::from(flags_node.get_return_type().unwrap()),
                 )
-                .map_err(|e| ExprError::Internal(e.into()))?
-                .unwrap();
-                let ScalarImpl::Utf8(flags) = flags_scalar else {
-                    bail!("Expected flags to be an String");
-                };
-                flags.to_string()
-            }
-            // NULL flag
-            None => {
-                pattern = NULL_PATTERN.to_string();
-                "".to_string()
+                .map_err(|e| ExprError::Internal(e.into()))?;
+
+                match flags_datum {
+                    Some(ScalarImpl::Utf8(flags)) => flags.to_string(),
+                    // NULL flag
+                    None => {
+                        pattern = NULL_PATTERN.to_string();
+                        "".to_string()
+                    }
+                    _ => bail!("Expected flags to be an String"),
+                }
             }
             _ => {
                 return Err(ExprError::UnsupportedFunction(

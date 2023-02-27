@@ -41,9 +41,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // e.g. -1 becomes -(1).
         // See: https://github.com/risingwavelabs/risingwave/issues/4344
         match *typ {
-            T::Int64 => Expr::Nested(Box::new(Expr::Value(Value::Number(
-                self.gen_int(i64::MIN as isize, i64::MAX as isize),
-            )))),
+            T::Int64 => Expr::Nested(Box::new(Expr::TypedString {
+                data_type: AstDataType::BigInt,
+                value: self.gen_int(i64::MIN as isize, i64::MAX as isize),
+            })),
             T::Int32 => Expr::Nested(Box::new(Expr::TypedString {
                 data_type: AstDataType::Int,
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
@@ -88,7 +89,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             })),
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=4); // Avoid ambiguous type
+                let n = self.rng.gen_range(1..=4);
                 Expr::Array(Array {
                     elem: self.gen_simple_scalar_list(ty, n),
                     named: true,
@@ -107,6 +108,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a list of [`n`] simple scalar values of a specific [`type`].
+    #[allow(dead_code)]
     fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Vec<Expr> {
         (0..n).map(|_| self.gen_simple_scalar(ty)).collect()
     }
@@ -114,13 +116,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_int(&mut self, min: isize, max: isize) -> String {
         // NOTE: Reduced chance for extreme values,
         // since these tend to generate invalid expressions.
-        let n = match self.rng.gen_range(0..=10) {
-            0 => 0,
-            1 => 1,
-            2 => max,
-            3 => min,
-            4 => self.rng.gen_range(min + 1..0),
-            5..=10 => self.rng.gen_range(2..max),
+        let n = match self.rng.gen_range(1..=100) {
+            1..=5 => 0,
+            6..=10 => 1,
+            11..=15 => max,
+            16..=20 => min,
+            21..=25 => self.rng.gen_range(min + 1..0),
+            26..=30 => self.rng.gen_range(1000..max),
+            31..=100 => self.rng.gen_range(2..1000),
             _ => unreachable!(),
         };
         n.to_string()
@@ -129,13 +132,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_float(&mut self) -> String {
         // NOTE: Reduced chance for extreme values,
         // since these tend to generate invalid expressions.
-        let n = match self.rng.gen_range(0..=10) {
-            0 => 0.0,
-            1 => 1.0,
-            2 => i32::MAX as f64,
-            3 => i32::MIN as f64,
-            4 => self.rng.gen_range(i32::MIN + 1..0) as f64,
-            5..=10 => self.rng.gen_range(2..i32::MAX) as f64,
+        let n = match self.rng.gen_range(1..=100) {
+            1..=5 => 0.0,
+            6..=10 => 1.0,
+            11..=15 => i32::MAX as f64,
+            16..=20 => i32::MIN as f64,
+            21..=25 => self.rng.gen_range(i32::MIN + 1..0) as f64,
+            26..=30 => self.rng.gen_range(1000..i32::MAX) as f64,
+            31..=100 => self.rng.gen_range(2..1000) as f64,
             _ => unreachable!(),
         };
         n.to_string()

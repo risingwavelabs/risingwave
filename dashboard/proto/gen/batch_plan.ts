@@ -100,6 +100,8 @@ export interface FilterNode {
 export interface InsertNode {
   /** Id of the table to perform inserting. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   columnIndices: number[];
   /**
    * An optional field and will be `None` for tables without user-defined pk.
@@ -113,12 +115,16 @@ export interface InsertNode {
 export interface DeleteNode {
   /** Id of the table to perform deleting. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   returning: boolean;
 }
 
 export interface UpdateNode {
   /** Id of the table to perform updating. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   exprs: ExprNode[];
   returning: boolean;
 }
@@ -742,13 +748,14 @@ export const FilterNode = {
 };
 
 function createBaseInsertNode(): InsertNode {
-  return { tableId: 0, columnIndices: [], rowIdIndex: undefined, returning: false };
+  return { tableId: 0, tableVersionId: 0, columnIndices: [], rowIdIndex: undefined, returning: false };
 }
 
 export const InsertNode = {
   fromJSON(object: any): InsertNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
       rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
@@ -758,6 +765,7 @@ export const InsertNode = {
   toJSON(message: InsertNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.columnIndices) {
       obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
     } else {
@@ -772,6 +780,7 @@ export const InsertNode = {
   fromPartial<I extends Exact<DeepPartial<InsertNode>, I>>(object: I): InsertNode {
     const message = createBaseInsertNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.columnIndices = object.columnIndices?.map((e) => e) || [];
     message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
       ? ColumnIndex.fromPartial(object.rowIdIndex)
@@ -782,13 +791,14 @@ export const InsertNode = {
 };
 
 function createBaseDeleteNode(): DeleteNode {
-  return { tableId: 0, returning: false };
+  return { tableId: 0, tableVersionId: 0, returning: false };
 }
 
 export const DeleteNode = {
   fromJSON(object: any): DeleteNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
   },
@@ -796,6 +806,7 @@ export const DeleteNode = {
   toJSON(message: DeleteNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
@@ -803,19 +814,21 @@ export const DeleteNode = {
   fromPartial<I extends Exact<DeepPartial<DeleteNode>, I>>(object: I): DeleteNode {
     const message = createBaseDeleteNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.returning = object.returning ?? false;
     return message;
   },
 };
 
 function createBaseUpdateNode(): UpdateNode {
-  return { tableId: 0, exprs: [], returning: false };
+  return { tableId: 0, tableVersionId: 0, exprs: [], returning: false };
 }
 
 export const UpdateNode = {
   fromJSON(object: any): UpdateNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       exprs: Array.isArray(object?.exprs) ? object.exprs.map((e: any) => ExprNode.fromJSON(e)) : [],
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
@@ -824,6 +837,7 @@ export const UpdateNode = {
   toJSON(message: UpdateNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.exprs) {
       obj.exprs = message.exprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
     } else {
@@ -836,6 +850,7 @@ export const UpdateNode = {
   fromPartial<I extends Exact<DeepPartial<UpdateNode>, I>>(object: I): UpdateNode {
     const message = createBaseUpdateNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.exprs = object.exprs?.map((e) => ExprNode.fromPartial(e)) || [];
     message.returning = object.returning ?? false;
     return message;

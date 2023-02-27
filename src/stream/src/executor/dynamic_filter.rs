@@ -21,12 +21,13 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{
+    new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
+};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
@@ -385,11 +386,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
-                        for vnode in self.left_table.vnodes().iter_ones() {
-                            let row_stream = self
-                                .left_table
-                                .iter_with_pk_range(&range, VirtualNode::from_index(vnode))
-                                .await?;
+                        for vnode in self.left_table.vnodes().iter_vnodes() {
+                            let row_stream =
+                                self.left_table.iter_with_pk_range(&range, vnode).await?;
                             pin_mut!(row_stream);
                             while let Some(res) = row_stream.next().await {
                                 let row = res?;
@@ -490,8 +489,8 @@ mod tests {
         mem_state: MemoryStateStore,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        let state_table_l = StateTable::new_without_distribution_no_sanity_check(
+        // TODO: use consistent operations for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
+        let state_table_l = StateTable::new_without_distribution_inconsistent_op(
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
@@ -499,7 +498,7 @@ mod tests {
             vec![0],
         )
         .await;
-        let state_table_r = StateTable::new_without_distribution_no_sanity_check(
+        let state_table_r = StateTable::new_without_distribution_inconsistent_op(
             mem_state,
             TableId::new(1),
             vec![column_descs],

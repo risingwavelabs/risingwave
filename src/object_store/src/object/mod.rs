@@ -829,6 +829,25 @@ pub async fn parse_remote_object_store(
                     .monitored(metrics),
             )
         }
+        gcs if gcs.starts_with("gcs://") => {
+            let gcs = gcs.strip_prefix("gcs://").unwrap();
+            let (bucket, root) = gcs.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
+
+        oss if oss.starts_with("oss://") => {
+            let oss = oss.strip_prefix("oss://").unwrap();
+            let (bucket, root) = oss.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_oss_engine(bucket.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
         webhdfs if webhdfs.starts_with("webhdfs://") => {
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
             let (endpoint, root) = webhdfs.split_once('@').unwrap();
@@ -900,6 +919,15 @@ pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> 
             let (namenode, root) = hdfs.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
+        gcs if gcs.starts_with("gcs://") => {
+            let gcs = gcs.strip_prefix("gcs://").unwrap();
+            let (bucket, root) = gcs.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )

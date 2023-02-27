@@ -39,7 +39,7 @@ where
 /// Visit the internal tables of a [`StreamFragment`].
 pub(super) fn visit_internal_tables<F>(fragment: &mut StreamFragment, mut f: F)
 where
-    F: FnMut(&mut Table, &'static str),
+    F: FnMut(&mut Table, &str),
 {
     macro_rules! always {
         ($table:expr, $name:expr) => {{
@@ -93,6 +93,9 @@ where
                         always!(s.table, "HashAgg");
                     }
                 }
+                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                    f(dedup_table, &format!("HashAggDedupForCol{}", distinct_col));
+                }
             }
             NodeBody::GlobalSimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
@@ -103,6 +106,12 @@ where
                     {
                         always!(s.table, "GlobalSimpleAgg");
                     }
+                }
+                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                    f(
+                        dedup_table,
+                        &format!("GlobalSimpleAggDedupForCol{}", distinct_col),
+                    );
                 }
             }
 

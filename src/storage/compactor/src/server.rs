@@ -61,7 +61,7 @@ pub async fn compactor_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Register to the cluster.
-    let meta_client = MetaClient::register_new(
+    let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
@@ -84,13 +84,15 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    // use half of limit because any memory which would hold in meta-cache will be allocate by
-    // limited at first.
-    let storage_opts = Arc::new(StorageOpts::from(&config));
+    let state_store_url = {
+        let from_local = opts.state_store.unwrap_or("".to_string());
+        system_params.state_store(from_local)
+    };
+
+    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
     let object_store = Arc::new(
         parse_remote_object_store(
-            storage_opts
-                .state_store
+            state_store_url
                 .strip_prefix("hummock+")
                 .expect("object store must be hummock for compactor server"),
             object_metrics,
@@ -110,6 +112,8 @@ pub async fn compactor_serve(
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
+    // use half of limit because any memory which would hold in meta-cache will be allocate by
+    // limited at first.
     let observer_join_handle = observer_manager.start().await;
     let output_limit_mb = storage_opts.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));

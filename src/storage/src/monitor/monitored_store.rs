@@ -30,8 +30,8 @@ use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 /// A state store wrapper for monitoring metrics.
@@ -188,7 +188,27 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     }
 }
 
-impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
+impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move {
+            let table_id_label = read_options.table_id.to_string();
+            let timer = self
+                .storage_metrics
+                .may_exist_duration
+                .with_label_values(&[table_id_label.as_str()])
+                .start_timer();
+            let res = self.inner.may_exist(key_range, read_options).await;
+            timer.observe_duration();
+            res
+        }
+    }
+}
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;

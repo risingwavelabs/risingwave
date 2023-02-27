@@ -29,7 +29,6 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
-use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
@@ -87,38 +86,8 @@ where
         self.core.read().await
     }
 
-    pub async fn start_worker_num_monitor(
-        cluster_manager: ClusterManagerRef<S>,
-        interval: Duration,
-        meta_metrics: Arc<MetaMetrics>,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            let mut monitor_interval = tokio::time::interval(interval);
-            monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = monitor_interval.tick() => {},
-                    // Shutdown monitor
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Worker number monitor is stopped");
-                        return;
-                    }
-                }
-
-                for (worker_type, worker_num) in
-                    cluster_manager.core.read().await.count_worker_node()
-                {
-                    meta_metrics
-                        .worker_num
-                        .with_label_values(&[(worker_type.as_str_name())])
-                        .set(worker_num as i64);
-                }
-            }
-        });
-
-        (join_handle, shutdown_tx)
+    pub async fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
+        self.core.read().await.count_worker_node()
     }
 
     /// A worker node will immediately register itself to meta when it bootstraps.

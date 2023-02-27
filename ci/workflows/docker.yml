@@ -15,6 +15,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
@@ -26,6 +27,7 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             DOCKER_TOKEN: docker-token
+            GITHUB_TOKEN: github-token
     retry: *auto-retry
     agents:
       queue: "linux-arm64"
@@ -46,10 +48,14 @@ steps:
   - label: "pre build binary"
     command: "ci/scripts/release.sh"
     plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
       - docker-compose#v4.9.0:
           run: release-env
           config: ci/docker-compose.yml
           environment:
             - BINARY_NAME
             - BUILDKITE_SOURCE
+            - GITHUB_TOKEN
     retry: *auto-retry

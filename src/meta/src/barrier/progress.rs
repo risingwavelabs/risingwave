@@ -13,23 +13,29 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 use super::command::CommandContext;
 use super::notifier::Notifier;
+use crate::barrier::Command;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 type CreateMviewEpoch = Epoch;
+type ConsumedRows = u64;
 
 #[derive(Clone, Copy)]
 enum ChainState {
     ConsumingSnapshot,
-    ConsumingUpstream(Epoch),
+    ConsumingUpstream(Epoch, ConsumedRows),
     Done,
 }
 
@@ -38,11 +44,32 @@ struct Progress {
     states: HashMap<ActorId, ChainState>,
 
     done_count: usize,
+
+    /// From 0 to 1.
+    progress: f64,
+
+    /// Creating mv id.
+    creating_mv_id: TableId,
+
+    /// Upstream mv count. Keep track of how many times each upstream MV appears.
+    upstream_mv_count: HashMap<TableId, usize>,
+
+    /// Upstream mvs total key count.
+    upstream_total_key_count: u64,
+
+    /// DDL definition
+    definition: String,
 }
 
 impl Progress {
     /// Create a [`Progress`] for some creating mview, with all `actors` containing the chain nodes.
-    fn new(actors: impl IntoIterator<Item = ActorId>) -> Self {
+    fn new(
+        actors: impl IntoIterator<Item = ActorId>,
+        creating_mv_id: TableId,
+        upstream_mv_count: HashMap<TableId, usize>,
+        upstream_total_key_count: u64,
+        definition: String,
+    ) -> Self {
         let states = actors
             .into_iter()
             .map(|a| (a, ChainState::ConsumingSnapshot))
@@ -52,13 +79,19 @@ impl Progress {
         Self {
             states,
             done_count: 0,
+            progress: 0.0,
+            creating_mv_id,
+            upstream_mv_count,
+            upstream_total_key_count,
+            definition,
         }
     }
 
     /// Update the progress of `actor`.
-    fn update(&mut self, actor: ActorId, new_state: ChainState) {
+    fn update(&mut self, actor: ActorId, new_state: ChainState, upstream_total_key_count: u64) {
+        self.upstream_total_key_count = upstream_total_key_count;
         match self.states.get_mut(&actor).unwrap() {
-            state @ (ChainState::ConsumingSnapshot | ChainState::ConsumingUpstream(_)) => {
+            state @ (ChainState::ConsumingSnapshot | ChainState::ConsumingUpstream(_, _)) => {
                 if matches!(new_state, ChainState::Done) {
                     self.done_count += 1;
                 }
@@ -66,6 +99,7 @@ impl Progress {
             }
             ChainState::Done => panic!("should not report done multiple times"),
         }
+        self.calculate_progress();
     }
 
     /// Returns whether all chains are done.
@@ -77,6 +111,35 @@ impl Progress {
     /// [`Progress`].
     fn actors(&self) -> impl Iterator<Item = ActorId> + '_ {
         self.states.keys().cloned()
+    }
+
+    /// `progress` = `done_ratio` + (1 - `done_ratio`) * (`consumed_rows` / `remaining_rows`).
+    fn calculate_progress(&mut self) -> f64 {
+        if self.states.is_empty() {
+            return 1.0;
+        }
+        let done_ratio: f64 = (self.done_count) as f64 / self.states.len() as f64;
+        let mut remaining_rows = self.upstream_total_key_count as f64 * (1_f64 - done_ratio);
+        if remaining_rows == 0.0 {
+            remaining_rows = 1.0;
+        }
+        let consumed_rows: u64 = self
+            .states
+            .values()
+            .map(|x| match x {
+                ChainState::ConsumingUpstream(_, rows) => *rows,
+                _ => 0,
+            })
+            .sum();
+        let calculate_progress =
+            done_ratio + (1_f64 - done_ratio) * consumed_rows as f64 / remaining_rows;
+        if self.progress < calculate_progress {
+            self.progress = calculate_progress;
+            if self.progress > 1.0 {
+                self.progress = 1.0;
+            }
+        }
+        self.progress
     }
 }
 
@@ -107,10 +170,46 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         }
     }
 
+    pub fn gen_ddl_progress(&self) -> Vec<DdlProgress> {
+        self.progress_map
+            .values()
+            .map(|(x, _)| DdlProgress {
+                id: x.creating_mv_id.table_id as u64,
+                statement: x.definition.clone(),
+                progress: format!("{:.2}%", x.progress * 100.0),
+            })
+            .collect()
+    }
+
+    /// Try to find the target create-streaming-job command from track.
+    ///
+    /// Return the target command as it should be cancelled based on the input actors.
+    pub fn find_cancelled_command(
+        &mut self,
+        actors_to_cancel: HashSet<ActorId>,
+    ) -> Option<TrackingCommand<S>> {
+        let epochs = actors_to_cancel
+            .into_iter()
+            .map(|actor_id| self.actor_map.get(&actor_id))
+            .collect_vec();
+        assert!(epochs.iter().all_equal());
+        // If the target command found in progress map, return and remove it. Note that the command
+        // should have finished if not found.
+        if let Some(Some(epoch)) = epochs.first() {
+            Some(self.progress_map.remove(epoch).unwrap().1)
+        } else {
+            None
+        }
+    }
+
     /// Add a new create-mview DDL command to track.
     ///
     /// If the actors to track is empty, return the given command as it can be finished immediately.
-    pub fn add(&mut self, command: TrackingCommand<S>) -> Option<TrackingCommand<S>> {
+    pub fn add(
+        &mut self,
+        command: TrackingCommand<S>,
+        version_stats: &HummockVersionStats,
+    ) -> Option<TrackingCommand<S>> {
         let actors = command.context.actors_to_track();
         if actors.is_empty() {
             // The command can be finished immediately.
@@ -122,7 +221,54 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             self.actor_map.insert(actor, ddl_epoch);
         }
 
-        let progress = Progress::new(actors);
+        let (creating_mv_id, upstream_mv_count, upstream_total_key_count, definition) =
+            if let Command::CreateStreamingJob {
+                table_fragments,
+                dispatchers,
+                upstream_mview_actors,
+                definition,
+                ..
+            } = &command.context.command
+            {
+                // Keep track of how many times each upstream MV appears.
+                let mut upstream_mv_count = HashMap::new();
+                for (table_id, actors) in upstream_mview_actors {
+                    assert!(!actors.is_empty());
+                    let dispatch_count: usize = dispatchers
+                        .iter()
+                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                        .map(|(_, v)| v.len())
+                        .sum();
+                    upstream_mv_count.insert(*table_id, dispatch_count / actors.len());
+                }
+
+                let upstream_total_key_count: u64 = upstream_mv_count
+                    .iter()
+                    .map(|(upstream_mv, count)| {
+                        *count as u64
+                            * version_stats
+                                .table_stats
+                                .get(&upstream_mv.table_id)
+                                .map_or(0, |stat| stat.total_key_count as u64)
+                    })
+                    .sum();
+                (
+                    table_fragments.table_id(),
+                    upstream_mv_count,
+                    upstream_total_key_count,
+                    definition.to_string(),
+                )
+            } else {
+                unreachable!("Must be CreateStreamingJob.");
+            };
+
+        let progress = Progress::new(
+            actors,
+            creating_mv_id,
+            upstream_mv_count,
+            upstream_total_key_count,
+            definition,
+        );
         let old = self.progress_map.insert(ddl_epoch, (progress, command));
         assert!(old.is_none());
         None
@@ -131,7 +277,11 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     /// Update the progress of `actor` according to the Prost struct.
     ///
     /// If all actors in this MV have finished, returns the command.
-    pub fn update(&mut self, progress: &CreateMviewProgress) -> Option<TrackingCommand<S>> {
+    pub fn update(
+        &mut self,
+        progress: &CreateMviewProgress,
+        version_stats: &HummockVersionStats,
+    ) -> Option<TrackingCommand<S>> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
             panic!("no tracked progress for actor {}, is it already finished?", actor);
@@ -140,13 +290,26 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         let new_state = if progress.done {
             ChainState::Done
         } else {
-            ChainState::ConsumingUpstream(progress.consumed_epoch.into())
+            ChainState::ConsumingUpstream(progress.consumed_epoch.into(), progress.consumed_rows)
         };
 
         match self.progress_map.entry(epoch) {
             Entry::Occupied(mut o) => {
                 let progress = &mut o.get_mut().0;
-                progress.update(actor, new_state);
+
+                let upstream_total_key_count: u64 = progress
+                    .upstream_mv_count
+                    .iter()
+                    .map(|(upstream_mv, count)| {
+                        *count as u64
+                            * version_stats
+                                .table_stats
+                                .get(&upstream_mv.table_id)
+                                .map_or(0, |stat| stat.total_key_count as u64)
+                    })
+                    .sum();
+
+                progress.update(actor, new_state, upstream_total_key_count);
 
                 if progress.is_done() {
                     tracing::debug!("all actors done for creating mview with epoch {}!", epoch);
@@ -162,7 +325,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
             }
             Entry::Vacant(_) => {
                 tracing::warn!(
-                    "update the progress of an inexistent create-mview DDL: {progress:?}"
+                    "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
                 );
                 None
             }

@@ -375,6 +375,7 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::compaction_schedule_policy::{
         CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy,
     };
@@ -383,7 +384,7 @@ mod tests {
         register_sstable_infos_to_compaction_group, setup_compute_env_with_config,
         to_local_sstable_info,
     };
-    use crate::hummock::{CompactionPickParma, HummockManager};
+    use crate::hummock::HummockManager;
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -421,6 +422,9 @@ mod tests {
                     stale_key_count: 0,
                     total_key_count: 0,
                     divide_version: 0,
+                    uncompressed_file_size: input_file_size,
+                    min_epoch: 0,
+                    max_epoch: 0,
                 }],
             }],
             splits: vec![],
@@ -516,7 +520,7 @@ mod tests {
         let task = hummock_manager
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault.into(),
-                CompactionPickParma::new_base_parma(),
+                &mut default_level_selector(),
             )
             .await
             .unwrap()

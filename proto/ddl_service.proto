@@ -223,6 +223,18 @@ message GetTableResponse {
   catalog.Table table = 1;
 }
 
+message GetDdlProgressRequest {}
+
+message DdlProgress {
+  uint64 id = 1;
+  string statement = 2;
+  string progress = 3;
+}
+
+message GetDdlProgressResponse {
+  repeated DdlProgress ddl_progress = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -245,4 +257,5 @@ service DdlService {
   rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
+  rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
 }

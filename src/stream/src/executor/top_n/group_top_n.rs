@@ -33,7 +33,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
@@ -238,6 +238,17 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         Ok(())
+    }
+
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
+        if watermark.col_idx == self.group_by[0] {
+            self.managed_state
+                .state_table
+                .update_watermark(watermark.val.clone());
+            Some(watermark)
+        } else {
+            None
+        }
     }
 }
 
@@ -528,6 +539,7 @@ mod tests {
             ),
         );
     }
+
     #[tokio::test]
     async fn test_multi_group_key() {
         let source = create_source();

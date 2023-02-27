@@ -1,0 +1,49 @@
+# Before running this test:
+#   python3 e2e_test/udf/test.py
+
+# TODO: check the service on creation
+# Currently whether the function exists in backend and whether the signature matches is checked on execution. Create function will always succeed.
+
+# Create a function.
+statement ok
+create function int_42() returns int as 'http://localhost:8815' language arrow_flight;
+
+statement ok
+create function gcd(int, int) returns int as 'http://localhost:8815' language arrow_flight;
+
+# Create a function with the same name but different arguments.
+statement ok
+create function gcd(int, int, int) returns int as 'http://localhost:8815' language arrow_flight;
+
+# Create a function with the same name and arguments.
+statement error exists
+create function gcd(int, int) returns int as 'http://localhost:8815' language arrow_flight;
+
+query I
+select int_42();
+----
+42
+
+query I
+select gcd(25, 15);
+----
+5
+
+query I
+select gcd(25, 15, 3);
+----
+1
+
+# TODO: drop function without arguments
+
+# # Drop a function but ambiguous.
+# statement error is not unique
+# drop function gcd;
+
+# Drop a function
+statement ok
+drop function gcd(int, int);
+
+# Drop a function
+statement ok
+drop function gcd(int, int, int);

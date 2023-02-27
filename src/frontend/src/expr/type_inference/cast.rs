@@ -115,9 +115,11 @@ pub fn align_array_and_element(
         .enumerate()
         .map(|(idx, input)| {
             if idx == array_idx {
-                input.cast_implicit(array_type.clone())
+                input.cast_implicit(array_type.clone()).map_err(Into::into)
             } else {
-                input.cast_implicit(common_ele_type.clone())
+                input
+                    .cast_implicit(common_ele_type.clone())
+                    .map_err(Into::into)
             }
         })
         .try_collect();

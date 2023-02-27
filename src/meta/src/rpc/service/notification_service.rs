@@ -155,12 +155,7 @@ where
 
     async fn hummock_subscribe(&self) -> MetaSnapshot {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
-        let hummock_version = self
-            .hummock_manager
-            .get_read_guard()
-            .await
-            .current_version
-            .clone();
+        let hummock_version = self.hummock_manager.get_current_version().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
 
         MetaSnapshot {

@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTopN {
     pub base: PlanBase,
     logical: LogicalTopN,

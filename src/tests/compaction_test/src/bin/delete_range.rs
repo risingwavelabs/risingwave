@@ -20,7 +20,7 @@ fn main() {
 
     let opts = risingwave_compaction_test::CompactionTestOpts::parse();
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
     risingwave_rt::main_okk(risingwave_compaction_test::start_delete_range(opts))
 }

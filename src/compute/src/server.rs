@@ -77,16 +77,6 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
-    let embedded_compactor_enabled = embedded_compactor_enabled(
-        &config.storage.state_store,
-        config.storage.disable_remote_compactor,
-    );
-    validate_compute_node_memory_config(
-        opts.total_memory_bytes,
-        embedded_compactor_enabled,
-        &config.storage,
-    );
-
     info!("Starting compute node",);
     info!("> config: {:?}", config);
     info!(
@@ -96,12 +86,11 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let storage_opts = Arc::new(StorageOpts::from(&config));
     let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
-    let meta_client = MetaClient::register_new(
+    let (meta_client, system_params) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &advertise_addr,
@@ -109,6 +98,20 @@ pub async fn compute_node_serve(
     )
     .await
     .unwrap();
+    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+
+    let state_store_url = {
+        let from_local = opts.state_store.unwrap_or("hummock+memory".to_string());
+        system_params.state_store(from_local)
+    };
+
+    let embedded_compactor_enabled =
+        embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
+    validate_compute_node_memory_config(
+        opts.total_memory_bytes,
+        embedded_compactor_enabled,
+        &config.storage,
+    );
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -138,7 +141,7 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &config.storage.state_store,
+        &state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -163,7 +166,6 @@ pub async fn compute_node_serve(
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
-
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
@@ -233,7 +235,7 @@ pub async fn compute_node_serve(
     let stream_mgr_clone = stream_mgr.clone();
     let mgr = GlobalMemoryManager::new(
         opts.total_memory_bytes,
-        config.streaming.barrier_interval_ms,
+        system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
     );
     // Run a background memory monitor

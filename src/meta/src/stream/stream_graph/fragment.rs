@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -25,7 +26,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
-    StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
+    Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -131,6 +132,7 @@ impl BuildingFragment {
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
+                dml_node.table_version_id = job.table_version_id().unwrap();
             }
             _ => {}
         });
@@ -149,7 +151,7 @@ impl Deref for BuildingFragment {
 
 /// The ID of an edge in the fragment graph. For different types of edges, the ID will be in
 /// different variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumAsInner)]
 pub(super) enum EdgeId {
     /// The edge between two building (internal) fragments.
     Internal {
@@ -163,6 +165,15 @@ pub(super) enum EdgeId {
     UpstreamExternal {
         /// The ID of the upstream table or materialized view.
         upstream_table_id: u32,
+        /// The ID of the downstream fragment.
+        downstream_fragment_id: GlobalFragmentId,
+    },
+
+    /// The edge between an upstream building fragment and downstream external fragment. Used for
+    /// schema change (replace table plan).
+    DownstreamExternal {
+        /// The ID of the original upstream fragment (`Materialize`).
+        original_upstream_fragment_id: GlobalFragmentId,
         /// The ID of the downstream fragment.
         downstream_fragment_id: GlobalFragmentId,
     },
@@ -208,6 +219,10 @@ pub struct StreamFragmentGraph {
 
     /// Dependent relations of this job.
     dependent_relations: HashSet<TableId>,
+
+    /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
+    /// variable. If not specified, all active parallel units will be used.
+    default_parallelism: Option<NonZeroUsize>,
 }
 
 impl StreamFragmentGraph {
@@ -262,20 +277,27 @@ impl StreamFragmentGraph {
                 .unwrap();
         }
 
-        // Note: Here we directly use the field `dependent_table_ids` in the proto (resolved in
+        // Note: Here we directly use the field `dependent_relation_ids` in the proto (resolved in
         // frontend), instead of visiting the graph ourselves. Note that for creating table with a
         // connector, the source itself is NOT INCLUDED in this list.
         let dependent_relations = proto
-            .dependent_table_ids
+            .dependent_relation_ids
             .iter()
             .map(TableId::from)
             .collect();
+
+        let default_parallelism = if let Some(Parallelism { parallelism }) = proto.parallelism {
+            Some(NonZeroUsize::new(parallelism as usize).context("parallelism should not be 0")?)
+        } else {
+            None
+        };
 
         Ok(Self {
             fragments,
             downstreams,
             upstreams,
             dependent_relations,
+            default_parallelism,
         })
     }
 
@@ -305,6 +327,11 @@ impl StreamFragmentGraph {
     /// Get the dependent relations of this job.
     pub fn dependent_relations(&self) -> &HashSet<TableId> {
         &self.dependent_relations
+    }
+
+    /// Get the default parallelism of the job.
+    pub fn default_parallelism(&self) -> Option<NonZeroUsize> {
+        self.default_parallelism
     }
 
     /// Get downstreams of a fragment.
@@ -341,8 +368,11 @@ pub(super) enum EitherFragment {
 /// A wrapper of [`StreamFragmentGraph`] that contains the additional information of existing
 /// fragments, which is connected to the graph's top-most or bottom-most fragments.
 ///
-/// For example, if we're going to build a mview on an existing mview, the upstream fragment
-/// containing the `Materialize` node will be included in this structure.
+/// For example,
+/// - if we're going to build a mview on an existing mview, the upstream fragment containing the
+///   `Materialize` node will be included in this structure.
+/// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
+///   containing the `Chain` nodes will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -370,9 +400,9 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV. Returns an error if the upstream
-    /// `Matererialize` is failed to resolve.
-    pub fn new(
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV, with the upstream existing
+    /// `Materialize` fragments.
+    pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_mview_fragments: HashMap<TableId, Fragment>,
     ) -> MetaResult<Self> {
@@ -388,6 +418,13 @@ impl CompleteStreamFragmentGraph {
                     .context("upstream materialized view fragment not found")?;
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
+                // TODO: only output the fields that are used by the downstream `Chain`.
+                // https://github.com/risingwavelabs/risingwave/issues/4529
+                let mview_output_indices = {
+                    let nodes = mview_fragment.actors[0].nodes.as_ref().unwrap();
+                    (0..nodes.fields.len() as u32).collect()
+                };
+
                 let edge = StreamFragmentEdge {
                     id: EdgeId::UpstreamExternal {
                         upstream_table_id,
@@ -397,7 +434,8 @@ impl CompleteStreamFragmentGraph {
                     // and the downstream `Chain` of the new materialized view.
                     dispatch_strategy: DispatchStrategy {
                         r#type: DispatcherType::NoShuffle as _,
-                        ..Default::default()
+                        dist_key_indices: vec![], // not used
+                        output_indices: mview_output_indices,
                     },
                 };
 
@@ -416,6 +454,72 @@ impl CompleteStreamFragmentGraph {
 
         let existing_fragments = upstream_mview_fragments
             .into_values()
+            .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
+            .collect();
+
+        Ok(Self {
+            building_graph: graph,
+            existing_fragments,
+            extra_downstreams,
+            extra_upstreams,
+        })
+    }
+
+    /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
+    /// downstream existing `Chain` fragments.
+    pub fn with_downstreams(
+        graph: StreamFragmentGraph,
+        downstream_fragments: Vec<Fragment>,
+    ) -> MetaResult<Self> {
+        let mut extra_downstreams = HashMap::new();
+        let mut extra_upstreams = HashMap::new();
+
+        let original_table_fragment_id = GlobalFragmentId::new(
+            downstream_fragments
+                .iter()
+                .flat_map(|f| f.upstream_fragment_ids.iter().copied())
+                .unique()
+                .exactly_one()
+                .map_err(|_| {
+                    anyhow!("downstream fragments must have exactly one upstream fragment")
+                })?,
+        );
+
+        let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
+
+        // Build the extra edges between the `Materialize` and the downstream `Chain` of the
+        // existing materialized views.
+        for fragment in &downstream_fragments {
+            let id = GlobalFragmentId::new(fragment.fragment_id);
+
+            let edge = StreamFragmentEdge {
+                id: EdgeId::DownstreamExternal {
+                    original_upstream_fragment_id: original_table_fragment_id,
+                    downstream_fragment_id: id,
+                },
+                // We always use `NoShuffle` for the exchange between the upstream `Materialize`
+                // and the downstream `Chain` of the new materialized view.
+                dispatch_strategy: DispatchStrategy {
+                    r#type: DispatcherType::NoShuffle as _,
+                    dist_key_indices: vec![], // not used
+                    output_indices: vec![],   // FIXME: should erase the changes of the schema
+                },
+            };
+
+            extra_downstreams
+                .entry(table_fragment_id)
+                .or_insert_with(HashMap::new)
+                .try_insert(id, edge.clone())
+                .unwrap();
+            extra_upstreams
+                .entry(id)
+                .or_insert_with(HashMap::new)
+                .try_insert(table_fragment_id, edge)
+                .unwrap();
+        }
+
+        let existing_fragments = downstream_fragments
+            .into_iter()
             .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
             .collect();
 

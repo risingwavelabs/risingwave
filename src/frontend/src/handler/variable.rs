@@ -48,10 +48,17 @@ pub fn handle_set(
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
 
-pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
-    let config_reader = handler_args.session.config();
+pub(super) async fn handle_show(
+    handler_args: HandlerArgs,
+    variable: Vec<Ident>,
+) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
+    if name.eq_ignore_ascii_case("PARAMETERS") {
+        return handle_show_system_params(handler_args).await;
+    }
+    // Show session config.
+    let config_reader = handler_args.session.config();
     if name.eq_ignore_ascii_case("ALL") {
         return handle_show_all(handler_args.clone());
     }
@@ -69,7 +76,7 @@ pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Re
     ))
 }
 
-pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     let config_reader = handler_args.session.config();
 
     let all_variables = config_reader.get_all();
@@ -102,6 +109,38 @@ pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse>
             ),
             PgFieldDescriptor::new(
                 "Description".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+        ],
+    ))
+}
+
+async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let params = handler_args
+        .session
+        .env()
+        .meta_client()
+        .get_system_params()
+        .await?;
+    let rows = params
+        .to_kv()
+        .into_iter()
+        .map(|(k, v)| Row::new(vec![Some(k.into()), Some(v.into())]))
+        .collect_vec();
+
+    Ok(RwPgResponse::new_for_stream(
+        StatementType::SHOW_COMMAND,
+        None,
+        rows.into(),
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Value".to_string(),
                 DataType::VARCHAR.to_oid(),
                 DataType::VARCHAR.type_len(),
             ),

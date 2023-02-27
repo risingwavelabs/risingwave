@@ -116,10 +116,7 @@ impl LocalSimpleAggExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-
+                Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
                     is_dirty = true;
@@ -209,6 +206,7 @@ mod tests {
             order_pairs: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }];
 
         let simple_agg = Box::new(
@@ -267,6 +265,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -275,6 +274,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -283,6 +283,7 @@ mod tests {
                 order_pairs: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
         ];
 

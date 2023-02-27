@@ -105,7 +105,7 @@ macro_rules! impl_split {
 #[macro_export]
 macro_rules! impl_split_reader {
     ($({ $variant_name:ident, $split_reader_name:ident} ),*) => {
-        impl SplitReaderV2Impl {
+        impl SplitReaderImpl {
             pub fn into_stream(self) -> BoxSourceWithStateStream {
                 match self {
                     $( Self::$variant_name(inner) => inner.into_stream(), )*                 }
@@ -115,8 +115,7 @@ macro_rules! impl_split_reader {
                 config: ConnectorProperties,
                 state: ConnectorState,
                 parser_config: ParserConfig,
-                metrics: Arc<SourceMetrics>,
-                source_info: SourceInfo,
+                source_ctx: SourceContextRef,
                 columns: Option<Vec<Column>>,
             ) -> Result<Self> {
                 if state.is_none() {
@@ -124,7 +123,7 @@ macro_rules! impl_split_reader {
                 }
                 let splits = state.unwrap();
                 let connector = match config {
-                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, splits, parser_config, metrics, source_info, columns).await?)), )*
+                     $( ConnectorProperties::$variant_name(props) => Self::$variant_name(Box::new($split_reader_name::new(*props, splits, parser_config, source_ctx, columns).await?)), )*
                 };
 
                 Ok(connector)
@@ -182,6 +181,7 @@ macro_rules! impl_common_parser_logic {
                             if let Err(e) = self.parse_inner(content.as_ref(), builder.row_writer())
                                 .await
                             {
+                                self.source_ctx.report_stream_source_error(&e);
                                 tracing::warn!("message parsing failed {}, skipping", e.to_string());
                                 continue;
                             }
@@ -237,10 +237,11 @@ macro_rules! impl_common_split_reader_logic {
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
             pub(crate) async fn into_chunk_stream(self) {
                 let parser_config = self.parser_config.clone();
-                let actor_id = self.source_info.actor_id.to_string();
-                let source_id = self.source_info.source_id.to_string();
+                let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let source_id = self.source_ctx.source_info.source_id.to_string();
                 let split_id = self.split_id.clone();
-                let metrics = self.metrics.clone();
+                let metrics = self.source_ctx.metrics.clone();
+                let source_ctx = self.source_ctx.clone();
 
                 let data_stream = self.into_data_stream();
 
@@ -265,7 +266,7 @@ macro_rules! impl_common_split_reader_logic {
                     })
                     .boxed();
                 let parser =
-                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config)?;
+                    $crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx)?;
                 #[for_await]
                 for msg_batch in parser.into_stream(data_stream) {
                     yield msg_batch?;

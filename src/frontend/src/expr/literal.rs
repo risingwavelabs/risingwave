@@ -15,7 +15,8 @@
 use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{literal_type_match, DataType, Datum};
-use risingwave_common::util::value_encoding::serialize_datum;
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_pb::data::Datum as ProstDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -51,6 +52,7 @@ impl std::fmt::Debug for Literal {
                     | DataType::Timestamptz
                     | DataType::Time
                     | DataType::Interval
+                    | DataType::Jsonb
                     | DataType::Struct(_) => write!(
                         f,
                         "'{}'",
@@ -77,6 +79,16 @@ impl Literal {
     pub fn get_data(&self) -> &Datum {
         &self.data
     }
+
+    pub(super) fn from_expr_proto(
+        proto: &risingwave_pb::expr::ExprNode,
+    ) -> risingwave_common::error::Result<Self> {
+        let data_type = proto.get_return_type()?;
+        Ok(Self {
+            data: value_encoding_to_literal(&proto.rex_node, &data_type.into())?,
+            data_type: data_type.into(),
+        })
+    }
 }
 
 impl Expr for Literal {
@@ -89,20 +101,32 @@ impl Expr for Literal {
         ExprNode {
             expr_type: self.get_expr_type() as i32,
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: literal_to_value_encoding(self.get_data()),
+            rex_node: Some(literal_to_value_encoding(self.get_data())),
         }
     }
 }
 
 /// Convert a literal value (datum) into protobuf.
-fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
-    if d.is_none() {
-        return None;
-    }
-    use risingwave_pb::data::Datum as ProstDatum;
-
+fn literal_to_value_encoding(d: &Datum) -> RexNode {
     let body = serialize_datum(d.as_ref());
-    Some(RexNode::Constant(ProstDatum { body }))
+    RexNode::Constant(ProstDatum { body })
+}
+
+/// Convert protobuf into a literal value (datum).
+fn value_encoding_to_literal(
+    proto: &Option<RexNode>,
+    ty: &DataType,
+) -> risingwave_common::error::Result<Datum> {
+    if let Some(rex_node) = proto {
+        if let RexNode::Constant(prost_datum) = rex_node {
+            let datum = deserialize_datum(prost_datum.body.as_ref(), ty)?;
+            Ok(datum)
+        } else {
+            unreachable!()
+        }
+    } else {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -123,7 +147,7 @@ mod tests {
         ]);
         let data = Some(ScalarImpl::Struct(value.clone()));
         let node = literal_to_value_encoding(&data);
-        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+        if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
                 &DataType::new_struct(
@@ -146,7 +170,7 @@ mod tests {
         ]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
-        if let RexNode::Constant(prost) = node.as_ref().unwrap() {
+        if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
                 &DataType::List {

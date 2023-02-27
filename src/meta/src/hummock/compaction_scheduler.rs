@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::{Either, Shared};
+use futures::stream::select;
+use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -23,11 +26,15 @@ use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
+use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
 
-use super::{CompactionPickParma, Compactor};
+use super::Compactor;
+use crate::hummock::compaction::{
+    DynamicLevelSelector, LevelSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
+};
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::manager::{LocalNotification, MetaSrvEnv};
@@ -42,7 +49,7 @@ type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 /// compaction groups.
 pub struct CompactionRequestChannel {
     request_tx: UnboundedSender<CompactionRequestChannelItem>,
-    scheduled: Mutex<HashSet<CompactionGroupId>>,
+    scheduled: Mutex<HashSet<(CompactionGroupId, compact_task::TaskType)>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,16 +76,21 @@ impl CompactionRequestChannel {
         task_type: compact_task::TaskType,
     ) -> Result<bool, SendError<CompactionRequestChannelItem>> {
         let mut guard = self.scheduled.lock();
-        if guard.contains(&compaction_group) {
+        let key = (compaction_group, task_type);
+        if guard.contains(&key) {
             return Ok(false);
         }
-        self.request_tx.send((compaction_group, task_type))?;
-        guard.insert(compaction_group);
+        self.request_tx.send(key)?;
+        guard.insert(key);
         Ok(true)
     }
 
-    pub fn unschedule(&self, compaction_group: CompactionGroupId) {
-        self.scheduled.lock().remove(&compaction_group);
+    pub fn unschedule(
+        &self,
+        compaction_group: CompactionGroupId,
+        task_type: compact_task::TaskType,
+    ) {
+        self.scheduled.lock().remove(&(compaction_group, task_type));
     }
 }
 
@@ -115,8 +127,8 @@ where
         }
     }
 
-    pub async fn start(&self, mut shutdown_rx: Receiver<()>) {
-        let (sched_tx, mut sched_rx) =
+    pub async fn start(&self, shutdown_rx: Receiver<()>) {
+        let (sched_tx, sched_rx) =
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
@@ -126,101 +138,40 @@ where
         );
 
         tracing::info!("Start compaction scheduler.");
-        let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
-            self.env.opts.periodic_compaction_interval_sec,
-        ));
-        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
+        let compaction_selectors = Self::init_selectors();
+        let shutdown_rx = shutdown_rx.shared();
+        let schedule_event_stream = Self::scheduler_event_stream(
+            sched_rx,
             self.env.opts.periodic_space_reclaim_compaction_interval_sec,
-        ));
-        min_space_reclaim_trigger_interval
-            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            self.env.opts.periodic_ttl_reclaim_compaction_interval_sec,
+            self.env.opts.periodic_compaction_interval_sec,
+        );
+        self.schedule_loop(
+            sched_channel.clone(),
+            shutdown_rx,
+            compaction_selectors,
+            schedule_event_stream,
+        )
+        .await;
+    }
 
-        loop {
-            let (compaction_group, task_type) = tokio::select! {
-                recv = sched_rx.recv() => {
-                    match recv {
-                        Some((compaction_group, task_type)) => (compaction_group, task_type),
-                        None => {
-                            tracing::warn!("Compactor Scheduler: The Hummock manager has dropped the connection,
-                                it means it has either died or started a new session. Exiting.");
-                            return;
-                        }
-                    }
-                },
-
-                _ = min_trigger_interval.tick() => {
-                    // Disable periodic trigger for compaction_deterministic_test.
-                    if self.env.opts.compaction_deterministic_test {
-                        continue;
-                    }
-                    // Periodically trigger compaction for all compaction groups.
-                    for cg_id in self.hummock_manager.compaction_group_ids().await {
-                        if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::Dynamic) {
-                            tracing::warn!("Failed to schedule base compaction for compaction group {}. {}", cg_id, e);
-                        }
-                    }
-                    continue;
-                },
-
-                _ = min_space_reclaim_trigger_interval.tick() => {
-                      // Disable periodic trigger for compaction_deterministic_test.
-                      if self.env.opts.compaction_deterministic_test {
-                        continue;
-                    }
-                    // Periodically trigger space_reclaim compaction for all compaction groups.
-                    for cg_id in self.hummock_manager.compaction_group_ids().await {
-                        if let Err(e) = sched_channel.try_sched_compaction(cg_id, compact_task::TaskType::SpaceReclaim) {
-                            tracing::warn!("Failed to schedule base compaction for compaction group {}. {}", cg_id, e);
-                        }
-                    }
-                    continue;
-                }
-
-                // Shutdown compactor scheduler
-                _ = &mut shutdown_rx => {
-                    break;
-                }
-            };
-
-            sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
-            sched_channel.unschedule(compaction_group);
-
-            // Wait for a compactor to become available.
-            let compactor = loop {
-                if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
-                    break compactor;
-                } else {
-                    tracing::debug!("No available compactor, pausing compaction.");
-                    tokio::select! {
-                        _ = self.compaction_resume_notifier.notified() => {},
-                        _ = &mut shutdown_rx => {
-                            return;
-                        }
-                    }
-                }
-            };
-
-            // Pick a task and assign it to this compactor.
-            let compaction_pick_param = match task_type {
-                compact_task::TaskType::Dynamic => CompactionPickParma::new_base_parma(),
-                compact_task::TaskType::SpaceReclaim => {
-                    CompactionPickParma::new_space_reclaim_parma()
-                }
-                compact_task::TaskType::Ttl => CompactionPickParma::new_ttl_reclaim_parma(),
-
-                _ => panic!("Error type when scheduler trigger compaction"),
-            };
-
-            self.pick_and_assign(
-                compaction_group,
-                compactor,
-                sched_channel.clone(),
-                compaction_pick_param,
-            )
-            .await;
-        }
+    fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn LevelSelector>> {
+        let mut compaction_selectors: HashMap<compact_task::TaskType, Box<dyn LevelSelector>> =
+            HashMap::default();
+        compaction_selectors.insert(
+            compact_task::TaskType::Dynamic,
+            Box::<DynamicLevelSelector>::default(),
+        );
+        compaction_selectors.insert(
+            compact_task::TaskType::SpaceReclaim,
+            Box::<SpaceReclaimCompactionSelector>::default(),
+        );
+        compaction_selectors.insert(
+            compact_task::TaskType::Ttl,
+            Box::<TtlCompactionSelector>::default(),
+        );
+        compaction_selectors
     }
 
     /// Tries to pick a compaction task, schedule it to a compactor.
@@ -231,15 +182,10 @@ where
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
         sched_channel: Arc<CompactionRequestChannel>,
-        compaction_pick_parma: CompactionPickParma,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> ScheduleStatus {
         let schedule_status = self
-            .pick_and_assign_impl(
-                compaction_group,
-                compactor,
-                sched_channel,
-                compaction_pick_parma,
-            )
+            .pick_and_assign_impl(compaction_group, compactor, sched_channel, selector)
             .await;
 
         let cancel_state = match &schedule_status {
@@ -281,12 +227,12 @@ where
         compaction_group: CompactionGroupId,
         compactor: Arc<Compactor>,
         sched_channel: Arc<CompactionRequestChannel>,
-        compaction_pick_parma: CompactionPickParma,
+        selector: &mut Box<dyn LevelSelector>,
     ) -> ScheduleStatus {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
-            .get_compact_task(compaction_group, compaction_pick_parma)
+            .get_compact_task(compaction_group, selector)
             .await;
 
         let compact_task = match compact_task {
@@ -317,7 +263,12 @@ where
                 );
             }
             Err(err) => {
-                tracing::warn!("Failed to assign compaction task to compactor: {:#?}", err);
+                tracing::warn!(
+                    "Failed to assign {:?} compaction task to compactor {} : {:#?}",
+                    compact_task.task_type().as_str_name(),
+                    compactor.context_id(),
+                    err
+                );
                 match err {
                     Error::CompactionTaskAlreadyAssigned(_, _) => {
                         panic!("Compaction scheduler is the only tokio task that can assign task.");
@@ -367,6 +318,207 @@ where
         }
         ScheduleStatus::Ok
     }
+
+    async fn schedule_loop(
+        &self,
+        sched_channel: Arc<CompactionRequestChannel>,
+        shutdown_rx: Shared<Receiver<()>>,
+        mut compaction_selectors: HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
+        event_stream: impl Stream<Item = SchedulerEvent>,
+    ) {
+        use futures::pin_mut;
+        pin_mut!(event_stream);
+
+        loop {
+            let item = futures::future::select(event_stream.next(), shutdown_rx.clone()).await;
+            match item {
+                Either::Left((event, _)) => {
+                    if let Some(event) = event {
+                        match event {
+                            SchedulerEvent::Channel((compaction_group, task_type)) => {
+                                // recv
+                                if !self
+                                    .on_handle_compact(
+                                        compaction_group,
+                                        &mut compaction_selectors,
+                                        task_type,
+                                        sched_channel.clone(),
+                                        shutdown_rx.clone(),
+                                    )
+                                    .await
+                                {
+                                    break;
+                                }
+                            }
+                            SchedulerEvent::DynamicTrigger => {
+                                // Disable periodic trigger for compaction_deterministic_test.
+                                if self.env.opts.compaction_deterministic_test {
+                                    continue;
+                                }
+                                // Periodically trigger compaction for all compaction groups.
+                                self.on_handle_trigger_multi_grouop(
+                                    sched_channel.clone(),
+                                    compact_task::TaskType::Dynamic,
+                                )
+                                .await;
+                                continue;
+                            }
+                            SchedulerEvent::SpaceReclaimTrigger => {
+                                // Disable periodic trigger for compaction_deterministic_test.
+                                if self.env.opts.compaction_deterministic_test {
+                                    continue;
+                                }
+                                // Periodically trigger compaction for all compaction groups.
+                                self.on_handle_trigger_multi_grouop(
+                                    sched_channel.clone(),
+                                    compact_task::TaskType::SpaceReclaim,
+                                )
+                                .await;
+                                continue;
+                            }
+                            SchedulerEvent::TtlReclaimTrigger => {
+                                // Disable periodic trigger for compaction_deterministic_test.
+                                if self.env.opts.compaction_deterministic_test {
+                                    continue;
+                                }
+                                // Periodically trigger compaction for all compaction groups.
+                                self.on_handle_trigger_multi_grouop(
+                                    sched_channel.clone(),
+                                    compact_task::TaskType::Ttl,
+                                )
+                                .await;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                Either::Right((_, _shutdown)) => {
+                    break;
+                }
+            }
+        }
+    }
+
+    async fn on_handle_compact(
+        &self,
+        compaction_group: CompactionGroupId,
+        compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
+        task_type: compact_task::TaskType,
+        sched_channel: Arc<CompactionRequestChannel>,
+        shutdown_rx: Shared<Receiver<()>>,
+    ) -> bool {
+        sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
+        sched_channel.unschedule(compaction_group, task_type);
+
+        self.task_dispatch(
+            compaction_group,
+            task_type,
+            compaction_selectors,
+            sched_channel,
+            shutdown_rx,
+        )
+        .await
+    }
+
+    async fn on_handle_trigger_multi_grouop(
+        &self,
+        sched_channel: Arc<CompactionRequestChannel>,
+        task_type: compact_task::TaskType,
+    ) {
+        for cg_id in self.hummock_manager.compaction_group_ids().await {
+            if let Err(e) = sched_channel.try_sched_compaction(cg_id, task_type) {
+                tracing::warn!(
+                    "Failed to schedule {:?} compaction for compaction group {}. {}",
+                    task_type,
+                    cg_id,
+                    e
+                );
+            }
+        }
+    }
+
+    async fn task_dispatch(
+        &self,
+        compaction_group: CompactionGroupId,
+        task_type: compact_task::TaskType,
+        compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
+        sched_channel: Arc<CompactionRequestChannel>,
+        mut shutdown_rx: Shared<Receiver<()>>,
+    ) -> bool {
+        // Wait for a compactor to become available.
+        let compactor = loop {
+            if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
+                break compactor;
+            } else {
+                tracing::debug!("No available compactor, pausing compaction.");
+                tokio::select! {
+                    _ = self.compaction_resume_notifier.notified() => {},
+                    _ = &mut shutdown_rx => {
+                        return false;
+                    }
+                }
+            }
+        };
+        let selector = compaction_selectors.get_mut(&task_type).unwrap();
+        self.pick_and_assign(compaction_group, compactor, sched_channel.clone(), selector)
+            .await;
+
+        true
+    }
+}
+
+enum SchedulerEvent {
+    Channel((CompactionGroupId, compact_task::TaskType)),
+    DynamicTrigger,
+    SpaceReclaimTrigger,
+    TtlReclaimTrigger,
+}
+
+impl<S> CompactionScheduler<S>
+where
+    S: MetaStore,
+{
+    fn scheduler_event_stream(
+        sched_rx: UnboundedReceiver<(CompactionGroupId, compact_task::TaskType)>,
+        periodic_space_reclaim_compaction_interval_sec: u64,
+        periodic_ttl_reclaim_compaction_interval_sec: u64,
+        periodic_compaction_interval_sec: u64,
+    ) -> impl Stream<Item = SchedulerEvent> {
+        let dynamic_channel_trigger =
+            UnboundedReceiverStream::new(sched_rx).map(SchedulerEvent::Channel);
+
+        let mut min_trigger_interval =
+            tokio::time::interval(Duration::from_secs(periodic_compaction_interval_sec));
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let dynamic_tick_trigger =
+            IntervalStream::new(min_trigger_interval).map(|_| SchedulerEvent::DynamicTrigger);
+
+        let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
+            periodic_space_reclaim_compaction_interval_sec,
+        ));
+
+        min_space_reclaim_trigger_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
+            .map(|_| SchedulerEvent::SpaceReclaimTrigger);
+
+        let mut min_ttl_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
+            periodic_ttl_reclaim_compaction_interval_sec,
+        ));
+        min_ttl_reclaim_trigger_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
+            .map(|_| SchedulerEvent::TtlReclaimTrigger);
+
+        select(
+            dynamic_channel_trigger,
+            select(
+                dynamic_tick_trigger,
+                select(space_reclaim_trigger, ttl_reclaim_trigger),
+            ),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -376,11 +528,12 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::compaction_scheduler::{
         CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
     };
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
-    use crate::hummock::{CompactionPickParma, CompactionScheduler};
+    use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
     async fn test_pick_and_assign() {
@@ -407,7 +560,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -421,7 +574,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -439,7 +592,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -469,7 +622,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -513,7 +666,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await
         );
@@ -529,7 +682,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -547,7 +700,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::SendFailure(_)
@@ -573,7 +726,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::AssignFailure(_)
@@ -582,16 +735,15 @@ mod tests {
         fail::remove(fp_cancel_compact_task);
         assert_eq!(hummock_manager.list_all_tasks_ids().await.len(), 1);
         // Notified to retry cancellation.
-        let mut task_to_cancel = match rx.recv().await.unwrap() {
-            LocalNotification::WorkerNodeIsDeleted(_) => {
-                panic!()
-            }
-            LocalNotification::CompactionTaskNeedCancel(task_to_cancel) => task_to_cancel,
+        if let LocalNotification::CompactionTaskNeedCancel(mut task_to_cancel) =
+            rx.recv().await.unwrap()
+        {
+            hummock_manager
+                .cancel_compact_task(&mut task_to_cancel, TaskStatus::ManualCanceled)
+                .await
+                .unwrap();
         };
-        hummock_manager
-            .cancel_compact_task(&mut task_to_cancel, TaskStatus::ManualCanceled)
-            .await
-            .unwrap();
+
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
 
         // Succeeded.
@@ -602,7 +754,7 @@ mod tests {
                     StaticCompactionGroupId::StateDefault.into(),
                     compactor,
                     request_channel.clone(),
-                    CompactionPickParma::new_base_parma(),
+                    &mut default_level_selector(),
                 )
                 .await,
             ScheduleStatus::Ok

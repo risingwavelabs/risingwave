@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
@@ -30,13 +30,13 @@ mod options {
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
-    inner: HashMap<String, String>,
+    inner: BTreeMap<String, String>,
 }
 
 impl std::ops::Deref for WithOptions {
-    type Target = HashMap<String, String>;
+    type Target = BTreeMap<String, String>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -46,17 +46,19 @@ impl std::ops::Deref for WithOptions {
 impl WithOptions {
     /// Create a new [`WithOptions`] from a [`HashMap`].
     pub fn new(inner: HashMap<String, String>) -> Self {
-        Self { inner }
+        Self {
+            inner: inner.into_iter().collect(),
+        }
     }
 
     /// Get the reference of the inner map.
-    pub fn inner(&self) -> &HashMap<String, String> {
+    pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner
     }
 
     /// Take the value of the inner map.
-    pub fn into_inner(self) -> HashMap<String, String> {
-        self.inner
+    pub fn into_inner(self) -> BTreeMap<String, String> {
+        self.inner.into_iter().collect()
     }
 
     /// Parse the retention seconds from the options.
@@ -68,12 +70,7 @@ impl WithOptions {
 
     /// Parse the append only property from the options.
     pub fn append_only(&self) -> bool {
-        if let Some(val) = self.inner.get(options::APPEND_ONLY) {
-            if val.eq_ignore_ascii_case("true") {
-                return true;
-            }
-        }
-        false
+        self.value_eq_ignore_case(options::APPEND_ONLY, "true")
     }
 
     /// Get a subset of the options from the given keys.
@@ -95,6 +92,15 @@ impl WithOptions {
     /// Currently only `retention_seconds` is included.
     pub fn internal_table_subset(&self) -> Self {
         self.subset([options::RETENTION_SECONDS])
+    }
+
+    pub fn value_eq_ignore_case(&self, key: &str, val: &str) -> bool {
+        if let Some(inner_val) = self.inner.get(key) {
+            if inner_val.eq_ignore_ascii_case(val) {
+                return true;
+            }
+        }
+        false
     }
 }
 

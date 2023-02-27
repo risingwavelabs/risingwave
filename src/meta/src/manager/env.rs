@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use crate::manager::{
@@ -67,7 +68,7 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
-
+    // TODO: this will be read from system param channel and should be removed to avoid misuse
     pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
@@ -95,8 +96,26 @@ pub struct MetaOpts {
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
 
+    /// Target size of the Sstable.
+    pub sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    pub block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    pub bloom_false_positive: f64,
+
+    /// State store url.
+    pub state_store: Option<String>,
+
+    /// Remote directory for storing data and metadata objects.
+    pub data_directory: String,
+
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -119,7 +138,29 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
+            sstable_size_mb: 256,
+            block_size_kb: 64,
+            bloom_false_positive: 0.001,
+            state_store: None,
+            data_directory: "hummock_001".to_string(),
             periodic_space_reclaim_compaction_interval_sec: 60,
+            periodic_ttl_reclaim_compaction_interval_sec: 60,
+        }
+    }
+
+    pub fn init_system_params(&self) -> SystemParams {
+        // For fields not provided from CLI, use default values.
+        // For deprecated fields, use `None`.
+        SystemParams {
+            barrier_interval_ms: Some(self.barrier_interval.as_millis() as u32),
+            checkpoint_frequency: Some(self.checkpoint_frequency as u64),
+            sstable_size_mb: Some(self.sstable_size_mb),
+            bloom_false_positive: Some(self.bloom_false_positive),
+            block_size_kb: Some(self.block_size_kb),
+            state_store: Some(self.state_store.clone().unwrap_or_default()),
+            data_directory: Some(self.data_directory.clone()),
+            backup_storage_url: Some(self.backup_storage_url.clone()),
+            backup_storage_directory: Some(self.backup_storage_directory.clone()),
         }
     }
 }

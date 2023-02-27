@@ -524,6 +524,15 @@ def section_cluster_node(panels):
                 )
             ],
         ),
+        panels.timeseries_count(
+            "Meta Cluster",
+            "",
+            [
+                panels.target(f"sum({metric('meta_num')}) by (worker_addr,role)",
+                              "{{worker_addr}} @ {{role}}")
+            ],
+            ["last"],
+        ),
     ]
 
 
@@ -794,6 +803,28 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+                    "Lsm Compact Pending Bytes",
+                    "bytes of Lsm tree needed to reach balance",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_pending_bytes')}) by (instance, group)",
+                            "compact pending bytes - {{group}} @ {{instance}} ",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_percentage(
+                    "Lsm Level Compression Ratio",
+                    "compression ratio of each level of the lsm tree",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_level_compression_ratio')}) by (instance, group, level, algorithm)",
+                            "lsm compression ratio - cg{{group}} @ L{{level}} - {{algorithm}} {{instance}} ",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -836,8 +867,8 @@ def section_object_storage(outer_panels):
                             [50, 90, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, type)(rate({metric('object_store_operation_latency_sum')}[$__rate_interval])) / sum by(le, type) (rate({metric('object_store_operation_latency_count')}[$__rate_interval]))",
-                            "{{type}} avg",
+                            f"sum by(le, type, job, instance)(rate({metric('object_store_operation_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('object_store_operation_latency_count')}[$__rate_interval]))",
+                            "{{type}} avg - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1320,7 +1351,11 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{actor_id}} {{side}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
+                            "may_exist true when insert {{actor_id}} {{side}}",
                         ),
                     ],
                 ),
@@ -1457,6 +1492,37 @@ def section_streaming_exchange(outer_panels):
     ]
 
 
+def section_streaming_errors(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "User Streaming Errors",
+            [
+                panels.timeseries_count(
+                    "Compute Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Source Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
+
+
 def section_batch_exchange(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -1501,6 +1567,61 @@ def section_frontend(outer_panels):
                         panels.target(
                             f"rate({metric('frontend_query_counter_local_execution')}[$__rate_interval])",
                             "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_query_per_sec(
+                    "Query Per second in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('distributed_completed_query_counter')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Running query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_running_query_num')}",
+                            "The number of running query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Rejected query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_rejected_query_counter')}",
+                            "The number of rejected query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "Completed query in distributed execution mode",
+                    "",
+                    [
+                        panels.target(f"{metric('distributed_completed_query_counter')}",
+                            "The number of completed query in distributed execution mode"),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_latency(
+                    "Query Latency in Distributed Execution Mode",
+                    "",
+                    [
+                        panels.target(
+                            f"histogram_quantile(0.5, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p50 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.9, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p90 - {{job}} @ {{instance}}",
+                        ),
+                        panels.target(
+                            f"histogram_quantile(0.95, sum(rate({metric('distributed_query_latency_bucket')}[$__rate_interval])) by (le, job, instance))",
+                            "p99 - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1693,6 +1814,23 @@ def section_hummock(panels):
                 panels.target(
                     f"sum(rate({metric('state_store_iter_size_sum')}[$__rate_interval])) by(job, instance)",
                     "{{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_latency(
+            "Read Duration - MayExist",
+            "",
+            [
+                *quantile(
+                    lambda quantile, legend: panels.target(
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_may_exist_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"p{legend}" + " - {{table_id}} @ {{job}} @ {{instance}}",
+                    ),
+                    [50, 90, 99, "max"],
+                ),
+                panels.target(
+                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_may_exist_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_may_exist_duration_count')}[$__rate_interval]))",
+                    "avg - {{table_id}} {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2092,6 +2230,14 @@ def section_hummock_manager(outer_panels):
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Stale SST Total Number",
+                    "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+                    [
+                        panels.target(f"{metric('storage_stale_ssts_count')}",
+                                      "stale SST total number"),
+                    ],
+                ),
             ],
         )
     ]
@@ -2398,15 +2544,11 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_ms(
-                    "LRU manager watermark_time and physical_now",
-                    "",
+                    "LRU manager diff between watermark_time and now (ms)",
+                    "watermark_time is the current lower watermark of cached data. physical_now is the current time of the machine. The diff (physical_now - watermark_time) shows how much data is cached.",
                     [
                         panels.target(
-                            f"{metric('lru_current_watermark_time_ms')}",
-                            "",
-                        ),
-                        panels.target(
-                            f"{metric('lru_physical_now_ms')}",
+                            f"{metric('lru_physical_now_ms')} - {metric('lru_current_watermark_time_ms')}",
                             "",
                         ),
                     ],
@@ -2477,6 +2619,7 @@ dashboard = Dashboard(
         *section_streaming(panels),
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
+        *section_streaming_errors(panels),
         *section_batch_exchange(panels),
         *section_hummock(panels),
         *section_compaction(panels),

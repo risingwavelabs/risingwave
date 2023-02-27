@@ -15,6 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
+easy-ext = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"

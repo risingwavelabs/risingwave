@@ -30,7 +30,7 @@ CREATE SOURCE nexmark (
     connector = 'nexmark',
     nexmark.split.num = '2',
     nexmark.min.event.gap.in.ns = '100'
-) ROW FORMAT JSON;
+);
 
 statement ok
 CREATE VIEW PERSON as select (person).* from nexmark where event_type = 0;

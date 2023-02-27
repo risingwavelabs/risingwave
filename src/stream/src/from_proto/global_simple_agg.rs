@@ -16,9 +16,13 @@
 
 use risingwave_pb::stream_plan::SimpleAggNode;
 
-use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
+use super::agg_common::{
+    build_agg_call_from_prost, build_agg_state_storages_from_proto,
+    build_distinct_dedup_table_from_proto,
+};
 use super::*;
 use crate::common::table::state_table::StateTable;
+use crate::executor::agg_common::AggExecutorArgs;
 use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
@@ -44,18 +48,28 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
                 .await;
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None).await;
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store.clone(), None)
+                .await;
+        let distinct_dedup_tables =
+            build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
+                .await;
 
-        Ok(GlobalSimpleAggExecutor::new(
-            params.actor_context,
+        Ok(GlobalSimpleAggExecutor::new(AggExecutorArgs {
             input,
+            actor_ctx: params.actor_context,
+            pk_indices: params.pk_indices,
+            executor_id: params.executor_id,
+
+            extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
+
             agg_calls,
             storages,
             result_table,
-            params.pk_indices,
-            params.executor_id,
-            stream.config.developer.unsafe_stream_extreme_cache_size,
-        )?
+            distinct_dedup_tables,
+            watermark_epoch: stream.get_watermark_epoch(),
+
+            extra: None,
+        })?
         .boxed())
     }
 }

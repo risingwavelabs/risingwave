@@ -25,7 +25,7 @@ use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
-use risingwave_expr::expr::expr_unary::new_unary_expr;
+use risingwave_expr::expr::test_utils::{make_expression, make_string_literal};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::cast::cast_sigs;

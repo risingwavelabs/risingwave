@@ -155,6 +155,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -168,11 +169,13 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         let levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let mut level_handlers = vec![
             LevelHandler::new(0),
@@ -231,6 +234,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -241,11 +245,13 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         let levels = Levels {
             levels,
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         let levels_handler = vec![
             LevelHandler::new(0),

@@ -240,6 +240,7 @@ pub mod tests {
         let mut levels = Levels {
             l0: Some(OverlappingLevel {
                 total_file_size: l0.total_file_size,
+                uncompressed_file_size: l0.total_file_size,
                 sub_levels: vec![l0],
             }),
             levels: vec![generate_level(
@@ -251,6 +252,7 @@ pub mod tests {
                     generate_table(0, 1, 301, 400, 1),
                 ],
             )],
+            ..Default::default()
         };
         let mut local_stats = LocalPickerStatistic::default();
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -328,13 +330,16 @@ pub mod tests {
             ],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let mut levels = Levels {
             levels,
             l0: Some(OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
+                uncompressed_file_size: 0,
             }),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
         push_tables_level0_nonoverlapping(
@@ -383,13 +388,16 @@ pub mod tests {
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let mut levels = Levels {
             levels,
             l0: Some(OverlappingLevel {
                 sub_levels: vec![],
                 total_file_size: 0,
+                uncompressed_file_size: 0,
             }),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(
             &mut levels,
@@ -427,10 +435,12 @@ pub mod tests {
                 table_infos: vec![generate_table(2, 1, 150, 300, 2)],
                 total_file_size: 150,
                 sub_level_id: 0,
+                uncompressed_file_size: 150,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![generate_table(
                 1, 1, 160, 280, 2,
             )])),
+            ..Default::default()
         };
 
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -482,11 +492,13 @@ pub mod tests {
                 table_infos: vec![generate_table(3, 1, 200, 300, 2)],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![
                 generate_table(1, 1, 100, 210, 2),
                 generate_table(2, 1, 200, 250, 2),
             ])),
+            ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
@@ -526,8 +538,10 @@ pub mod tests {
                 ],
                 total_file_size: 590,
                 sub_level_id: 0,
+                uncompressed_file_size: 590,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(
             &mut levels,
@@ -580,8 +594,10 @@ pub mod tests {
                 ],
                 total_file_size: 900,
                 sub_level_id: 0,
+                uncompressed_file_size: 900,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            ..Default::default()
         };
         push_tables_level0_nonoverlapping(
             &mut levels,
@@ -616,6 +632,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
@@ -689,6 +706,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let mut local_stats = LocalPickerStatistic::default();

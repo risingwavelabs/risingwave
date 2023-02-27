@@ -19,6 +19,9 @@ message SstableInfo {
   uint64 total_key_count = 7;
   // When a SST is divided, its divide_version will increase one.
   uint64 divide_version = 8;
+  uint64 min_epoch = 9;
+  uint64 max_epoch = 10;
+  uint64 uncompressed_file_size = 11;
 }
 
 enum LevelType {
@@ -30,6 +33,7 @@ enum LevelType {
 message OverlappingLevel {
   repeated Level sub_levels = 1;
   uint64 total_file_size = 2;
+  uint64 uncompressed_file_size = 3;
 }
 
 message Level {
@@ -38,6 +42,7 @@ message Level {
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
+  uint64 uncompressed_file_size = 6;
 }
 
 message InputLevel {
@@ -58,6 +63,12 @@ message GroupConstruct {
   // If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially.
   uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
+  uint64 group_id = 4;
+}
+
+message GroupMetaChange {
+  repeated uint32 table_ids_add = 1;
+  repeated uint32 table_ids_remove = 2;
 }
 
 message GroupDestroy {}
@@ -67,6 +78,7 @@ message GroupDelta {
     IntraLevelDelta intra_level = 1;
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
+    GroupMetaChange group_meta_change = 4;
   }
 }
 
@@ -79,6 +91,9 @@ message HummockVersion {
   message Levels {
     repeated Level levels = 1;
     OverlappingLevel l0 = 2;
+    uint64 group_id = 3;
+    uint64 parent_group_id = 4;
+    repeated uint32 member_table_ids = 5;
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -274,12 +289,19 @@ message CompactStatus {
   repeated LevelHandler level_handlers = 2;
 }
 
+// Config info of compaction group.
 message CompactionGroup {
+  uint64 id = 1;
+  CompactionConfig compaction_config = 4;
+}
+
+// Complete info of compaction group.
+// The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
+message CompactionGroupInfo {
   uint64 id = 1;
   uint64 parent_id = 2;
   repeated uint32 member_table_ids = 3;
   CompactionConfig compaction_config = 4;
-  map<uint32, TableOption> table_id_to_options = 5;
 }
 
 message CompactTaskAssignment {
@@ -389,13 +411,6 @@ message ReportVacuumTaskResponse {
   common.Status status = 1;
 }
 
-message GetCompactionGroupsRequest {}
-
-message GetCompactionGroupsResponse {
-  common.Status status = 1;
-  repeated CompactionGroup compaction_groups = 2;
-}
-
 message TriggerManualCompactionRequest {
   uint64 compaction_group_id = 1;
   KeyRange key_range = 2;
@@ -458,7 +473,7 @@ message RiseCtlGetPinnedSnapshotsSummaryResponse {
 
 message InitMetadataForReplayRequest {
   repeated catalog.Table tables = 1;
-  repeated CompactionGroup compaction_groups = 2;
+  repeated CompactionGroupInfo compaction_groups = 2;
 }
 
 message InitMetadataForReplayResponse {}
@@ -489,7 +504,7 @@ message RiseCtlListCompactionGroupRequest {}
 
 message RiseCtlListCompactionGroupResponse {
   common.Status status = 1;
-  repeated CompactionGroup compaction_groups = 2;
+  repeated CompactionGroupInfo compaction_groups = 2;
 }
 
 message RiseCtlUpdateCompactionConfigRequest {
@@ -546,7 +561,6 @@ service HummockManagerService {
   rpc GetNewSstIds(GetNewSstIdsRequest) returns (GetNewSstIdsResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
-  rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
   rpc ReportFullScanTask(ReportFullScanTaskRequest) returns (ReportFullScanTaskResponse);
   rpc TriggerFullGC(TriggerFullGCRequest) returns (TriggerFullGCResponse);

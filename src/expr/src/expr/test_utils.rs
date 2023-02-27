@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Helper functions to construct prost [`ExprNode`] for test.
+
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::serialize_datum;

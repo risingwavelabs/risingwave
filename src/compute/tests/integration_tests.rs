@@ -28,7 +28,9 @@ use risingwave_batch::executor::{
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
@@ -182,6 +184,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         2,
         dml_manager.clone(),
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         column_descs.clone(),
     );
 
@@ -226,6 +229,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     ));
     let insert = Box::new(InsertExecutor::new(
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         dml_manager.clone(),
         insert_inner,
         1024,
@@ -346,6 +350,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
     let delete = Box::new(DeleteExecutor::new(
         table_id,
+        INITIAL_TABLE_VERSION_ID,
         dml_manager.clone(),
         delete_inner,
         1024,

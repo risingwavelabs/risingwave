@@ -1,0 +1,45 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v int)
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+NULL NULL NULL NULL
+
+statement ok
+insert into t values (1)
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+0 NULL 0 NULL
+
+statement ok
+insert into t values (2), (3), (4), (5), (6)
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+1.707825127659933 1.8708286933869707 2.9166666666666666666666666667 3.50
+
+statement ok
+delete from t where v = 3
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+1.8547236990991407 2.073644135332772 3.44 4.30
+
+statement ok
+update t set v = 7 where v = 4
+
+query RRRR
+select stddev_pop(v), stddev_samp(v), var_pop(v), var_samp(v) from t
+----
+2.3151673805580453 2.588435821108957 5.36 6.70
+
+statement ok
+drop table t

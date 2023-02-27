@@ -20,8 +20,7 @@ use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, StreamChunk, Vis};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{new_binary_expr, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node;
 

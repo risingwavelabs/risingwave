@@ -30,6 +30,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_system;
 mod alter_table;
 pub mod alter_user;
 mod create_database;
@@ -344,7 +345,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
             table_name,
@@ -375,6 +376,9 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::AddColumn { column_def },
         } => alter_table::handle_add_column(handler_args, name, column_def).await,
+        Statement::AlterSystem { param, value } => {
+            alter_system::handle_alter_system(handler_args, param, value).await
+        }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

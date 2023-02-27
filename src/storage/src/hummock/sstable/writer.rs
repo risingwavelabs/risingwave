@@ -100,7 +100,7 @@ mod tests {
         }
         let meta = SstableMeta {
             block_metas,
-            bloom_filter: Vec::new(),
+            bloom_filter: vec![],
             estimated_size: 0,
             key_count: 0,
             smallest_key: Vec::new(),

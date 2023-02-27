@@ -32,9 +32,9 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
-use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -330,13 +330,9 @@ impl LocalStreamManager {
         core.context.take_receiver(&ids)
     }
 
-    pub async fn update_actors(
-        &self,
-        actors: &[stream_plan::StreamActor],
-        hanging_channels: &[stream_service::HangingChannel],
-    ) -> StreamResult<()> {
+    pub async fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> StreamResult<()> {
         let mut core = self.core.lock().await;
-        core.update_actors(actors, hanging_channels)
+        core.update_actors(actors)
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
@@ -372,14 +368,6 @@ impl LocalStreamManager {
     pub fn get_total_mem_val(&self) -> Arc<TrAdder<i64>> {
         self.total_mem_val.clone()
     }
-}
-
-fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
-    ids.iter()
-        .map(|&id| {
-            context.add_channel_pairs(id);
-        })
-        .count();
 }
 
 impl LocalStreamManagerCore {
@@ -614,8 +602,13 @@ impl LocalStreamManagerCore {
                 StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
             })?;
             let mview_definition = &actor.mview_definition;
-            let actor_context =
-                ActorContext::create_with_counter(actor_id, self.total_mem_val.clone());
+            let actor_context = ActorContext::create_with_metrics(
+                actor_id,
+                actor.fragment_id,
+                self.total_mem_val.clone(),
+                self.streaming_metrics.clone(),
+                self.config.unique_user_stream_errors,
+            );
             let vnode_bitmap = actor
                 .vnode_bitmap
                 .as_ref()
@@ -807,47 +800,13 @@ impl LocalStreamManagerCore {
         self.context.actor_infos.write().clear();
     }
 
-    fn update_actors(
-        &mut self,
-        actors: &[stream_plan::StreamActor],
-        hanging_channels: &[stream_service::HangingChannel],
-    ) -> StreamResult<()> {
+    fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> StreamResult<()> {
         for actor in actors {
             self.actors
                 .try_insert(actor.get_actor_id(), actor.clone())
                 .map_err(|_| anyhow!("duplicated actor {}", actor.get_actor_id()))?;
         }
 
-        for actor in actors {
-            // At this time, the graph might not be complete, so we do not check if downstream
-            // has `current_id` as upstream.
-            let down_id = actor
-                .dispatcher
-                .iter()
-                .flat_map(|x| x.downstream_actor_id.iter())
-                .map(|id| (actor.actor_id, *id))
-                .collect_vec();
-            update_upstreams(&self.context, &down_id);
-        }
-
-        for hanging_channel in hanging_channels {
-            match (&hanging_channel.upstream, &hanging_channel.downstream) {
-                (
-                    Some(ActorInfo {
-                        actor_id: up_id,
-                        host: None, // local
-                    }),
-                    Some(ActorInfo {
-                        actor_id: down_id,
-                        host: Some(_), // remote
-                    }),
-                ) => {
-                    let up_down_ids = (*up_id, *down_id);
-                    self.context.add_channel_pairs(up_down_ids);
-                }
-                _ => bail!("hanging channel must be from local to remote: {hanging_channel:?}"),
-            }
-        }
         Ok(())
     }
 
@@ -862,12 +821,6 @@ pub mod test_utils {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
-
-    pub fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
-        for up_down_id in up_down_ids {
-            ctx.add_channel_pairs(up_down_id);
-        }
-    }
 
     pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
         ActorInfo {

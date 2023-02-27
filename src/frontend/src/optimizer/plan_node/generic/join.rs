@@ -26,7 +26,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// of the cartesian product of the two inputs; precisely which subset depends on the join
 /// condition. In addition, the output columns are a subset of the columns of the left and
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Join<PlanRef> {
     pub left: PlanRef,
     pub right: PlanRef,

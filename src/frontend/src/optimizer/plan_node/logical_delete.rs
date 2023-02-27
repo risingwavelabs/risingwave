@@ -14,7 +14,7 @@
 
 use std::{fmt, vec};
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
@@ -32,18 +32,25 @@ use crate::utils::{ColIndexMapping, Condition};
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
 ///
 /// It corresponds to the `DELETE` statements in SQL.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDelete {
     pub base: PlanBase,
     table_name: String, // explain-only
     table_id: TableId,
+    table_version_id: TableVersionId,
     input: PlanRef,
     returning: bool,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table_name: String, table_id: TableId, returning: bool) -> Self {
+    pub fn new(
+        input: PlanRef,
+        table_name: String,
+        table_id: TableId,
+        table_version_id: TableVersionId,
+        returning: bool,
+    ) -> Self {
         let ctx = input.ctx();
         let schema = if returning {
             input.schema().clone()
@@ -56,6 +63,7 @@ impl LogicalDelete {
             base,
             table_name,
             table_id,
+            table_version_id,
             input,
             returning,
         }
@@ -66,9 +74,16 @@ impl LogicalDelete {
         input: PlanRef,
         table_name: String,
         table_id: TableId,
+        table_version_id: TableVersionId,
         returning: bool,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id, returning))
+        Ok(Self::new(
+            input,
+            table_name,
+            table_id,
+            table_version_id,
+            returning,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -93,6 +108,10 @@ impl LogicalDelete {
     pub fn has_returning(&self) -> bool {
         self.returning
     }
+
+    pub fn table_version_id(&self) -> TableVersionId {
+        self.table_version_id
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalDelete {
@@ -105,6 +124,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
             input,
             self.table_name.clone(),
             self.table_id,
+            self.table_version_id,
             self.returning,
         )
     }

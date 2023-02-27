@@ -16,11 +16,8 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::HummockPinnedSnapshot;
 
+use crate::hummock::model::HUMMOCK_PINNED_SNAPSHOT_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// Column family name for hummock pinned snapshot
-/// `cf(hummock_pinned_snapshot)`: `HummockContextId` -> `HummockPinnedSnapshot`
-const HUMMOCK_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_pinned_snapshot";
 
 /// `HummockPinnedSnapshot` tracks pinned snapshots by given context id.
 impl MetadataModel for HummockPinnedSnapshot {

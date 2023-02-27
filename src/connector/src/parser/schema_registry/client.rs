@@ -81,7 +81,7 @@ impl Client {
         let res: GetByIdResp = request(req).await?;
         Ok(ConfluentSchema {
             id,
-            raw: res.schema,
+            content: res.schema,
         })
     }
 
@@ -94,10 +94,11 @@ impl Client {
     pub async fn get_subject(&self, subject: &str) -> Result<Subject> {
         let req = self.build_request(Method::GET, &["subjects", subject, "versions", "latest"]);
         let res: GetBySubjectResp = request(req).await?;
+        tracing::info!("res {:?}", res);
         Ok(Subject {
             schema: ConfluentSchema {
                 id: res.id,
-                raw: res.schema,
+                content: res.schema,
             },
             version: res.version,
             name: res.subject,
@@ -120,7 +121,7 @@ impl Client {
             let ref_subject = Subject {
                 schema: ConfluentSchema {
                     id: res.id,
-                    raw: res.schema,
+                    content: res.schema,
                 },
                 version: res.version,
                 name: res.subject.clone(),
@@ -178,7 +179,7 @@ pub struct ConfluentSchema {
     /// The id of the schema
     pub id: i32,
     /// The raw text of the schema def
-    pub raw: String,
+    pub content: String,
 }
 
 /// `Subject` stored in confluent schema registry
@@ -224,6 +225,12 @@ struct GetBySubjectResp {
 struct ErrorResp {
     error_code: i32,
     message: String,
+}
+
+#[derive(Debug)]
+enum ReqResp<T> {
+    Succeed(T),
+    Failed(ErrorResp),
 }
 
 #[cfg(test)]

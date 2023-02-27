@@ -15,7 +15,9 @@
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
@@ -93,10 +95,13 @@ pub async fn handle_add_column(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, source, table) = {
+    let (graph, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, source, table) =
             gen_create_table_plan(context, table_name, columns, constraints, col_id_gen)?;
+
+        // We should already have rejected the case where the table has a connector.
+        assert!(source.is_none());
 
         // TODO: avoid this backward conversion.
         if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
@@ -105,12 +110,21 @@ pub async fn handle_add_column(
             ))?
         }
 
-        let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table)
+        let graph = StreamFragmentGraph {
+            parallelism: session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism }),
+            ..build_graph(plan)
+        };
+
+        // Fill the original table ID.
+        let table = Table {
+            id: original_catalog.id().table_id(),
+            ..table
+        };
+
+        (graph, table)
     };
 
     // TODO: for test purpose only, we drop the original table and create a new one. This is wrong
@@ -118,10 +132,13 @@ pub async fn handle_add_column(
     if cfg!(debug_assertions) {
         let catalog_writer = session.env().catalog_writer();
 
+        // TODO: call replace_table RPC
+        // catalog_writer.replace_table(table, graph).await?;
+
         catalog_writer
             .drop_table(None, original_catalog.id())
             .await?;
-        catalog_writer.create_table(source, table, graph).await?;
+        catalog_writer.create_table(None, table, graph).await?;
 
         Ok(PgResponse::empty_result_with_notice(
             StatementType::ALTER_TABLE,

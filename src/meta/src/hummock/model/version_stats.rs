@@ -16,10 +16,8 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionStats;
 
+use crate::hummock::model::HUMMOCK_VERSION_STATS_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// `cf(hummock_table_stats)`: `HummockVersionId` -> `TableStatsMap`
-const HUMMOCK_VERSION_STATS_CF_NAME: &str = "cf/hummock_version_stats";
 
 /// `HummockVersionStats` stores stats for hummock version.
 /// Currently it only persists one row for latest version.

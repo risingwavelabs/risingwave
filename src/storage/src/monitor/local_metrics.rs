@@ -56,6 +56,7 @@ pub struct StoreLocalStatistic {
     pub staging_sst_iter_count: u64,
     pub overlapping_iter_count: u64,
     pub non_overlapping_iter_count: u64,
+    pub may_exist_check_sstable_count: u64,
     pub sub_iter_count: u64,
     pub found_key: bool,
 
@@ -125,7 +126,11 @@ impl StoreLocalStatistic {
             .observe(self.overlapping_iter_count as f64);
         metrics
             .non_overlapping_iter_count
-            .observe(self.overlapping_iter_count as f64);
+            .observe(self.non_overlapping_iter_count as f64);
+        metrics
+            .may_exist_check_sstable_count
+            .observe(self.may_exist_check_sstable_count as f64);
+
         metrics.collect_count += 1;
         if metrics.collect_count > FLUSH_LOCAL_METRICS_TIMES {
             metrics.flush();
@@ -256,8 +261,10 @@ struct LocalStoreMetrics {
     staging_sst_iter_count: LocalHistogram,
     overlapping_iter_count: LocalHistogram,
     non_overlapping_iter_count: LocalHistogram,
+    may_exist_check_sstable_count: LocalHistogram,
     iter_filter_metrics: BloomFilterLocalMetrics,
     get_filter_metrics: BloomFilterLocalMetrics,
+    may_exist_filter_metrics: BloomFilterLocalMetrics,
     collect_count: usize,
 }
 
@@ -331,8 +338,14 @@ impl LocalStoreMetrics {
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "committed-non-overlapping-iter"])
             .local();
+        let may_exist_check_sstable_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "may-exist-check-sstable"])
+            .local();
         let get_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "get");
         let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
+        let may_exist_filter_metrics =
+            BloomFilterLocalMetrics::new(metrics, table_id_label, "may_exist");
         Self {
             cache_data_block_total,
             cache_data_block_miss,
@@ -348,8 +361,10 @@ impl LocalStoreMetrics {
             staging_sst_iter_count,
             overlapping_iter_count,
             non_overlapping_iter_count,
+            may_exist_check_sstable_count,
             get_filter_metrics,
             iter_filter_metrics,
+            may_exist_filter_metrics,
             collect_count: 0,
         }
     }
@@ -468,6 +483,40 @@ impl Drop for IterLocalMetricsGuard {
             self.local_stats.report(table_metrics);
             self.local_stats
                 .report_bloom_filter_metrics(&mut table_metrics.iter_filter_metrics);
+        });
+    }
+}
+
+pub struct MayExistLocalMetricsGuard {
+    metrics: Arc<HummockStateStoreMetrics>,
+    table_id: TableId,
+    pub local_stats: StoreLocalStatistic,
+}
+
+impl MayExistLocalMetricsGuard {
+    pub fn new(metrics: Arc<HummockStateStoreMetrics>, table_id: TableId) -> Self {
+        Self {
+            metrics,
+            table_id,
+            local_stats: StoreLocalStatistic::default(),
+        }
+    }
+}
+
+impl Drop for MayExistLocalMetricsGuard {
+    fn drop(&mut self) {
+        LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+            let table_metrics = local_metrics
+                .entry(self.table_id.table_id)
+                .or_insert_with(|| {
+                    LocalStoreMetrics::new(
+                        self.metrics.as_ref(),
+                        self.table_id.to_string().as_str(),
+                    )
+                });
+            self.local_stats.report(table_metrics);
+            self.local_stats
+                .report_bloom_filter_metrics(&mut table_metrics.may_exist_filter_metrics);
         });
     }
 }

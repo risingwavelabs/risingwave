@@ -18,7 +18,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;
@@ -79,7 +79,7 @@ impl StreamingAggImpl for StreamingRowCountAgg {
                 }
             }
             Some(visibility) => {
-                for (op, visible) in ops.iter().zip_eq_debug(visibility.iter()) {
+                for (op, visible) in ops.iter().zip_eq_fast(visibility.iter()) {
                     if visible {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.row_cnt += 1,

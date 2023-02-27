@@ -14,8 +14,7 @@
     },
     {
       "name": "name",
-      "type": "string",
-      "default": ""
+      "type": ["null", "string"]
     },
     {
       "name": "score",

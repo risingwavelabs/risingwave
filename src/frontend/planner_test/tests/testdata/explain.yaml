@@ -6,11 +6,6 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Share Source:
-
-    LogicalProject { exprs: [1:Int32] }
-    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
@@ -36,23 +31,35 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
+    Project Remove:
+
+    apply TrivialProjectToValuesRule 1 time(s)
+
+    LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+
+    Inline Session Timezone:
+
+    BatchValues { rows: [[1:Int32]] }
+
+    Const eval exprs:
+
+    BatchValues { rows: [[1:Int32]] }
+
     To Batch Physical Plan:
 
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 
     To Batch Local Plan:
 
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 
     {
       "root_stage_id": 0,
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 29,
-            "plan_node_type": "BatchProject",
+            "plan_node_id": 33,
+            "plan_node_type": "BatchValues",
             "schema": [
               {
                 "dataType": {
@@ -62,15 +69,7 @@
                 "name": "1:Int32"
               }
             ],
-            "children": [
-              {
-                "plan_node_id": 27,
-                "plan_node_type": "BatchValues",
-                "schema": [],
-                "children": [],
-                "source_stage_id": null
-              }
-            ],
+            "children": [],
             "source_stage_id": null
           },
           "parallelism": 1,
@@ -100,13 +99,6 @@
     explain (logical, trace) select * from t1 join t2 on v1=v2;
   explain_output: |+
     Begin:
-
-    LogicalProject { exprs: [t1.v1, t2.v2] }
-    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
-      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
-      └─LogicalScan { table: t2, columns: [v2, _row_id] }
-
-    Share Source:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
@@ -169,3 +161,19 @@
     explain (logical) create table t1(v1 int);
   explain_output: |
     LogicalSource
+- sql: |
+    explain create table t (v1 int, v2 varchar);
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "overwrite" }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamDml { columns: [v1, v2, _row_id] }
+          └─StreamSource
+- sql: |
+    explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) row format json;
+  explain_output: |
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "overwrite" }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamDml { columns: [v1, v2, _row_id] }
+          └─StreamSource { source: "t", columns: ["v1", "v2", "_row_id"] }

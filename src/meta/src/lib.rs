@@ -33,6 +33,7 @@
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(is_sorted)]
 
 pub mod backup_restore;
 mod barrier;
@@ -104,6 +105,11 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
+    // TODO(zhidong): Make it required in v0.1.18
+    /// State store url.
+    #[clap(long, env = "RW_STATE_STORE")]
+    state_store: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
@@ -125,13 +131,43 @@ pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKEND", arg_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
+
+    /// Target size of the Sstable.
+    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
+    #[override_opts(path = storage.sstable_size_mb)]
+    sstable_size_mb: Option<u32>,
+
+    /// Size of each block in bytes in SST.
+    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
+    #[override_opts(path = storage.block_size_kb)]
+    block_size_kb: Option<u32>,
+
+    /// False positive probability of bloom filter.
+    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
+    #[override_opts(path = storage.bloom_false_positive)]
+    bloom_false_positive: Option<f64>,
+
+    /// Remote directory for storing data and metadata objects.
+    #[clap(long, env = "RW_DATA_DIRECTORY")]
+    #[override_opts(path = storage.data_directory)]
+    data_directory: Option<String>,
+
+    /// Remote storage url for storing snapshots.
+    #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
+    #[override_opts(path = backup.storage_url)]
+    backup_storage_url: Option<String>,
+
+    /// Remote directory for storing snapshots.
+    #[clap(long, env = "RW_STORAGE_DIRECTORY")]
+    #[override_opts(path = backup.storage_directory)]
+    backup_storage_directory: Option<String>,
 }
 
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, MetaBackend};
+use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
@@ -166,6 +202,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaBackend::Mem => MetaStoreBackend::Mem,
         };
 
+        validate_config(&config);
+
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let barrier_interval = Duration::from_millis(config.streaming.barrier_interval_ms as u64);
@@ -181,7 +219,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -205,25 +243,41 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 backup_storage_url: config.backup.storage_url,
                 backup_storage_directory: config.backup.storage_directory,
+                sstable_size_mb: config.storage.sstable_size_mb,
+                block_size_kb: config.storage.block_size_kb,
+                bloom_false_positive: config.storage.bloom_false_positive,
+                state_store: opts.state_store,
+                data_directory: config.storage.data_directory,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
+                periodic_ttl_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_ttl_reclaim_compaction_interval_sec,
             },
         )
         .await
         .unwrap();
 
-        if let Some(leader_lost_handle) = leader_lost_handle {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("receive ctrl+c");
-                    shutdown_send.send(()).unwrap();
-                    join_handle.await.unwrap();
-                    leader_lost_handle.abort();
-                },
+        let res = tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("receive ctrl+c");
+                shutdown_send.send(()).unwrap();
+                join_handle.await
             }
-        } else {
-            join_handle.await.unwrap();
+            res = &mut join_handle => res,
+        };
+        res.unwrap();
+        if let Some(leader_lost_handle) = leader_lost_handle {
+            leader_lost_handle.abort();
         }
     })
+}
+
+fn validate_config(config: &RwConfig) {
+    if config.meta.meta_leader_lease_secs <= 1 {
+        let error_msg = "meta leader lease secs should be larger than 1";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
 }

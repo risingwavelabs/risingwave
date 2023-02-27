@@ -29,8 +29,9 @@ use risingwave_pb::hummock::{
 
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
-use crate::hummock::metrics_utils::trigger_safepoint_stat;
+use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_stale_ssts_stat};
 use crate::hummock::HummockManager;
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
@@ -105,9 +106,18 @@ impl Versioning {
         min_pinned_version_id
     }
 
+    pub fn extend_ssts_to_delete_from_deltas(
+        &mut self,
+        delta_range: impl RangeBounds<HummockVersionId>,
+        metric: &MetaMetrics,
+    ) {
+        self.extend_ssts_to_delete_from_deltas_impl(delta_range);
+        trigger_stale_ssts_stat(metric, self.ssts_to_delete.len());
+    }
+
     /// Extends `ssts_to_delete` according to given deltas.
     /// Possibly extends `deltas_to_delete`.
-    pub fn extend_ssts_to_delete_from_deltas(
+    fn extend_ssts_to_delete_from_deltas_impl(
         &mut self,
         delta_range: impl RangeBounds<HummockVersionId>,
     ) {
@@ -217,7 +227,7 @@ mod tests {
             },
         );
         assert_eq!(versioning.deltas_to_delete.len(), 0);
-        versioning.extend_ssts_to_delete_from_deltas(1..=2);
+        versioning.extend_ssts_to_delete_from_deltas_impl(1..=2);
         assert_eq!(versioning.deltas_to_delete.len(), 1);
     }
 

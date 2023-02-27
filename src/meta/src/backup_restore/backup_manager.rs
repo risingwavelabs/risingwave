@@ -189,6 +189,14 @@ impl<S: MetaStore> BackupManager<S> {
     /// Deletes existent backups from backup storage.
     pub async fn delete_backups(&self, ids: &[MetaSnapshotId]) -> MetaResult<()> {
         self.backup_store.delete(ids).await?;
+        self.env
+            .notification_manager()
+            .notify_hummock_without_version(
+                Operation::Update,
+                Info::MetaBackupManifestId(MetaBackupManifestId {
+                    id: self.backup_store.manifest().manifest_id,
+                }),
+            );
         Ok(())
     }
 

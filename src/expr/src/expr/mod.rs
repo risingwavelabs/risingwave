@@ -12,13 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod agg;
-pub mod build_expr_from_prost;
-pub mod data_types;
+//! Expressions in RisingWave.
+//!
+//! All expressions are implemented under the [`Expression`] trait.
+//!
+//! ## Construction
+//!
+//! Expressions can be constructed by functions like [`new_binary_expr`],
+//! which returns a [`BoxedExpression`].
+//!
+//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost`]
+//! function.
+//!
+//! ## Evaluation
+//!
+//! Expressions can be evaluated using the [`eval`] function.
+//!
+//! [`ExprNode`]: risingwave_pb::expr::ExprNode
+//! [`eval`]: Expression::eval
+
+// These modules define concrete expression structures.
 mod expr_array_concat;
+mod expr_array_to_string;
 mod expr_binary_bytes;
-pub mod expr_binary_nonnull;
-pub mod expr_binary_nullable;
+mod expr_binary_nonnull;
+mod expr_binary_nullable;
 mod expr_case;
 mod expr_coalesce;
 mod expr_concat_ws;
@@ -26,6 +44,7 @@ mod expr_field;
 mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
+mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
@@ -35,40 +54,33 @@ mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
 mod expr_udf;
-pub mod expr_unary;
+mod expr_unary;
 mod expr_vnode;
+
+mod agg;
+mod build_expr_from_prost;
+pub(crate) mod data_types;
 mod template;
 mod template_fast;
+pub mod test_utils;
 
-use std::convert::TryFrom;
 use std::sync::Arc;
 
-pub use agg::AggKind;
-pub use expr_input_ref::InputRefExpression;
-pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::ExprNode;
 
+pub use self::agg::AggKind;
+pub use self::build_expr_from_prost::build_from_prost;
+pub use self::expr_binary_nonnull::new_binary_expr;
+pub use self::expr_input_ref::InputRefExpression;
+pub use self::expr_literal::LiteralExpression;
+pub use self::expr_unary::new_unary_expr;
 use super::Result;
-use crate::expr::build_expr_from_prost::*;
-use crate::expr::expr_array_concat::ArrayConcatExpression;
-use crate::expr::expr_case::CaseExpression;
-use crate::expr::expr_coalesce::CoalesceExpression;
-use crate::expr::expr_concat_ws::ConcatWsExpression;
-use crate::expr::expr_field::FieldExpression;
-use crate::expr::expr_in::InExpression;
-use crate::expr::expr_nested_construct::NestedConstructExpression;
-use crate::expr::expr_regexp::RegexpMatchExpression;
-use crate::expr::expr_udf::UdfExpression;
-use crate::expr::expr_vnode::VnodeExpression;
-use crate::ExprError;
-
-pub type ExpressionRef = Arc<dyn Expression>;
 
 /// Instance of an expression
 pub trait Expression: std::fmt::Debug + Sync + Send {
+    /// Get the return data type.
     fn return_type(&self) -> DataType;
 
     /// Eval the result with extra checks.
@@ -91,6 +103,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Evaluate the expression in row-based execution.
     fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
+    /// Wrap the expression in a Box.
     fn boxed(self) -> BoxedExpression
     where
         Self: Sized + Send + 'static,
@@ -99,67 +112,8 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
+/// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
 
-pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    use risingwave_pb::expr::expr_node::Type::*;
-
-    match prost.get_expr_type().unwrap() {
-        // Fixed number of arguments and based on `Unary/Binary/Ternary/...Expression`
-        Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | BitwiseNot | CharLength
-        | BoolOut | OctetLength | BitLength | ToTimestamp => build_unary_expr_prost(prost),
-        Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
-        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
-        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
-            build_nullable_binary_expr_prost(prost)
-        }
-        ToChar => build_to_char_expr(prost),
-        ToTimestamp1 => build_to_timestamp_expr(prost),
-        Length => build_length_expr(prost),
-        Replace => build_replace_expr(prost),
-        Like => build_like_expr(prost),
-        Repeat => build_repeat_expr(prost),
-        SplitPart => build_split_part_expr(prost),
-        Translate => build_translate_expr(prost),
-
-        // Variable number of arguments and based on `Unary/Binary/Ternary/...Expression`
-        Substr => build_substr_expr(prost),
-        Overlay => build_overlay_expr(prost),
-        Trim => build_trim_expr(prost),
-        Ltrim => build_ltrim_expr(prost),
-        Rtrim => build_rtrim_expr(prost),
-        DateTrunc => build_date_trunc_expr(prost),
-
-        // Dedicated types
-        All | Some => build_some_all_expr_prost(prost),
-        In => InExpression::try_from(prost).map(Expression::boxed),
-        Case => CaseExpression::try_from(prost).map(Expression::boxed),
-        Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
-        ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
-        ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
-        InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
-        Field => FieldExpression::try_from(prost).map(Expression::boxed),
-        Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
-        ArrayCat | ArrayAppend | ArrayPrepend => {
-            // Now we implement these three functions as a single expression for the
-            // sake of simplicity. If performance matters at some time, we can split
-            // the implementation to improve performance.
-            ArrayConcatExpression::try_from(prost).map(Expression::boxed)
-        }
-        Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
-        Now => build_now_expr(prost),
-        Udf => UdfExpression::try_from(prost).map(Expression::boxed),
-        _ => Err(ExprError::UnsupportedFunction(format!(
-            "{:?}",
-            prost.get_expr_type()
-        ))),
-    }
-}
-
-mod test_utils;
-pub use test_utils::*;
+/// A reference to a dynamically typed [`Expression`].
+pub type ExpressionRef = Arc<dyn Expression>;

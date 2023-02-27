@@ -28,8 +28,8 @@ use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 pub type BytesFullKey = FullKey<Bytes>;
@@ -604,7 +604,17 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {}
+impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async move { Ok(true) }
+    }
+}
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     type Local = Self;

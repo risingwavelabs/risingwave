@@ -22,7 +22,7 @@ profile:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
 
-      
+
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
@@ -143,6 +143,35 @@ profile:
       # - use: prometheus
       # - use: grafana
 
+  gcs:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use google cloud stoage as storage backend, configure hdfs namenode and root path:
+      - use: opendal
+        engine: gcs
+        bucket: bucket-name
+        root: risingwave
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
+
+  oss:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use google cloud stoage as storage backend, configure hdfs namenode and root path:
+      - use: opendal
+        engine: oss
+        bucket: "risingwave-oss-wcy"
+        root: risingwave
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
 
   full-benchmark:
     steps:
@@ -161,7 +190,6 @@ profile:
         persist-data: true
       - use: kafka
         persist-data: true
-
 
   3etcd-3meta:
     steps:
@@ -683,7 +711,7 @@ template:
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
-    # AWS s3 bucket used by this compute node
+    # OpenDAL storage backend used by this compute node
     provide-opendal: "opendal*"
 
     # AWS s3 bucket used by this compute node
@@ -891,6 +919,8 @@ template:
     engine: hdfs
 
     namenode: 127.0.0.1:9000"
+
+    bucket: risingwave-test
 
     root: risingwave
 

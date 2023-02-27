@@ -14,7 +14,7 @@
 
 use std::{fmt, vec};
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
@@ -34,11 +34,12 @@ use crate::utils::{ColIndexMapping, Condition};
 /// specified table.
 ///
 /// It corresponds to the `UPDATE` statements in SQL.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
     pub base: PlanBase,
     table_name: String, // explain-only
     table_id: TableId,
+    table_version_id: TableVersionId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
     returning: bool,
@@ -50,6 +51,7 @@ impl LogicalUpdate {
         input: PlanRef,
         table_name: String,
         table_id: TableId,
+        table_version_id: TableVersionId,
         exprs: Vec<ExprImpl>,
         returning: bool,
     ) -> Self {
@@ -65,6 +67,7 @@ impl LogicalUpdate {
             base,
             table_name,
             table_id,
+            table_version_id,
             input,
             exprs,
             returning,
@@ -76,10 +79,18 @@ impl LogicalUpdate {
         input: PlanRef,
         table_name: String,
         table_id: TableId,
+        table_version_id: TableVersionId,
         exprs: Vec<ExprImpl>,
         returning: bool,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id, exprs, returning))
+        Ok(Self::new(
+            input,
+            table_name,
+            table_id,
+            table_version_id,
+            exprs,
+            returning,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -109,6 +120,10 @@ impl LogicalUpdate {
     pub fn has_returning(&self) -> bool {
         self.returning
     }
+
+    pub fn table_version_id(&self) -> TableVersionId {
+        self.table_version_id
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalUpdate {
@@ -121,6 +136,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
             input,
             self.table_name.clone(),
             self.table_id,
+            self.table_version_id,
             self.exprs.clone(),
             self.returning,
         )

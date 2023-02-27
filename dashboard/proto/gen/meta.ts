@@ -300,6 +300,20 @@ export interface FlushResponse {
   snapshot: HummockSnapshot | undefined;
 }
 
+export interface CreatingJobInfo {
+  databaseId: number;
+  schemaId: number;
+  name: string;
+}
+
+export interface CancelCreatingJobsRequest {
+  infos: CreatingJobInfo[];
+}
+
+export interface CancelCreatingJobsResponse {
+  status: Status | undefined;
+}
+
 export interface ListTableFragmentsRequest {
   tableIds: number[];
 }
@@ -534,6 +548,40 @@ export interface MetaMember {
 
 export interface MembersResponse {
   members: MetaMember[];
+}
+
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields.
+ * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ */
+export interface SystemParams {
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
+}
+
+export interface GetSystemParamsRequest {
+}
+
+export interface GetSystemParamsResponse {
+  params: SystemParams | undefined;
+}
+
+export interface SetSystemParamRequest {
+  param: string;
+  /** None means set to default value. */
+  value?: string | undefined;
+}
+
+export interface SetSystemParamResponse {
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -1037,6 +1085,86 @@ export const FlushResponse = {
       : undefined;
     message.snapshot = (object.snapshot !== undefined && object.snapshot !== null)
       ? HummockSnapshot.fromPartial(object.snapshot)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreatingJobInfo(): CreatingJobInfo {
+  return { databaseId: 0, schemaId: 0, name: "" };
+}
+
+export const CreatingJobInfo = {
+  fromJSON(object: any): CreatingJobInfo {
+    return {
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+    };
+  },
+
+  toJSON(message: CreatingJobInfo): unknown {
+    const obj: any = {};
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreatingJobInfo>, I>>(object: I): CreatingJobInfo {
+    const message = createBaseCreatingJobInfo();
+    message.databaseId = object.databaseId ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsRequest(): CancelCreatingJobsRequest {
+  return { infos: [] };
+}
+
+export const CancelCreatingJobsRequest = {
+  fromJSON(object: any): CancelCreatingJobsRequest {
+    return { infos: Array.isArray(object?.infos) ? object.infos.map((e: any) => CreatingJobInfo.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: CancelCreatingJobsRequest): unknown {
+    const obj: any = {};
+    if (message.infos) {
+      obj.infos = message.infos.map((e) => e ? CreatingJobInfo.toJSON(e) : undefined);
+    } else {
+      obj.infos = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsRequest>, I>>(object: I): CancelCreatingJobsRequest {
+    const message = createBaseCancelCreatingJobsRequest();
+    message.infos = object.infos?.map((e) => CreatingJobInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsResponse(): CancelCreatingJobsResponse {
+  return { status: undefined };
+}
+
+export const CancelCreatingJobsResponse = {
+  fromJSON(object: any): CancelCreatingJobsResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: CancelCreatingJobsResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsResponse>, I>>(object: I): CancelCreatingJobsResponse {
+    const message = createBaseCancelCreatingJobsResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
       : undefined;
     return message;
   },
@@ -2316,6 +2444,155 @@ export const MembersResponse = {
   fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
     const message = createBaseMembersResponse();
     message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return {
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
+  };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsRequest(): GetSystemParamsRequest {
+  return {};
+}
+
+export const GetSystemParamsRequest = {
+  fromJSON(_: any): GetSystemParamsRequest {
+    return {};
+  },
+
+  toJSON(_: GetSystemParamsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsRequest>, I>>(_: I): GetSystemParamsRequest {
+    const message = createBaseGetSystemParamsRequest();
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsResponse(): GetSystemParamsResponse {
+  return { params: undefined };
+}
+
+export const GetSystemParamsResponse = {
+  fromJSON(object: any): GetSystemParamsResponse {
+    return { params: isSet(object.params) ? SystemParams.fromJSON(object.params) : undefined };
+  },
+
+  toJSON(message: GetSystemParamsResponse): unknown {
+    const obj: any = {};
+    message.params !== undefined && (obj.params = message.params ? SystemParams.toJSON(message.params) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsResponse>, I>>(object: I): GetSystemParamsResponse {
+    const message = createBaseGetSystemParamsResponse();
+    message.params = (object.params !== undefined && object.params !== null)
+      ? SystemParams.fromPartial(object.params)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamRequest(): SetSystemParamRequest {
+  return { param: "", value: undefined };
+}
+
+export const SetSystemParamRequest = {
+  fromJSON(object: any): SetSystemParamRequest {
+    return {
+      param: isSet(object.param) ? String(object.param) : "",
+      value: isSet(object.value) ? String(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SetSystemParamRequest): unknown {
+    const obj: any = {};
+    message.param !== undefined && (obj.param = message.param);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamRequest>, I>>(object: I): SetSystemParamRequest {
+    const message = createBaseSetSystemParamRequest();
+    message.param = object.param ?? "";
+    message.value = object.value ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamResponse(): SetSystemParamResponse {
+  return {};
+}
+
+export const SetSystemParamResponse = {
+  fromJSON(_: any): SetSystemParamResponse {
+    return {};
+  },
+
+  toJSON(_: SetSystemParamResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamResponse>, I>>(_: I): SetSystemParamResponse {
+    const message = createBaseSetSystemParamResponse();
     return message;
   },
 };

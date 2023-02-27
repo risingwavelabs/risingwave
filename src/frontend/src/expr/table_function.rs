@@ -20,7 +20,7 @@ use risingwave_common::types::{unnested_list_type, DataType, ScalarImpl};
 use risingwave_pb::expr::table_function::Type;
 use risingwave_pb::expr::TableFunction as TableFunctionProst;
 
-use super::{Expr, ExprImpl, ExprRewriter, Result};
+use super::{Expr, ExprImpl, ExprRewriter, RwResult};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -85,7 +85,7 @@ impl FromStr for TableFunctionType {
 impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
-    pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> Result<Self> {
+    pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> RwResult<Self> {
         // TODO: refactor into sth like FunctionCall::new.
         // Current implementation is copied from legacy code.
 
@@ -94,7 +94,7 @@ impl TableFunction {
                 // generate_series ( start timestamp, stop timestamp, step interval ) or
                 // generate_series ( start i32, stop i32, step i32 )
 
-                fn type_check(exprs: &[ExprImpl]) -> Result<DataType> {
+                fn type_check(exprs: &[ExprImpl]) -> RwResult<DataType> {
                     let mut exprs = exprs.iter();
                     let (start, stop, step) = exprs.next_tuple().unwrap();
                     match (start.return_type(), stop.return_type(), step.return_type()) {

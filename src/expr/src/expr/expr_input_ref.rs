@@ -24,7 +24,7 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
-/// `InputRefExpression` references to a column in input relation
+/// A reference to a column in input relation.
 #[derive(Debug, Clone)]
 pub struct InputRefExpression {
     return_type: DataType,

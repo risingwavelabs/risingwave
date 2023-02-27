@@ -48,7 +48,7 @@ async fn test_failpoints_state_store_read_upload() {
     ));
 
     let hummock_storage = HummockStorage::for_test(
-        hummock_options.clone(),
+        hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),

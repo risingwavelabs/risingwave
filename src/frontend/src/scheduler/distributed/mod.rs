@@ -20,3 +20,5 @@ mod stage;
 use stage::*;
 mod query_manager;
 pub use query_manager::*;
+mod stats;
+pub use stats::*;

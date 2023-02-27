@@ -49,6 +49,7 @@ message DataType {
     STRUCT = 15;
     LIST = 16;
     BYTEA = 17;
+    JSONB = 18;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -95,6 +96,7 @@ enum ArrayType {
   STRUCT = 13;
   LIST = 14;
   BYTEA = 15;
+  JSONB = 16;
 }
 
 message Array {

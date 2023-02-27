@@ -32,7 +32,7 @@ use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef,
+    ExecutorInfo, Message, PkIndicesRef, Watermark,
 };
 
 #[async_trait]
@@ -68,6 +68,9 @@ pub trait TopNExecutorBase: Send + 'static {
 
     fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+
+    /// Handle incoming watermarks
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -122,8 +125,10 @@ where
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(watermark) => {
+                    if let Some(output_watermark) = self.inner.handle_watermark(watermark).await {
+                        yield Message::Watermark(output_watermark);
+                    }
                 }
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {

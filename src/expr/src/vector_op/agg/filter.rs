@@ -111,8 +111,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type as ProstType;
 
     use super::*;
-    use crate::expr::expr_binary_nonnull::new_binary_expr;
-    use crate::expr::{Expression, InputRefExpression, LiteralExpression};
+    use crate::expr::{new_binary_expr, Expression, InputRefExpression, LiteralExpression};
 
     #[derive(Clone)]
     struct MockAgg {

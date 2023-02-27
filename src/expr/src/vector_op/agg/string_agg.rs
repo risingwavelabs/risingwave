@@ -18,7 +18,7 @@ use risingwave_common::array::{
 use risingwave_common::bail;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
@@ -88,7 +88,7 @@ impl Aggregator for StringAggUnordered {
         ) {
             for (value, delim) in agg_col
                 .iter()
-                .zip_eq_debug(delim_col.iter())
+                .zip_eq_fast(delim_col.iter())
                 .skip(start_row_id)
                 .take(end_row_id - start_row_id)
                 .filter(|(v, _)| v.is_some())
@@ -207,7 +207,7 @@ impl Aggregator for StringAggOrdered {
         ) {
             for (row_id, (value, delim)) in agg_col
                 .iter()
-                .zip_eq_debug(delim_col.iter())
+                .zip_eq_fast(delim_col.iter())
                 .enumerate()
                 .skip(start_row_id)
                 .take(end_row_id - start_row_id)

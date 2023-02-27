@@ -64,7 +64,7 @@ async fn test_storage_table_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let table = StorageTable::for_test(
@@ -192,7 +192,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
 
     test_env.register_table(table.clone()).await;
     let mut state =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -295,7 +295,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
 
     test_env.register_table(table.clone()).await;
     let mut state =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];
@@ -402,7 +402,7 @@ async fn test_batch_scan_with_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let column_ids_partial = vec![ColumnId::from(1), ColumnId::from(2)];

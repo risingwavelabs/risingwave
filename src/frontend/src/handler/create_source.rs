@@ -16,18 +16,23 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ROW_ID_COLUMN_ID};
+use risingwave_common::catalog::{
+    columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, ROW_ID_COLUMN_ID,
+};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::parser::{AvroParserConfig, ProtobufParserConfig};
+use risingwave_connector::parser::{
+    AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, WatermarkDesc,
 };
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
-    AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema, SourceWatermark,
+    AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
+    SourceWatermark,
 };
 
 use super::create_table::bind_sql_table_constraints;
@@ -45,15 +50,17 @@ pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
     schema: &AvroSchema,
-    with_properties: HashMap<String, String>,
+    with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser = AvroParserConfig::new(
-        &with_properties,
+    let conf = AvroParserConfig::new(
+        with_properties,
         schema.row_schema_location.0.as_str(),
         schema.use_schema_registry,
+        false,
+        None,
     )
     .await?;
-    let vec_column_desc = parser.map_to_columns()?;
+    let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
         .map(|col| ColumnCatalog {
@@ -61,6 +68,76 @@ async fn extract_avro_table_schema(
             is_hidden: false,
         })
         .collect_vec())
+}
+
+/// Map an Avro schema to a relational schema. And extract primary key columns.
+async fn extract_upsert_avro_table_schema(
+    schema: &AvroSchema,
+    with_properties: &HashMap<String, String>,
+) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>)> {
+    let conf = AvroParserConfig::new(
+        with_properties,
+        schema.row_schema_location.0.as_str(),
+        schema.use_schema_registry,
+        true,
+        None,
+    )
+    .await?;
+    let vec_column_desc = conf.map_to_columns()?;
+    let vec_pk_desc = conf.extract_pks()?;
+    let pks = vec_pk_desc
+        .into_iter()
+        .map(|desc| {
+            vec_column_desc
+                .iter()
+                .find(|x| x.name == desc.name)
+                .ok_or_else(|| {
+                    RwError::from(ErrorCode::InternalError(format!(
+                        "Can not found primary key column {} in value schema",
+                        desc.name
+                    )))
+                })
+        })
+        .map_ok(|desc| ColumnId::new(desc.column_id))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((
+        vec_column_desc
+            .into_iter()
+            .map(|col| ColumnCatalog {
+                column_desc: col.into(),
+                is_hidden: false,
+            })
+            .collect_vec(),
+        pks,
+    ))
+}
+async fn extract_debezium_avro_table_pk_columns(
+    schema: &DebeziumAvroSchema,
+    with_properties: &HashMap<String, String>,
+) -> Result<Vec<String>> {
+    let conf =
+        DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
+            .await?;
+    conf.get_pk_names()
+}
+
+// Map an Avro schema to a relational schema and return the pk_column_ids.
+async fn extract_debezium_avro_table_schema(
+    schema: &DebeziumAvroSchema,
+    with_properties: &HashMap<String, String>,
+) -> Result<Vec<ColumnCatalog>> {
+    let conf =
+        DebeziumAvroParserConfig::new(with_properties, schema.row_schema_location.0.as_str())
+            .await?;
+    let vec_column_desc = conf.map_to_columns()?;
+    let column_catalog = vec_column_desc
+        .into_iter()
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
+            is_hidden: false,
+        })
+        .collect_vec();
+    Ok(column_catalog)
 }
 
 /// Map a protobuf schema to a relational schema.
@@ -99,8 +176,8 @@ pub(crate) async fn resolve_source_schema(
     source_schema: SourceSchema,
     columns: &mut Vec<ColumnCatalog>,
     with_properties: &HashMap<String, String>,
-    row_id_index: Option<usize>,
-    pk_column_ids: &[ColumnId],
+    row_id_index: &mut Option<usize>,
+    pk_column_ids: &mut Vec<ColumnId>,
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
     let is_kafka = is_kafka_source(with_properties);
@@ -113,7 +190,7 @@ pub(crate) async fn resolve_source_schema(
             }) | SourceSchema::Avro(AvroSchema {
                 use_schema_registry: true,
                 ..
-            })
+            }) | SourceSchema::DebeziumAvro(_)
         )
     {
         return Err(RwError::from(ProtocolError(format!(
@@ -131,16 +208,21 @@ pub(crate) async fn resolve_source_schema(
                 (1, 0)
             };
             if columns.len() != expected_column_len
-                || pk_column_ids != vec![ROW_ID_COLUMN_ID]
-                || row_id_index != Some(expected_row_id_index)
+                || *pk_column_ids != vec![ROW_ID_COLUMN_ID]
+                || *row_id_index != Some(expected_row_id_index)
             {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
                 )));
             }
 
-            columns.extend(
-                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+            columns_extend(
+                columns,
+                extract_protobuf_table_schema(
+                    protobuf_schema,
+                    with_properties.clone().into_iter().collect(),
+                )
+                .await?,
             );
 
             StreamSourceInfo {
@@ -160,18 +242,21 @@ pub(crate) async fn resolve_source_schema(
                 (1, 0)
             };
             if columns.len() != expected_column_len
-                || pk_column_ids != vec![ROW_ID_COLUMN_ID]
-                || row_id_index != Some(expected_row_id_index)
+                || *pk_column_ids != vec![ROW_ID_COLUMN_ID]
+                || *row_id_index != Some(expected_row_id_index)
             {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
                 )));
             }
 
-            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
-
+            columns_extend(
+                columns,
+                extract_avro_table_schema(avro_schema, with_properties).await?,
+            );
             StreamSourceInfo {
                 row_format: RowFormatType::Avro as i32,
+
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
                 use_schema_registry: avro_schema.use_schema_registry,
                 proto_message_name: "".to_owned(),
@@ -179,8 +264,58 @@ pub(crate) async fn resolve_source_schema(
             }
         }
 
+        SourceSchema::UpsertAvro(avro_schema) => {
+            let mut upsert_avro_primary_key = Default::default();
+            if row_id_index.is_none() {
+                // user specify pk(s)
+                if columns.len() != pk_column_ids.len() || pk_column_ids.len() != 1 {
+                    return Err(RwError::from(ProtocolError(
+                        "You can specify single primary key column or leave the columns and primary key fields empty.".to_string(),
+                    )));
+                }
+                let pk_name = columns[0].column_desc.name.clone();
+
+                *columns = extract_avro_table_schema(avro_schema, with_properties).await?;
+                let pk_col = columns
+                    .iter()
+                    .find(|col| col.column_desc.name == pk_name)
+                    .ok_or_else(|| {
+                        RwError::from(ProtocolError(format!(
+                            "Primary key {pk_name} is not found."
+                        )))
+                    })?;
+
+                *pk_column_ids = vec![pk_col.column_id()];
+                upsert_avro_primary_key = pk_name;
+            } else {
+                // contains row_id, user specify some columns without pk
+                if !(*pk_column_ids == vec![ROW_ID_COLUMN_ID] && columns.len() == 1) {
+                    return Err(RwError::from(ProtocolError(
+                        "UPSERT AVRO will automatically extract the schema from the Avro schema. You can specify single primary key column or leave the columns and primary key fields empty.".to_string(),
+                )));
+                }
+                let (columns_extracted, pks_extracted) =
+                    extract_upsert_avro_table_schema(avro_schema, with_properties).await?;
+
+                *columns = columns_extracted;
+                *pk_column_ids = pks_extracted;
+            }
+
+            StreamSourceInfo {
+                row_format: RowFormatType::UpsertAvro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                use_schema_registry: avro_schema.use_schema_registry,
+                upsert_avro_primary_key,
+                ..Default::default()
+            }
+        }
+
         SourceSchema::Json => StreamSourceInfo {
             row_format: RowFormatType::Json as i32,
+            ..Default::default()
+        },
+        SourceSchema::UpsertJson => StreamSourceInfo {
+            row_format: RowFormatType::UpsertJson as i32,
             ..Default::default()
         },
 
@@ -235,6 +370,83 @@ pub(crate) async fn resolve_source_schema(
             csv_has_header: csv_info.has_header,
             ..Default::default()
         },
+
+        SourceSchema::Native => StreamSourceInfo {
+            row_format: RowFormatType::Native as i32,
+            ..Default::default()
+        },
+
+        SourceSchema::DebeziumAvro(avro_schema) => {
+            // no row_id, so user specify pk(s)
+            if row_id_index.is_none() {
+                // user specify no only pk columns
+                if columns.len() != pk_column_ids.len() {
+                    return Err(RwError::from(ProtocolError(
+                        "User can only specify primary key columns when creating table with row
+                        format debezium_avro."
+                            .to_owned(),
+                    )));
+                }
+
+                let full_columns =
+                    extract_debezium_avro_table_schema(avro_schema, with_properties).await?;
+                pk_column_ids.clear();
+                for pk_column in columns.as_slice() {
+                    let real_pk_column = full_columns
+                        .iter()
+                        .find(|c| c.name().eq(pk_column.name()))
+                        .ok_or_else(|| {
+                            RwError::from(ProtocolError(format!(
+                                "pk column {} not exists in avro schema",
+                                pk_column.name()
+                            )))
+                        })?;
+                    pk_column_ids.push(real_pk_column.column_id());
+                }
+                columns.clear();
+                columns.extend(full_columns);
+            } else {
+                // user specify some columns without pk
+                if columns.len() != 1 || *pk_column_ids != vec![ROW_ID_COLUMN_ID] {
+                    return Err(RwError::from(ProtocolError(
+                        "User can only specify primary key columns when creating table with row
+                        format debezium_avro."
+                            .to_owned(),
+                    )));
+                }
+
+                *row_id_index = None;
+                columns.clear();
+                pk_column_ids.clear();
+
+                let full_columns =
+                    extract_debezium_avro_table_schema(avro_schema, with_properties).await?;
+                let pk_names =
+                    extract_debezium_avro_table_pk_columns(avro_schema, with_properties).await?;
+                // extract pk(s) from schema registry
+                for pk_name in &pk_names {
+                    let pk_column_id = full_columns
+                        .iter()
+                        .find(|c| c.name().eq(pk_name))
+                        .ok_or_else(|| {
+                            RwError::from(ProtocolError(format!(
+                                "pk column {} not exists in avro schema",
+                                pk_name
+                            )))
+                        })?
+                        .column_desc
+                        .column_id;
+                    pk_column_ids.push(pk_column_id);
+                }
+                columns.extend(full_columns);
+            }
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumAvro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                ..Default::default()
+            }
+        }
     };
 
     Ok(source_info)
@@ -296,7 +508,12 @@ pub async fn handle_create_source(
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let with_properties = handler_args.with_options.inner().clone();
+    let with_properties = handler_args
+        .with_options
+        .inner()
+        .clone()
+        .into_iter()
+        .collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -305,7 +522,7 @@ pub async fn handle_create_source(
 
     check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
-    let (mut columns, pk_column_ids, row_id_index) = bind_sql_table_constraints(
+    let (mut columns, mut pk_column_ids, mut row_id_index) = bind_sql_table_constraints(
         column_descs.clone(),
         pk_column_id_from_columns,
         stmt.constraints,
@@ -322,11 +539,13 @@ pub async fn handle_create_source(
         stmt.source_schema,
         &mut columns,
         &with_properties,
-        row_id_index,
-        &pk_column_ids,
+        &mut row_id_index,
+        &mut pk_column_ids,
         false,
     )
     .await?;
+
+    debug_assert!(is_column_ids_dedup(&columns));
 
     let watermark_descs =
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
@@ -339,14 +558,14 @@ pub async fn handle_create_source(
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     let source = ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name,
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties,
+        properties: with_properties.into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,

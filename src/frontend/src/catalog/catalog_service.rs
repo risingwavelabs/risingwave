@@ -78,6 +78,8 @@ pub trait CatalogWriter: Send + Sync {
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
+    async fn replace_table(&self, table: ProstTable, graph: StreamFragmentGraph) -> Result<()>;
+
     async fn create_index(
         &self,
         index: ProstIndex,
@@ -183,6 +185,11 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_table(&self, table: ProstTable, graph: StreamFragmentGraph) -> Result<()> {
+        let version = self.meta_client.replace_table(table, graph).await?;
         self.wait_version(version).await
     }
 

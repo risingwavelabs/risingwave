@@ -71,4 +71,7 @@ pub struct AggCall {
 
     /// Filter of aggregation.
     pub filter: Option<ExpressionRef>,
+
+    /// Should deduplicate the input before aggregation.
+    pub distinct: bool,
 }
