@@ -803,6 +803,28 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+                    "Lsm Compact Pending Bytes",
+                    "bytes of Lsm tree needed to reach balance",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_pending_bytes')}) by (instance, group)",
+                            "compact pending bytes - {{group}} @ {{instance}} ",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_percentage(
+                    "Lsm Level Compression Ratio",
+                    "compression ratio of each level of the lsm tree",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_level_compression_ratio')}) by (instance, group, level, algorithm)",
+                            "lsm compression ratio - cg{{group}} @ L{{level}} - {{algorithm}} {{instance}} ",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
