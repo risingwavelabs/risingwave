@@ -15,6 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
+arc-swap = "1"
 arrow-array = "33"
 arrow-schema = "33"
 async-trait = "0.1"

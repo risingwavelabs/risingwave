@@ -45,7 +45,7 @@ struct Inner {
     /// Force checkpoint in next barrier.
     force_checkpoint: AtomicBool,
 
-    checkpoint_frequency: usize,
+    checkpoint_frequency: AtomicUsize,
 }
 
 /// The sender side of the barrier scheduling queue.
@@ -73,7 +73,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             queue: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
             num_uncheckpointed_barrier: AtomicUsize::new(0),
-            checkpoint_frequency,
+            checkpoint_frequency: AtomicUsize::new(checkpoint_frequency),
             force_checkpoint: AtomicBool::new(false),
         });
 
@@ -281,13 +281,20 @@ impl ScheduledBarriers {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
-            >= self.inner.checkpoint_frequency
+            >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }
 
     /// Make the `checkpoint` of the next barrier must be true
     pub(crate) fn force_checkpoint_in_next_barrier(&self) {
         self.inner.force_checkpoint.store(true, Ordering::Relaxed)
+    }
+
+    /// Update the `checkpoint_frequency`
+    pub fn set_checkpoint_frequency(&self, frequency: usize) {
+        self.inner
+            .checkpoint_frequency
+            .store(frequency, Ordering::Relaxed);
     }
 
     /// Update the `num_uncheckpointed_barrier`

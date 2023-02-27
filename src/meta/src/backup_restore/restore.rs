@@ -198,8 +198,8 @@ async fn restore_impl(
         tracing::info!(
             "snapshot {} after rewrite by snapshot {}:\n{}",
             target_id,
+            newest_id,
             target_snapshot,
-            newest_id
         );
     }
     if opts.dry_run {

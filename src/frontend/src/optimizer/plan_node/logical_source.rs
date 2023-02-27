@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
-use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanNode;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
     generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
@@ -46,7 +46,7 @@ use crate::TableCatalog;
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
     pub base: PlanBase,
     pub core: generic::Source,
@@ -326,7 +326,6 @@ impl PredicatePushdown for LogicalSource {
 
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
-            let expr = self.base.ctx().expr_with_session_timezone(expr);
             if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
                 // Not recognized, so push back
                 new_conjunctions.push(e);

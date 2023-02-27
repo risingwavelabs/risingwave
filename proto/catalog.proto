@@ -30,6 +30,7 @@ message StreamSourceInfo {
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
+  string upsert_avro_primary_key = 7;
 }
 
 message Source {

@@ -29,6 +29,7 @@
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
+use std::hash::Hash;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -49,6 +50,12 @@ use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
+pub trait PlanNodeMeta {
+    fn node_type(&self) -> PlanNodeType;
+    fn plan_base(&self) -> &PlanBase;
+    fn convention(&self) -> Convention;
+}
+
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
@@ -56,6 +63,8 @@ use super::property::{Distribution, FunctionalDependencySet, Order};
 pub trait PlanNode:
     PlanTreeNode
     + DynClone
+    + DynEq
+    + DynHash
     + Debug
     + Display
     + Downcast
@@ -67,17 +76,128 @@ pub trait PlanNode:
     + ToProst
     + ToLocalBatch
     + PredicatePushdown
+    + PlanNodeMeta
 {
-    fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> &PlanBase;
-    fn convention(&self) -> Convention;
 }
 
+impl Hash for dyn PlanNode {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.dyn_hash(state);
+    }
+}
+
+impl PartialEq for dyn PlanNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.dyn_eq(other.as_dyn_eq())
+    }
+}
+
+impl Eq for dyn PlanNode {}
+
 impl_downcast!(PlanNode);
-pub type PlanRef = Rc<dyn PlanNode>;
+
+// Using a new type wrapper allows direct function implementation on `PlanRef`,
+// and we currently need a manual implementation of `PartialEq` for `PlanRef`.
+#[allow(clippy::derived_hash_with_manual_eq)]
+#[derive(Clone, Debug, Eq, Hash)]
+pub struct PlanRef(Rc<dyn PlanNode>);
+
+// Cannot use the derived implementation for now.
+// See https://github.com/rust-lang/rust/issues/31740
+#[allow(clippy::op_ref)]
+impl PartialEq for PlanRef {
+    fn eq(&self, other: &Self) -> bool {
+        &self.0 == &other.0
+    }
+}
+
+impl Deref for PlanRef {
+    type Target = dyn PlanNode;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
+impl<T: PlanNode> From<T> for PlanRef {
+    fn from(value: T) -> Self {
+        PlanRef(Rc::new(value))
+    }
+}
+
+impl Display for PlanRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Layer for PlanRef {
+    type Sub = Self;
+
+    fn map<F>(self, f: F) -> Self
+    where
+        F: FnMut(Self::Sub) -> Self::Sub,
+    {
+        self.clone_with_inputs(&self.inputs().into_iter().map(f).collect_vec())
+    }
+
+    fn descent<F>(&self, f: F)
+    where
+        F: FnMut(&Self::Sub),
+    {
+        self.inputs().iter().for_each(f);
+    }
+}
 
 #[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
+
+/// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
+/// In addition to `Endo`, one have to specify the `cached` function
+/// to persist transformed `LogicalShare` and their results,
+/// and the `dag_apply` function will take care to only transform every `LogicalShare` nodes once.
+///
+/// Note: Due to the way super trait is designed in rust,
+/// one need to have separate implementation blocks of `Endo<PlanRef>` and `EndoPlan`.
+/// And conventionally the real transformation `apply` is under `Endo<PlanRef>`,
+/// although one can refer to `dag_apply` in the implementation of `apply`.
+pub trait EndoPlan: Endo<PlanRef> {
+    // Return the cached result of `plan` if present,
+    // otherwise store and return the value provided by `f`.
+    // Notice that to allow mutable access of `self` in `f`,
+    // we let `f` to take `&mut Self` as its first argument.
+    fn cached<F>(&mut self, plan: PlanRef, f: F) -> PlanRef
+    where
+        F: FnMut(&mut Self) -> PlanRef;
+
+    fn dag_apply(&mut self, plan: PlanRef) -> PlanRef {
+        match plan.as_logical_share() {
+            Some(_) => self.cached(plan.clone(), |this| this.tree_apply(plan.clone())),
+            None => self.tree_apply(plan),
+        }
+    }
+}
+
+/// A more sophisticated `Visit` taking into account of the DAG structure of `PlanRef`.
+/// In addition to `Visit`, one have to specify `visited`
+/// to store and report visited `LogicalShare` nodes,
+/// and the `dag_visit` function will take care to only visit every `LogicalShare` nodes once.
+/// See also `EndoPlan`.
+pub trait VisitPlan: Visit<PlanRef> {
+    // Skip visiting `plan` if visited, otherwise run the traversal provided by `f`.
+    // Notice that to allow mutable access of `self` in `f`,
+    // we let `f` to take `&mut Self` as its first argument.
+    fn visited<F>(&mut self, plan: &PlanRef, f: F)
+    where
+        F: FnMut(&mut Self);
+
+    fn dag_visit(&mut self, plan: &PlanRef) {
+        match plan.as_logical_share() {
+            Some(_) => self.visited(plan, |this| this.tree_visit(plan)),
+            None => self.tree_visit(plan),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Convention {
@@ -136,7 +256,7 @@ impl ColPrunable for PlanRef {
                     &new_required_cols,
                     new_share.schema().len(),
                 );
-                return LogicalProject::with_mapping(new_share.clone(), mapping).into();
+                return LogicalProject::with_mapping(new_share, mapping).into();
             }
 
             // `LogicalShare` can't clone, so we implement column pruning for `LogicalShare`
@@ -464,6 +584,8 @@ mod to_prost;
 pub use to_prost::*;
 mod predicate_pushdown;
 pub use predicate_pushdown::*;
+mod merge_eq_nodes;
+pub use merge_eq_nodes::*;
 
 pub mod generic;
 pub mod stream;
@@ -622,7 +744,7 @@ use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -817,7 +939,7 @@ macro_rules! for_stream_plan_nodes {
 }
 
 /// impl [`PlanNodeType`] fn for each node.
-macro_rules! enum_plan_node_type {
+macro_rules! impl_plan_node_meta {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
@@ -826,7 +948,7 @@ macro_rules! enum_plan_node_type {
                 $( [<$convention $name>] ),*
             }
 
-            $(impl PlanNode for [<$convention $name>] {
+            $(impl PlanNodeMeta for [<$convention $name>] {
                 fn node_type(&self) -> PlanNodeType{
                     PlanNodeType::[<$convention $name>]
                 }
@@ -841,22 +963,17 @@ macro_rules! enum_plan_node_type {
     }
 }
 
-for_all_plan_nodes! { enum_plan_node_type }
+for_all_plan_nodes! { impl_plan_node_meta }
 
-/// impl fn `plan_ref` for each node.
-macro_rules! impl_plan_ref {
-    ($( { $convention:ident, $name:ident }),*) => {
+macro_rules! impl_plan_node {
+    ($({ $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl From<[<$convention $name>]> for PlanRef {
-                fn from(plan: [<$convention $name>]) -> Self {
-                    std::rc::Rc::new(plan)
-                }
-            })*
+            $(impl PlanNode for [<$convention $name>] { })*
         }
     }
 }
 
-for_all_plan_nodes! { impl_plan_ref }
+for_all_plan_nodes! { impl_plan_node }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {

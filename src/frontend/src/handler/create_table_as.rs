@@ -50,13 +50,13 @@ pub async fn handle_create_as(
         }
     }
 
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
+
     // Generate catalog descs from query
     let mut column_descs: Vec<_> = {
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
-            let mut col_id_gen = ColumnIdGenerator::new_initial();
-
             // Create ColumnCatelog by Field
             query
                 .schema()
@@ -93,7 +93,7 @@ pub async fn handle_create_as(
             None,
             vec![],
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
-            None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
+            Some(col_id_gen.into_version()),
         )?;
         let mut graph = build_graph(plan);
         graph.parallelism = session

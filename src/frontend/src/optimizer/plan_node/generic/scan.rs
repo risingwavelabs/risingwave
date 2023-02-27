@@ -24,7 +24,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::Condition;
 
 /// [`Scan`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,
     pub is_sys_table: bool,

@@ -102,9 +102,6 @@ pub struct StateTable<
 
     value_indices: Option<Vec<usize>>,
 
-    /// last watermark that is used to construct delete ranges in `ingest`.
-    last_watermark: Option<ScalarImpl>,
-
     /// latest watermark
     cur_watermark: Option<ScalarImpl>,
 
@@ -233,7 +230,6 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             table_option,
             vnode_col_idx_in_pk,
             value_indices,
-            last_watermark: None,
             cur_watermark: None,
             watermark_buffer_strategy: W::default(),
         }
@@ -297,6 +293,31 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             Distribution::fallback(),
             None,
             false,
+            0,
+        )
+        .await
+    }
+
+    /// Create a state table without distribution, with given `prefix_hint_len`, used for unit
+    /// tests.
+    pub async fn new_without_distribution_with_prefix_hint_len(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        prefix_hint_len: usize,
+    ) -> Self {
+        Self::new_with_distribution_inner(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            None,
+            true,
+            prefix_hint_len,
         )
         .await
     }
@@ -321,6 +342,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             distribution,
             value_indices,
             true,
+            0,
         )
         .await
     }
@@ -343,6 +365,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             distribution,
             value_indices,
             false,
+            0,
         )
         .await
     }
@@ -360,6 +383,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         }: Distribution,
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
+        prefix_hint_len: usize,
     ) -> Self {
         let local_state_store = store
             .new_local(NewLocalOptions {
@@ -391,12 +415,11 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            prefix_hint_len: 0,
+            prefix_hint_len,
             vnodes,
             table_option: Default::default(),
             vnode_col_idx_in_pk: None,
             value_indices,
-            last_watermark: None,
             cur_watermark: None,
             watermark_buffer_strategy: W::default(),
         }
@@ -532,7 +555,6 @@ impl<S: StateStore> StateTable<S> {
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
         self.cur_watermark = None;
-        self.last_watermark = None;
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
@@ -678,11 +700,17 @@ impl<S: StateStore> StateTable<S> {
     }
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
         self.cur_watermark = Some(watermark);
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         assert_eq!(self.epoch(), new_epoch.prev);
+        trace!(
+            table_id = %self.table_id,
+            epoch = ?self.epoch(),
+            "commit state table"
+        );
         self.seal_current_epoch(new_epoch.curr).await
     }
 
@@ -714,6 +742,10 @@ impl<S: StateStore> StateTable<S> {
             }
         };
 
+        watermark.as_ref().inspect(|watermark| {
+            trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
+        });
+
         let mut delete_ranges = Vec::new();
 
         let prefix_serializer = if self.pk_indices().is_empty() {
@@ -728,14 +760,10 @@ impl<S: StateStore> StateTable<S> {
             )
         });
         if let Some(range_end_suffix) = range_end_suffix {
-            let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
-                serialize_pk(
-                    row::once(Some(last_watermark.clone())),
-                    prefix_serializer.as_ref().unwrap(),
-                )
-            } else {
-                vec![]
-            };
+            let range_begin_suffix = vec![];
+            trace!(table_id = %self.table_id, range_end = ?range_end_suffix, vnodes = ?{
+                self.vnodes.iter_vnodes().collect_vec()
+            }, "delete range");
             for vnode in self.vnodes.iter_vnodes() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
@@ -861,7 +889,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         };
 
         trace!(
-            table_id = ?self.table_id(),
+            table_id = %self.table_id(),
             ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
             dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
             "storage_iter_with_prefix"

@@ -25,7 +25,7 @@ use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNo
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
     pub base: PlanBase,
     logical: LogicalUnion,

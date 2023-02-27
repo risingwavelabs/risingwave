@@ -252,8 +252,8 @@ impl ApplyJoinTransposeRule {
         }
 
         let new_join_left = LogicalApply::create(
-            apply_left.clone(),
-            join.left().clone(),
+            apply_left,
+            join.left(),
             apply_join_type,
             Condition {
                 conjunctions: left_apply_condition,
@@ -264,8 +264,8 @@ impl ApplyJoinTransposeRule {
         );
 
         let new_join = LogicalJoin::new(
-            new_join_left.clone(),
-            join.right().clone(),
+            new_join_left,
+            join.right(),
             join.join_type(),
             new_join_condition,
         );
@@ -355,8 +355,8 @@ impl ApplyJoinTransposeRule {
         }
 
         let new_join_right = LogicalApply::create(
-            apply_left.clone(),
-            join.right().clone(),
+            apply_left,
+            join.right(),
             apply_join_type,
             Condition {
                 conjunctions: right_apply_condition,
@@ -386,8 +386,8 @@ impl ApplyJoinTransposeRule {
         let mut output_indices_mapping =
             ColIndexMapping::new(output_indices.iter().map(|x| Some(*x)).collect());
         let new_join = LogicalJoin::new(
-            join.left().clone(),
-            new_join_right.clone(),
+            join.left(),
+            new_join_right,
             join.join_type(),
             new_join_condition,
         )
@@ -523,7 +523,7 @@ impl ApplyJoinTransposeRule {
             false,
         );
         let new_join_right = LogicalApply::create(
-            apply_left.clone(),
+            apply_left,
             join.right(),
             apply_join_type,
             Condition {
@@ -552,8 +552,8 @@ impl ApplyJoinTransposeRule {
             }
         };
         let new_join = LogicalJoin::new(
-            new_join_left.clone(),
-            new_join_right.clone(),
+            new_join_left,
+            new_join_right,
             join.join_type(),
             new_join_condition,
         )

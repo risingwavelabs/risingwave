@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLimit {
     pub base: PlanBase,
     logical: LogicalLimit,

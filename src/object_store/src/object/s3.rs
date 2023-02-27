@@ -29,7 +29,6 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
-use random_string::generate;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
@@ -292,7 +291,6 @@ pub struct S3ObjectStore {
     part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
-    object_store_use_batch_delete: bool,
 }
 
 #[async_trait::async_trait]
@@ -433,12 +431,6 @@ impl ObjectStore for S3ObjectStore {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         // AWS restricts the number of objects per request to 1000.
         const MAX_LEN: usize = 1000;
-        if !self.object_store_use_batch_delete {
-            for path in paths {
-                self.delete(path).await?;
-            }
-            return Ok(());
-        }
 
         // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
         for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
@@ -531,7 +523,6 @@ impl S3ObjectStore {
             bucket,
             part_size: S3_PART_SIZE,
             metrics,
-            object_store_use_batch_delete: true,
         }
     }
 
@@ -566,36 +557,11 @@ impl S3ObjectStore {
         let client = Client::new(&sdk_config);
         Self::configure_bucket_lifecycle(&client, bucket.as_str()).await;
 
-        // check whether use batch delete
-        let charset = "1234567890";
-        let test_path = "risingwave_check_batch_delete/".to_string() + &generate(10, charset);
-        client
-            .put_object()
-            .bucket(&bucket)
-            .body(aws_sdk_s3::types::ByteStream::from(Bytes::from(
-                "test batch delete",
-            )))
-            .key(&test_path)
-            .send()
-            .await
-            .unwrap();
-        let obj_ids = vec![ObjectIdentifier::builder().key(&test_path).build()];
-
-        let delete_builder = Delete::builder().set_objects(Some(obj_ids));
-        let object_store_use_batch_delete = client
-            .delete_objects()
-            .bucket(&bucket)
-            .delete(delete_builder.build())
-            .send()
-            .await
-            .is_ok();
-
         Self {
             client,
             bucket: bucket.to_string(),
             part_size: S3_PART_SIZE,
             metrics,
-            object_store_use_batch_delete,
         }
     }
 
@@ -630,7 +596,6 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            object_store_use_batch_delete: true,
         }
     }
 

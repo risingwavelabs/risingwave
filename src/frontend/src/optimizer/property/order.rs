@@ -24,7 +24,7 @@ use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Order {
     pub field_order: Vec<FieldOrder>,
 }
