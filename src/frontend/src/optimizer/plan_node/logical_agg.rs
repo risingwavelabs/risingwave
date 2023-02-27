@@ -532,14 +532,21 @@ impl LogicalAggBuilder {
         Ok(())
     }
 
+    fn schema_agg_start_offset(&self) -> usize {
+        self.group_key.len()
+    }
+
     /// Push a new planned agg call into the builder.
     /// Return an `InputRef` to that agg call.
     /// For existing agg calls, return an `InputRef` to the existing one.
     fn push_agg_call(&mut self, agg_call: PlanAggCall) -> InputRef {
         if let Some((pos, existing)) = self.agg_calls.iter().find_position(|&c| c == &agg_call) {
-            return InputRef::new(self.group_key.len() + pos, existing.return_type.clone());
+            return InputRef::new(
+                self.schema_agg_start_offset() + pos,
+                existing.return_type.clone(),
+            );
         }
-        let index = self.group_key.len() + self.agg_calls.len();
+        let index = self.schema_agg_start_offset() + self.agg_calls.len();
         let data_type = agg_call.return_type.clone();
         self.agg_calls.push(agg_call);
         InputRef::new(index, data_type)
