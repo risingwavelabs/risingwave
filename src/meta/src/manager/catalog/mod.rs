@@ -1474,27 +1474,26 @@ where
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            tables.contains_key(&table.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "table must exist and be in altering procedure"
+        );
 
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
-        // occur after it's created. We may need to add a new tracker for `alter` procedure.
-        if tables.contains_key(&table.id)
-            && database_core.in_progress_creation_tracker.contains(&key)
-        {
-            database_core.in_progress_creation_tracker.remove(&key);
+        database_core.in_progress_creation_tracker.remove(&key);
 
-            tables.insert(table.id, table.clone());
-            commit_meta!(self, tables)?;
+        tables.insert(table.id, table.clone());
+        commit_meta!(self, tables)?;
 
-            let version = self
-                .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
-                .await;
+        let version = self
+            .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
+            .await;
 
-            Ok(version)
-        } else {
-            unreachable!("table must not exist and must be in altering procedure");
-        }
+        Ok(version)
     }
 
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
     pub async fn cancel_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1502,16 +1501,16 @@ where
 
         assert!(table.dependent_relations.is_empty());
 
+        assert!(
+            database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must exist and must be in altering procedure"
+        );
+
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
-        if database_core.tables.contains_key(&table.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            Ok(())
-        } else {
-            unreachable!("table must exist and must be in altering procedure");
-        }
+        database_core.unmark_creating(&key);
+        Ok(())
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {
