@@ -44,6 +44,7 @@ pub enum LocalNotification {
 #[derive(Debug)]
 struct Target {
     subscribe_type: SubscribeType,
+    // `None` indicates sending to all subscribers of `subscribe_type`.
     worker_key: Option<WorkerKey>,
 }
 
