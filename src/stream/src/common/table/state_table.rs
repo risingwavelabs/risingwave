@@ -436,6 +436,18 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         self.table_id
     }
 
+    /// Returns whether the table is a singleton table.
+    fn is_singleton(&self) -> bool {
+        // If the table has a vnode column, it must be hash-distributed (but act like a singleton
+        // table). So we should return false here. Otherwise, we check the distribution key.
+        if self.vnode_col_idx_in_pk.is_some() {
+            assert!(self.dist_key_indices.is_empty());
+            false
+        } else {
+            self.dist_key_indices.is_empty()
+        }
+    }
+
     /// get the newest epoch of the state store and panic if the `init_epoch()` has never be called
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         match self.epoch {
@@ -585,7 +597,7 @@ impl<S: StateStore> StateTable<S> {
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
         );
-        if self.vnode_col_idx_in_pk.is_none() && self.dist_key_indices.is_empty() {
+        if self.is_singleton() {
             assert_eq!(
                 new_vnodes, self.vnodes,
                 "should not update vnode bitmap for singleton table"
