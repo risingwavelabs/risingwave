@@ -441,7 +441,6 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         // If the table has a vnode column, it must be hash-distributed (but act like a singleton
         // table). So we should return false here. Otherwise, we check the distribution key.
         if self.vnode_col_idx_in_pk.is_some() {
-            assert!(self.dist_key_indices.is_empty());
             false
         } else {
             self.dist_key_indices.is_empty()
@@ -473,13 +472,24 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     /// Get the vnode value with given (prefix of) primary key
     fn compute_prefix_vnode(&self, pk_prefix: impl Row) -> VirtualNode {
         let prefix_len = pk_prefix.len();
-        if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
-            let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
-            VirtualNode::from_scalar(vnode.into_int16())
-        } else {
+        let compute_vnode = || {
             // For streaming, the given prefix must be enough to calculate the vnode
             assert!(self.dist_key_in_pk_indices.iter().all(|&d| d < prefix_len));
-            compute_vnode(pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes)
+            compute_vnode(&pk_prefix, &self.dist_key_in_pk_indices, &self.vnodes)
+        };
+
+        if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
+            let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
+            let vnode = VirtualNode::from_scalar(vnode.into_int16());
+            // If the dist key indices is not empty, we additionally compute the vnode from the
+            // distribution key and assert that the two values are equal.
+            if cfg!(debug_assertions) && !self.dist_key_indices.is_empty() {
+                let computed_vnode = compute_vnode();
+                assert_eq!(vnode, computed_vnode);
+            }
+            vnode
+        } else {
+            compute_vnode()
         }
     }
 
