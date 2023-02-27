@@ -317,3 +317,47 @@ impl NotificationManagerCore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::common::HostAddress;
+
+    use super::*;
+    use crate::storage::MemStore;
+
+    #[tokio::test]
+    async fn test_multiple_subscribers_one_worker() {
+        let mgr = NotificationManager::new(MemStore::new().into()).await;
+        let worker_key1 = WorkerKey(HostAddress {
+            host: "a".to_string(),
+            port: 1,
+        });
+        let worker_key2 = WorkerKey(HostAddress {
+            host: "a".to_string(),
+            port: 2,
+        });
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx3, mut rx3) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1)
+            .await;
+        mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2)
+            .await;
+        mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3)
+            .await;
+        mgr.notify_snapshot(
+            worker_key1.clone(),
+            SubscribeType::Hummock,
+            MetaSnapshot::default(),
+        );
+        assert!(rx1.recv().await.is_some());
+        assert!(rx2.try_recv().is_err());
+        assert!(rx3.try_recv().is_err());
+
+        mgr.notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        assert!(rx1.try_recv().is_err());
+        assert!(rx2.recv().await.is_some());
+        assert!(rx3.recv().await.is_some());
+    }
+}
