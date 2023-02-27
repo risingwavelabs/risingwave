@@ -616,6 +616,20 @@ mod tests {
         }
         output.reverse();
         assert_eq!(output, shared_buffer_items);
+
+        let batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![],
+            1,
+            vec![
+                (Bytes::from("a"), Bytes::from("c")),
+                (Bytes::from("b"), Bytes::from("d")),
+            ],
+            TableId::new(0),
+            None,
+        );
+        assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
+        assert_eq!(batch.end_table_key().as_ref(), "d".as_bytes());
     }
 
     #[tokio::test]
