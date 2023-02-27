@@ -1680,7 +1680,7 @@
      Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }
 - id: nexmark_q106
   before:
-  - create_tables
+  - create_sources
   sql: |
     -- A self-made query that covers two-phase stateful simple aggregation.
     --
@@ -1702,65 +1702,85 @@
                 auction.id
         )
   batch_plan: |
-    BatchTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
+    BatchSimpleAgg { aggs: [min(min(max(price)))] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
-        └─BatchHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction)] }
-          └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-            ├─BatchExchange { order: [], dist: HashShard(auction.id) }
-            | └─BatchScan { table: auction, columns: [auction.id, auction.item_name], distribution: UpstreamHashShard(auction.id) }
-            └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-              └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
+      └─BatchSimpleAgg { aggs: [min(max(price))] }
+        └─BatchHashAgg { group_key: [id], aggs: [max(price)] }
+          └─BatchHashJoin { type: Inner, predicate: id = auction AND (date_time >= date_time) AND (date_time <= expires), output: [id, price] }
+            ├─BatchExchange { order: [], dist: HashShard(id) }
+            | └─BatchProject { exprs: [id, date_time, expires] }
+            |   └─BatchSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "_row_id"], filter: (None, None) }
+            └─BatchExchange { order: [], dist: HashShard(auction) }
+              └─BatchProject { exprs: [auction, price, date_time] }
+                └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
-    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name], order_descs: [bid_count, auction_id, auction_item_name], pk_conflict: "no check" }
-    └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
-      └─StreamTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
+    StreamMaterialize { columns: [min_final], pk_columns: [], pk_conflict: "no check" }
+    └─StreamProject { exprs: [min(min(max(price)))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, min(min(max(price)))] }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0, group_key: [3] }
-            └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id) as $expr1] }
-              └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
-                └─StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count, count(bid.auction)] }
-                  └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-                    ├─StreamExchange { dist: HashShard(auction.id) }
-                    | └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-                    └─StreamExchange { dist: HashShard(bid.auction) }
-                      └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [count, min(max(price))] }
+            └─StreamProject { exprs: [id, max(price), Vnode(id) as $expr1] }
+              └─StreamProject { exprs: [id, max(price)] }
+                └─StreamAppendOnlyHashAgg { group_key: [id], aggs: [count, max(price)] }
+                  └─StreamProject { exprs: [id, price, _row_id, _row_id, auction] }
+                    └─StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
+                      └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = auction, output: all }
+                        ├─StreamExchange { dist: HashShard(id) }
+                        | └─StreamProject { exprs: [id, date_time, expires, _row_id], watermark_columns: [date_time] }
+                        |   └─StreamRowIdGen { row_id_index: 9 }
+                        |     └─StreamWatermarkFilter { watermark_descs: [idx: 5, expr: (date_time - '00:00:04':Interval)] }
+                        |       └─StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "_row_id"] }
+                        └─StreamExchange { dist: HashShard(auction) }
+                          └─StreamProject { exprs: [auction, price, date_time, _row_id], watermark_columns: [date_time] }
+                            └─StreamRowIdGen { row_id_index: 7 }
+                              └─StreamWatermarkFilter { watermark_descs: [idx: 5, expr: (date_time - '00:00:04':Interval)] }
+                                └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name], order_descs: [bid_count, auction_id, auction_item_name], pk_conflict: "no check" }
+      StreamMaterialize { columns: [min_final], pk_columns: [], pk_conflict: "no check" }
           materialized table: 4294967294
-        StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
-          StreamTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
-              state table: 0
+        StreamProject { exprs: [min(min(max(price)))] }
+          StreamGlobalSimpleAgg { aggs: [count, min(min(max(price)))] }
+              result table: 1, state tables: [0]
             StreamExchange Single from 1
 
     Fragment 1
-      StreamGroupTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0, group_key: [3] }
-          state table: 1
-        StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id) as $expr3] }
-          StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
-            StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count, count(bid.auction)] }
-                result table: 2, state tables: []
-              StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-                  left table: 3, right table 5, left degree table: 4, right degree table: 6,
-                StreamExchange Hash([0]) from 2
-                StreamExchange Hash([0]) from 3
+      StreamHashAgg { group_key: [$expr3], aggs: [count, min(max(price))] }
+          result table: 3, state tables: [2]
+        StreamProject { exprs: [id, max(price), Vnode(id) as $expr3] }
+          StreamProject { exprs: [id, max(price)] }
+            StreamAppendOnlyHashAgg { group_key: [id], aggs: [count, max(price)] }
+                result table: 4, state tables: []
+              StreamProject { exprs: [id, price, _row_id, _row_id, auction] }
+                StreamFilter { predicate: (date_time >= date_time) AND (date_time <= expires) }
+                  StreamAppendOnlyHashJoin { type: Inner, predicate: id = auction, output: all }
+                      left table: 5, right table 7, left degree table: 6, right degree table: 8,
+                    StreamExchange Hash([0]) from 2
+                    StreamExchange Hash([0]) from 3
 
     Fragment 2
-      Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-        Upstream
-        BatchPlanNode
+      StreamProject { exprs: [id, date_time, expires, _row_id], watermark_columns: [date_time] }
+        StreamRowIdGen { row_id_index: 9 }
+          StreamWatermarkFilter { watermark_descs: [idx: 5, expr: (date_time - '00:00:04':Interval)] }
+            StreamSource { source: "auction", columns: ["id", "item_name", "description", "initial_bid", "reserve", "date_time", "expires", "seller", "category", "_row_id"] }
+                source state table: 10
 
     Fragment 3
-      Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-        Upstream
-        BatchPlanNode
+      StreamProject { exprs: [auction, price, date_time, _row_id], watermark_columns: [date_time] }
+        StreamRowIdGen { row_id_index: 7 }
+          StreamWatermarkFilter { watermark_descs: [idx: 5, expr: (date_time - '00:00:04':Interval)] }
+            StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+                source state table: 12
 
-     Table 0 { columns: [auction_id, auction_item_name, count(bid_auction), $expr3], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
-     Table 1 { columns: [auction_id, auction_item_name, count(bid_auction), $expr3], primary key: [$3 ASC, $2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0], vnode column idx: 3 }
-     Table 2 { columns: [auction_id, auction_item_name, count, count(bid_auction)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
-     Table 3 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [min(max(price)), $expr3], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 1 { columns: [count, min(min(max(price)))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 2 { columns: [$expr3, max(price), id], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 3 { columns: [$expr3, count, min(max(price))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
+     Table 4 { columns: [id, count, max(price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 5 { columns: [id, date_time, expires, _row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 6 { columns: [id, _row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 7 { columns: [auction, price, date_time, _row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 8 { columns: [auction, _row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 10 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 12 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
+     Table 4294967294 { columns: [min_final], primary key: [], value indices: [0], distribution key: [] }
