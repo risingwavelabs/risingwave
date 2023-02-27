@@ -13,3 +13,13 @@
         └─StreamRowIdGen { row_id_index: 1 }
           └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
             └─StreamSource { source: "t", columns: ["v1", "_row_id"] }
+- name: watermark on append only table
+  sql: |
+    explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) with (connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest', appendonly=true) ROW FORMAT JSON;
+  explain_output: |
+    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "no check" }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamRowIdGen { row_id_index: 1 }
+        └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
+          └─StreamDml { columns: [v1, _row_id] }
+            └─StreamSource { source: "t", columns: ["v1", "_row_id"] }

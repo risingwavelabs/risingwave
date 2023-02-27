@@ -372,37 +372,34 @@ impl ParseTo for CreateSourceStatement {
     }
 }
 
+pub(super) fn fmt_create_items(
+    columns: &[ColumnDef],
+    constraints: &[TableConstraint],
+    watermarks: &[SourceWatermark],
+) -> std::result::Result<String, fmt::Error> {
+    let mut items = String::new();
+    let has_items = !columns.is_empty() || !constraints.is_empty() || !watermarks.is_empty();
+    has_items.then(|| write!(&mut items, "("));
+    write!(&mut items, "{}", display_comma_separated(columns))?;
+    if !columns.is_empty() && (!constraints.is_empty() || !watermarks.is_empty()) {
+        write!(&mut items, ", ")?;
+    }
+    write!(&mut items, "{}", display_comma_separated(constraints))?;
+    if !columns.is_empty() && !constraints.is_empty() && !watermarks.is_empty() {
+        write!(&mut items, ", ")?;
+    }
+    write!(&mut items, "{}", display_comma_separated(watermarks))?;
+    has_items.then(|| write!(&mut items, ")"));
+    Ok(items)
+}
+
 impl fmt::Display for CreateSourceStatement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(source_name, v, self);
 
-        // Items
-        let mut items = String::new();
-        let has_items = !self.columns.is_empty()
-            || !self.constraints.is_empty()
-            || !self.source_watermarks.is_empty();
-        has_items.then(|| write!(&mut items, "("));
-        write!(&mut items, "{}", display_comma_separated(&self.columns))?;
-        if !self.columns.is_empty()
-            && (!self.constraints.is_empty() || !self.source_watermarks.is_empty())
-        {
-            write!(&mut items, ", ")?;
-        }
-        write!(&mut items, "{}", display_comma_separated(&self.constraints))?;
-        if !self.columns.is_empty()
-            && !self.constraints.is_empty()
-            && !self.source_watermarks.is_empty()
-        {
-            write!(&mut items, ", ")?;
-        }
-        write!(
-            &mut items,
-            "{}",
-            display_comma_separated(&self.source_watermarks)
-        )?;
-        has_items.then(|| write!(&mut items, ")"));
+        let items = fmt_create_items(&self.columns, &self.constraints, &self.source_watermarks)?;
         if !items.is_empty() {
             v.push(items);
         }

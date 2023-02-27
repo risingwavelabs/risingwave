@@ -466,7 +466,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn bind_source_watermark(
+pub(super) fn bind_source_watermark(
     session: &SessionImpl,
     name: String,
     source_watermarks: Vec<SourceWatermark>,
