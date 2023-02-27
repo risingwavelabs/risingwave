@@ -27,6 +27,7 @@ use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
@@ -330,10 +331,12 @@ impl MetaClient {
         &self,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             table: Some(table),
             fragment_graph: Some(graph),
+            table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
         };
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here

@@ -68,6 +68,17 @@ export interface ColumnIndex {
   index: number;
 }
 
+/** A mapping of column indices. */
+export interface ColIndexMapping {
+  /** The size of the target space. */
+  targetSize: number;
+  /**
+   * Each subscript is mapped to the corresponding element.
+   * For those not mapped, the value will be negative.
+   */
+  map: number[];
+}
+
 export interface WatermarkDesc {
   /** The column idx the watermark is on */
   watermarkIdx: number;
@@ -341,6 +352,37 @@ export const ColumnIndex = {
   fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
     const message = createBaseColumnIndex();
     message.index = object.index ?? 0;
+    return message;
+  },
+};
+
+function createBaseColIndexMapping(): ColIndexMapping {
+  return { targetSize: 0, map: [] };
+}
+
+export const ColIndexMapping = {
+  fromJSON(object: any): ColIndexMapping {
+    return {
+      targetSize: isSet(object.targetSize) ? Number(object.targetSize) : 0,
+      map: Array.isArray(object?.map) ? object.map.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: ColIndexMapping): unknown {
+    const obj: any = {};
+    message.targetSize !== undefined && (obj.targetSize = Math.round(message.targetSize));
+    if (message.map) {
+      obj.map = message.map.map((e) => Math.round(e));
+    } else {
+      obj.map = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ColIndexMapping>, I>>(object: I): ColIndexMapping {
+    const message = createBaseColIndexMapping();
+    message.targetSize = object.targetSize ?? 0;
+    message.map = object.map?.map((e) => e) || [];
     return message;
   },
 };

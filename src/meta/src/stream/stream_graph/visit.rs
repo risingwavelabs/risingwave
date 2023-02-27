@@ -17,9 +17,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{agg_call_state, StreamNode};
 
-/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
-/// [`StreamFragment`] recursively.
-pub fn visit_fragment<F>(fragment: &mut StreamFragment, mut f: F)
+/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
+pub fn visit_stream_node<F>(stream_node: &mut StreamNode, mut f: F)
 where
     F: FnMut(&mut NodeBody),
 {
@@ -33,7 +32,16 @@ where
         }
     }
 
-    visit_inner(fragment.node.as_mut().unwrap(), &mut f)
+    visit_inner(stream_node, &mut f)
+}
+
+/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
+/// [`StreamFragment`] recursively.
+pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
+where
+    F: FnMut(&mut NodeBody),
+{
+    visit_stream_node(fragment.node.as_mut().unwrap(), f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].
