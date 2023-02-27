@@ -490,7 +490,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::ReplaceStreamingJob(
+            .run_command(DdlCommand::ReplaceTable(
                 stream_job,
                 fragment_graph,
                 table_col_index_mapping,

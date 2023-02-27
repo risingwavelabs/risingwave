@@ -65,7 +65,7 @@ pub enum DdlCommand {
     DropView(ViewId),
     CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
-    ReplaceStreamingJob(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
 }
 
 #[derive(Clone)]
@@ -138,12 +138,8 @@ where
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
                 DdlCommand::DropStreamingJob(job_id) => ctrl.drop_streaming_job(job_id).await,
-                DdlCommand::ReplaceStreamingJob(
-                    stream_job,
-                    fragment_graph,
-                    table_col_index_mapping,
-                ) => {
-                    ctrl.replace_streaming_job(stream_job, fragment_graph, table_col_index_mapping)
+                DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
+                    ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
                 }
             }
@@ -527,60 +523,77 @@ where
         }
     }
 
-    async fn replace_streaming_job(
+    async fn replace_table(
         &self,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let (ctx, table_fragments) = self
-            .prepare_replace_table(&mut stream_job, fragment_graph, table_col_index_mapping)
+        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+
+        let fragment_graph = self
+            .prepare_replace_table(&mut stream_job, fragment_graph)
             .await?;
 
-        let version = match self
-            .stream_manager
-            .replace_table(table_fragments, ctx)
-            .await
-        {
+        let result = try {
+            let (ctx, table_fragments) = self
+                .build_replace_table(env, &stream_job, fragment_graph, table_col_index_mapping)
+                .await?;
+
+            self.stream_manager
+                .replace_table(table_fragments, ctx)
+                .await?;
+        };
+
+        match result {
             Ok(_) => self.finish_replace_table(&stream_job).await,
             Err(err) => {
                 self.cancel_replace_table(&stream_job).await?;
                 Err(err)
             }
-        }?;
-
-        Ok(version)
+        }
     }
 
-    /// Prepares a table replacement and returns the context and table fragments.
+    /// `prepare_replace_table` prepares a table replacement and returns the new stream fragment
+    /// graph. This is basically the same as `prepare_stream_job`, except that it does more
+    /// assertions and uses a different method to mark in the catalog.
     async fn prepare_replace_table(
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        table_col_index_mapping: ColIndexMapping,
-    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
-        let id = stream_job.id();
-
-        // 1. Get the env for streaming jobs.
-        let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
-
-        // 2. Build fragment graph.
+    ) -> MetaResult<StreamFragmentGraph> {
+        // 1. Build fragment graph.
         let fragment_graph =
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
                 .await?;
-        let default_parallelism = fragment_graph.default_parallelism();
         assert!(fragment_graph.internal_tables().is_empty());
+        assert!(fragment_graph.dependent_relations().is_empty());
 
-        // 3. Set the graph-related fields and freeze the `stream_job`.
+        // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let stream_job = &*stream_job;
 
-        // 4. Mark current relation as "updating".
+        // 3. Mark current relation as "updating".
         self.catalog_manager
             .start_replace_table_procedure(stream_job.table().unwrap())
             .await?;
 
-        // 5. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
+        Ok(fragment_graph)
+    }
+
+    /// `build_replace_table` builds a table replacement and returns the context and new table
+    /// fragments.
+    async fn build_replace_table(
+        &self,
+        env: StreamEnvironment,
+        stream_job: &StreamingJob,
+        fragment_graph: StreamFragmentGraph,
+        table_col_index_mapping: ColIndexMapping,
+    ) -> MetaResult<(ReplaceTableContext, TableFragments)> {
+        let id = stream_job.id();
+        let default_parallelism = fragment_graph.default_parallelism();
+
+        // 1. Resolve the edges to the downstream fragments, extend the fragment graph to a complete
         // graph that contains all information needed for building the actor graph.
         let original_table_fragment = self.fragment_manager.get_mview_fragment(id.into()).await?;
 
@@ -600,7 +613,7 @@ where
             downstream_fragments,
         )?;
 
-        // 6. Build the actor graph.
+        // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
         let actor_graph_builder =
             ActorGraphBuilder::new(complete_graph, cluster_info, default_parallelism)?;
@@ -616,7 +629,7 @@ where
             .await?;
         assert!(dispatchers.is_empty());
 
-        // 7. Assign a new dummy ID for the new table fragments.
+        // 3. Assign a new dummy ID for the new table fragments.
         //
         // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
         // with the real table ID, then replace the dummy table ID with the real table ID. This is a
@@ -627,7 +640,7 @@ where
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
-        // 8. Build the table fragments structure that will be persisted in the stream manager, and
+        // 4. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
         let table_fragments = TableFragments::new(
