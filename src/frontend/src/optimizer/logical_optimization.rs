@@ -184,9 +184,15 @@ lazy_static! {
         ApplyOrder::TopDown,
     );
 
-    static ref CONVERT_DISTINCT_AGG: OptimizationStage = OptimizationStage::new(
+    static ref CONVERT_DISTINCT_AGG_FOR_STREAM: OptimizationStage = OptimizationStage::new(
         "Convert Distinct Aggregation",
-        vec![UnionToDistinctRule::create(), DistinctAggRule::create()],
+        vec![UnionToDistinctRule::create(), DistinctAggRule::create(true)],
+        ApplyOrder::TopDown,
+    );
+
+    static ref CONVERT_DISTINCT_AGG_FOR_BATCH: OptimizationStage = OptimizationStage::new(
+        "Convert Distinct Aggregation",
+        vec![UnionToDistinctRule::create(), DistinctAggRule::create(false)],
         ApplyOrder::TopDown,
     );
 
@@ -380,7 +386,7 @@ impl LogicalOptimization {
         }
 
         // Convert distinct aggregates.
-        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG);
+        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
@@ -505,7 +511,7 @@ impl LogicalOptimization {
         }
 
         // Convert distinct aggregates.
-        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG);
+        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
