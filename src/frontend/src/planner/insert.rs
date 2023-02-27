@@ -32,6 +32,7 @@ impl Planner {
             input,
             insert.table_name.clone(),
             insert.table_id,
+            insert.table_version_id,
             insert.column_indices,
             insert.row_id_index,
             returning,

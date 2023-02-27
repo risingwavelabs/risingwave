@@ -100,6 +100,8 @@ impl SourceDescBuilder {
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
             ProstRowFormatType::Native => SourceFormat::Native,
             ProstRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
+            ProstRowFormatType::UpsertJson => SourceFormat::UpsertJson,
+            ProstRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
             _ => unreachable!(),
         };
 

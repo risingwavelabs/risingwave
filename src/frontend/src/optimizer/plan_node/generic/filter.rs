@@ -23,7 +23,7 @@ use crate::utils::Condition;
 /// true, filtering out the others.
 ///
 /// If the condition allows nulls, then a null value is treated the same as false.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Filter<PlanRef> {
     pub predicate: Condition,
     pub input: PlanRef,

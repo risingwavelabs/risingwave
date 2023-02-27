@@ -30,10 +30,10 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition, Substitute};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
     pub base: PlanBase,
     core: generic::Project<PlanRef>,
@@ -45,7 +45,7 @@ impl LogicalProject {
     }
 
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        let core = generic::Project::new(exprs, input.clone());
+        let core = generic::Project::new(exprs, input);
         Self::with_core(core)
     }
 
