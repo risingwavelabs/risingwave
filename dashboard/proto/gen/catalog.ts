@@ -164,11 +164,12 @@ export interface Function {
   schemaId: number;
   databaseId: number;
   name: string;
+  owner: number;
   argTypes: DataType[];
   returnType: DataType | undefined;
   language: string;
-  path: string;
-  owner: number;
+  link: string;
+  identifier: string;
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -758,11 +759,12 @@ function createBaseFunction(): Function {
     schemaId: 0,
     databaseId: 0,
     name: "",
+    owner: 0,
     argTypes: [],
     returnType: undefined,
     language: "",
-    path: "",
-    owner: 0,
+    link: "",
+    identifier: "",
   };
 }
 
@@ -773,11 +775,14 @@ export const Function = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+      argTypes: Array.isArray(object?.argTypes)
+        ? object.argTypes.map((e: any) => DataType.fromJSON(e))
+        : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       language: isSet(object.language) ? String(object.language) : "",
-      path: isSet(object.path) ? String(object.path) : "",
-      owner: isSet(object.owner) ? Number(object.owner) : 0,
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
     };
   },
 
@@ -787,6 +792,7 @@ export const Function = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
     if (message.argTypes) {
       obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
     } else {
@@ -795,8 +801,8 @@ export const Function = {
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.language !== undefined && (obj.language = message.language);
-    message.path !== undefined && (obj.path = message.path);
-    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
     return obj;
   },
 
@@ -806,13 +812,14 @@ export const Function = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
+    message.owner = object.owner ?? 0;
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.language = object.language ?? "";
-    message.path = object.path ?? "";
-    message.owner = object.owner ?? 0;
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
     return message;
   },
 };
