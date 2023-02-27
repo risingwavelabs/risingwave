@@ -224,4 +224,13 @@ pub mod queries {
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
+
+    pub mod q106 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q106.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q106;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q106;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
 }

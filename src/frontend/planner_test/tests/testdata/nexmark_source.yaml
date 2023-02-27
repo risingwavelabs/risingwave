@@ -1678,3 +1678,89 @@
      Table 8 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
      Table 10 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [] }
      Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }
+- id: nexmark_q106
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers two-phase stateful simple aggregation.
+    --
+    -- Show the minimum final price of all auctions.
+    SELECT
+        MIN(final) AS min_final
+    FROM
+        (
+            SELECT
+                auction.id,
+                MAX(price) AS final
+            FROM
+                auction,
+                bid
+            WHERE
+                bid.auction = auction.id
+                AND bid.date_time BETWEEN auction.date_time AND auction.expires
+            GROUP BY
+                auction.id
+        )
+  batch_plan: |
+    BatchTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
+        └─BatchHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction)] }
+          └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+            ├─BatchExchange { order: [], dist: HashShard(auction.id) }
+            | └─BatchScan { table: auction, columns: [auction.id, auction.item_name], distribution: UpstreamHashShard(auction.id) }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+              └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name], order_descs: [bid_count, auction_id, auction_item_name], pk_conflict: "no check" }
+    └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
+      └─StreamTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0, group_key: [3] }
+            └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id) as $expr1] }
+              └─StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
+                └─StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count, count(bid.auction)] }
+                  └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                    ├─StreamExchange { dist: HashShard(auction.id) }
+                    | └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+                    └─StreamExchange { dist: HashShard(bid.auction) }
+                      └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+  stream_dist_plan: |
+    Fragment 0
+      StreamMaterialize { columns: [auction_id, auction_item_name, bid_count], pk_columns: [auction_id, auction_item_name], order_descs: [bid_count, auction_id, auction_item_name], pk_conflict: "no check" }
+          materialized table: 4294967294
+        StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
+          StreamTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0 }
+              state table: 0
+            StreamExchange Single from 1
+
+    Fragment 1
+      StreamGroupTopN { order: "[count(bid.auction) DESC]", limit: 1000, offset: 0, group_key: [3] }
+          state table: 1
+        StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id) as $expr3] }
+          StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
+            StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count, count(bid.auction)] }
+                result table: 2, state tables: []
+              StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                  left table: 3, right table 5, left degree table: 4, right degree table: 6,
+                StreamExchange Hash([0]) from 2
+                StreamExchange Hash([0]) from 3
+
+    Fragment 2
+      Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        Upstream
+        BatchPlanNode
+
+    Fragment 3
+      Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        Upstream
+        BatchPlanNode
+
+     Table 0 { columns: [auction_id, auction_item_name, count(bid_auction), $expr3], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
+     Table 1 { columns: [auction_id, auction_item_name, count(bid_auction), $expr3], primary key: [$3 ASC, $2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0], vnode column idx: 3 }
+     Table 2 { columns: [auction_id, auction_item_name, count, count(bid_auction)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
+     Table 3 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }

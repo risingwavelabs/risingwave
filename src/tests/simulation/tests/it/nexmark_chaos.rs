@@ -168,3 +168,4 @@ test!(q102);
 test!(q103);
 test!(q104);
 test!(q105);
+test!(q106);
