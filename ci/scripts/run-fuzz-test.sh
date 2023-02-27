@@ -57,8 +57,6 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     echo "--- Kill cluster"
     cargo make kill
 
-    if [[ "$RUN_DETERMINISTIC_SQLSMITH" -eq "1" ]]; then
-      echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
-      seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
-    fi
+    echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
+    seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 fi
