@@ -91,6 +91,7 @@ pub async fn handle_explain(
                         columns,
                         constraints,
                         ColumnIdGenerator::new_initial(),
+                        source_watermarks,
                     )?
                     .0
                 }

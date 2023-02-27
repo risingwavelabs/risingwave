@@ -338,9 +338,11 @@ pub(crate) fn gen_create_table_plan(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
+    source_watermarks: Vec<SourceWatermark>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
+
     gen_create_table_plan_without_bind(
         context,
         table_name,
@@ -348,6 +350,7 @@ pub(crate) fn gen_create_table_plan(
         pk_column_id_from_columns,
         constraints,
         definition,
+        source_watermarks,
         Some(col_id_gen.into_version()),
     )
 }
@@ -360,10 +363,18 @@ pub(crate) fn gen_create_table_plan_without_bind(
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
     definition: String,
+    source_watermarks: Vec<SourceWatermark>,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
 
     gen_table_plan_inner(
         context.into(),
@@ -373,7 +384,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         row_id_index,
         None,
         definition,
-        vec![],
+        watermark_descs,
         version,
     )
 }
@@ -524,6 +535,7 @@ pub async fn handle_create_table(
                 columns,
                 constraints,
                 col_id_gen,
+                source_watermarks,
             )?,
         };
         let mut graph = build_graph(plan);

@@ -1994,11 +1994,6 @@ impl Parser {
             }
         } else {
             // Table is NOT created with an external connector.
-            if !source_watermarks.is_empty() {
-                return Err(ParserError::ParserError(
-                    "Watermarks can't be defined on table without external source".to_string(),
-                ));
-            }
             None
         };
 
