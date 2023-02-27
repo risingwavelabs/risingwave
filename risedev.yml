@@ -22,7 +22,6 @@ profile:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
 
-
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
