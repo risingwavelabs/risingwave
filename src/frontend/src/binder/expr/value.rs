@@ -130,7 +130,7 @@ impl Binder {
                 },
             )
             .into();
-            return lhs.cast_explicit(ty);
+            return lhs.cast_explicit(ty).map_err(Into::into);
         }
         let inner_type = if let DataType::List { datatype } = &ty {
             *datatype.clone()

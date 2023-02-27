@@ -29,7 +29,6 @@ use futures::future::try_join_all;
 use futures::stream;
 use hyper::Body;
 use itertools::Itertools;
-use random_string::generate;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 
@@ -116,7 +115,7 @@ impl S3StreamingUploader {
                 .key(&self.key)
                 .send()
                 .await?;
-            self.upload_id = Some(resp.upload_id().unwrap().into());
+            self.upload_id = Some(resp.upload_id.unwrap());
         }
 
         // Get the data to upload for the next part.
@@ -187,7 +186,7 @@ impl S3StreamingUploader {
                 .iter()
                 .map(|(part_id, output)| {
                     CompletedPart::builder()
-                        .set_e_tag(output.e_tag().map(|s| s.into()))
+                        .set_e_tag(output.e_tag.clone())
                         .set_part_number(Some(*part_id))
                         .build()
                 })
@@ -292,7 +291,6 @@ pub struct S3ObjectStore {
     part_size: usize,
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
-    object_store_use_batch_delete: bool,
 }
 
 #[async_trait::async_trait]
@@ -389,7 +387,7 @@ impl ObjectStore for S3ObjectStore {
                 .last_modified()
                 .expect("last_modified required")
                 .as_secs_f64(),
-            total_size: resp.content_length() as usize,
+            total_size: resp.content_length as usize,
         })
     }
 
@@ -433,12 +431,6 @@ impl ObjectStore for S3ObjectStore {
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
         // AWS restricts the number of objects per request to 1000.
         const MAX_LEN: usize = 1000;
-        if !self.object_store_use_batch_delete {
-            for path in paths {
-                self.delete(path).await?;
-            }
-            return Ok(());
-        }
 
         // If needed, split given set into subsets of size with no more than `MAX_LEN` objects.
         for start_idx /* inclusive */ in (0..paths.len()).step_by(MAX_LEN) {
@@ -484,7 +476,7 @@ impl ObjectStore for S3ObjectStore {
                 request = request.continuation_token(continuation_token);
             }
             let result = request.send().await?;
-            let is_truncated = result.is_truncated();
+            let is_truncated = result.is_truncated;
             ret.append(
                 &mut result
                     .contents()
@@ -500,7 +492,7 @@ impl ObjectStore for S3ObjectStore {
                     })
                     .collect_vec(),
             );
-            next_continuation_token = result.next_continuation_token().map(|s| s.to_string());
+            next_continuation_token = result.next_continuation_token;
             if !is_truncated {
                 break;
             }
@@ -531,7 +523,6 @@ impl S3ObjectStore {
             bucket,
             part_size: S3_PART_SIZE,
             metrics,
-            object_store_use_batch_delete: true,
         }
     }
 
@@ -566,36 +557,11 @@ impl S3ObjectStore {
         let client = Client::new(&sdk_config);
         Self::configure_bucket_lifecycle(&client, bucket.as_str()).await;
 
-        // check whether use batch delete
-        let charset = "1234567890";
-        let test_path = "risingwave_check_batch_delete/".to_string() + &generate(10, charset);
-        client
-            .put_object()
-            .bucket(&bucket)
-            .body(aws_sdk_s3::types::ByteStream::from(Bytes::from(
-                "test batch delete",
-            )))
-            .key(&test_path)
-            .send()
-            .await
-            .unwrap();
-        let obj_ids = vec![ObjectIdentifier::builder().key(&test_path).build()];
-
-        let delete_builder = Delete::builder().set_objects(Some(obj_ids));
-        let object_store_use_batch_delete = client
-            .delete_objects()
-            .bucket(&bucket)
-            .delete(delete_builder.build())
-            .send()
-            .await
-            .is_ok();
-
         Self {
             client,
             bucket: bucket.to_string(),
             part_size: S3_PART_SIZE,
             metrics,
-            object_store_use_batch_delete,
         }
     }
 
@@ -630,7 +596,6 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            object_store_use_batch_delete: true,
         }
     }
 
@@ -731,10 +696,10 @@ impl S3ObjectStore {
                 .is_ok()
             {
                 tracing::info!(
-                        "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
-                        bucket,
-                        S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
-                    );
+                    "S3 bucket {:?} is configured to automatically purge abandoned MultipartUploads after {} days",
+                    bucket,
+                    S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS,
+                );
             } else {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }

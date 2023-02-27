@@ -27,7 +27,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::{TableCatalog, WithOptions};
 
 /// [`Source`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,

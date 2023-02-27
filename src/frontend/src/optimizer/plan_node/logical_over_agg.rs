@@ -29,10 +29,10 @@ use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, Win
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanWindowFunction {
     pub function_type: WindowFunctionType,
     pub return_type: DataType,
@@ -99,7 +99,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
 /// `LogicalOverAgg` performs `OVER` window aggregates ([`WindowFunction`]) to its input.
 ///
 /// The output schema is the input schema plus the window functions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverAgg {
     pub base: PlanBase,
     pub window_function: PlanWindowFunction,

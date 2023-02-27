@@ -33,6 +33,7 @@
 
 // These modules define concrete expression structures.
 mod expr_array_concat;
+mod expr_array_to_string;
 mod expr_binary_bytes;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
@@ -43,6 +44,7 @@ mod expr_field;
 mod expr_in;
 mod expr_input_ref;
 mod expr_is_null;
+mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;

@@ -19,8 +19,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
 };
@@ -64,8 +62,8 @@ use crate::WithOptions;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug)]
-#[cfg_attr(test, derive(Default, PartialEq))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(test, derive(Default))]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -83,8 +81,7 @@ pub struct TableCatalog {
     pub stream_key: Vec<usize>,
 
     /// Type of the table. Used to distinguish user-created tables, materialized views, index
-    /// tables, and internal tables. Sinks will have a type of `TableType::Table` because there is
-    /// no need to distinguish sinks from other types of tables now.
+    /// tables, and internal tables.
     pub table_type: TableType,
 
     /// Distribution key column indices.
@@ -129,7 +126,7 @@ pub struct TableCatalog {
     pub watermark_columns: FixedBitSet,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TableType {
     /// Tables created by `CREATE TABLE`.
     Table,
@@ -170,7 +167,7 @@ impl TableType {
 }
 
 /// The version of a table, used by schema change. See [`ProstTableVersion`].
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
     pub next_column_id: ColumnId,
@@ -285,7 +282,8 @@ impl TableCatalog {
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
 
-        let table_options = TableOption::build_table_option(&self.properties);
+        let table_options =
+            TableOption::build_table_option(&self.properties.inner().clone().into_iter().collect());
 
         TableDesc {
             table_id: self.id,
@@ -330,6 +328,11 @@ impl TableCatalog {
         self.version.as_ref()
     }
 
+    /// Get the table's version id. Returns `None` if the table has no version field.
+    pub fn version_id(&self) -> Option<TableVersionId> {
+        self.version().map(|v| v.version_id)
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id,
@@ -351,7 +354,7 @@ impl TableCatalog {
                 .collect_vec(),
             append_only: self.append_only,
             owner: self.owner,
-            properties: self.properties.inner().clone(),
+            properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
             vnode_col_index: self
                 .vnode_col_index
@@ -365,20 +368,6 @@ impl TableCatalog {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
-        }
-    }
-
-    pub fn to_sink_desc(&self, properties: WithOptions, sink_type: SinkType) -> SinkDesc {
-        SinkDesc {
-            id: SinkId::placeholder(),
-            name: self.name.clone(),
-            columns: self.columns.clone(),
-            pk: self.pk.iter().map(|x| x.to_order_pair()).collect(),
-            stream_key: self.stream_key.clone(),
-            distribution_key: self.distribution_key.clone(),
-            definition: self.definition.clone(),
-            properties: properties.into_inner(),
-            sink_type,
         }
     }
 }

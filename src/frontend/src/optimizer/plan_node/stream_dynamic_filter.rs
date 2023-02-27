@@ -30,7 +30,7 @@ use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ConditionDisplay;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
     pub base: PlanBase,
     core: generic::DynamicFilter<PlanRef>,

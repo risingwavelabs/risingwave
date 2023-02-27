@@ -27,7 +27,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 ///
 /// Aggregates use expanded columns as their arguments and original columns for their filter. `flag`
 /// is used to distinguish between different `subset`s in `column_subsets`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Expand<PlanRef> {
     // `column_subsets` has many `subset`s which specifies the columns that need to be
     // reserved and other columns will be filled with NULL.

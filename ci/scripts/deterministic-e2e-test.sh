@@ -4,6 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.env.sh
+source ci/scripts/pr.env.sh
 
 echo "--- Download artifacts"
 buildkite-agent artifact download risingwave_simulation .
@@ -38,5 +39,5 @@ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
 
-echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
+seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/freeze/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'

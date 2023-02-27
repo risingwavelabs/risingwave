@@ -1,4 +1,6 @@
-![RisingWave Logo](./docs/images/logo-title.svg)
+<picture>
+<img src='./docs/images/logo-title.svg' alt='RisingWave Logo' style='visibility:visible'>
+</picture>
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
 [![Build status](https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg)](https://buildkite.com/risingwavelabs/main)
