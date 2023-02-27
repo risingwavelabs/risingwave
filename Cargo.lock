@@ -8644,7 +8644,6 @@ dependencies = [
  "regex-syntax",
  "reqwest",
  "ring",
- "rustls",
  "scopeguard",
  "serde",
  "smallvec",
