@@ -22,6 +22,7 @@ glob = "0.3"
 itertools = "0.10"
 madsim = "0.2.17"
 paste = "1"
+pretty_assertions = "1"
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 risingwave_common = { path = "../../common" }

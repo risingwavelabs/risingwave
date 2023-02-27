@@ -39,6 +39,10 @@ pub struct HummockStateStoreMetrics {
     pub read_req_bloom_filter_positive_counts: GenericCounterVec<AtomicU64>,
     pub read_req_positive_but_non_exist_counts: GenericCounterVec<AtomicU64>,
     pub read_req_check_bloom_filter_counts: GenericCounterVec<AtomicU64>,
+
+    pub write_batch_tuple_counts: GenericCounterVec<AtomicU64>,
+    pub write_batch_duration: HistogramVec,
+    pub write_batch_size: HistogramVec,
 }
 
 impl HummockStateStoreMetrics {
@@ -109,6 +113,31 @@ impl HummockStateStoreMetrics {
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
+        // ----- write_batch -----
+        let write_batch_tuple_counts = register_int_counter_vec_with_registry!(
+            "state_store_write_batch_tuple_counts",
+            "Total number of batched write kv pairs requests that have been issued to state store",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+                "state_store_write_batch_duration",
+                "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
+                exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+            );
+        let write_batch_duration =
+            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_write_batch_size",
+            "Total size of batched write that have been issued to state store",
+            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
+        );
+        let write_batch_size =
+            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+
         let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -145,6 +174,9 @@ impl HummockStateStoreMetrics {
             read_req_bloom_filter_positive_counts,
             read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,
+            write_batch_tuple_counts,
+            write_batch_duration,
+            write_batch_size,
         }
     }
 

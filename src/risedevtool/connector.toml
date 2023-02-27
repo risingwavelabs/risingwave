@@ -1,7 +1,7 @@
 extend = "common.toml"
 
 [env]
-RW_CONNECTOR_VERSION = "0.1.16"
+RW_CONNECTOR_VERSION = "0.1.17"
 RW_CONNECTOR_DOWNLOAD_PATH = "${PREFIX_TMP}/risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
 RW_CONNECTOR_RELEASE = "risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
 RW_CONNECTOR_BIN_PREFIX = "${PREFIX_BIN}/connector-node"
