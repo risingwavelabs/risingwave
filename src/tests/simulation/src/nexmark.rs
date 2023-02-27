@@ -151,6 +151,24 @@ pub mod queries {
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
+    pub mod q15 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q15.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q15 ORDER BY day ASC, total_bids DESC;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q15;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q18 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q18.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q18 ORDER BY auction, bidder;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q18;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
     pub mod q101 {
         use super::*;
         pub const CREATE: &str = include_str!("nexmark/q101.sql");

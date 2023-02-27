@@ -159,6 +159,8 @@ test!(q7);
 test!(q8);
 test!(q9);
 // q10+: duplicated or unsupported
+test!(q15);
+test!(q18);
 
 // Self made queries.
 test!(q101);
