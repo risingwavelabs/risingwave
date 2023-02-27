@@ -136,7 +136,7 @@ profile:
       # If you want to use hdfs as storage backend, configure hdfs namenode and root path:
       - use: opendal
         engine: webhdfs
-        namenode: "127.0.0.1:9000"
+        namenode: "127.0.0.1:9870"
         root: risingwave
       - use: compactor
       # - use: prometheus
