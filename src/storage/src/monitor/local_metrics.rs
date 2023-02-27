@@ -28,13 +28,6 @@ use crate::monitor::CompactorMetrics;
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
-macro_rules! inc_local_metrics {
-    ($self:ident, $metrics: ident, $($x:ident),*) => {{
-        $(
-            $metrics.$x.inc_by($self.$x);
-        )*
-    }}
-}
 
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
@@ -151,8 +144,7 @@ impl StoreLocalStatistic {
             return;
         }
         // checks SST bloom filters
-        inc_local_metrics!(self, metrics, bloom_filter_true_negative_counts);
-
+        metrics.bloom_filter_true_negative_counts.inc_by(self.bloom_filter_true_negative_counts);
         metrics.read_req_check_bloom_filter_counts.inc();
 
         if self.bloom_filter_check_counts > self.bloom_filter_true_negative_counts {
