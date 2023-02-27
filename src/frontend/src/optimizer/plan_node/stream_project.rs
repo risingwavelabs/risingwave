@@ -16,17 +16,20 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::generic::GenericPlanRef;
 use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl, ExprRewriter};
+use crate::optimizer::plan_node::generic::AliasedExpr;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
     pub base: PlanBase,
     logical: LogicalProject,
@@ -45,7 +48,16 @@ impl fmt::Display for StreamProject {
             &self
                 .exprs()
                 .iter()
-                .map(|expr| ExprDisplay { expr, input_schema })
+                .zip_eq_fast(self.base.schema().fields().iter())
+                .map(|(expr, field)| AliasedExpr {
+                    expr: ExprDisplay { expr, input_schema },
+                    alias: {
+                        match expr {
+                            ExprImpl::InputRef(_) | ExprImpl::Literal(_) => None,
+                            _ => Some(field.name.clone()),
+                        }
+                    },
+                })
                 .collect_vec(),
         );
         if !self.watermark_derivations.is_empty() {
@@ -130,12 +142,7 @@ impl StreamNode for StreamProject {
                 .logical
                 .exprs()
                 .iter()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x.clone())
-                        .to_expr_proto()
-                })
+                .map(|x| x.to_expr_proto())
                 .collect(),
             watermark_input_key: self
                 .watermark_derivations

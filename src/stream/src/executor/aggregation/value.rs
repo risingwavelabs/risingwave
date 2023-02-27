@@ -93,6 +93,7 @@ mod tests {
             order_pairs: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }
     }
 
@@ -135,6 +136,7 @@ mod tests {
             order_pairs: vec![],
             append_only: true,
             filter: None,
+            distinct: false,
         }
     }
 

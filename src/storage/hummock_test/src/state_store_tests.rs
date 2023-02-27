@@ -26,8 +26,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
-use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
-use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     ReadOptions, StateStore, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
@@ -35,8 +34,7 @@ use risingwave_storage::store::{
 
 use crate::get_notification_client_for_test;
 use crate::test_utils::{
-    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
-    HummockV2MixedStateStore,
+    with_hummock_storage_v2, HummockStateStoreTestTrait, HummockV2MixedStateStore,
 };
 
 #[tokio::test]
@@ -73,12 +71,6 @@ async fn test_empty_read_v2() {
         .unwrap();
     pin_mut!(stream);
     assert!(stream.try_next().await.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn test_basic_v1() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
-    test_basic_inner(hummock_storage, meta_client).await;
 }
 
 #[tokio::test]
@@ -428,12 +420,6 @@ async fn test_basic_inner(
 }
 
 #[tokio::test]
-async fn test_state_store_sync_v1() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
-    test_state_store_sync_inner(hummock_storage, meta_client).await;
-}
-
-#[tokio::test]
 async fn test_state_store_sync_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_state_store_sync_inner(hummock_storage, meta_client).await;
@@ -443,10 +429,6 @@ async fn test_state_store_sync_inner(
     hummock_storage: impl HummockStateStoreTestTrait,
     _meta_client: Arc<MockHummockMetaClient>,
 ) {
-    let mut config = default_opts_for_test();
-    config.shared_buffer_capacity_mb = 64;
-    config.write_conflict_detection_enabled = false;
-
     let mut epoch: HummockEpoch = hummock_storage.get_pinned_version().max_committed_epoch() + 1;
 
     // ingest 16B batch
@@ -542,27 +524,7 @@ async fn test_reload_storage() {
     let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    // TODO: may also test for v2 when the unit test is enabled.
-    let hummock_storage = HummockStorageV1::new(
-        hummock_options.clone(),
-        sstable_store.clone(),
-        meta_client.clone(),
-        get_notification_client_for_test(
-            env.clone(),
-            hummock_manager_ref.clone(),
-            worker_node.clone(),
-        ),
-        Arc::new(HummockStateStoreMetrics::unused()),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
-        Arc::new(CompactorMetrics::unused()),
-    )
-    .await
-    .unwrap();
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
@@ -602,7 +564,7 @@ async fn test_reload_storage() {
     // Mock something happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
     let hummock_storage = HummockStorage::for_test(
-        hummock_options.clone(),
+        hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),
@@ -756,12 +718,6 @@ async fn test_reload_storage() {
         .unwrap();
     let len = count_stream(iter).await;
     assert_eq!(len, 3);
-}
-
-#[tokio::test]
-async fn test_write_anytime_v1() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
-    test_write_anytime_inner(hummock_storage, meta_client).await;
 }
 
 #[tokio::test]
@@ -1059,12 +1015,6 @@ async fn test_write_anytime_inner(
 }
 
 #[tokio::test]
-async fn test_delete_get_v1() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
-    test_delete_get_inner(hummock_storage, meta_client).await;
-}
-
-#[tokio::test]
 async fn test_delete_get_v2() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_delete_get_inner(hummock_storage, meta_client).await;
@@ -1136,12 +1086,6 @@ async fn test_delete_get_inner(
         .await
         .unwrap()
         .is_none());
-}
-
-#[tokio::test]
-async fn test_multiple_epoch_sync_v1() {
-    let (hummock_storage, meta_client) = with_hummock_storage_v1().await;
-    test_multiple_epoch_sync_inner(hummock_storage, meta_client).await;
 }
 
 #[tokio::test]

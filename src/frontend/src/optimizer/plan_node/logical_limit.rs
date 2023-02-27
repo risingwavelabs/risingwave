@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::{
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLimit {
     pub base: PlanBase,
     input: PlanRef,

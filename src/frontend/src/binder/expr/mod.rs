@@ -40,6 +40,7 @@ impl Binder {
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
                 s.cast_explicit(bind_data_type(&data_type)?)
+                    .map_err(Into::into)
             }
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
@@ -430,7 +431,7 @@ impl Binder {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr(expr)?;
-        lhs.cast_explicit(data_type)
+        lhs.cast_explicit(data_type).map_err(Into::into)
     }
 }
 
@@ -510,6 +511,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
+                "jsonb" => DataType::Jsonb,
                 _ => return Err(new_err().into()),
             }
         }

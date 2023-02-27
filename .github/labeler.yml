@@ -22,3 +22,7 @@ labels:
   title: "^test.*"
 - label: "component/doc"
   title: "^doc.*"
+
+- label: "user-facing-changes"
+  negate: true
+  body: 'My PR \*\*DOES NOT\*\* contain user-facing changes'

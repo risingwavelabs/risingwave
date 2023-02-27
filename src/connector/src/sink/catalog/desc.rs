@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_pb::stream_plan::SinkDesc as ProstSinkDesc;
 
-use super::{SinkCatalog, SinkId};
+use super::{SinkCatalog, SinkId, SinkType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkDesc {
     /// Id of the sink. For debug now.
     pub id: SinkId,
@@ -47,11 +47,13 @@ pub struct SinkDesc {
     /// distribution keys will be `columns[1]` and `columns[2]`.
     pub distribution_key: Vec<usize>,
 
-    /// Whether the sink is append-only.
-    pub append_only: bool,
-
     /// The properties of the sink.
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
+
+    // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
+    // based on both its own derivation on the append-only attribute and other user-specified
+    // options in `properties`.
+    pub sink_type: SinkType,
 }
 
 impl SinkDesc {
@@ -72,10 +74,10 @@ impl SinkDesc {
             pk: self.pk,
             stream_key: self.stream_key,
             distribution_key: self.distribution_key,
-            append_only: self.append_only,
             owner,
             dependent_relations,
-            properties: self.properties,
+            properties: self.properties.into_iter().collect(),
+            sink_type: self.sink_type,
         }
     }
 
@@ -92,8 +94,8 @@ impl SinkDesc {
             pk: self.pk.iter().map(|k| k.to_protobuf()).collect_vec(),
             stream_key: self.stream_key.iter().map(|idx| *idx as _).collect_vec(),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            append_only: self.append_only,
-            properties: self.properties.clone(),
+            properties: self.properties.clone().into_iter().collect(),
+            sink_type: self.sink_type.to_proto() as i32,
         }
     }
 }

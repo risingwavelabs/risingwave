@@ -18,8 +18,7 @@
   sql: |
     select case when NULL then 1 end;
   batch_plan: |
-    BatchProject { exprs: [Case(null:Boolean, 1:Int32)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[null:Int32]] }
 - name: implicit cast boolean (JOIN ON NULL)
   sql: |
     create table t1(v1 int);
@@ -37,8 +36,7 @@
   sql: |
     select current_schemas(NULL);
   batch_plan: |
-    BatchProject { exprs: [null:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[null:List { datatype: Varchar }]] }
 - name: FILTER (FILTER NULL)
   sql: |
     create table t(v1 int);
@@ -52,21 +50,17 @@
   sql: |
     select 1 having 'y';
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
-    └─BatchSimpleAgg { aggs: [] }
-      └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 - name: implicit cast boolean (WHERE with literal 'y' of unknown type)
   sql: |
     select 1 where 'y';
   batch_plan: |
-    BatchProject { exprs: [1:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 - name: implicit cast boolean (CASE with literal 'y' of unknown type)
   sql: |
     select case when 'y' then 1 end;
   batch_plan: |
-    BatchProject { exprs: [Case(true:Boolean, 1:Int32)] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[1:Int32]] }
 - name: implicit cast boolean (JOIN ON with literal 'y' of unknown type)
   sql: |
     create table t1(v1 int);
@@ -82,8 +76,7 @@
   sql: |
     select current_schemas('y');
   batch_plan: |
-    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ARRAY[pg_catalog, public]:List { datatype: Varchar }]] }
 - name: FILTER (FILTER with literal 'y' of unknown type)
   sql: |
     create table t(v1 int);

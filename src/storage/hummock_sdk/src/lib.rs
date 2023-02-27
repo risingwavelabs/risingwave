@@ -53,8 +53,31 @@ pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
-pub const LOCAL_SST_ID_MASK: HummockSstableId = 1 << (HummockSstableId::BITS - 1);
-pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
+#[macro_export]
+/// This is wrapper for `info` log.
+///
+/// In our CI tests, we frequently create and drop tables, and checkpoint in all barriers, which may
+/// cause many events. However, these events are not expected to be frequent in production usage, so
+/// we print an info log for every these events. But these events are frequent in CI, and produce
+/// many logs in CI, and we may want to downgrade the log level of these event log to debug.
+/// Therefore, we provide this macro to wrap the `info` log, which will produce `info` log when
+/// `debug_assertions` is not enabled, and `debug` log when `debug_assertions` is enabled.
+macro_rules! info_in_release {
+    ($($arg:tt)*) => {
+        {
+            #[cfg(debug_assertions)]
+            {
+                use tracing::debug;
+                debug!($($arg)*);
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                use tracing::info;
+                info!($($arg)*);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct LocalSstableInfo {
@@ -146,18 +169,6 @@ impl PartialEq for LocalSstableInfo {
     fn eq(&self, other: &Self) -> bool {
         self.compaction_group_id == other.compaction_group_id && self.sst_info == other.sst_info
     }
-}
-
-pub fn get_remote_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id & REMOTE_SST_ID_MASK
-}
-
-pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id | LOCAL_SST_ID_MASK
-}
-
-pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
-    id & LOCAL_SST_ID_MASK == 0
 }
 
 /// Package read epoch of hummock, it be used for `wait_epoch`

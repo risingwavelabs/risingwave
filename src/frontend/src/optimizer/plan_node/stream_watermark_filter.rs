@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use risingwave_common::catalog::Field;
+use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
@@ -23,10 +25,11 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{ExprDisplay, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
     pub base: PlanBase,
     input: PlanRef,
@@ -59,11 +62,39 @@ impl StreamWatermarkFilter {
 
 impl fmt::Display for StreamWatermarkFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            // TODO(yuhao): display watermark filter expr
-            "StreamWatermarkFilter",
-        )
+        struct DisplayWatermarkDesc<'a> {
+            watermark_idx: u32,
+            expr: ExprImpl,
+            input_schema: &'a Schema,
+        }
+
+        impl fmt::Debug for DisplayWatermarkDesc<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let expr_display = ExprDisplay {
+                    expr: &self.expr,
+                    input_schema: self.input_schema,
+                };
+                write!(f, "idx: {}, expr: {}", self.watermark_idx, expr_display)
+            }
+        }
+
+        let mut builder = f.debug_struct("StreamWatermarkFilter");
+        let input_schema = self.input.schema();
+
+        let display_watermark_descs: Vec<_> = self
+            .watermark_descs
+            .iter()
+            .map(|desc| {
+                Ok::<_, RwError>(DisplayWatermarkDesc {
+                    watermark_idx: desc.watermark_idx,
+                    expr: ExprImpl::from_expr_proto(desc.get_expr()?)?,
+                    input_schema,
+                })
+            })
+            .try_collect()
+            .map_err(|_| fmt::Error)?;
+        builder.field("watermark_descs", &display_watermark_descs);
+        builder.finish()
     }
 }
 

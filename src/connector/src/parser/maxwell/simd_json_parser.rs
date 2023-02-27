@@ -23,7 +23,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{SourceColumnDesc, SourceContextRef};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -34,11 +34,15 @@ impl_common_parser_logic!(MaxwellParser);
 #[derive(Debug)]
 pub struct MaxwellParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
+    source_ctx: SourceContextRef,
 }
 
 impl MaxwellParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        Ok(Self { rw_columns })
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, source_ctx: SourceContextRef) -> Result<Self> {
+        Ok(Self {
+            rw_columns,
+            source_ctx,
+        })
     }
 
     #[allow(clippy::unused_async)]
@@ -112,6 +116,124 @@ impl MaxwellParser {
                 "unknown Maxwell op: {}",
                 other
             )))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::Op;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+    use risingwave_expr::vector_op::cast::str_to_timestamp;
+
+    use super::*;
+    use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
+    #[tokio::test]
+    async fn test_json_parser() {
+        let descs = vec![
+            SourceColumnDesc::simple("ID", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("NAME", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("is_adult", DataType::Int16, 2.into()),
+            SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
+        ];
+
+        let parser = MaxwellParser::new(descs.clone(), Default::default()).unwrap();
+
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        let payloads = vec![
+            br#"{"database":"test","table":"t","type":"insert","ts":1666937996,"xid":1171,"commit":true,"data":{"id":1,"name":"tom","is_adult":0,"birthday":"2017-12-31 16:00:01"}}"#.as_slice(),
+            br#"{"database":"test","table":"t","type":"insert","ts":1666938023,"xid":1254,"commit":true,"data":{"id":2,"name":"alex","is_adult":1,"birthday":"1999-12-31 16:00:01"}}"#.as_slice(),
+            br#"{"database":"test","table":"t","type":"update","ts":1666938068,"xid":1373,"commit":true,"data":{"id":2,"name":"chi","is_adult":1,"birthday":"1999-12-31 16:00:01"},"old":{"name":"alex"}}"#.as_slice()
+        ];
+
+        for payload in payloads {
+            let writer = builder.row_writer();
+            parser.parse_inner(payload, writer).await.unwrap();
+        }
+
+        let chunk = builder.finish();
+
+        let mut rows = chunk.rows();
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("tom".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int16(0)))
+            );
+            assert_eq!(
+                row.datum_at(3).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("2017-12-31 16:00:01").unwrap()
+                )))
+            )
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("alex".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int16(1)))
+            );
+            assert_eq!(
+                row.datum_at(3).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                )))
+            )
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::UpdateDelete);
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("alex".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int16(1)))
+            );
+            assert_eq!(
+                row.datum_at(3).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                )))
+            )
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::UpdateInsert);
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("chi".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int16(1)))
+            );
+            assert_eq!(
+                row.datum_at(3).to_owned_datum(),
+                (Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
+                )))
+            )
         }
     }
 }

@@ -34,6 +34,7 @@ pub use local::*;
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 
 mod error;
+pub mod streaming_manager;
 mod task_context;
 pub mod worker_node_manager;
 

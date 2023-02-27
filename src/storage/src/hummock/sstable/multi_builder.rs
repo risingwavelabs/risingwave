@@ -22,12 +22,13 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
 use crate::hummock::compactor::task_progress::TaskProgress;
+use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BatchUploadWriter, CachePolicy, DeleteRangeTombstone, HummockResult, MemoryLimiter,
     RangeTombstonesCollector, SstableBuilder, SstableBuilderOptions, SstableWriter,
-    SstableWriterOptions,
+    SstableWriterOptions, XorFilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -36,7 +37,8 @@ pub type UploadJoinHandle = JoinHandle<HummockResult<()>>;
 #[async_trait::async_trait]
 pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>>;
+    type Filter: FilterBuilder;
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
 }
 
 pub struct SplitTableOutput {
@@ -57,7 +59,7 @@ where
 
     sst_outputs: Vec<SplitTableOutput>,
 
-    current_builder: Option<SstableBuilder<F::Writer>>,
+    current_builder: Option<SstableBuilder<F::Writer, F::Filter>>,
 
     /// Statistics.
     pub compactor_metrics: Arc<CompactorMetrics>,
@@ -251,9 +253,12 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
+    type Filter = XorFilterBuilder;
     type Writer = BatchUploadWriter;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<BatchUploadWriter>> {
+    async fn open_builder(
+        &mut self,
+    ) -> HummockResult<SstableBuilder<BatchUploadWriter, XorFilterBuilder>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {

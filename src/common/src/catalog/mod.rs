@@ -36,6 +36,11 @@ use crate::types::DataType;
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
 
+/// The version number of the per-table catalog.
+pub type TableVersionId = u64;
+/// The default version ID for a new table.
+pub const INITIAL_TABLE_VERSION_ID: u64 = 0;
+
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
@@ -94,7 +99,8 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
+#[display("{database_id}")]
 pub struct DatabaseId {
     pub database_id: u32,
 }
@@ -129,7 +135,8 @@ impl From<DatabaseId> for u32 {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Display, Hash, PartialOrd, PartialEq, Eq)]
+#[display("{schema_id}")]
 pub struct SchemaId {
     pub schema_id: u32,
 }
@@ -165,6 +172,7 @@ impl From<SchemaId> for u32 {
 }
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[display("{table_id}")]
 pub struct TableId {
     pub table_id: u32,
 }
@@ -204,8 +212,6 @@ impl From<TableId> for u32 {
     }
 }
 
-// TODO: TableOption is duplicated with the properties in table catalog, We can refactor later to
-// directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
     pub retention_seconds: Option<u32>, // second
@@ -257,6 +263,7 @@ impl TableOption {
 }
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[display("{index_id}")]
 pub struct IndexId {
     pub index_id: u32,
 }
@@ -325,6 +332,7 @@ impl From<FunctionId> for u32 {
 }
 
 #[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+#[display("{user_id}")]
 pub struct UserId {
     pub user_id: u32,
 }

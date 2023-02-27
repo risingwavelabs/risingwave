@@ -30,7 +30,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     BatchSstableWriterFactory, CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter,
     SstableBuilder, SstableBuilderOptions, SstableStore, SstableWriterFactory,
-    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache,
+    SstableWriterOptions, StreamingSstableWriterFactory, TieredCache, XorFilterBuilder,
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
@@ -61,9 +61,10 @@ impl<F: SstableWriterFactory> LocalTableBuilderFactory<F> {
 
 #[async_trait::async_trait]
 impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F> {
+    type Filter = XorFilterBuilder;
     type Writer = <F as SstableWriterFactory>::Writer;
 
-    async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>> {
+    async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {

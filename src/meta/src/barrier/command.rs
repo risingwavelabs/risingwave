@@ -97,10 +97,16 @@ pub enum Command {
     /// will be set to `Created`.
     CreateStreamingJob {
         table_fragments: TableFragments,
-        table_mview_map: HashMap<TableId, Vec<ActorId>>,
+        upstream_mview_actors: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         init_split_assignment: SplitAssignment,
+        definition: String,
     },
+    /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
+    /// table fragment.
+    ///
+    /// The collecting and cleaning part works exactly the same as `DropStreamingJobs` command.
+    CancelStreamingJob(TableFragments),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
@@ -135,6 +141,9 @@ impl Command {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
             Command::DropStreamingJobs(table_ids) => CommandChanges::DropTables(table_ids.clone()),
+            Command::CancelStreamingJob(table_fragments) => {
+                CommandChanges::DropTables(std::iter::once(table_fragments.table_id()).collect())
+            }
             Command::RescheduleFragment(reschedules) => {
                 let to_add = reschedules
                     .values()
@@ -268,6 +277,11 @@ where
                 }))
             }
 
+            Command::CancelStreamingJob(table_fragments) => {
+                let actors = table_fragments.actor_ids();
+                Some(Mutation::Stop(StopMutation { actors }))
+            }
+
             Command::RescheduleFragment(reschedules) => {
                 let mut dispatcher_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
@@ -341,6 +355,7 @@ where
                                     MergeUpdate {
                                         actor_id,
                                         upstream_fragment_id: fragment_id,
+                                        new_upstream_fragment_id: None,
                                         added_upstream_actor_id: reschedule.added_actors.clone(),
                                         removed_upstream_actor_id: reschedule
                                             .removed_actors
@@ -411,6 +426,38 @@ where
         }
     }
 
+    /// For `CancelStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// returns an empty set.
+    pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
+        match &self.command {
+            Command::CancelStreamingJob(table_fragments) => table_fragments.chain_actor_ids(),
+            _ => Default::default(),
+        }
+    }
+
+    /// Clean up actors in CNs if needed, used by drop, cancel and reschedule commands.
+    async fn clean_up(
+        &self,
+        actors_to_clean: impl IntoIterator<Item = (WorkerId, Vec<ActorId>)>,
+    ) -> MetaResult<()> {
+        let futures = actors_to_clean.into_iter().map(|(node_id, actors)| {
+            let node = self.info.node_map.get(&node_id).unwrap();
+            let request_id = Uuid::new_v4().to_string();
+
+            async move {
+                let client = self.client_pool.get(node).await?;
+                let request = DropActorsRequest {
+                    request_id,
+                    actor_ids: actors.to_owned(),
+                };
+                client.drop_actors(request).await
+            }
+        });
+
+        try_join_all(futures).await?;
+        Ok(())
+    }
+
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
@@ -448,36 +495,33 @@ where
             Command::DropStreamingJobs(table_ids) => {
                 // Tell compute nodes to drop actors.
                 let node_actors = self.fragment_manager.table_node_actors(table_ids).await?;
-                let futures = node_actors.iter().map(|(node_id, actors)| {
-                    let node = self.info.node_map.get(node_id).unwrap();
-                    let request_id = Uuid::new_v4().to_string();
-
-                    async move {
-                        let client = self.client_pool.get(node).await?;
-                        let request = DropActorsRequest {
-                            request_id,
-                            actor_ids: actors.to_owned(),
-                        };
-                        client.drop_actors(request).await
-                    }
-                });
-
-                try_join_all(futures).await?;
-
+                self.clean_up(node_actors).await?;
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments_vec(table_ids)
                     .await?;
             }
 
+            Command::CancelStreamingJob(table_fragments) => {
+                let node_actors = table_fragments.worker_actor_ids();
+                self.clean_up(node_actors).await?;
+                // Drop fragment info in meta store.
+                self.fragment_manager
+                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
+                        table_fragments.table_id(),
+                    )))
+                    .await?;
+            }
+
             Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                table_mview_map,
+                upstream_mview_actors,
                 init_split_assignment,
+                ..
             } => {
-                let mut dependent_table_actors = Vec::with_capacity(table_mview_map.len());
-                for (table_id, actors) in table_mview_map {
+                let mut dependent_table_actors = Vec::with_capacity(upstream_mview_actors.len());
+                for (table_id, actors) in upstream_mview_actors {
                     let downstream_actors = dispatchers
                         .iter()
                         .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
@@ -532,23 +576,7 @@ where
                         }
                     }
                 }
-
-                let drop_actor_futures =
-                    node_dropped_actors.into_iter().map(|(node_id, actors)| {
-                        let node = self.info.node_map.get(&node_id).unwrap();
-                        let request_id = Uuid::new_v4().to_string();
-
-                        async move {
-                            let client = self.client_pool.get(node).await?;
-                            let request = DropActorsRequest {
-                                request_id,
-                                actor_ids: actors.to_owned(),
-                            };
-                            client.drop_actors(request).await
-                        }
-                    });
-
-                try_join_all(drop_actor_futures).await?;
+                self.clean_up(node_dropped_actors).await?;
 
                 // Update fragment info after rescheduling in meta store.
                 self.fragment_manager
