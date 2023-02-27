@@ -4,7 +4,7 @@
 
 [meta]
 # a relatively small number to make it easier to timeout
-max_heartbeat_interval_secs = 60
+max_heartbeat_interval_secs = 10
 
 [streaming]
 barrier_interval_ms = 250
