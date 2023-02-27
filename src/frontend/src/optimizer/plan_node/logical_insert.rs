@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
 /// statements, the input relation would be [`super::LogicalValues`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
     pub base: PlanBase,
     table_name: String, // explain-only

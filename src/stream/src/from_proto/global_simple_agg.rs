@@ -66,6 +66,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             storages,
             result_table,
             distinct_dedup_tables,
+            watermark_epoch: stream.get_watermark_epoch(),
 
             extra: None,
         })?

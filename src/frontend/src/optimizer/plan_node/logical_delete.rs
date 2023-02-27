@@ -32,7 +32,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
 ///
 /// It corresponds to the `DELETE` statements in SQL.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDelete {
     pub base: PlanBase,
     table_name: String, // explain-only

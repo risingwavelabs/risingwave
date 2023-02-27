@@ -1,5 +1,5 @@
 <picture>
-<img src='./docs/images/logo-title.svg' alt='RisingWave Logo'>
+<img src='./docs/images/logo-title.svg' alt='RisingWave Logo' style='visibility:visible'>
 </picture>
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)

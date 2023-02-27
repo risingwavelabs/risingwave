@@ -14,16 +14,20 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use itertools::enumerate;
+use itertools::{enumerate, Itertools};
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
+    HummockVersionStats,
 };
 
+use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -221,4 +225,60 @@ pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersio
 
 pub fn trigger_stale_ssts_stat(metrics: &MetaMetrics, total_number: usize) {
     metrics.stale_ssts_count.set(total_number as _);
+}
+
+// Triggers a report on compact_pending_bytes_needed
+pub fn trigger_lsm_stat(
+    metrics: &MetaMetrics,
+    compaction_config: Arc<CompactionConfig>,
+    levels: &Levels,
+    compaction_group_id: CompactionGroupId,
+) {
+    let group_label = compaction_group_id.to_string();
+    // compact_pending_bytes
+    let dynamic_level_core = DynamicLevelSelectorCore::new(compaction_config.clone());
+    let ctx = dynamic_level_core.calculate_level_base_size(levels);
+    {
+        let compact_pending_bytes_needed =
+            dynamic_level_core.compact_pending_bytes_needed_with_ctx(levels, &ctx);
+
+        metrics
+            .compact_pending_bytes
+            .with_label_values(&[&group_label])
+            .set(compact_pending_bytes_needed as _);
+    }
+
+    {
+        // compact_level_compression_ratio
+        let level_compression_ratio = levels
+            .get_levels()
+            .iter()
+            .map(|level| {
+                let ratio = if level.get_uncompressed_file_size() == 0 {
+                    0.0
+                } else {
+                    level.get_total_file_size() as f64 / level.get_uncompressed_file_size() as f64
+                };
+
+                (level.get_level_idx(), ratio)
+            })
+            .collect_vec();
+
+        for (level_index, compression_ratio) in level_compression_ratio {
+            let compression_algorithm_label = get_compression_algorithm(
+                compaction_config.as_ref(),
+                ctx.base_level,
+                level_index as usize,
+            );
+
+            metrics
+                .compact_level_compression_ratio
+                .with_label_values(&[
+                    &group_label,
+                    &level_index.to_string(),
+                    &compression_algorithm_label,
+                ])
+                .set(compression_ratio);
+        }
+    }
 }

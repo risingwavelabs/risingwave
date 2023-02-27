@@ -51,9 +51,16 @@ pub trait Transactional {
     fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
 }
 
+mod private {
+    /// A marker trait helps to collect all implementors of `MetadataModel` in
+    /// `for_all_metadata_models`. The trait should only be implemented by adding item in
+    /// `for_all_metadata_models`.
+    pub trait MetadataModelMarker {}
+}
+
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
-pub trait MetadataModel: std::fmt::Debug + Sized {
+pub trait MetadataModel: std::fmt::Debug + Sized + private::MetadataModelMarker {
     /// Serialized prost message type.
     type ProstType: Message + Default;
     /// Serialized key type.
@@ -151,6 +158,45 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         Ok(Some(model))
     }
 }
+
+macro_rules! for_all_metadata_models {
+    ($macro:ident) => {
+        $macro! {
+            // These items should be included in a meta snapshot.
+            // So be sure to update meta backup/restore when adding new items.
+            { risingwave_pb::hummock::HummockVersion },
+            { risingwave_pb::hummock::HummockVersionStats },
+            { crate::hummock::model::CompactionGroup },
+            { risingwave_pb::catalog::Database },
+            { risingwave_pb::catalog::Schema },
+            { risingwave_pb::catalog::Table },
+            { risingwave_pb::catalog::Index },
+            { risingwave_pb::catalog::Sink },
+            { risingwave_pb::catalog::Source },
+            { risingwave_pb::catalog::View },
+            { crate::model::stream::TableFragments },
+            { risingwave_pb::user::UserInfo },
+            { risingwave_pb::catalog::Function },
+            // These items need not be included in a meta snapshot.
+            { crate::model::cluster::Worker },
+            { risingwave_pb::hummock::CompactTaskAssignment },
+            { crate::hummock::compaction::CompactStatus },
+            { risingwave_pb::hummock::HummockVersionDelta },
+            { risingwave_pb::hummock::HummockPinnedSnapshot },
+            { risingwave_pb::hummock::HummockPinnedVersion },
+        }
+    };
+}
+
+macro_rules! impl_metadata_model_marker {
+    ($({ $target_type:ty },)*) => {
+        $(
+            impl private::MetadataModelMarker for $target_type {}
+        )*
+    }
+}
+
+for_all_metadata_models!(impl_metadata_model_marker);
 
 /// `Transactional` defines operations supported in a transaction.
 /// Read operations can be supported if necessary.

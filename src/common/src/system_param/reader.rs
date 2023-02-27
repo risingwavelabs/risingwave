@@ -21,7 +21,7 @@ use super::system_params_to_kv;
 /// - Avoid misuse of deprecated fields by hiding their getters.
 /// - Abstract fallback logic for fields that might not be provided by meta service due to backward
 ///   compatibility.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SystemParamsReader {
     prost: ProstSystemParams,
 }

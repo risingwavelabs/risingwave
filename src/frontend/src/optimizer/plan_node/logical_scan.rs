@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -39,10 +39,10 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
     pub base: PlanBase,
     core: generic::Scan,
@@ -266,7 +266,7 @@ impl LogicalScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &HashMap<usize, usize>,
+        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
     ) -> LogicalScan {
         let new_output_col_idx = self
             .output_col_idx()
@@ -275,7 +275,7 @@ impl LogicalScan {
             .collect_vec();
 
         struct Rewriter<'a> {
-            primary_to_secondary_mapping: &'a HashMap<usize, usize>,
+            primary_to_secondary_mapping: &'a BTreeMap<usize, usize>,
         }
         impl ExprRewriter for Rewriter<'_> {
             fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {

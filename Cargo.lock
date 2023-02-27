@@ -2507,12 +2507,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gen-iter"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ab36ccf1ed3d9c719f4c8725b34482c530f6d569c084ea762490b5e19f77bf"
-
-[[package]]
 name = "generator"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5680,6 +5674,7 @@ name = "risingwave_common"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "arrow-array",
  "arrow-schema",
  "async-trait",
@@ -5881,6 +5876,7 @@ dependencies = [
  "http",
  "http-serde",
  "hyper",
+ "hyper-tls",
  "itertools",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -5889,6 +5885,7 @@ dependencies = [
  "moka",
  "nexmark",
  "num-traits",
+ "parking_lot 0.12.1",
  "prometheus",
  "prost 0.11.6",
  "prost-reflect",
@@ -5991,6 +5988,7 @@ dependencies = [
  "derivative",
  "downcast-rs",
  "dyn-clone",
+ "easy-ext",
  "enum-as-inner",
  "fixedbitset",
  "futures",
@@ -6451,7 +6449,6 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
- "gen-iter",
  "hytra",
  "iter-chunks",
  "itertools",

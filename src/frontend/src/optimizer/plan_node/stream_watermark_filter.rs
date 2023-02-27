@@ -29,7 +29,7 @@ use crate::expr::{ExprDisplay, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
     pub base: PlanBase,
     input: PlanRef,
