@@ -26,6 +26,8 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     buildkite-agent artifact download risedev-dev-"$profile" target/debug/
     mv target/debug/risingwave-"$profile" target/debug/risingwave
     mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
+    buildkite-agent artifact download risingwave_simulation .
+    chmod +x ./risingwave_simulation
 
     echo "--- Adjust permission"
     chmod +x ./target/debug/risingwave
@@ -54,4 +56,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     # Use that to reproduce logs on local machine.
     echo "--- Kill cluster"
     cargo make kill
+
+    echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (seed)"
+    seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 fi
