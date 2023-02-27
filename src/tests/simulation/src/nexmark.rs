@@ -37,11 +37,14 @@ impl NexmarkCluster {
         conf: Configuration,
         split_num: usize,
         event_num: Option<usize>,
+        watermark: bool,
     ) -> Result<Self> {
         let mut cluster = Self {
             cluster: Cluster::start(conf).await?,
         };
-        cluster.create_nexmark_source(split_num, event_num).await?;
+        cluster
+            .create_nexmark_source(split_num, event_num, watermark)
+            .await?;
         Ok(cluster)
     }
 
@@ -50,7 +53,14 @@ impl NexmarkCluster {
         &mut self,
         split_num: usize,
         event_num: Option<usize>,
+        watermark: bool,
     ) -> Result<()> {
+        let watermark_column = if watermark {
+            ", WATERMARK FOR date_time AS date_time - INTERVAL '4' SECOND"
+        } else {
+            ""
+        };
+
         let extra_args = {
             let mut output = String::new();
             write!(
@@ -68,6 +78,7 @@ impl NexmarkCluster {
 
         self.run(format!(
             include_str!("nexmark/create_source.sql"),
+            watermark_column = watermark_column,
             extra_args = extra_args
         ))
         .await?;
