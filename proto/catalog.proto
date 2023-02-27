@@ -16,6 +16,15 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
+// A mapping of column indices.
+message ColIndexMapping {
+  // The size of the target space.
+  uint64 target_size = 1;
+  // Each subscript is mapped to the corresponding element.
+  // For those not mapped, the value will be negative.
+  repeated int64 map = 2;
+}
+
 message WatermarkDesc {
   // The column idx the watermark is on
   uint32 watermark_idx = 1;

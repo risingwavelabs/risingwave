@@ -191,6 +191,12 @@ impl TableFragments {
         self.state == State::Created
     }
 
+    /// Set the table ID.
+    // TODO: remove this workaround for replacing table.
+    pub fn set_table_id(&mut self, table_id: TableId) {
+        self.table_id = table_id;
+    }
+
     /// Set the state of the table fragments.
     pub fn set_state(&mut self, state: State) {
         self.state = state;
