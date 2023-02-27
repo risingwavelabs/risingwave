@@ -19,8 +19,10 @@ use risingwave_common::error::{ErrorCode, Result};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
+#[cfg(debug_assertions)]
+use crate::optimizer::plan_visitor::InputRefValidator;
 use crate::optimizer::plan_visitor::{
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, InputRefValidator, PlanVisitor,
+    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, PlanVisitor,
 };
 use crate::optimizer::rule::{
     AggDedupGroupKeyRule, AggProjectMergeRule, ApplyAggTransposeRule, ApplyFilterTransposeRule,
