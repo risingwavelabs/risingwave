@@ -23,12 +23,13 @@ use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::{
-    check_create_table_with_source, gen_create_table_plan, ColumnIdGenerator,
+    check_create_table_with_source, gen_create_table_plan, gen_create_table_plan_with_source,
+    ColumnIdGenerator,
 };
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::Convention;
+use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
@@ -69,12 +70,17 @@ pub async fn handle_explain(
                 source_schema,
                 ..
             } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
-                Some(_) => {
-                    return Err(ErrorCode::NotImplemented(
-                        "explain create table with a connector".to_string(),
-                        None.into(),
+                Some(s) => {
+                    gen_create_table_plan_with_source(
+                        context,
+                        name,
+                        columns,
+                        constraints,
+                        s,
+                        ColumnIdGenerator::new_initial(),
                     )
-                    .into())
+                    .await?
+                    .0
                 }
                 None => {
                     gen_create_table_plan(

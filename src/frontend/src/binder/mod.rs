@@ -20,6 +20,7 @@ use risingwave_common::session_config::SearchPath;
 use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
+mod create;
 mod delete;
 mod expr;
 mod insert;

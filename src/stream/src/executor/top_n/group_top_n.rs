@@ -16,12 +16,12 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
@@ -33,7 +33,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
@@ -168,7 +168,7 @@ where
         let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
 
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
+        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
@@ -238,6 +238,17 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         Ok(())
+    }
+
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
+        if watermark.col_idx == self.group_by[0] {
+            self.managed_state
+                .state_table
+                .update_watermark(watermark.val.clone());
+            Some(watermark)
+        } else {
+            None
+        }
     }
 }
 
@@ -528,6 +539,7 @@ mod tests {
             ),
         );
     }
+
     #[tokio::test]
     async fn test_multi_group_key() {
         let source = create_source();

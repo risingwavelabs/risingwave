@@ -18,12 +18,13 @@ use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
     /// an optional column index which is the vnode of each row computed by the input's consistent
@@ -106,13 +107,14 @@ impl StreamNode for StreamHashAgg {
         use risingwave_pb::stream_plan::*;
         let result_table = self.logical.infer_result_table(self.vnode_col_idx);
         let agg_states = self.logical.infer_stream_agg_state(self.vnode_col_idx);
+        let distinct_dedup_tables = self.logical.infer_distinct_dedup_tables(self.vnode_col_idx);
 
         ProstStreamNode::HashAgg(HashAggNode {
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
 
             is_append_only: self.input().append_only(),
@@ -125,6 +127,35 @@ impl StreamNode for StreamHashAgg {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            distinct_dedup_tables: distinct_dedup_tables
+                .into_iter()
+                .map(|(key_idx, table)| {
+                    (
+                        key_idx as u32,
+                        table
+                            .with_id(state.gen_table_id_wrapped())
+                            .to_internal_table_prost(),
+                    )
+                })
+                .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamHashAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+            self.vnode_col_idx,
+        )
+        .into()
     }
 }

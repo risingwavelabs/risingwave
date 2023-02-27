@@ -18,7 +18,6 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -36,10 +35,11 @@ use crate::hummock::{
     SstableStoreRef, SstableWriter,
 };
 use crate::monitor::StoreLocalStatistic;
+use crate::opts::StorageOpts;
 use crate::storage_value::StorageValue;
 
-pub fn default_config_for_test() -> StorageConfig {
-    StorageConfig {
+pub fn default_opts_for_test() -> StorageOpts {
+    StorageOpts {
         sstable_size_mb: 4,
         block_size_kb: 64,
         bloom_false_positive: 0.1,
@@ -110,6 +110,8 @@ pub fn gen_dummy_sst_info(
         stale_key_count: 0,
         total_key_count: 0,
         divide_version: 0,
+        min_epoch: 0,
+        max_epoch: 0,
     }
 }
 
@@ -182,6 +184,8 @@ pub async fn put_sst(
         stale_key_count: 0,
         total_key_count: 0,
         divide_version: 0,
+        min_epoch: 0,
+        max_epoch: 0,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;

@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, TableConstraint,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, UnaryOperator};
 pub use self::query::{
@@ -96,7 +96,8 @@ pub struct Ident {
 
 impl Ident {
     /// Create a new identifier with the given value and no quotes.
-    pub fn new<S>(value: S) -> Self
+    /// the given value must not be a empty string.
+    pub fn new_unchecked<S>(value: S) -> Self
     where
         S: Into<String>,
     {
@@ -106,17 +107,42 @@ impl Ident {
         }
     }
 
-    /// Create a new quoted identifier with the given quote and value. This function
-    /// panics if the given quote is not a valid quote character.
-    pub fn with_quote<S>(quote: char, value: S) -> Self
+    /// Create a new quoted identifier with the given quote and value.
+    /// the given value must not be a empty string and the given quote must be in ['\'', '"', '`',
+    /// '['].
+    pub fn with_quote_unchecked<S>(quote: char, value: S) -> Self
     where
         S: Into<String>,
     {
-        assert!(quote == '\'' || quote == '"' || quote == '`' || quote == '[');
         Ident {
             value: value.into(),
             quote_style: Some(quote),
         }
+    }
+
+    /// Create a new quoted identifier with the given quote and value.
+    /// returns ParserError when the given string is empty or the given quote is illegal.
+    pub fn with_quote_check<S>(quote: char, value: S) -> Result<Ident, ParserError>
+    where
+        S: Into<String>,
+    {
+        let value_str = value.into();
+        if value_str.is_empty() {
+            return Err(ParserError::ParserError(format!(
+                "zero-length delimited identifier at or near \"{value_str}\""
+            )));
+        }
+
+        if !(quote == '\'' || quote == '"' || quote == '`' || quote == '[') {
+            return Err(ParserError::ParserError(
+                "unexpected quote style".to_string(),
+            ));
+        }
+
+        Ok(Ident {
+            value: value_str,
+            quote_style: Some(quote),
+        })
     }
 
     /// Value after considering quote style
@@ -188,6 +214,28 @@ impl ParseTo for ObjectName {
 impl From<Vec<Ident>> for ObjectName {
     fn from(value: Vec<Ident>) -> Self {
         Self(value)
+    }
+}
+
+/// For array type `ARRAY[..]` or `[..]`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Array {
+    /// The list of expressions between brackets
+    pub elem: Vec<Expr>,
+
+    /// `true` for  `ARRAY[..]`, `false` for `[..]`
+    pub named: bool,
+}
+
+impl fmt::Display for Array {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}[{}]",
+            if self.named { "ARRAY" } else { "" },
+            display_comma_separated(&self.elem)
+        )
     }
 }
 
@@ -311,6 +359,8 @@ pub enum Expr {
     Nested(Box<Expr>),
     /// A literal value, such as string, number, date or NULL
     Value(Value),
+    /// Parameter Symbol e.g. `$1`, `$1::int`
+    Parameter { index: u64 },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
@@ -344,12 +394,13 @@ pub enum Expr {
     Row(Vec<Expr>),
     /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
     /// e.g. {1, 2, 3},
-    Array(Vec<Expr>),
+    Array(Array),
     /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
     ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
+    #[expect(clippy::disallowed_methods, reason = "use zip_eq")]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
@@ -396,20 +447,14 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(
-                f,
-                "{} {} {}",
-                fmt_expr_with_paren(left),
-                op,
-                fmt_expr_with_paren(right)
-            ),
+            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
             Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
             Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
+                    write!(f, "{} {}", op, expr)
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -422,6 +467,7 @@ impl fmt::Display for Expr {
             Expr::Collate { expr, collation } => write!(f, "{} COLLATE {}", expr, collation),
             Expr::Nested(ast) => write!(f, "({})", ast),
             Expr::Value(v) => write!(f, "{}", v),
+            Expr::Parameter { index } => write!(f, "${}", index),
             Expr::TypedString { data_type, value } => {
                 write!(f, "{}", data_type)?;
                 write!(f, " '{}'", &value::escape_single_quote_string(value))
@@ -543,36 +589,9 @@ impl fmt::Display for Expr {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
-            Expr::Array(exprs) => write!(
-                f,
-                "ARRAY[{}]",
-                exprs
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<String>>()
-                    .as_slice()
-                    .join(", ")
-            ),
+            Expr::Array(exprs) => write!(f, "{}", exprs),
         }
     }
-}
-
-/// Wrap complex expressions with necessary parentheses.
-/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
-fn fmt_expr_with_paren(e: &Expr) -> String {
-    use Expr as E;
-    match e {
-        E::BinaryOp { .. }
-        | E::UnaryOp { .. }
-        | E::IsNull(_)
-        | E::IsNotNull(_)
-        | E::IsFalse(_)
-        | E::IsTrue(_)
-        | E::IsNotTrue(_)
-        | E::IsNotFalse(_) => return format!("({})", e),
-        _ => {}
-    };
-    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
@@ -916,6 +935,7 @@ pub enum Statement {
         name: ObjectName,
         columns: Vec<Ident>,
         query: Box<Query>,
+        emit_mode: Option<EmitMode>,
         with_options: Vec<SqlOption>,
     },
     /// CREATE TABLE
@@ -1085,6 +1105,11 @@ pub enum Statement {
     CreateUser(CreateUserStatement),
     /// ALTER USER
     AlterUser(AlterUserStatement),
+    /// ALTER SYSTEM SET configuration_parameter { TO | = } { value | 'value' | DEFAULT }
+    AlterSystem {
+        param: Ident,
+        value: SetVariableValue,
+    },
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1246,6 +1271,7 @@ impl fmt::Display for Statement {
                 query,
                 materialized,
                 with_options,
+                emit_mode,
             } => {
                 write!(
                     f,
@@ -1254,6 +1280,9 @@ impl fmt::Display for Statement {
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
                     name = name
                 )?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
@@ -1516,6 +1545,13 @@ impl fmt::Display for Statement {
             }
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
+            }
+            Statement::AlterSystem{param, value} => {
+                f.write_str("ALTER SYSTEM SET ")?;
+                write!(
+                    f,
+                    "{param} = {value}",
+                )
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -1920,6 +1956,22 @@ impl fmt::Display for SqlOption {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum EmitMode {
+    Immediately,
+    OnWindowClose,
+}
+
+impl fmt::Display for EmitMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            EmitMode::Immediately => "IMMEDIATELY",
+            EmitMode::OnWindowClose => "ON WINDOW CLOSE",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionMode {
     AccessMode(TransactionAccessMode),
     IsolationLevel(TransactionIsolationLevel),
@@ -2173,6 +2225,7 @@ impl fmt::Display for CreateFunctionBody {
 pub enum SetVariableValue {
     Ident(Ident),
     Literal(Value),
+    Default,
 }
 
 impl fmt::Display for SetVariableValue {
@@ -2181,6 +2234,7 @@ impl fmt::Display for SetVariableValue {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Default => write!(f, "DEFAULT"),
         }
     }
 }
@@ -2199,27 +2253,27 @@ mod tests {
     fn test_grouping_sets_display() {
         // a and b in different group
         let grouping_sets = Expr::GroupingSets(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("GROUPING SETS ((a), (b))", format!("{}", grouping_sets));
 
         // a and b in the same group
         let grouping_sets = Expr::GroupingSets(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("GROUPING SETS ((a, b))", format!("{}", grouping_sets));
 
         // (a, b) and (c, d) in different group
         let grouping_sets = Expr::GroupingSets(vec![
             vec![
-                Expr::Identifier(Ident::new("a")),
-                Expr::Identifier(Ident::new("b")),
+                Expr::Identifier(Ident::new_unchecked("a")),
+                Expr::Identifier(Ident::new_unchecked("b")),
             ],
             vec![
-                Expr::Identifier(Ident::new("c")),
-                Expr::Identifier(Ident::new("d")),
+                Expr::Identifier(Ident::new_unchecked("c")),
+                Expr::Identifier(Ident::new_unchecked("d")),
             ],
         ]);
         assert_eq!(
@@ -2230,56 +2284,56 @@ mod tests {
 
     #[test]
     fn test_rollup_display() {
-        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new("a"))]]);
+        let rollup = Expr::Rollup(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("ROLLUP (a)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("ROLLUP ((a, b))", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("ROLLUP (a, b)", format!("{}", rollup));
 
         let rollup = Expr::Rollup(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new("b")),
-                Expr::Identifier(Ident::new("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("ROLLUP (a, (b, c), d)", format!("{}", rollup));
     }
 
     #[test]
     fn test_cube_display() {
-        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new("a"))]]);
+        let cube = Expr::Cube(vec![vec![Expr::Identifier(Ident::new_unchecked("a"))]]);
         assert_eq!("CUBE (a)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![vec![
-            Expr::Identifier(Ident::new("a")),
-            Expr::Identifier(Ident::new("b")),
+            Expr::Identifier(Ident::new_unchecked("a")),
+            Expr::Identifier(Ident::new_unchecked("b")),
         ]]);
         assert_eq!("CUBE ((a, b))", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
-            vec![Expr::Identifier(Ident::new("b"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("b"))],
         ]);
         assert_eq!("CUBE (a, b)", format!("{}", cube));
 
         let cube = Expr::Cube(vec![
-            vec![Expr::Identifier(Ident::new("a"))],
+            vec![Expr::Identifier(Ident::new_unchecked("a"))],
             vec![
-                Expr::Identifier(Ident::new("b")),
-                Expr::Identifier(Ident::new("c")),
+                Expr::Identifier(Ident::new_unchecked("b")),
+                Expr::Identifier(Ident::new_unchecked("c")),
             ],
-            vec![Expr::Identifier(Ident::new("d"))],
+            vec![Expr::Identifier(Ident::new_unchecked("d"))],
         ]);
         assert_eq!("CUBE (a, (b, c), d)", format!("{}", cube));
     }
@@ -2287,7 +2341,7 @@ mod tests {
     #[test]
     fn test_array_index_display() {
         let array_index = Expr::ArrayIndex {
-            obj: Box::new(Expr::Identifier(Ident::new("v1"))),
+            obj: Box::new(Expr::Identifier(Ident::new_unchecked("v1"))),
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1]", format!("{}", array_index));
@@ -2297,5 +2351,26 @@ mod tests {
             index: Box::new(Expr::Value(Value::Number("1".into()))),
         };
         assert_eq!("v1[1][1]", format!("{}", array_index2));
+    }
+
+    #[test]
+    /// issue: https://github.com/risingwavelabs/risingwave/issues/7635
+    fn test_nested_op_display() {
+        let binary_op = Expr::BinaryOp {
+            left: Box::new(Expr::Value(Value::Boolean(true))),
+            op: BinaryOperator::Or,
+            right: Box::new(Expr::IsNotFalse(Box::new(Expr::Value(Value::Boolean(
+                true,
+            ))))),
+        };
+        assert_eq!("true OR true IS NOT FALSE", format!("{}", binary_op));
+
+        let unary_op = Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr: Box::new(Expr::IsNotFalse(Box::new(Expr::Value(Value::Boolean(
+                true,
+            ))))),
+        };
+        assert_eq!("NOT true IS NOT FALSE", format!("{}", unary_op));
     }
 }

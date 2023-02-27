@@ -47,9 +47,8 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
-use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
+use risingwave_storage::hummock::test_utils::default_opts_for_test;
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::{
@@ -269,49 +268,11 @@ impl HummockStateStoreTestTrait for HummockV2MixedStateStore {
     }
 }
 
-impl HummockStateStoreTestTrait for HummockStorageV1 {
-    fn get_pinned_version(&self) -> PinnedVersion {
-        self.get_pinned_version()
-    }
-}
-
-pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMetaClient>) {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let hummock_storage = HummockStorageV1::new(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
-        Arc::new(HummockStateStoreMetrics::unused()),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
-        Arc::new(CompactorMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    register_tables_with_id_for_test(
-        hummock_storage.filter_key_extractor_manager(),
-        &hummock_manager_ref,
-        &[0],
-    )
-    .await;
-
-    (hummock_storage, meta_client)
-}
-
 pub async fn with_hummock_storage_v2(
     table_id: TableId,
 ) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -409,7 +370,7 @@ impl HummockTestEnv {
 
 pub async fn prepare_hummock_test_env() -> HummockTestEnv {
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
 

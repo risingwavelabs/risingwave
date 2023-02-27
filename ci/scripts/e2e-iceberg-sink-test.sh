@@ -28,8 +28,10 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -43,14 +45,14 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
+./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-sink.log 2>&1 &
 sleep 1
 
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
 .risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/iceberg
-wget https://downloads.apache.org/spark/spark-3.3.1/spark-3.3.1-bin-hadoop3.tgz
+wget https://iceberg-ci-spark-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
 tar -xf spark-3.3.1-bin-hadoop3.tgz --no-same-owner
 DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.0.0,org.apache.hadoop:hadoop-aws:3.3.2
 spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
@@ -93,5 +95,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill

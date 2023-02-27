@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use aws_sdk_kinesis::Client as KinesisClient;
 use http::Uri;
 use rdkafka::ClientConfig;
@@ -198,4 +200,12 @@ impl KinesisCommon {
         }
         Ok(KinesisClient::from_conf(builder.build()))
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpsertMessage<'a> {
+    #[serde(borrow)]
+    pub primary_key: Cow<'a, [u8]>,
+    #[serde(borrow)]
+    pub record: Cow<'a, [u8]>,
 }

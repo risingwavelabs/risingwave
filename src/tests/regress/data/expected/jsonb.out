@@ -419,7 +419,7 @@ SELECT jsonb_agg(q ORDER BY x NULLS FIRST, y)
 (1 row)
 
 -- jsonb extraction functions
-CREATE TEMP TABLE test_jsonb (
+CREATE TABLE test_jsonb (
        json_type text,
        test_json jsonb
 );
@@ -580,6 +580,8 @@ SELECT (test_json->>3) IS NULL AS expect_true FROM test_jsonb WHERE json_type = 
 -------------
  t
 (1 row)
+
+DROP TABLE test_jsonb;
 
 -- corner cases
 select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb -> null::text;
@@ -5405,70 +5407,70 @@ select ts_headline('[]'::jsonb, tsquery('aaa & bbb'));
 (1 row)
 
 -- casts
-select 'true'::jsonb::bool;
- bool 
-------
+select 'true'::jsonb::bool AS v;
+ v 
+---
  t
 (1 row)
 
-select '[]'::jsonb::bool;
+select '[]'::jsonb::bool AS v;
 ERROR:  cannot cast jsonb array to type boolean
-select '1.0'::jsonb::float;
- float8 
---------
-      1
+select '1.0'::jsonb::float AS v;
+ v 
+---
+ 1
 (1 row)
 
-select '[1.0]'::jsonb::float;
+select '[1.0]'::jsonb::float AS v;
 ERROR:  cannot cast jsonb array to type double precision
-select '12345'::jsonb::int4;
- int4  
+select '12345'::jsonb::int4 AS v;
+   v   
 -------
  12345
 (1 row)
 
-select '"hello"'::jsonb::int4;
+select '"hello"'::jsonb::int4 AS v;
 ERROR:  cannot cast jsonb string to type integer
-select '12345'::jsonb::numeric;
- numeric 
----------
-   12345
+select '12345'::jsonb::numeric AS v;
+   v   
+-------
+ 12345
 (1 row)
 
-select '{}'::jsonb::numeric;
+select '{}'::jsonb::numeric AS v;
 ERROR:  cannot cast jsonb object to type numeric
-select '12345.05'::jsonb::numeric;
- numeric  
+select '12345.05'::jsonb::numeric AS v;
+    v     
 ----------
  12345.05
 (1 row)
 
-select '12345.05'::jsonb::float4;
-  float4  
+select '12345.05'::jsonb::float4 AS v;
+    v     
 ----------
  12345.05
 (1 row)
 
-select '12345.05'::jsonb::float8;
-  float8  
+select '12345.05'::jsonb::float8 AS v;
+    v     
 ----------
  12345.05
 (1 row)
 
-select '12345.05'::jsonb::int2;
- int2  
+select '12345.05'::jsonb::int2 AS v;
+   v   
 -------
  12345
 (1 row)
 
-select '12345.05'::jsonb::int4;
- int4  
+select '12345.05'::jsonb::int4 AS v;
+   v   
 -------
  12345
 (1 row)
 
-select '12345.05'::jsonb::int8;
- int8  
+select '12345.05'::jsonb::int8 AS v;
+   v   
 -------
  12345
 (1 row)
@@ -5479,32 +5481,32 @@ select '12345.0000000000000000000000000000000000000000000005'::jsonb::numeric;
  12345.0000000000000000000000000000000000000000000005
 (1 row)
 
-select '12345.0000000000000000000000000000000000000000000005'::jsonb::float4;
- float4 
---------
-  12345
-(1 row)
-
-select '12345.0000000000000000000000000000000000000000000005'::jsonb::float8;
- float8 
---------
-  12345
-(1 row)
-
-select '12345.0000000000000000000000000000000000000000000005'::jsonb::int2;
- int2  
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::float4 AS v;
+   v   
 -------
  12345
 (1 row)
 
-select '12345.0000000000000000000000000000000000000000000005'::jsonb::int4;
- int4  
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::float8 AS v;
+   v   
 -------
  12345
 (1 row)
 
-select '12345.0000000000000000000000000000000000000000000005'::jsonb::int8;
- int8  
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::int2 AS v;
+   v   
+-------
+ 12345
+(1 row)
+
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::int4 AS v;
+   v   
+-------
+ 12345
+(1 row)
+
+select '12345.0000000000000000000000000000000000000000000005'::jsonb::int8 AS v;
+   v   
 -------
  12345
 (1 row)

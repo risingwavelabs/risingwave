@@ -19,13 +19,13 @@ use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::UnionNode;
 
-use super::PlanRef;
+use super::{ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
     pub base: PlanBase,
     logical: LogicalUnion,
@@ -88,3 +88,5 @@ impl StreamNode for StreamUnion {
         ProstStreamNode::Union(UnionNode {})
     }
 }
+
+impl ExprRewritable for StreamUnion {}

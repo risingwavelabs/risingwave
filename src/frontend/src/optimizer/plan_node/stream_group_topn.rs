@@ -17,12 +17,12 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::PlanRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
     pub base: PlanBase,
     logical: LogicalTopN,
@@ -94,6 +94,7 @@ impl StreamNode for StreamGroupTopN {
             .logical
             .infer_internal_table_catalog(self.vnode_col_idx)
             .with_id(state.gen_table_id_wrapped());
+        assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {
             limit: self.limit(),
             offset: self.offset(),
@@ -151,3 +152,5 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
         Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
     }
 }
+
+impl ExprRewritable for StreamGroupTopN {}

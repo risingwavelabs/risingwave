@@ -18,12 +18,12 @@ use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGlobalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -92,12 +92,13 @@ impl StreamNode for StreamGlobalSimpleAgg {
         use risingwave_pb::stream_plan::*;
         let result_table = self.logical.infer_result_table(None);
         let agg_states = self.logical.infer_stream_agg_state(None);
+        let distinct_dedup_tables = self.logical.infer_distinct_dedup_tables(None);
 
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             distribution_key: self
                 .base
@@ -116,6 +117,34 @@ impl StreamNode for StreamGlobalSimpleAgg {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
+            distinct_dedup_tables: distinct_dedup_tables
+                .into_iter()
+                .map(|(key_idx, table)| {
+                    (
+                        key_idx as u32,
+                        table
+                            .with_id(state.gen_table_id_wrapped())
+                            .to_internal_table_prost(),
+                    )
+                })
+                .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamGlobalSimpleAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

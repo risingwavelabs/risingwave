@@ -36,7 +36,9 @@ fn build_no_shuffle_exchange_for_delta_join(
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
         node_body: Some(NodeBody::Exchange(ExchangeNode {
-            strategy: Some(dispatch_no_shuffle()),
+            strategy: Some(dispatch_no_shuffle(
+                (0..(upstream.fields.len() as u32)).collect(),
+            )),
         })),
         input: vec![],
         append_only: upstream.append_only,
@@ -46,7 +48,7 @@ fn build_no_shuffle_exchange_for_delta_join(
 fn build_consistent_hash_shuffle_exchange_for_delta_join(
     state: &mut BuildFragmentGraphState,
     upstream: &StreamNode,
-    column_indices: Vec<u32>,
+    dist_key_indices: Vec<u32>,
 ) -> StreamNode {
     StreamNode {
         operator_id: state.gen_operator_id() as u64,
@@ -54,25 +56,33 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
         node_body: Some(NodeBody::Exchange(ExchangeNode {
-            strategy: Some(dispatch_consistent_hash_shuffle(column_indices)),
+            strategy: Some(dispatch_consistent_hash_shuffle(
+                dist_key_indices,
+                (0..(upstream.fields.len() as u32)).collect(),
+            )),
         })),
         input: vec![],
         append_only: upstream.append_only,
     }
 }
 
-fn dispatch_no_shuffle() -> DispatchStrategy {
+fn dispatch_no_shuffle(output_indices: Vec<u32>) -> DispatchStrategy {
     DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
-        column_indices: vec![],
+        dist_key_indices: vec![],
+        output_indices,
     }
 }
 
-fn dispatch_consistent_hash_shuffle(column_indices: Vec<u32>) -> DispatchStrategy {
+fn dispatch_consistent_hash_shuffle(
+    dist_key_indices: Vec<u32>,
+    output_indices: Vec<u32>,
+) -> DispatchStrategy {
     // Actually Hash shuffle is consistent hash shuffle now.
     DispatchStrategy {
         r#type: DispatcherType::Hash.into(),
-        column_indices,
+        dist_key_indices,
+        output_indices,
     }
 }
 
@@ -135,6 +145,9 @@ fn build_delta_join_inner(
 
     let i0_length = arrange_0.fields.len();
     let i1_length = arrange_1.fields.len();
+
+    let i0_output_indices = (0..i0_length as u32).collect_vec();
+    let i1_output_indices = (0..i1_length as u32).collect_vec();
 
     let lookup_0_column_reordering = {
         let tmp: Vec<i32> = (i1_length..i1_length + i0_length)
@@ -204,8 +217,7 @@ fn build_delta_join_inner(
         arrange_0_frag.fragment_id,
         lookup_0_frag.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(),
-            same_worker_node: true,
+            dispatch_strategy: dispatch_no_shuffle(i0_output_indices.clone()),
             link_id: exchange_a0l0.operator_id,
         },
     );
@@ -222,9 +234,8 @@ fn build_delta_join_inner(
                     .iter()
                     .map(|x| *x as u32)
                     .collect_vec(),
+                i0_output_indices,
             ),
-            // stream input doesn't need to be on the same worker node as lookup
-            same_worker_node: false,
             link_id: exchange_a0l1.operator_id,
         },
     );
@@ -241,9 +252,8 @@ fn build_delta_join_inner(
                     .iter()
                     .map(|x| *x as u32)
                     .collect_vec(),
+                i1_output_indices.clone(),
             ),
-            // stream input doesn't need to be on the same worker node as lookup
-            same_worker_node: false,
             link_id: exchange_a1l0.operator_id,
         },
     );
@@ -254,8 +264,7 @@ fn build_delta_join_inner(
         arrange_1_frag.fragment_id,
         lookup_1_frag.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_no_shuffle(),
-            same_worker_node: true,
+            dispatch_strategy: dispatch_no_shuffle(i1_output_indices),
             link_id: exchange_a1l1.operator_id,
         },
     );
@@ -281,8 +290,10 @@ fn build_delta_join_inner(
         lookup_0_frag.fragment_id,
         current_fragment.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_consistent_hash_shuffle(node.stream_key.clone()),
-            same_worker_node: false,
+            dispatch_strategy: dispatch_consistent_hash_shuffle(
+                node.stream_key.clone(),
+                (0..node.fields.len() as u32).collect(),
+            ),
             link_id: exchange_l0m.operator_id,
         },
     );
@@ -291,8 +302,10 @@ fn build_delta_join_inner(
         lookup_1_frag.fragment_id,
         current_fragment.fragment_id,
         StreamFragmentEdge {
-            dispatch_strategy: dispatch_consistent_hash_shuffle(node.stream_key.clone()),
-            same_worker_node: false,
+            dispatch_strategy: dispatch_consistent_hash_shuffle(
+                node.stream_key.clone(),
+                (0..node.fields.len() as u32).collect(),
+            ),
             link_id: exchange_l1m.operator_id,
         },
     );

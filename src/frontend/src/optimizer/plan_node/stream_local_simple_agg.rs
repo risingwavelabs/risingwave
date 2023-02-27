@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::ExprRewriter;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 ///
 /// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -95,7 +95,7 @@ impl StreamNode for StreamLocalSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             distribution_key: self
                 .distribution()
@@ -106,6 +106,24 @@ impl StreamNode for StreamLocalSimpleAgg {
             agg_call_states: vec![],
             result_table: None,
             is_append_only: self.input().append_only(),
+            distinct_dedup_tables: Default::default(),
         })
+    }
+}
+
+impl ExprRewritable for StreamLocalSimpleAgg {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_agg()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

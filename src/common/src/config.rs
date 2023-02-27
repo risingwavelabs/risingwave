@@ -46,6 +46,7 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
+    // TODO(zhidong): warn deprecated config
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
@@ -154,6 +155,14 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::backend")]
     pub backend: MetaBackend,
+
+    /// Schedule space_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -201,6 +210,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    #[serde(default)]
+    pub distributed_query_limit: Option<u64>,
 }
 
 impl Default for BatchConfig {
@@ -240,6 +252,10 @@ pub struct StreamingConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    /// Max unique user stream errors per actor
+    #[serde(default = "default::streaming::unique_user_stream_errors")]
+    pub unique_user_stream_errors: usize,
 }
 
 impl Default for StreamingConfig {
@@ -252,14 +268,20 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Target size of the Sstable.
     #[serde(default = "default::storage::sst_size_mb")]
     pub sstable_size_mb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Size of each block in bytes in SST.
     #[serde(default = "default::storage::block_size_kb")]
     pub block_size_kb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// False positive probability of bloom filter.
     #[serde(default = "default::storage::bloom_false_positive")]
     pub bloom_false_positive: f64,
@@ -278,10 +300,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
 
-    /// State store url.
-    #[serde(default = "default::storage::state_store")]
-    pub state_store: String,
-
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
     pub data_directory: String,
@@ -331,46 +351,13 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
-    #[serde(default = "default::storage::object_store_use_batch_delete")]
-    pub object_store_use_batch_delete: bool,
-
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
-
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
-    }
-}
-
-impl StorageConfig {
-    /// Checks whether an embedded compactor starts with a compute node.
-    #[inline(always)]
-    pub fn embedded_compactor_enabled(&self) -> bool {
-        // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-        // along with the compute node.
-        self.state_store == "hummock+memory"
-            || self.state_store.starts_with("hummock+disk")
-            || self.disable_remote_compactor
-    }
-
-    /// The maximal memory that storage components may use based on the configurations. Note that
-    /// this is the total storage memory for one compute node instead of the whole cluster.
-    pub fn total_storage_memory_limit_mb(&self) -> usize {
-        let total_memory = self.block_cache_capacity_mb
-            + self.meta_cache_capacity_mb
-            + self.shared_buffer_capacity_mb
-            + self.file_cache.total_buffer_capacity_mb;
-        if self.embedded_compactor_enabled() {
-            total_memory + self.compactor_memory_limit_mb
-        } else {
-            total_memory
-        }
     }
 }
 
@@ -467,9 +454,13 @@ impl Default for DeveloperConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupConfig {
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote storage url for storing snapshots.
     #[serde(default = "default::backup::storage_url")]
     pub storage_url: String,
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing snapshots.
     #[serde(default = "default::backup::storage_directory")]
     pub storage_directory: String,
@@ -516,6 +507,14 @@ mod default {
         pub fn backend() -> MetaBackend {
             MetaBackend::Mem
         }
+
+        pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
+            3600 // 60min
+        }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
+        }
     }
 
     pub mod server {
@@ -561,12 +560,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn state_store() -> String {
-            // May be problematic for multi-node deployment, but since we override it with CLI and
-            // it will be removed soon, it won't be a problem.
-            "hummock+memory".to_string()
         }
 
         pub fn data_directory() -> String {
@@ -618,16 +611,8 @@ mod default {
             4
         }
 
-        pub fn object_store_use_batch_delete() -> bool {
-            true
-        }
-
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
-        }
-
-        pub fn enable_state_store_v1() -> bool {
-            false
         }
     }
 
@@ -654,6 +639,10 @@ mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::On
+        }
+
+        pub fn unique_user_stream_errors() -> usize {
+            10
         }
     }
 

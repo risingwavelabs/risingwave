@@ -15,8 +15,9 @@
 //! Provides validation logic for expected errors.
 use risingwave_expr::ExprError;
 
-fn is_division_by_zero_err(db_error: &str) -> bool {
-    db_error.contains(&ExprError::DivisionByZero.to_string())
+/// Ignore errors related to `0`.
+fn is_zero_err(db_error: &str) -> bool {
+    db_error.contains(&ExprError::DivisionByZero.to_string()) || db_error.contains("can't be zero")
 }
 
 /// `Casting to u32 out of range` occurs when we have functions
@@ -31,7 +32,7 @@ fn is_numeric_out_of_range_err(db_error: &str) -> bool {
 
 /// Skip queries with unimplemented features
 fn is_unimplemented_error(db_error: &str) -> bool {
-    db_error.contains("Feature is not yet implemented")
+    db_error.contains("not yet implemented")
 }
 
 /// This error occurs because we test `implicit` casts as well,
@@ -71,7 +72,7 @@ fn is_neg_substr_error(db_error: &str) -> bool {
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
 pub fn is_permissible_error(db_error: &str) -> bool {
     is_numeric_out_of_range_err(db_error)
-        || is_division_by_zero_err(db_error)
+        || is_zero_err(db_error)
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
         || is_window_error(db_error)

@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockSstableId;
@@ -33,22 +32,20 @@ use risingwave_pb::hummock::HummockVersion;
 use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::hummock::event_handler::hummock_event_handler::BufferTracker;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::local_version::local_version_manager::{
-    LocalVersionManager, LocalVersionManagerRef,
-};
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
-    default_config_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
+    default_opts_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
 use risingwave_storage::hummock::SstableIdManager;
 use risingwave_storage::monitor::CompactorMetrics;
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::storage_value::StorageValue;
 
 use crate::test_utils::prepare_first_valid_version;
 
 pub async fn prepare_local_version_manager(
-    opt: Arc<StorageConfig>,
+    opt: Arc<StorageOpts>,
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: HummockManagerRef<MemStore>,
     worker_node: WorkerNode,
@@ -71,9 +68,9 @@ pub async fn prepare_local_version_manager(
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     update_filter_key_extractor_for_table_ids(&filter_key_extractor_manager, &[0]);
 
-    let buffer_tracker = BufferTracker::from_storage_config(&opt);
+    let buffer_tracker = BufferTracker::from_storage_opts(&opt);
     let compactor_context = Arc::new(CompactorContext::new_local_compact_context(
-        opt.clone(),
+        opt,
         sstable_store,
         hummock_meta_client,
         Arc::new(CompactorMetrics::unused()),
@@ -87,7 +84,7 @@ pub async fn prepare_local_version_manager(
 
 #[tokio::test]
 async fn test_update_pinned_version() {
-    let opt = Arc::new(default_config_for_test());
+    let opt = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
@@ -236,7 +233,7 @@ async fn test_update_pinned_version() {
 
 #[tokio::test]
 async fn test_update_uncommitted_ssts() {
-    let mut opt = default_config_for_test();
+    let mut opt = default_opts_for_test();
     opt.share_buffers_sync_parallelism = 2;
     opt.sstable_size_mb = 1;
     let opt = Arc::new(opt);
@@ -428,7 +425,7 @@ async fn test_update_uncommitted_ssts() {
 
 #[tokio::test]
 async fn test_clear_shared_buffer() {
-    let opt = Arc::new(default_config_for_test());
+    let opt = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;
@@ -470,7 +467,7 @@ async fn test_clear_shared_buffer() {
 
 #[tokio::test]
 async fn test_sst_gc_watermark() {
-    let opt = Arc::new(default_config_for_test());
+    let opt = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
     let local_version_manager =
         prepare_local_version_manager(opt, env, hummock_manager_ref, worker_node).await;

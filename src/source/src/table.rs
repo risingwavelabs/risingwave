@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use anyhow::Context;
+use futures::FutureExt;
 use futures_async_stream::try_stream;
-use parking_lot::{RwLock, RwLockUpgradableReadGuard};
+use parking_lot::RwLock;
 use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
@@ -33,8 +34,12 @@ struct TableDmlHandleCore {
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<usize>)>>,
+    changes_txs: Vec<mpsc::Sender<(StreamChunk, oneshot::Sender<usize>)>>,
 }
+
+/// The buffer size of the channel between each [`TableDmlHandle`] and the source executors.
+// TODO: decide a default value carefully and make this configurable.
+const DML_CHUNK_BUFFER_SIZE: usize = 32;
 
 /// [`TableDmlHandle`] is a special internal source to handle table updates from user,
 /// including insert/delete/update statements via SQL interface.
@@ -47,7 +52,6 @@ pub struct TableDmlHandle {
     core: RwLock<TableDmlHandleCore>,
 
     /// All columns in this table.
-    #[allow(dead_code)]
     column_descs: Vec<ColumnDesc>,
 }
 
@@ -65,7 +69,7 @@ impl TableDmlHandle {
 
     pub fn stream_reader(&self) -> TableStreamReader {
         let mut core = self.core.write();
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(DML_CHUNK_BUFFER_SIZE);
         core.changes_txs.push(tx);
 
         TableStreamReader { rx }
@@ -76,10 +80,8 @@ impl TableDmlHandle {
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    pub fn write_chunk(&self, mut chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+    pub async fn write_chunk(&self, mut chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
         loop {
-            let core = self.core.upgradable_read();
-
             // The `changes_txs` should not be empty normally, since we ensured that the channels
             // between the `TableDmlHandle` and the `SourceExecutor`s are ready before we making the
             // table catalog visible to the users. However, when we're recovering, it's possible
@@ -87,12 +89,14 @@ impl TableDmlHandle {
             // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
             // error instead of asserting here.
             // TODO: may reject DML when streaming executors are not recovered.
-            let (index, tx) = core
+            let tx = self
+                .core
+                .read()
                 .changes_txs
                 .iter()
-                .enumerate()
                 .choose(&mut rand::thread_rng())
-                .context("no available table reader in streaming source executors")?;
+                .context("no available table reader in streaming source executors")?
+                .clone();
 
             #[cfg(debug_assertions)]
             risingwave_common::util::schema_check::schema_check(
@@ -103,21 +107,33 @@ impl TableDmlHandle {
 
             let (notifier_tx, notifier_rx) = oneshot::channel();
 
-            match tx.send((chunk, notifier_tx)) {
+            match tx.send((chunk, notifier_tx)).await {
                 Ok(_) => return Ok(notifier_rx),
 
                 // It's possible that the source executor is scaled in or migrated, so the channel
                 // is closed. In this case, we should remove the closed channel and retry.
                 Err(SendError((chunk_, _))) => {
-                    tracing::info!("find one closed table source channel, remove it and retry");
-
+                    tracing::info!("find one closed table source channel, retry");
                     chunk = chunk_;
-                    RwLockUpgradableReadGuard::upgrade(core)
-                        .changes_txs
-                        .swap_remove(index);
+
+                    // Remove all closed channels.
+                    self.core.write().changes_txs.retain(|tx| !tx.is_closed());
                 }
             }
         }
+    }
+
+    /// Get the reference of all columns in this table.
+    pub(super) fn column_descs(&self) -> &[ColumnDesc] {
+        self.column_descs.as_ref()
+    }
+}
+
+#[easy_ext::ext(TableDmlHandleTestExt)]
+impl TableDmlHandle {
+    /// Write a chunk and assert that the chunk channel is not blocking.
+    fn write_chunk_ready(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+        self.write_chunk(chunk).now_or_never().unwrap()
     }
 }
 
@@ -128,7 +144,7 @@ impl TableDmlHandle {
 #[derive(Debug)]
 pub struct TableStreamReader {
     /// The receiver of the changes channel.
-    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
+    rx: mpsc::Receiver<(StreamChunk, oneshot::Sender<usize>)>,
 }
 
 impl TableStreamReader {
@@ -176,7 +192,7 @@ mod tests {
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                source.write_chunk(chunk).unwrap();
+                source.write_chunk_ready(chunk).unwrap();
             }};
         }
 

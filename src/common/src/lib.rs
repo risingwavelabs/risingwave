@@ -30,6 +30,7 @@
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(portable_simd)]
 #![feature(array_chunks)]
+#![feature(inline_const_pat)]
 #![allow(incomplete_features)]
 #![feature(const_option_ext)]
 
@@ -52,6 +53,7 @@ pub mod hash;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
+pub mod system_param;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;

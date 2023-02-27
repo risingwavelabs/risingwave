@@ -15,13 +15,13 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDml {
     pub base: PlanBase,
     input: PlanRef,
@@ -82,9 +82,11 @@ impl StreamNode for StreamDml {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::Dml(DmlNode {
-            // Meta will fill this table id.
-            table_id: 0,
+            table_id: 0,                                // Meta will fill this table id.
+            table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),
         })
     }
 }
+
+impl ExprRewritable for StreamDml {}

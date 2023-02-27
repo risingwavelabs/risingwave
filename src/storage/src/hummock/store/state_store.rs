@@ -20,6 +20,7 @@ use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -35,12 +36,12 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
-use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_read_associated_type, define_state_store_write_associated_type,
-    StateStoreIter,
+    define_local_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type, StateStoreIter,
 };
 
 pub struct LocalHummockStorage {
@@ -105,6 +106,25 @@ impl LocalHummockStorage {
 
         self.hummock_version_reader
             .iter(table_key_range, epoch, read_options, read_snapshot)
+            .await
+    }
+
+    pub async fn may_exist_inner(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> StorageResult<bool> {
+        let table_key_range = map_table_key_range(key_range);
+
+        let read_snapshot = read_filter_for_local(
+            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
+            read_options.table_id,
+            &table_key_range,
+            self.read_version.clone(),
+        )?;
+
+        self.hummock_version_reader
+            .may_exist(table_key_range, read_options, read_snapshot)
             .await
     }
 }
@@ -195,7 +215,17 @@ impl StateStoreWrite for LocalHummockStorage {
     }
 }
 
-impl LocalStateStore for LocalHummockStorage {}
+impl LocalStateStore for LocalHummockStorage {
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        self.may_exist_inner(key_range, read_options)
+    }
+}
 
 impl LocalHummockStorage {
     pub fn new(
@@ -245,8 +275,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
-    metrics: Arc<HummockStateStoreMetrics>,
-    table_id: TableId,
+    stats_guard: IterLocalMetricsGuard,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -274,23 +303,18 @@ impl HummockStorageIterator {
         inner: UserIterator<HummockStorageIteratorPayload>,
         metrics: Arc<HummockStateStoreMetrics>,
         table_id: TableId,
+        local_stats: StoreLocalStatistic,
     ) -> Self {
         Self {
             inner,
-            metrics,
-            table_id,
+            stats_guard: IterLocalMetricsGuard::new(metrics, table_id, local_stats),
         }
-    }
-
-    fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        self.inner.collect_local_statistic(stats);
     }
 }
 
 impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
-        let mut stats = StoreLocalStatistic::default();
-        self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics, self.table_id.to_string().as_str());
+        self.inner
+            .collect_local_statistic(&mut self.stats_guard.local_stats);
     }
 }
