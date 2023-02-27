@@ -20,7 +20,6 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_connector::common::AwsPrivateLinks;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_pb::catalog;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection, Source, Table};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;

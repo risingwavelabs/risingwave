@@ -5,10 +5,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use aws_config::retry::RetryConfig;
-use aws_sdk_ec2::error::{CreateVpcEndpointError, DescribeSubnetsError};
 use aws_sdk_ec2::model::{Filter, VpcEndpointType};
-use aws_sdk_ec2::output::{CreateVpcEndpointOutput, DescribeSubnetsOutput};
-use aws_smithy_http::result::SdkError;
 use chrono::prelude::*;
 use clap::{value_t, App, Arg};
 use env_logger::fmt::Formatter;

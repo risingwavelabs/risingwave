@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use itertools::Itertools;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};

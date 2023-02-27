@@ -17,7 +17,7 @@ mod database;
 mod fragment;
 mod user;
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;

@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
-use rdkafka::consumer::{Consumer, ConsumerContext};
+use rdkafka::consumer::ConsumerContext;
 use rdkafka::ClientContext;
 
 pub struct PrivateLinkConsumerContext {
@@ -47,7 +47,7 @@ impl PrivateLinkConsumerContext {
                     rewrite_map.insert(old_addr, new_addr);
                 });
         }
-        tracing::debug!("broker addr rewrite map {:?}", rewrite_map);
+        tracing::info!("broker addr rewrite map {:?}", rewrite_map);
         Self { rewrite_map }
     }
 }

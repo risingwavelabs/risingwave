@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::ddl_service::create_connection_request::PrivateLink;
 
-use crate::cmd_impl::meta::connection;
 use crate::common::CtlContext;
 
 pub async fn create_connection(
