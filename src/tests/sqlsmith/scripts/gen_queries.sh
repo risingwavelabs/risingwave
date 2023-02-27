@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-export TEST_NUM=32
+export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_FOLDER="src/tests/sqlsmith/tests"

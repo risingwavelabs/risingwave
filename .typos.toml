@@ -7,6 +7,7 @@ ot = "ot"
 inout = "inout"
 numer = "numer"
 nd = "nd"
+steam = "stream"
 
 [files]
 extend-exclude = [

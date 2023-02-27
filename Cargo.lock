@@ -2507,12 +2507,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gen-iter"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33ab36ccf1ed3d9c719f4c8725b34482c530f6d569c084ea762490b5e19f77bf"
-
-[[package]]
 name = "generator"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6455,7 +6449,6 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
- "gen-iter",
  "hytra",
  "iter-chunks",
  "itertools",

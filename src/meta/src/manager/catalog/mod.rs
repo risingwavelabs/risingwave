@@ -602,53 +602,51 @@ where
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !tables.contains_key(&table.id)
-            && database_core.in_progress_creation_tracker.contains(&key)
-        {
-            database_core.in_progress_creation_tracker.remove(&key);
-            database_core
-                .in_progress_creation_streaming_job
-                .remove(&table.id);
+        assert!(
+            !tables.contains_key(&table.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "table must be in creating procedure"
+        );
+        database_core.in_progress_creation_tracker.remove(&key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&table.id);
 
+        tables.insert(table.id, table.clone());
+        for table in &internal_tables {
             tables.insert(table.id, table.clone());
-            for table in &internal_tables {
-                tables.insert(table.id, table.clone());
-            }
-            commit_meta!(self, tables)?;
-
-            for internal_table in internal_tables {
-                self.notify_frontend(Operation::Add, Info::Table(internal_table))
-                    .await;
-            }
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            unreachable!("table must not exist and must be in creating procedure");
         }
+        commit_meta!(self, tables)?;
+
+        for internal_table in internal_tables {
+            self.notify_frontend(Operation::Add, Info::Table(internal_table))
+                .await;
+        }
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+            .await;
+
+        Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn cancel_create_table_procedure(&self, table: &Table) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (table.database_id, table.schema_id, table.name.clone());
-        if !database_core.tables.contains_key(&table.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(table.id);
-            for &dependent_relation_id in &table.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
-            }
-            user_core.decrease_ref(table.owner);
-            Ok(())
-        } else {
-            unreachable!("table must not exist and must be in creating procedure");
+        assert!(
+            !database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(table.id);
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
         }
+        user_core.decrease_ref(table.owner);
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -776,7 +774,8 @@ where
     }
 
     pub async fn get_index_table(&self, index_id: IndexId) -> MetaResult<TableId> {
-        let index = Index::select(self.env.meta_store(), &index_id).await?;
+        let guard = self.core.lock().await;
+        let index = guard.database.indexes.get(&index_id);
         if let Some(index) = index {
             Ok(index.index_table_id)
         } else {
@@ -863,7 +862,7 @@ where
         user_core.ensure_user_id(source.owner)?;
 
         if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure");
+            bail!("source is in creating procedure");
         } else {
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
@@ -879,22 +878,21 @@ where
         let database_core = &mut core.database;
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !sources.contains_key(&source.id)
-            && database_core.in_progress_creation_tracker.contains(&key)
-        {
-            database_core.in_progress_creation_tracker.remove(&key);
-            sources.insert(source.id, source.clone());
+        assert!(
+            !sources.contains_key(&source.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "source must be in creating procedure"
+        );
+        database_core.in_progress_creation_tracker.remove(&key);
+        sources.insert(source.id, source.clone());
 
-            commit_meta!(self, sources)?;
+        commit_meta!(self, sources)?;
 
-            let version = self
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
-                .await;
+        let version = self
+            .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+            .await;
 
-            Ok(version)
-        } else {
-            unreachable!("source must not exist and must be in creating procedure");
-        }
+        Ok(version)
     }
 
     pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
@@ -902,15 +900,15 @@ where
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (source.database_id, source.schema_id, source.name.clone());
-        if !database_core.sources.contains_key(&source.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            user_core.decrease_ref(source.owner);
-            Ok(())
-        } else {
-            unreachable!("source must not exist and must be in creating procedure");
-        }
+        assert!(
+            !database_core.sources.contains_key(&source.id)
+                && database_core.has_in_progress_creation(&key),
+            "source must be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        user_core.decrease_ref(source.owner);
+        Ok(())
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
@@ -995,69 +993,62 @@ where
 
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
-        if !sources.contains_key(&source.id)
-            && !tables.contains_key(&mview.id)
-            && database_core
-                .in_progress_creation_tracker
-                .contains(&source_key)
-            && database_core
-                .in_progress_creation_tracker
-                .contains(&mview_key)
-        {
-            database_core
-                .in_progress_creation_tracker
-                .remove(&source_key);
-            database_core
-                .in_progress_creation_tracker
-                .remove(&mview_key);
-            database_core
-                .in_progress_creation_streaming_job
-                .remove(&mview.id);
+        assert!(
+            !sources.contains_key(&source.id)
+                && !tables.contains_key(&mview.id)
+                && database_core
+                    .in_progress_creation_tracker
+                    .contains(&source_key)
+                && database_core
+                    .in_progress_creation_tracker
+                    .contains(&mview_key),
+            "table and source must be in creating procedure"
+        );
+        database_core
+            .in_progress_creation_tracker
+            .remove(&source_key);
+        database_core
+            .in_progress_creation_tracker
+            .remove(&mview_key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&mview.id);
 
-            sources.insert(source.id, source.clone());
-            tables.insert(mview.id, mview.clone());
-            tables.insert(internal_table.id, internal_table.clone());
+        sources.insert(source.id, source.clone());
+        tables.insert(mview.id, mview.clone());
+        tables.insert(internal_table.id, internal_table.clone());
 
-            commit_meta!(self, sources, tables)?;
+        commit_meta!(self, sources, tables)?;
+        self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
+            .await;
+        self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+            .await;
 
-            self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
-                .await;
-            self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
-                .await;
-
-            // Currently frontend uses source's version
-            let version = self
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
-                .await;
-            Ok(version)
-        } else {
-            unreachable!("source must not exist and must be in creating procedure");
-        }
+        // Currently frontend uses source's version
+        let version = self
+            .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+            .await;
+        Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure_with_source(
-        &self,
-        source: &Source,
-        table: &Table,
-    ) -> MetaResult<()> {
+    pub async fn cancel_create_table_procedure_with_source(&self, source: &Source, table: &Table) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
         let table_key = (table.database_id, table.schema_id, table.name.clone());
-        if !database_core.sources.contains_key(&source.id)
-            && !database_core.tables.contains_key(&table.id)
-            && database_core.has_in_progress_creation(&source_key)
-            && database_core.has_in_progress_creation(&table_key)
-        {
-            database_core.unmark_creating(&source_key);
-            database_core.unmark_creating(&table_key);
-            database_core.unmark_creating_streaming_job(table.id);
-            user_core.decrease_ref_count(source.owner, 2); // source and table
-            Ok(())
-        } else {
-            unreachable!("source must not exist and must be in creating procedure");
-        }
+        assert!(
+            !database_core.sources.contains_key(&source.id)
+                && !database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&source_key)
+                && database_core.has_in_progress_creation(&table_key),
+            "table and source must be in creating procedure"
+        );
+
+        database_core.unmark_creating(&source_key);
+        database_core.unmark_creating(&table_key);
+        database_core.unmark_creating_streaming_job(table.id);
+        user_core.decrease_ref_count(source.owner, 2); // source and table
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1232,29 +1223,24 @@ where
         }
     }
 
-    pub async fn cancel_create_index_procedure(
-        &self,
-        index: &Index,
-        index_table: &Table,
-    ) -> MetaResult<()> {
+    pub async fn cancel_create_index_procedure(&self, index: &Index, index_table: &Table) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
-        if !database_core.indexes.contains_key(&index.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(index_table.id);
-            for &dependent_relation_id in &index_table.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
-            }
-            // index table and index.
-            user_core.decrease_ref_count(index.owner, 2);
-            Ok(())
-        } else {
-            unreachable!("index must not exist and must be in creating procedure");
+        assert!(
+            !database_core.indexes.contains_key(&index.id)
+                && database_core.has_in_progress_creation(&key),
+            "index must be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(index_table.id);
+        for &dependent_relation_id in &index_table.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
         }
+        // index table and index.
+        user_core.decrease_ref_count(index.owner, 2);
     }
 
     pub async fn finish_create_index_procedure(
@@ -1268,30 +1254,30 @@ where
 
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        if !indexes.contains_key(&index.id)
-            && database_core.in_progress_creation_tracker.contains(&key)
-        {
-            database_core.in_progress_creation_tracker.remove(&key);
-            database_core
-                .in_progress_creation_streaming_job
-                .remove(&table.id);
+        assert!(
+            !indexes.contains_key(&index.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "index must be in creating procedure"
+        );
 
-            indexes.insert(index.id, index.clone());
-            tables.insert(table.id, table.clone());
+        database_core.in_progress_creation_tracker.remove(&key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&table.id);
 
-            commit_meta!(self, indexes, tables)?;
+        indexes.insert(index.id, index.clone());
+        tables.insert(table.id, table.clone());
 
-            self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                .await;
+        commit_meta!(self, indexes, tables)?;
 
-            let version = self
-                .notify_frontend(Operation::Add, Info::Index(index.to_owned()))
-                .await;
+        self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+            .await;
 
-            Ok(version)
-        } else {
-            unreachable!("index must not exist and must be in creating procedure");
-        }
+        let version = self
+            .notify_frontend(Operation::Add, Info::Index(index.to_owned()))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn start_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
@@ -1332,53 +1318,52 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
-        if !sinks.contains_key(&sink.id)
-            && database_core.in_progress_creation_tracker.contains(&key)
-        {
-            database_core.in_progress_creation_tracker.remove(&key);
-            database_core
-                .in_progress_creation_streaming_job
-                .remove(&sink.id);
+        assert!(
+            !sinks.contains_key(&sink.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "sink must be in creating procedure"
+        );
 
-            sinks.insert(sink.id, sink.clone());
-            for table in &internal_tables {
-                tables.insert(table.id, table.clone());
-            }
-            commit_meta!(self, sinks, tables)?;
+        database_core.in_progress_creation_tracker.remove(&key);
+        database_core
+            .in_progress_creation_streaming_job
+            .remove(&sink.id);
 
-            for internal_table in internal_tables {
-                self.notify_frontend(Operation::Add, Info::Table(internal_table))
-                    .await;
-            }
-
-            let version = self
-                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            unreachable!("sink must not exist and must be in creating procedure");
+        sinks.insert(sink.id, sink.clone());
+        for table in &internal_tables {
+            tables.insert(table.id, table.clone());
         }
+        commit_meta!(self, sinks, tables)?;
+
+        for internal_table in internal_tables {
+            self.notify_frontend(Operation::Add, Info::Table(internal_table))
+                .await;
+        }
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
+            .await;
+
+        Ok(version)
     }
 
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> MetaResult<()> {
+    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !database_core.sinks.contains_key(&sink.id)
-            && database_core.has_in_progress_creation(&key)
-        {
-            database_core.unmark_creating(&key);
-            database_core.unmark_creating_streaming_job(sink.id);
-            for &dependent_relation_id in &sink.dependent_relations {
-                database_core.decrease_ref_count(dependent_relation_id);
-            }
-            user_core.decrease_ref(sink.owner);
-            Ok(())
-        } else {
-            unreachable!("sink must not exist and must be in creating procedure");
+        assert!(
+            !database_core.sinks.contains_key(&sink.id)
+                && database_core.has_in_progress_creation(&key),
+            "sink must be in creating procedure"
+        );
+
+        database_core.unmark_creating(&key);
+        database_core.unmark_creating_streaming_job(sink.id);
+        for &dependent_relation_id in &sink.dependent_relations {
+            database_core.decrease_ref_count(dependent_relation_id);
         }
+        user_core.decrease_ref(sink.owner);
     }
 
     pub async fn drop_sink(

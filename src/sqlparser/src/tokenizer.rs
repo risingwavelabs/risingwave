@@ -53,6 +53,8 @@ pub enum Token {
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
     HexStringLiteral(String),
+    /// Parameter symbols: i.e:  $1, $2
+    Parameter(String),
     /// Comma
     Comma,
     /// Whitespace (space, tab, etc)
@@ -161,6 +163,7 @@ impl fmt::Display for Token {
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
             Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
+            Token::Parameter(ref s) => write!(f, "${}", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -359,7 +362,6 @@ impl<'a> Tokenizer<'a> {
 
     /// Get the next token or return None
     fn next_token(&self, chars: &mut Peekable<Chars<'_>>) -> Result<Option<Token>, TokenizerError> {
-        // println!("next_token: {:?}", chars.peek());
         match chars.peek() {
             Some(&ch) => match ch {
                 ' ' => self.consume_and_return(chars, Token::Whitespace(Whitespace::Space)),
@@ -611,6 +613,13 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Colon)),
                     }
                 }
+                '$' => {
+                    if let Some(parameter) = self.tokenize_parameter(chars) {
+                        Ok(Some(parameter))
+                    } else {
+                        Ok(Some(Token::Char('$')))
+                    }
+                }
                 ';' => self.consume_and_return(chars, Token::SemiColon),
                 '\\' => self.consume_and_return(chars, Token::Backslash),
                 '[' => self.consume_and_return(chars, Token::LBracket),
@@ -789,6 +798,17 @@ impl<'a> Tokenizer<'a> {
     ) -> Result<Option<Token>, TokenizerError> {
         chars.next();
         Ok(Some(t))
+    }
+
+    fn tokenize_parameter(&self, chars: &mut Peekable<Chars<'_>>) -> Option<Token> {
+        chars.next(); // consume '$'
+
+        let s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
+        if s.is_empty() {
+            None
+        } else {
+            Some(Token::Parameter(s))
+        }
     }
 }
 

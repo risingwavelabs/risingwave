@@ -94,7 +94,7 @@
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     create table t(x int);
-    select * from t JOIN (select t.x) as t1;
+    select * from t CROSS JOIN (select t.x) as t1;
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     create table ab (a int, b int);

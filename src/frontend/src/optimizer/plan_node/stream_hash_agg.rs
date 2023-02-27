@@ -22,7 +22,7 @@ use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, St
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMappingRewriteExt;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
@@ -78,6 +78,10 @@ impl StreamHashAgg {
 
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
+    }
+
+    pub(crate) fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.logical.i2o_col_mapping()
     }
 }
 

@@ -331,6 +331,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             vec![]
         };
 
+        let uncompressed_file_size = self
+            .block_metas
+            .iter()
+            .map(|block_meta| block_meta.uncompressed_size as u64)
+            .sum::<u64>();
+
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
             bloom_filter,
@@ -370,6 +376,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
             divide_version: 0,
+            uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
             min_epoch: cmp::min(self.min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(self.max_epoch, tombstone_max_epoch),
         };
@@ -467,6 +474,7 @@ pub(super) mod tests {
         default_builder_opt_for_test, gen_default_test_sstable, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
+    use crate::hummock::Sstable;
 
     #[tokio::test]
     async fn test_empty() {
@@ -559,7 +567,10 @@ pub(super) mod tests {
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            assert!(table.may_match(full_key.user_key.encode().as_slice()));
+            if table.has_bloom_filter() {
+                let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
+                assert!(table.may_match_hash(hash));
+            }
         }
     }
 
