@@ -265,6 +265,19 @@ impl LogicalAgg {
             return self.gen_stateless_two_phase_streaming_agg_plan(stream_input);
         }
 
+        // If input is [`Distribution::SomeShard`] and we must try to use two phase agg,
+        // The only remaining strategy is Vnode-based 2-phase agg.
+        // We shall first distribute it by PK,
+        // so it obeys consistent hash strategy via [`Distribution::HashShard`].
+        let stream_input =
+            if *input_dist == Distribution::SomeShard && self.must_try_two_phase_agg() {
+                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
+                    .enforce_if_not_satisfies(stream_input, &Order::any())?
+            } else {
+                stream_input
+            };
+        let input_dist = stream_input.distribution();
+
         // Vnode-based 2-phase agg
         // can be applied on agg calls not affected by order,
         // with input distributed by dist_key.

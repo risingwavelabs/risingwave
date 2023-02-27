@@ -1057,7 +1057,7 @@
           └─StreamHashAgg { group_key: [t.v1, t.v3, t.v2, $expr1], aggs: [count, min(t.v3), sum(t.v1)] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: enable two phase aggregation with simple agg
+- name: enable two phase aggregation with simple agg should have two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_ENABLE_TWO_PHASE_AGG=true;
@@ -1092,7 +1092,7 @@
       └─StreamGlobalSimpleAgg { aggs: [count, min(t.v1), sum(t.v2)] }
         └─StreamExchange { dist: Single }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: force two phase agg with different distributions on inner and outer agg.
+- name: force two phase agg with different distributions on inner and outer agg should have exchange
   sql: |
     set QUERY_MODE to DISTRIBUTED;
     set RW_FORCE_TWO_PHASE_AGG to TRUE;
@@ -1137,7 +1137,7 @@
               └─StreamProject { exprs: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate] }
                 └─StreamHashAgg { group_key: [lineitem.l_tax, lineitem.l_shipinstruct, lineitem.l_orderkey, lineitem.l_commitdate], aggs: [count] }
                   └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_tax, lineitem.l_commitdate, lineitem.l_shipinstruct], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
-- name: two phase agg on hop window input
+- name: two phase agg on hop window input should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
@@ -1183,7 +1183,7 @@
                         └─StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
                           └─StreamFilter { predicate: IsNotNull(bid.date_time) }
                             └─StreamTableScan { table: bid, columns: [bid.date_time, bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-- name: two phase agg with stream SomeShard (via index) should fail
+- name: two phase agg with stream SomeShard (via index) but pk satisfies output dist should use shuffle agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
     SET RW_FORCE_TWO_PHASE_AGG=true;
@@ -1203,3 +1203,25 @@
       └─StreamHashAgg { group_key: [idx.id], aggs: [count, count] }
         └─StreamExchange { dist: HashShard(idx.id) }
           └─StreamTableScan { table: idx, columns: [idx.id], pk: [idx.id], dist: SomeShard }
+- name: two phase agg with stream SomeShard (via index) but pk does not satisfy output dist should use two phase agg
+  sql: |
+    SET QUERY_MODE TO DISTRIBUTED;
+    SET RW_FORCE_TWO_PHASE_AGG=true;
+    create table t (id int primary key, col1 int, col2 int);
+    create index idx on t(id);
+    with sq as (select col1, col2 from idx) select count(*) from sq group by sq.col1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [sum0(count)] }
+      └─BatchHashAgg { group_key: [idx.col1], aggs: [sum0(count)] }
+        └─BatchExchange { order: [], dist: HashShard(idx.col1) }
+          └─BatchHashAgg { group_key: [idx.col1], aggs: [count] }
+            └─BatchScan { table: idx, columns: [idx.col1], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [count, idx.col1(hidden)], pk_columns: [idx.col1], pk_conflict: "no check" }
+    └─StreamProject { exprs: [sum0(count), idx.col1] }
+      └─StreamHashAgg { group_key: [idx.col1], aggs: [count, sum0(count)] }
+        └─StreamExchange { dist: HashShard(idx.col1) }
+          └─StreamHashAgg { group_key: [idx.col1, $expr1], aggs: [count, count] }
+            └─StreamProject { exprs: [idx.col1, idx.id, Vnode(idx.id) as $expr1] }
+              └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], pk: [idx.id], dist: UpstreamHashShard(idx.id) }

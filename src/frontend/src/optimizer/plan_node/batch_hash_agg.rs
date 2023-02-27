@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::HashAggNode;
 
 use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalAgg, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchProst,
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
@@ -61,6 +61,7 @@ impl BatchHashAgg {
     fn to_two_phase_agg(&self, dist_input: PlanRef) -> Result<PlanRef> {
         // partial agg - follows input distribution
         let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
+        debug_assert!(partial_agg.node_type() == PlanNodeType::BatchHashAgg);
 
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
