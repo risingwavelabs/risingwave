@@ -867,8 +867,8 @@ def section_object_storage(outer_panels):
                             [50, 90, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, type)(rate({metric('object_store_operation_latency_sum')}[$__rate_interval])) / sum by(le, type) (rate({metric('object_store_operation_latency_count')}[$__rate_interval]))",
-                            "{{type}} avg",
+                            f"sum by(le, type, job, instance)(rate({metric('object_store_operation_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('object_store_operation_latency_count')}[$__rate_interval]))",
+                            "{{type}} avg - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),

@@ -36,7 +36,6 @@ pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
-use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
@@ -153,19 +152,6 @@ impl Sstable {
     #[inline(always)]
     pub fn has_bloom_filter(&self) -> bool {
         !self.filter_reader.is_empty()
-    }
-
-    pub fn may_match(&self, dist_key: &[u8]) -> bool {
-        let enable_bloom_filter: fn() -> bool = || {
-            fail_point!("disable_bloom_filter", |_| false);
-            true
-        };
-        if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = xxh64::xxh64(dist_key, 0);
-            self.may_match_hash(hash)
-        } else {
-            true
-        }
     }
 
     #[inline(always)]

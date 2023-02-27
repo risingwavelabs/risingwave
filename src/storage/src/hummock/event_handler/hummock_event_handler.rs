@@ -37,7 +37,6 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -124,16 +123,9 @@ async fn flush_imms(
                 error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
             });
     }
-    compact(
-        compactor_context,
-        payload
-            .into_iter()
-            .map(|imm| vec![UncommittedData::Batch(imm)])
-            .collect(),
-        task_info.compaction_group_index,
-    )
-    .verbose_stack_trace("shared_buffer_compact")
-    .await
+    compact(compactor_context, payload, task_info.compaction_group_index)
+        .verbose_stack_trace("shared_buffer_compact")
+        .await
 }
 
 impl HummockEventHandler {
