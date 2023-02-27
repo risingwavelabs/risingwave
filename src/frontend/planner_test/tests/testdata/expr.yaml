@@ -92,7 +92,7 @@
     SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
   batch_plan: |
     BatchProject { exprs: [b.b2] }
-    └─BatchFilter { predicate: (true:Boolean OR (1:Int32 = min(min(t.v1)))) }
+    └─BatchFilter { predicate: true }
       └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
         ├─BatchExchange { order: [], dist: Single }
         | └─BatchScan { table: b, columns: [b.b2], distribution: SomeShard }
