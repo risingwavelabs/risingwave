@@ -251,10 +251,9 @@ export interface Table {
    */
   valueIndices: number[];
   definition: string;
-  handlePkConflict: boolean;
+  handlePkConflictBehavior: HandleConflictBehavior;
   readPrefixLenHint: number;
   watermarkIndices: number[];
-  handlePkConflictBehavior: HandleConflictBehavior;
   /**
    * Per-table catalog version, used by schema change. `None` for internal tables and tests.
    * Not to be confused with the global catalog version for notification service.
@@ -880,10 +879,9 @@ function createBaseTable(): Table {
     rowIdIndex: undefined,
     valueIndices: [],
     definition: "",
-    handlePkConflict: false,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
     readPrefixLenHint: 0,
     watermarkIndices: [],
-    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
     version: undefined,
   };
 }
@@ -923,14 +921,13 @@ export const Table = {
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
       watermarkIndices: Array.isArray(object?.watermarkIndices)
         ? object.watermarkIndices.map((e: any) => Number(e))
         : [],
-      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
-        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NO_CHECK,
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -988,15 +985,14 @@ export const Table = {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     if (message.watermarkIndices) {
       obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
     } else {
       obj.watermarkIndices = [];
     }
-    message.handlePkConflictBehavior !== undefined &&
-      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     message.version !== undefined &&
       (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
@@ -1044,10 +1040,9 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;

@@ -467,8 +467,7 @@ export interface MaterializeNode {
   table:
     | Table
     | undefined;
-  /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  /** Used to handle pk conflict, open it when upstream executor is source executor. */
   handlePkConflictBehavior: HandleConflictBehavior;
 }
 
@@ -740,7 +739,6 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
   handlePkConflictBehavior: HandleConflictBehavior;
 }
 
@@ -2127,13 +2125,7 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return {
-    tableId: 0,
-    columnOrders: [],
-    table: undefined,
-    handlePkConflict: false,
-    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
-  };
+  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK };
 }
 
 export const MaterializeNode = {
@@ -2144,7 +2136,6 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
         : HandleConflictBehavior.NO_CHECK,
@@ -2160,7 +2151,6 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.handlePkConflictBehavior !== undefined &&
       (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
@@ -2171,7 +2161,6 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
     message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     return message;
   },
@@ -3138,7 +3127,6 @@ function createBaseArrangeNode(): ArrangeNode {
     tableInfo: undefined,
     distributionKey: [],
     table: undefined,
-    handlePkConflict: false,
     handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
   };
 }
@@ -3149,7 +3137,6 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
         : HandleConflictBehavior.NO_CHECK,
@@ -3166,7 +3153,6 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.handlePkConflictBehavior !== undefined &&
       (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
@@ -3179,7 +3165,6 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
     message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
     return message;
   },
