@@ -241,10 +241,14 @@ impl fmt::Display for StreamMaterialize {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
 
-        let pk_conflict_behavior = match self.table.handle_pk_conflict() {
-            true => "overwrite",
-            false => "no check",
-        };
+        let pk_conflict_behavior;
+        if self.table.conflict_behavior_type() == 0 {
+            pk_conflict_behavior = "no check";
+        } else if self.table.conflict_behavior_type() == 1 {
+            pk_conflict_behavior = "overwrite";
+        } else {
+            pk_conflict_behavior = "ignore conflict";
+        }
         builder.field("pk_conflict", &pk_conflict_behavior);
 
         builder.finish()
