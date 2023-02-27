@@ -44,6 +44,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
 
+        let system_params = params.env.system_param_manager().get_params();
+
         if let Some(source) = &node.source_inner {
             let source_id = TableId::new(source.source_id);
             let source_name = source.source_name.clone();
@@ -108,7 +110,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     stream_source_core,
                     params.executor_stats,
                     barrier_receiver,
-                    stream.config.barrier_interval_ms as u64,
+                    system_params,
                     params.executor_id,
                 )?))
             } else {
@@ -119,7 +121,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     Some(stream_source_core),
                     params.executor_stats,
                     barrier_receiver,
-                    stream.config.barrier_interval_ms as u64,
+                    system_params,
                     params.executor_id,
                 )))
             }
@@ -133,7 +135,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 None,
                 params.executor_stats,
                 barrier_receiver,
-                stream.config.barrier_interval_ms as u64,
+                system_params,
                 params.executor_id,
             )))
         }

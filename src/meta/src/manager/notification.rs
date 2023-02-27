@@ -176,6 +176,11 @@ where
             .await
     }
 
+    pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify_with_version(SubscribeType::Compute.into(), operation, info)
+            .await
+    }
+
     pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
     }
@@ -226,6 +231,7 @@ where
             SubscribeType::Frontend => &mut core_guard.frontend_senders,
             SubscribeType::Hummock => &mut core_guard.hummock_senders,
             SubscribeType::Compactor => &mut core_guard.compactor_senders,
+            SubscribeType::Compute => &mut core_guard.compute_senders,
             SubscribeType::Unspecified => unreachable!(),
         };
 
@@ -254,6 +260,8 @@ struct NotificationManagerCore {
     hummock_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compactor nodes.
     compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to compute nodes.
+    compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
     exiting: bool,
@@ -265,6 +273,7 @@ impl NotificationManagerCore {
             frontend_senders: HashMap::new(),
             hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
+            compute_senders: HashMap::new(),
             local_senders: vec![],
             exiting: false,
         }
@@ -295,6 +304,7 @@ impl NotificationManagerCore {
             SubscribeType::Frontend => &mut self.frontend_senders,
             SubscribeType::Hummock => &mut self.hummock_senders,
             SubscribeType::Compactor => &mut self.compactor_senders,
+            SubscribeType::Compute => &mut self.compute_senders,
             SubscribeType::Unspecified => unreachable!(),
         };
 

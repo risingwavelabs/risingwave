@@ -34,6 +34,9 @@ use risingwave_common::catalog::{
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
+use risingwave_common::system_param::local_manager::{
+    LocalSystemParamManager, SystemParamsReaderRef,
+};
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
@@ -41,6 +44,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
 use risingwave_source::connector_test_utils::create_source_desc_builder;
 use risingwave_source::dml_manager::DmlManager;
@@ -93,6 +97,17 @@ impl SingleChunkExecutor {
     async fn do_execute(self: Box<Self>) {
         yield self.chunk.unwrap()
     }
+}
+
+fn dummy_system_params() -> SystemParamsReaderRef {
+    LocalSystemParamManager::new(
+        SystemParams {
+            barrier_interval_ms: Some(u32::MAX),
+            ..Default::default()
+        }
+        .into(),
+    )
+    .get_params()
 }
 
 /// This test checks whether batch task and streaming task work together for `Table` creation,
@@ -172,7 +187,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
-        u64::MAX,
+        dummy_system_params(),
         1,
     );
 

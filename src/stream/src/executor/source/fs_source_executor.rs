@@ -20,12 +20,14 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SplitId, SplitImpl, SplitMetaData,
     StreamChunkWithState,
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
 use risingwave_storage::StateStore;
+use source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
 
@@ -55,8 +57,8 @@ pub struct FsSourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    /// Expected barrier latency
-    expected_barrier_latency_ms: u64,
+    /// Read barrier latency from system parameters.
+    system_params: SystemParamsReaderRef,
 }
 
 impl<S: StateStore> FsSourceExecutor<S> {
@@ -68,7 +70,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         stream_source_core: StreamSourceCore<S>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        expected_barrier_latency_ms: u64,
+        system_params: SystemParamsReaderRef,
         executor_id: u64,
     ) -> StreamResult<Self> {
         Ok(Self {
@@ -79,7 +81,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
-            expected_barrier_latency_ms,
+            system_params,
         })
     }
 
@@ -340,9 +342,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         yield Message::Barrier(barrier);
 
-        // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
-        // some other latencies like network and cost in Meta.
-        let max_wait_barrier_time_ms = self.expected_barrier_latency_ms as u128 * 5;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
@@ -401,7 +400,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     chunk,
                     split_offset_mapping,
                 }) => {
-                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                    // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` *
+                    // `expected_barrier_latency_ms` milliseconds, considering some other latencies
+                    // like network and cost in Meta.
+                    if last_barrier_time.elapsed().as_millis()
+                        > self.system_params.load().barrier_interval_ms() as u128
+                            * WAIT_BARRIER_MULTIPLE_TIMES
+                    {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
                         // we can guarantee the source is not paused since it received stream
                         // chunks.

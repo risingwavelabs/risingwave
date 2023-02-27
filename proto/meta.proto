@@ -205,6 +205,7 @@ enum SubscribeType {
   FRONTEND = 1;
   HUMMOCK = 2;
   COMPACTOR = 3;
+  COMPUTE = 4;
 }
 
 // Below for notification service.
@@ -265,6 +266,7 @@ message SubscribeResponse {
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
+    SystemParams system_params = 19;
   }
 }
 

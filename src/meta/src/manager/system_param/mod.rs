@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::set_system_param;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::RwLock;
 
@@ -81,6 +82,12 @@ impl<S: MetaStore> SystemParamManager<S> {
             .notify_local_subscribers(super::LocalNotification::SystemParamsChange(
                 params.clone().into(),
             ))
+            .await;
+
+        // Notify worker nodes.
+        self.env
+            .notification_manager()
+            .notify_compute(Operation::Update, Info::SystemParams(params.clone()))
             .await;
 
         Ok(())

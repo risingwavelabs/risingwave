@@ -16,10 +16,14 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
+use risingwave_common::system_param::local_manager::{
+    LocalSystemParamManagerRef, SystemParamsReaderRef,
+};
 #[cfg(target_os = "linux")]
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
+use tokio::select;
 
 /// The minimal memory requirement of computing tasks in megabytes.
 pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
@@ -35,8 +39,8 @@ pub struct GlobalMemoryManager {
     watermark_epoch: Arc<AtomicU64>,
     /// Total memory can be allocated by the process.
     total_memory_available_bytes: usize,
-    /// Barrier interval.
-    barrier_interval_ms: u32,
+    /// Read the latest barrier interval from system parameter.
+    system_param_manager: LocalSystemParamManagerRef,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -50,17 +54,13 @@ impl GlobalMemoryManager {
 
     pub fn new(
         total_memory_available_bytes: usize,
-        barrier_interval_ms: u32,
+        system_param_manager: LocalSystemParamManagerRef,
         metrics: Arc<StreamingMetrics>,
     ) -> Arc<Self> {
-        // Arbitrarily set a minimal barrier interval in case it is too small,
-        // especially when it's 0.
-        let barrier_interval_ms = std::cmp::max(barrier_interval_ms, 10);
-
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             total_memory_available_bytes,
-            barrier_interval_ms,
+            system_param_manager,
             metrics,
         })
     }
@@ -97,6 +97,7 @@ impl GlobalMemoryManager {
         use std::time::Duration;
 
         use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
+
         let mem_threshold_graceful =
             (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;
         let mem_threshold_aggressive = (self.total_memory_available_bytes as f64
@@ -109,12 +110,25 @@ impl GlobalMemoryManager {
         let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
         let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
 
-        let mut tick_interval =
-            tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
+        let mut barrier_interval_ms =
+            Self::get_eviction_check_interval(&self.system_param_manager.get_params());
+        let mut tick_interval = tokio::time::interval(Duration::from_millis(barrier_interval_ms));
+        let mut params_rx = self.system_param_manager.watch_params();
 
         loop {
             // Wait for a while to check if need eviction.
-            tick_interval.tick().await;
+            select! {
+                // Barrier interval has changed.
+                Ok(_) = params_rx.changed() => {
+                    let new_barrier_interval_ms = Self::get_eviction_check_interval(&params_rx.borrow());
+                    if new_barrier_interval_ms != barrier_interval_ms
+                     {
+                        tick_interval = tokio::time::interval(Duration::from_millis(new_barrier_interval_ms));
+                        barrier_interval_ms = new_barrier_interval_ms;
+                    }
+                }
+                _ = tick_interval.tick() => {},
+            }
 
             if let Err(e) = jemalloc_epoch_mib.advance() {
                 tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
@@ -167,11 +181,11 @@ impl GlobalMemoryManager {
             // if watermark_time_ms + self.barrier_interval_ms as u64 * step > now, we do not
             // increase the step, and set the epoch to now time epoch.
             let physical_now = Epoch::physical_now();
-            if (physical_now - watermark_time_ms) / (self.barrier_interval_ms as u64) < step {
+            if (physical_now - watermark_time_ms) / (barrier_interval_ms) < step {
                 step = last_step;
                 watermark_time_ms = physical_now;
             } else {
-                watermark_time_ms += self.barrier_interval_ms as u64 * step;
+                watermark_time_ms += barrier_interval_ms * step;
             }
 
             self.metrics
@@ -189,5 +203,11 @@ impl GlobalMemoryManager {
 
             self.set_watermark_time_ms(watermark_time_ms);
         }
+    }
+
+    fn get_eviction_check_interval(params: &SystemParamsReaderRef) -> u64 {
+        // Arbitrarily set a minimal barrier interval in case it is too small,
+        // especially when it's 0.
+        std::cmp::max(params.load().barrier_interval_ms() as u64, 10)
     }
 }

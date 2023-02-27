@@ -79,6 +79,9 @@ impl ObserverState for FrontendObserverNode {
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
             }
+            Info::SystemParams(_) => {
+                panic!("frontend node should not receive SystemParams");
+            }
         }
     }
 

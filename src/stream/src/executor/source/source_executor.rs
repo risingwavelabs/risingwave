@@ -18,6 +18,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SplitMetaData, StreamChunkWithState,
 };
@@ -33,7 +34,7 @@ use crate::executor::*;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+pub(crate) const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
@@ -53,8 +54,8 @@ pub struct SourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    /// Expected barrier latency.
-    expected_barrier_latency_ms: u64,
+    /// Read barrier latency from system parameters.
+    system_params: SystemParamsReaderRef,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -66,7 +67,7 @@ impl<S: StateStore> SourceExecutor<S> {
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        expected_barrier_latency_ms: u64,
+        system_params: SystemParamsReaderRef,
         executor_id: u64,
     ) -> Self {
         Self {
@@ -77,7 +78,7 @@ impl<S: StateStore> SourceExecutor<S> {
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
-            expected_barrier_latency_ms,
+            system_params,
         }
     }
 
@@ -301,10 +302,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         yield Message::Barrier(barrier);
 
-        // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` * `expected_barrier_latency_ms`
-        // milliseconds, considering some other latencies like network and cost in Meta.
-        let max_wait_barrier_time_ms =
-            self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
         let mut metric_row_per_barrier: u64 = 0;
@@ -368,7 +365,13 @@ impl<S: StateStore> SourceExecutor<S> {
                     chunk,
                     split_offset_mapping,
                 }) => {
-                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                    // We allow data to flow for `WAIT_BARRIER_MULTIPLE_TIMES` *
+                    // `expected_barrier_latency_ms` milliseconds, considering some other latencies
+                    // like network and cost in Meta.
+                    if last_barrier_time.elapsed().as_millis()
+                        > self.system_params.load().barrier_interval_ms() as u128
+                            * WAIT_BARRIER_MULTIPLE_TIMES
+                    {
                         // Exceeds the max wait barrier time, the source will be paused. Currently
                         // we can guarantee the source is not paused since it received stream
                         // chunks.
@@ -494,11 +497,13 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::system_param::local_manager::LocalSystemParamManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::meta::SystemParams;
     use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
@@ -508,6 +513,17 @@ mod tests {
     use crate::executor::ActorContext;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
+
+    fn dummy_system_params() -> SystemParamsReaderRef {
+        LocalSystemParamManager::new(
+            SystemParams {
+                barrier_interval_ms: Some(u32::MAX),
+                ..Default::default()
+            }
+            .into(),
+        )
+        .get_params()
+    }
 
     #[tokio::test]
     async fn test_source_executor() {
@@ -563,7 +579,7 @@ mod tests {
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
-            u64::MAX,
+            dummy_system_params(),
             1,
         );
         let mut executor = Box::new(executor).execute();
@@ -655,7 +671,7 @@ mod tests {
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
-            u64::MAX,
+            dummy_system_params(),
             1,
         );
 
