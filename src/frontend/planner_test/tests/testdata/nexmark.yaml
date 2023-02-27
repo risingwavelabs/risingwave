@@ -1434,3 +1434,96 @@
      Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
      Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }
+- id: nexmark_q106
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers two-phase stateful simple aggregation.
+    --
+    -- Show the minimum final price of all auctions.
+    SELECT
+        MIN(final) AS min_final
+    FROM
+        (
+            SELECT
+                auction.id,
+                MAX(price) AS final
+            FROM
+                auction,
+                bid
+            WHERE
+                bid.auction = auction.id
+                AND bid.date_time BETWEEN auction.date_time AND auction.expires
+            GROUP BY
+                auction.id
+        )
+  batch_plan: |
+    BatchSimpleAgg { aggs: [min(min(max(bid.price)))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchSimpleAgg { aggs: [min(max(bid.price))] }
+        └─BatchHashAgg { group_key: [auction.id], aggs: [max(bid.price)] }
+          └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: [auction.id, bid.price] }
+            ├─BatchExchange { order: [], dist: HashShard(auction.id) }
+            | └─BatchScan { table: auction, columns: [auction.id, auction.date_time, auction.expires], distribution: UpstreamHashShard(auction.id) }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+              └─BatchScan { table: bid, columns: [bid.auction, bid.price, bid.date_time], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [min_final], pk_columns: [], pk_conflict: "no check" }
+    └─StreamProject { exprs: [min(min(max(bid.price)))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, min(min(max(bid.price)))] }
+        └─StreamExchange { dist: Single }
+          └─StreamHashAgg { group_key: [$expr1], aggs: [count, min(max(bid.price))] }
+            └─StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr1] }
+              └─StreamProject { exprs: [auction.id, max(bid.price)] }
+                └─StreamHashAgg { group_key: [auction.id], aggs: [count, max(bid.price)] }
+                  └─StreamProject { exprs: [auction.id, bid.price, bid._row_id, bid.auction] }
+                    └─StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+                      └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                        ├─StreamExchange { dist: HashShard(auction.id) }
+                        | └─StreamTableScan { table: auction, columns: [auction.id, auction.date_time, auction.expires], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+                        └─StreamExchange { dist: HashShard(bid.auction) }
+                          └─StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+  stream_dist_plan: |
+    Fragment 0
+      StreamMaterialize { columns: [min_final], pk_columns: [], pk_conflict: "no check" }
+          materialized table: 4294967294
+        StreamProject { exprs: [min(min(max(bid.price)))] }
+          StreamGlobalSimpleAgg { aggs: [count, min(min(max(bid.price)))] }
+              result table: 1, state tables: [0]
+            StreamExchange Single from 1
+
+    Fragment 1
+      StreamHashAgg { group_key: [$expr3], aggs: [count, min(max(bid.price))] }
+          result table: 3, state tables: [2]
+        StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr3] }
+          StreamProject { exprs: [auction.id, max(bid.price)] }
+            StreamHashAgg { group_key: [auction.id], aggs: [count, max(bid.price)] }
+                result table: 5, state tables: [4]
+              StreamProject { exprs: [auction.id, bid.price, bid._row_id, bid.auction] }
+                StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+                  StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+                      left table: 6, right table 8, left degree table: 7, right degree table: 9,
+                    StreamExchange Hash([0]) from 2
+                    StreamExchange Hash([0]) from 3
+
+    Fragment 2
+      Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        Upstream
+        BatchPlanNode
+
+    Fragment 3
+      Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        Upstream
+        BatchPlanNode
+
+     Table 0 { columns: [min(max(bid_price)), $expr3], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 1 { columns: [count, min(min(max(bid_price)))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 2 { columns: [$expr3, max(bid_price), auction_id], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 3 { columns: [$expr3, count, min(max(bid_price))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
+     Table 4 { columns: [auction_id, bid_price, bid__row_id, bid_auction], primary key: [$0 ASC, $1 DESC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 5 { columns: [auction_id, count, max(bid_price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 6 { columns: [auction_id, auction_date_time, auction_expires], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 7 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 8 { columns: [bid_auction, bid_price, bid_date_time, bid__row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 9 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4294967294 { columns: [min_final], primary key: [], value indices: [0], distribution key: [] }
