@@ -155,9 +155,11 @@ impl Compactor {
 
         let need_quota = estimate_memory_use_for_compaction(&compact_task);
         tracing::info!(
-            "Ready to handle compaction task: {} need memory: {}",
+            "Ready to handle compaction task: {} need memory: {} target_level {} compression_algorithm {:?}",
             compact_task.task_id,
-            need_quota
+            need_quota,
+            compact_task.target_level,
+            compact_task.compression_algorithm,
         );
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);

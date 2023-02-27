@@ -253,6 +253,8 @@ impl HummockVersionUpdateExt for HummockVersion {
                         .drain_filter(|table_id| member_table_ids.contains(table_id))
                         .collect_vec();
                     cur_levels.levels[z].total_file_size += branch_table_info.file_size;
+                    cur_levels.levels[z].uncompressed_file_size +=
+                        branch_table_info.uncompressed_file_size;
                     cur_levels.levels[z].table_infos.push(branch_table_info);
                 }
             }
@@ -441,6 +443,14 @@ impl HummockLevelsExt for Levels {
                 .iter()
                 .map(|level| level.total_file_size)
                 .sum::<u64>();
+            self.l0.as_mut().unwrap().uncompressed_file_size = self
+                .l0
+                .as_mut()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .map(|level| level.uncompressed_file_size)
+                .sum::<u64>();
         }
     }
 }
@@ -457,6 +467,7 @@ pub fn build_initial_compaction_group_levels(
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         });
     }
     Levels {
@@ -464,6 +475,7 @@ pub fn build_initial_compaction_group_levels(
         l0: Some(OverlappingLevel {
             sub_levels: vec![],
             total_file_size: 0,
+            uncompressed_file_size: 0,
         }),
         group_id,
         parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
@@ -528,12 +540,17 @@ pub fn new_sub_level(
         );
     }
     let total_file_size = table_infos.iter().map(|table| table.file_size).sum();
+    let uncompressed_file_size = table_infos
+        .iter()
+        .map(|table| table.uncompressed_file_size)
+        .sum();
     Level {
         level_idx: 0,
         level_type: level_type as i32,
         table_infos,
         total_file_size,
         sub_level_id,
+        uncompressed_file_size,
     }
 }
 
@@ -559,6 +576,7 @@ pub fn add_new_sub_level(
     // Nonoverlapping  after at least one compaction.
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
     l0.total_file_size += level.total_file_size;
+    l0.uncompressed_file_size += level.uncompressed_file_size;
     l0.sub_levels.push(level);
 }
 
@@ -587,6 +605,11 @@ fn level_delete_ssts(operand: &mut Level, delete_sst_ids_superset: &HashSet<u64>
         .iter()
         .map(|table| table.file_size)
         .sum::<u64>();
+    operand.uncompressed_file_size = operand
+        .table_infos
+        .iter()
+        .map(|table| table.uncompressed_file_size)
+        .sum::<u64>();
     original_len != operand.table_infos.len()
 }
 
@@ -594,6 +617,10 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     operand.total_file_size += insert_table_infos
         .iter()
         .map(|sst| sst.file_size)
+        .sum::<u64>();
+    operand.uncompressed_file_size += insert_table_infos
+        .iter()
+        .map(|sst| sst.uncompressed_file_size)
         .sum::<u64>();
     operand.table_infos.extend(insert_table_infos);
     operand.table_infos.sort_by(|sst1, sst2| {
@@ -634,6 +661,7 @@ mod tests {
                     l0: Some(OverlappingLevel {
                         sub_levels: vec![],
                         total_file_size: 0,
+                        uncompressed_file_size: 0,
                     }),
                     ..Default::default()
                 },

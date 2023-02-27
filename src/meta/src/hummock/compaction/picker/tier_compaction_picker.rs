@@ -416,6 +416,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(OverlappingLevel {
                 total_file_size: l1.total_file_size + l2.total_file_size,
+                uncompressed_file_size: l1.total_file_size + l2.total_file_size,
                 sub_levels: vec![l1, l2],
             }),
             levels: vec![],

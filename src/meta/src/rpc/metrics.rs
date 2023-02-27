@@ -16,11 +16,13 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
+use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, Histogram, HistogramVec, IntCounterVec, IntGauge,
+    IntGaugeVec, Registry,
 };
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -93,6 +95,10 @@ pub struct MetaMetrics {
 
     /// The roles of all meta nodes in the cluster.
     pub meta_type: IntGaugeVec,
+
+    /// compaction
+    pub compact_pending_bytes: IntGaugeVec,
+    pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
 }
 
 impl MetaMetrics {
@@ -276,6 +282,22 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let compact_pending_bytes = register_int_gauge_vec_with_registry!(
+            "storage_compact_pending_bytes",
+            "bytes of lsm tree needed to reach balance",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compact_level_compression_ratio = register_gauge_vec_with_registry!(
+            "storage_compact_level_compression_ratio",
+            "compression ratio of each level of the lsm tree",
+            &["group", "level", "algorithm"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -304,9 +326,10 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
-
             worker_num,
             meta_type,
+            compact_pending_bytes,
+            compact_level_compression_ratio,
         }
     }
 

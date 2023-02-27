@@ -197,6 +197,7 @@ impl Sstable {
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
             divide_version: 0,
+            uncompressed_file_size: self.meta.estimated_size as u64,
             min_epoch: 0,
             max_epoch: 0,
         }

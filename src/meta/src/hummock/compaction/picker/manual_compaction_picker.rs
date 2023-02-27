@@ -379,6 +379,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -392,6 +393,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         let mut levels = Levels {
@@ -555,6 +557,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -565,6 +568,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         // Set internal_table_ids.
@@ -607,6 +611,7 @@ pub mod tests {
             ],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let levels = Levels {
             levels,
@@ -627,6 +632,7 @@ pub mod tests {
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let levels = Levels {
             levels,
@@ -1165,6 +1171,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         assert_eq!(levels.len(), 4);
@@ -1274,6 +1281,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         assert_eq!(levels.len(), 4);
