@@ -290,7 +290,7 @@
     SELECT * FROM mv WHERE x = 60000;
   batch_plan: |
     BatchValues { rows: [] }
-- name: When the constant with larger type is bigger than the max value of the column's type, we can convert < as true condition.
+- name: When the constant with larger type is out of the upper bound of the column's type, we can convert < as true condition.
   before:
   - create_small
   sql: |
@@ -298,14 +298,29 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
-- name: When the constant with larger type is bigger than the max value of the column's type, we can convert > as false condition.
+- name: When the constant with larger type is out of the upper bound of the column's type, we can convert > as false condition.
   before:
   - create_small
   sql: |
     SELECT * FROM mv WHERE x > 60000;
   batch_plan: |
     BatchValues { rows: [] }
-- name: When the constant with large type is in range of the column's type, we can convert it.
+- name: When the constant with larger type is out of the lower bound of the column's type, we can convert < as false condition.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x < -60000;
+  batch_plan: |
+    BatchValues { rows: [] }
+- name: When the constant with larger type is out of the lower bound of the column's type, we can convert > as true condition.
+  before:
+  - create_small
+  sql: |
+    SELECT * FROM mv WHERE x > -60000;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: mv, columns: [mv.x], distribution: UpstreamHashShard(mv.x) }
+- name: When the constant with larger type is in range of the column's type, we can convert it.
   before:
   - create_small
   sql: |
