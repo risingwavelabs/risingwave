@@ -40,7 +40,7 @@ async fn nexmark_chaos_common_inner(
     multiple: bool,
 ) -> Result<()> {
     let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT), true).await?;
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT), false).await?;
     cluster.run(create).await?;
     sleep(Duration::from_secs(30)).await;
     let final_result = cluster.run(select).await?;
