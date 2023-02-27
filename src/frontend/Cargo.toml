@@ -17,7 +17,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-schema = "33"
+arrow-schema = "34"
 async-recursion = "1.0.2"
 async-trait = "0.1"
 bk-tree = "0.4.0"
