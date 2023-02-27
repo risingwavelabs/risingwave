@@ -24,16 +24,7 @@ use crate::optimizer::plan_visitor::InputRefValidator;
 use crate::optimizer::plan_visitor::{
     has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, PlanVisitor,
 };
-use crate::optimizer::rule::{
-    AggDedupGroupKeyRule, AggProjectMergeRule, ApplyAggTransposeRule, ApplyFilterTransposeRule,
-    ApplyJoinTransposeRule, ApplyProjectTransposeRule, ApplyScanRule, ApplyShareEliminateRule,
-    ApplyToJoinRule, BoxedRule, DagToTreeRule, DistinctAggRule, FilterWithNowToJoinRule,
-    JoinCommuteRule, MaxOneRowEliminateRule, MergeMultiJoinRule, OverAggToTopNRule,
-    ProjectEliminateRule, ProjectJoinMergeRule, ProjectMergeRule, PullUpCorrelatedPredicateRule,
-    PushCalculationOfJoinRule, ReorderMultiJoinRule, RewriteLikeExprRule, TopNOnIndexRule,
-    TranslateApplyRule, TrivialProjectToValuesRule, UnionInputValuesMergeRule, UnionMergeRule,
-    UnionToDistinctRule,
-};
+use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 use crate::Explain;
@@ -108,7 +99,7 @@ impl OptimizationStage {
     }
 }
 
-pub struct LogicalOptimization {}
+pub struct LogicalOptimizer {}
 
 lazy_static! {
     static ref DAG_TO_TREE: OptimizationStage = OptimizationStage::new(
@@ -252,7 +243,7 @@ lazy_static! {
     );
 }
 
-impl LogicalOptimization {
+impl LogicalOptimizer {
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();

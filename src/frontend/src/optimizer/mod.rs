@@ -147,12 +147,12 @@ impl PlanRoot {
 
     /// Apply logical optimization to the plan for stream.
     pub fn gen_optimized_logical_plan_for_stream(&self) -> Result<PlanRef> {
-        LogicalOptimization::gen_optimized_logical_plan_for_stream(self.plan.clone())
+        LogicalOptimizer::gen_optimized_logical_plan_for_stream(self.plan.clone())
     }
 
     /// Apply logical optimization to the plan for batch.
     pub fn gen_optimized_logical_plan_for_batch(&self) -> Result<PlanRef> {
-        LogicalOptimization::gen_optimized_logical_plan_for_batch(self.plan.clone())
+        LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone())
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
