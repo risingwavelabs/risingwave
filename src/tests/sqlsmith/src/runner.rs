@@ -83,12 +83,12 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
-        // test_session_variable(client, rng).await;
+        let session_sql = test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
-        let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
+        let skipped =
+            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
         if skipped == 0 {
             generated_queries += 1;
             queries.push_str(&format!("{};\n", &sql));
@@ -98,12 +98,12 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
 
     let mut generated_queries = 0;
     for _ in 0..count {
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
-        // test_session_variable(client, rng).await;
+        let session_sql = test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
         let response = client.query(&sql, &[]).await;
-        let skipped = validate_response(&setup_sql, &format!("{};", sql), response);
+        let skipped =
+            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
         drop_mview_table(&table, client).await;
         if skipped == 0 {
             generated_queries += 1;
@@ -245,11 +245,11 @@ async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &s
     s
 }
 
-#[allow(dead_code)]
-async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) {
+async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) -> String {
     let session_sql = session_sql_gen(rng);
     tracing::info!("[EXECUTING TEST SESSION_VAR]: {}", session_sql);
     client.simple_query(session_sql.as_str()).await.unwrap();
+    session_sql
 }
 
 /// Expects at least 50% of inserted rows included.
@@ -286,12 +286,11 @@ async fn test_batch_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
-        // test_session_variable(client, rng).await;
+        let session_sql = test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
-        skipped += validate_response(setup_sql, &format!("{};", sql), response);
+        skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response);
     }
     skipped as f64 / sample_size as f64
 }
@@ -306,12 +305,11 @@ async fn test_stream_queries<R: Rng>(
 ) -> f64 {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7928
-        // test_session_variable(client, rng).await;
+        let session_sql = test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
-        skipped += validate_response(setup_sql, &format!("{};", sql), response);
+        skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response);
         drop_mview_table(&table, client).await;
     }
     skipped as f64 / sample_size as f64
