@@ -43,7 +43,7 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
 }
 
 /// [`Project`] computes a set of expressions from its input relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[allow(clippy::manual_non_exhaustive)]
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,

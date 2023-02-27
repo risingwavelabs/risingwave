@@ -26,8 +26,9 @@ use super::{
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -122,7 +123,7 @@ impl ToBatchProst for BatchHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             group_key: self
                 .group_key()

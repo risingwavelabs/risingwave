@@ -524,6 +524,15 @@ def section_cluster_node(panels):
                 )
             ],
         ),
+        panels.timeseries_count(
+            "Meta Cluster",
+            "",
+            [
+                panels.target(f"sum({metric('meta_num')}) by (worker_addr,role)",
+                              "{{worker_addr}} @ {{role}}")
+            ],
+            ["last"],
+        ),
     ]
 
 
@@ -1320,7 +1329,11 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{actor_id}} {{side}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
+                            "may_exist true when insert {{actor_id}} {{side}}",
                         ),
                     ],
                 ),

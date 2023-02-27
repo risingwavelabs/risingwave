@@ -9,6 +9,10 @@ explain select v1 from ddl_t;
 statement error
 create table ddl_t (v2 int);
 
+# Create a table using a empty string.
+statement error
+create table ""(v2 int);
+
 statement ok
 create table if not exists ddl_t (v2 int);
 
@@ -35,10 +39,10 @@ statement ok
 explain select v2 from ddl_t;
 
 statement ok
-explain create sink sink_t from ddl_t with ( connector = 'kafka' );
+explain create sink sink_t from ddl_t with ( connector = 'kafka', format = 'append_only', force_append_only = 'true' );
 
 statement ok
-explain create sink sink_as as select sum(v2) as sum from ddl_t with ( connector = 'kafka' );
+explain create sink sink_as as select sum(v2) as sum from ddl_t with ( connector = 'kafka', format = 'append_only', force_append_only = 'true' );
 
 # Create a mview with duplicated name.
 statement error

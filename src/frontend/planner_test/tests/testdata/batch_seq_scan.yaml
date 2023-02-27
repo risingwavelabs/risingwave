@@ -5,7 +5,7 @@
     create table t (id int);
     create materialized view v as select count(*) cnt from t;
     SET QUERY_MODE TO distributed;
-    select * from v join (select count(*) from t) T;
+    select * from v cross join (select count(*) from t) T;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }

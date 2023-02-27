@@ -1026,18 +1026,20 @@ mod tests {
         order_types: &[OrderType],
         pk_indices: &[usize],
         table_id: u32,
+        prefix_hint_len: usize,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = StateTable::new_without_distribution_with_prefix_hint_len(
             mem_state.clone(),
             TableId::new(table_id),
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
+            prefix_hint_len,
         )
         .await;
 
@@ -1088,8 +1090,9 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
-        let params_l = JoinParams::new(vec![0], vec![1]);
-        let params_r = JoinParams::new(vec![0], vec![1]);
+        let join_key_indices = vec![0];
+        let params_l = JoinParams::new(join_key_indices.clone(), vec![1]);
+        let params_r = JoinParams::new(join_key_indices.clone(), vec![1]);
         let cond = with_condition.then(create_cond);
 
         let mem_state = MemoryStateStore::new();
@@ -1100,6 +1103,7 @@ mod tests {
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
             0,
+            join_key_indices.len(),
         )
         .await;
 
@@ -1109,6 +1113,7 @@ mod tests {
             &[OrderType::Ascending, OrderType::Ascending],
             &[0, 1],
             2,
+            join_key_indices.len(),
         )
         .await;
 
@@ -1154,8 +1159,9 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![0]);
-        let params_l = JoinParams::new(vec![0, 1], vec![]);
-        let params_r = JoinParams::new(vec![0, 1], vec![]);
+        let join_key_indices = vec![0, 1];
+        let params_l = JoinParams::new(join_key_indices.clone(), vec![]);
+        let params_r = JoinParams::new(join_key_indices.clone(), vec![]);
         let cond = with_condition.then(create_cond);
 
         let mem_state = MemoryStateStore::new();
@@ -1170,6 +1176,7 @@ mod tests {
             ],
             &[0, 1, 0],
             0,
+            join_key_indices.len(),
         )
         .await;
 
@@ -1183,6 +1190,7 @@ mod tests {
             ],
             &[0, 1, 1],
             0,
+            join_key_indices.len(),
         )
         .await;
         let schema_len = match T {

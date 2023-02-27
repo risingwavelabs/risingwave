@@ -14,89 +14,92 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, Op, Vis, VisRef};
+use risingwave_common::array::{Op, Vis, VisRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
+use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
+use crate::cache::ExecutorCache;
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
+type DedupCache = ExecutorCache<CompactedRow, Box<[i64]>>;
+
 /// Deduplicater for one distinct column.
-struct Deduplicater<S: StateStore> {
-    agg_call_indices: Vec<usize>,
+struct ColumnDeduplicater<S: StateStore> {
+    cache: DedupCache,
     _phantom: PhantomData<S>,
 }
 
-impl<S: StateStore> Deduplicater<S> {
-    fn new(indices_and_calls: Vec<(usize, &AggCall)>) -> Self {
-        let agg_call_indices = indices_and_calls
-            .into_iter()
-            .map(|(call_idx, _)| call_idx)
-            .collect();
+impl<S: StateStore> ColumnDeduplicater<S> {
+    fn new(watermark_epoch: &Arc<AtomicU64>) -> Self {
         Self {
-            agg_call_indices,
+            cache: DedupCache::new(crate::cache::new_unbounded(watermark_epoch.clone())),
             _phantom: PhantomData,
         }
     }
 
-    /// Get the indices of agg calls that distinct on this column.
-    /// The index is the position of the agg call in the original agg call list.
-    fn agg_call_indices(&self) -> &[usize] {
-        &self.agg_call_indices
-    }
-
-    /// Update the `visibilities` of distinct agg calls that distinct on the `column`,
-    /// according to the counts of distinct keys for each call.
-    ///
-    /// * `ops`: Ops for each datum in `column`.
-    /// * `column`: The column to distinct on.
-    /// * `visibilities` - Visibilities for agg calls that distinct on the this column.
-    /// * `dedup_table` - The deduplication table for this distinct column.
     async fn dedup(
         &mut self,
         ops: &[Op],
-        column: &ArrayImpl,
+        column: &Column,
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
-        assert_eq!(visibilities.len(), self.agg_call_indices.len());
+        let column = column.array_ref();
+        let n_calls = visibilities.len();
 
-        // TODO(rc): move to field of `Deduplicater`
-        let mut cache = HashMap::new();
-        let mut old_rows = HashMap::new();
+        let mut prev_counts_map = HashMap::new(); // also serves as changeset
 
         // inverted masks for visibilities, 1 means hidden, 0 means visible
         let mut vis_masks_inv = (0..visibilities.len())
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
-        for (datum_idx, (op, datum)) in ops.iter().zip_eq(column.iter()).enumerate() {
+
+        for (datum_idx, (op, datum)) in ops.iter().zip_eq_fast(column.iter()).enumerate() {
+            // skip if this item is hidden to all agg calls (this is likely to happen)
+            if !visibilities.iter().any(|vis| vis.is_set(datum_idx)) {
+                continue;
+            }
+
             // get counts of the distinct key of all agg calls that distinct on this column
-            let counts = if let Some(counts) = cache.get_mut(&datum) {
+            let key = group_key.chain(row::once(datum));
+            let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
+            let counts = if let Some(counts) = self.cache.get_mut(&compacted_key) {
                 counts
             } else {
-                let counts_row: Option<OwnedRow> = dedup_table
-                    .get_row(group_key.chain(row::once(datum)))
-                    .await?;
-                let counts = counts_row.map_or_else(
-                    || vec![0; self.agg_call_indices.len()],
-                    |r| {
-                        old_rows.insert(datum, r.clone());
-                        r.iter()
-                            .map(|d| if let Some(d) = d { d.into_int64() } else { 0 })
-                            .collect()
-                    },
-                );
-                cache.insert(datum, counts);
-                cache.get_mut(&datum).unwrap()
+                // load from table into the cache
+                let counts = if let Some(counts_row) =
+                    dedup_table.get_row(&key).await? as Option<OwnedRow>
+                {
+                    counts_row
+                        .iter()
+                        .map(|v| v.map_or(0, ScalarRefImpl::into_int64))
+                        .collect()
+                } else {
+                    // ensure there is a row in the dedup table for this distinct key
+                    dedup_table
+                        .insert((&key).chain(row::repeat_n(Some(ScalarImpl::from(0i64)), n_calls)));
+                    vec![0; n_calls].into_boxed_slice()
+                };
+                self.cache.put(compacted_key.clone(), counts); // TODO(rc): can we avoid this clone?
+                self.cache.get_mut(&compacted_key).unwrap()
             };
             debug_assert_eq!(counts.len(), visibilities.len());
+
+            // snapshot the counts as prev counts when first time seeing this distinct key
+            prev_counts_map
+                .entry(datum)
+                .or_insert_with(|| counts.to_owned());
 
             match op {
                 Op::Insert | Op::UpdateInsert => {
@@ -127,16 +130,23 @@ impl<S: StateStore> Deduplicater<S> {
             }
         }
 
-        cache.into_iter().for_each(|(key, counts)| {
-            let new_row = group_key.chain(row::once(key)).chain(OwnedRow::new(
-                counts.into_iter().map(ScalarImpl::from).map(Some).collect(),
-            ));
-            if let Some(old_row) = old_rows.remove(&key) {
-                dedup_table.update(group_key.chain(row::once(key)).chain(old_row), new_row)
-            } else {
-                dedup_table.insert(new_row)
-            }
-        });
+        // flush changes to dedup table
+        prev_counts_map
+            .into_iter()
+            .for_each(|(datum, prev_counts)| {
+                let key = group_key.chain(row::once(datum));
+                let new_counts = OwnedRow::new(
+                    self.cache
+                        .get(&CompactedRow::from(&key)) // TODO(rc): is it necessary to avoid recomputing here?
+                        .expect("distinct key in `prev_counts_map` must also exist in `self.cache`")
+                        .iter()
+                        .map(|&v| Some(v.into()))
+                        .collect(),
+                );
+                let old_counts =
+                    OwnedRow::new(prev_counts.iter().map(|&v| Some(v.into())).collect());
+                dedup_table.update(key.chain(old_counts), key.chain(new_counts));
+            });
 
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
             let mask = !vis_mask_inv.finish();
@@ -150,8 +160,9 @@ impl<S: StateStore> Deduplicater<S> {
     }
 
     /// Flush the deduplication table.
-    fn flush(&self, _dedup_table: &mut StateTable<S>) {
+    fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
         // TODO(rc): now we flush the table in `dedup` method.
+        self.cache.evict();
     }
 }
 
@@ -168,26 +179,32 @@ unsafe fn get_many_mut_from_slice<'a, T>(slice: &'a mut [T], indices: &[usize]) 
 }
 
 pub struct DistinctDeduplicater<S: StateStore> {
-    /// Key: distinct column index, value: deduplicater for the column.
-    deduplicaters: HashMap<usize, Deduplicater<S>>,
-
-    _phantom: PhantomData<S>,
+    /// Key: distinct column index;
+    /// Value: (agg call indices that distinct on the column, deduplicater for the column).
+    deduplicaters: HashMap<usize, (Box<[usize]>, ColumnDeduplicater<S>)>,
 }
 
 impl<S: StateStore> DistinctDeduplicater<S> {
-    pub fn new(agg_calls: &[AggCall]) -> Self {
+    pub fn new(agg_calls: &[AggCall], watermark_epoch: &Arc<AtomicU64>) -> Self {
         let deduplicaters: HashMap<_, _> = agg_calls
             .iter()
             .enumerate()
             .filter(|(_, call)| call.distinct) // only distinct agg calls need dedup table
             .into_group_map_by(|(_, call)| call.args.val_indices()[0])
             .into_iter()
-            .map(|(k, v)| (k, Deduplicater::new(v)))
+            .map(|(distinct_col, indices_and_calls)| {
+                let call_indices: Box<[_]> = indices_and_calls.into_iter().map(|v| v.0).collect();
+                let deduplicater = ColumnDeduplicater::new(watermark_epoch);
+                (distinct_col, (call_indices, deduplicater))
+            })
             .collect();
-        Self {
-            deduplicaters,
-            _phantom: PhantomData,
-        }
+        Self { deduplicaters }
+    }
+
+    pub fn dedup_caches_mut(&mut self) -> impl Iterator<Item = &mut DedupCache> {
+        self.deduplicaters
+            .values_mut()
+            .map(|(_, deduplicater)| &mut deduplicater.cache)
     }
 
     /// Deduplicate the chunk for each agg call, by returning new visibilities
@@ -208,15 +225,13 @@ impl<S: StateStore> DistinctDeduplicater<S> {
                 None => Vis::from(ops.len()),
             })
             .collect_vec();
-        for (distinct_col, deduplicater) in &mut self.deduplicaters {
-            let column = columns[*distinct_col].array_ref();
+        for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
+            let column = &columns[*distinct_col];
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
             // Select visibilities (as mutable references) of distinct agg calls that distinct on
             // `distinct_col` so that `Deduplicater` doesn't need to care about index mapping.
-            // Safety: all items in `agg_call_indices` are unique by nature.
-            let visibilities = unsafe {
-                get_many_mut_from_slice(&mut visibilities, deduplicater.agg_call_indices())
-            };
+            // SAFETY: all items in `agg_call_indices` are unique by nature, see `new`.
+            let visibilities = unsafe { get_many_mut_from_slice(&mut visibilities, call_indices) };
             deduplicater
                 .dedup(ops, column, visibilities, dedup_table, group_key)
                 .await?;
@@ -229,10 +244,10 @@ impl<S: StateStore> DistinctDeduplicater<S> {
 
     /// Flush dedup state caches to dedup tables.
     pub fn flush(
-        &self,
+        &mut self,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
     ) -> StreamExecutorResult<()> {
-        for (distinct_col, deduplicater) in &self.deduplicaters {
+        for (distinct_col, (_, deduplicater)) in &mut self.deduplicaters {
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
             deduplicater.flush(dedup_table);
         }
@@ -357,7 +372,7 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls);
+        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
 
         // --- chunk 1 ---
 
@@ -441,7 +456,7 @@ mod tests {
         }
 
         // test recovery
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls);
+        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
 
         // --- chunk 3 ---
 
@@ -528,7 +543,7 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls);
+        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
 
         let chunk = StreamChunk::from_pretty(
             " I   I     I

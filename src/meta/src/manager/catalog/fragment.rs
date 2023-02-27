@@ -825,7 +825,7 @@ where
     pub async fn get_upstream_mview_fragments(
         &self,
         dependent_relation_ids: &HashSet<TableId>,
-    ) -> MetaResult<HashMap<TableId, Fragment>> {
+    ) -> HashMap<TableId, Fragment> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
 
@@ -835,7 +835,7 @@ where
             }
         }
 
-        Ok(fragments)
+        fragments
     }
 
     /// Get the downstream `Chain` fragments of the specified table.

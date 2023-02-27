@@ -21,10 +21,11 @@ use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, ErrorSuppressor, RwError};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -76,6 +77,62 @@ pub trait SplitEnumerator: Sized {
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
 }
 
+pub type SourceContextRef = Arc<SourceContext>;
+
+#[derive(Debug, Default)]
+pub struct SourceContext {
+    pub source_info: SourceInfo,
+    pub metrics: Arc<SourceMetrics>,
+    error_suppressor: Option<Arc<Mutex<ErrorSuppressor>>>,
+}
+impl SourceContext {
+    pub fn new(
+        actor_id: u32,
+        table_id: TableId,
+        fragment_id: u32,
+        metrics: Arc<SourceMetrics>,
+    ) -> Self {
+        Self {
+            source_info: SourceInfo {
+                actor_id,
+                source_id: table_id,
+                fragment_id,
+            },
+            metrics,
+            error_suppressor: None,
+        }
+    }
+
+    pub fn add_suppressor(&mut self, error_suppressor: Arc<Mutex<ErrorSuppressor>>) {
+        self.error_suppressor = Some(error_suppressor)
+    }
+
+    pub(crate) fn report_stream_source_error(&self, e: &RwError) {
+        // Do not report for batch
+        if self.source_info.fragment_id == u32::MAX {
+            return;
+        }
+        let mut err_str = e.inner().to_string();
+        if let Some(suppressor) = &self.error_suppressor &&
+            suppressor.lock().suppress_error(&err_str)
+        {
+            err_str = format!("error msg suppressed (due to per-actor error limit: {})", suppressor.lock().max());
+        }
+        self.metrics
+            .user_source_error_count
+            .with_label_values(&[
+                "SourceError",
+                // TODO(jon-chuang): add the error msg truncator to truncate these
+                &err_str,
+                // Let's be a bit more specific for SourceExecutor
+                "SourceExecutor",
+                &self.source_info.fragment_id.to_string(),
+                &self.source_info.source_id.table_id.to_string(),
+            ])
+            .inc();
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SourceInfo {
     pub actor_id: u32,
@@ -84,67 +141,15 @@ pub struct SourceInfo {
     pub fragment_id: u32,
 }
 
-impl SourceInfo {
-    pub fn new(actor_id: u32, source_id: TableId, fragment_id: u32) -> Self {
-        SourceInfo {
-            actor_id,
-            source_id,
-            fragment_id,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SourceErrorContext {
-    metrics: Arc<SourceMetrics>,
-    table_id: u32,
-    fragment_id: u32,
-}
-
-impl SourceErrorContext {
-    pub(crate) fn new(table_id: u32, fragment_id: u32, metrics: Arc<SourceMetrics>) -> Self {
-        Self {
-            metrics,
-            table_id,
-            fragment_id,
-        }
-    }
-
-    pub(crate) fn report_stream_source_error(&self, e: &RwError) {
-        // Do not report for batch
-        if self.fragment_id == u32::MAX {
-            return;
-        }
-        self.metrics
-            .user_source_error_count
-            .with_label_values(&[
-                "SourceError",
-                // TODO(jon-chuang): add the error msg truncator to truncate these
-                &e.inner().to_string(),
-                // Let's be a bit more specific for SourceExecutor
-                "SourceExecutor",
-                &self.fragment_id.to_string(),
-                &self.table_id.to_string(),
-            ])
-            .inc();
-    }
-
-    pub(crate) fn for_test() -> Self {
-        Self {
-            metrics: Arc::new(SourceMetrics::unused()),
-            table_id: u32::MAX,
-            fragment_id: u32::MAX,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
     Invalid,
     Json,
+    UpsertJson,
     Protobuf,
     DebeziumJson,
     Avro,
+    UpsertAvro,
     Maxwell,
     CanalJson,
     Csv,
@@ -185,8 +190,7 @@ pub trait SplitReader: Sized {
         properties: Self::Properties,
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
 

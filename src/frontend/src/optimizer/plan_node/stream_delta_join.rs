@@ -28,10 +28,11 @@ use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -192,12 +193,7 @@ impl StreamNode for StreamDeltaJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x)
-                        .to_expr_proto()
-                }),
+                .map(|x| x.to_expr_proto()),
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {

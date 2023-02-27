@@ -24,6 +24,7 @@ pub type ParallelUnitId = u32;
 /// consistent hashing.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
+#[display("{0}")]
 pub struct VirtualNode(VirtualNodeInner);
 
 type VirtualNodeInner = u8;

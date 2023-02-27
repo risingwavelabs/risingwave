@@ -11,11 +11,10 @@ statement ok
 insert into t values(now());
 
 # constant eval of now in batch plan
-# query T
-# explain select now() + interval '1 hour' = now() + interval '30 minutes' + interval '30 minutes' true;
-# ----
-# BatchProject { exprs: [true:Boolean] }
-#     └─BatchValues { rows: [[]] }
+query T
+explain select now() + interval '1 hour' = now() + interval '30 minutes' + interval '30 minutes' true;
+----
+BatchValues { rows: [[true:Boolean]] }
 
 statement ok
 drop table tz
