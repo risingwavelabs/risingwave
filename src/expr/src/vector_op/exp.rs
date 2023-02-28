@@ -12,16 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use num_traits::Float;
+use num_traits::{Float, Zero};
 use risingwave_common::types::OrderedF64;
 
 use crate::{ExprError, Result};
 
 pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
-    let res = input.exp();
-    if res.is_infinite() {
-        Err(ExprError::NumericOutOfRange)
+    if input.is_nan() {
+        Ok(input)
+    } else if input.is_infinite() {
+        if input.is_sign_negative() {
+            Ok(0.into())
+        } else {
+            Ok(input)
+        }
     } else {
-        Ok(res)
+        let res = input.exp();
+
+        // If the argument passed to `exp` is not `inf` or `-inf` then a result that is `inf` or `0`
+        // means that the operation had an overflow or an underflow, and the appropriate
+        // error should be returned.
+        if res.is_infinite() {
+            Err(ExprError::FloatOverflow)
+        } else if res.is_zero() {
+            Err(ExprError::FloatUnderflow)
+        } else {
+            Ok(res)
+        }
     }
 }
