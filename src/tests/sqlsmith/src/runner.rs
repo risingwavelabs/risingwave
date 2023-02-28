@@ -50,7 +50,7 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("Executing: {}", sql);
-        let response = client.query(&sql, &[]).await;
+        let response = client.simple_query(&sql).await;
         if let Err(e) = response {
             panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
         }
@@ -86,7 +86,7 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         let session_sql = test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("Executing: {}", sql);
-        let response = client.query(sql.as_str(), &[]).await;
+        let response = client.simple_query(sql.as_str()).await;
         let skipped =
             validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
         if skipped == 0 {
@@ -101,7 +101,7 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
         let session_sql = test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("Executing: {}", sql);
-        let response = client.query(&sql, &[]).await;
+        let response = client.simple_query(&sql).await;
         let skipped =
             validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
         drop_mview_table(&table, client).await;
@@ -191,7 +191,7 @@ async fn populate_tables<R: Rng>(
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
         tracing::info!("[EXECUTING POPULATION]: {}", insert);
-        client.query(insert, &[]).await.unwrap();
+        client.simple_query(insert).await.unwrap();
     }
     inserts.into_iter().map(|i| format!("{};\n", i)).collect()
 }
