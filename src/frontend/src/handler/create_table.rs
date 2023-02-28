@@ -33,7 +33,7 @@ use risingwave_sqlparser::ast::{
     TableConstraint,
 };
 
-use super::create_source::{resolve_source_schema, validate_compatibility};
+use super::create_source::resolve_source_schema;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
@@ -309,7 +309,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     let definition = context.normalized_sql().to_owned();
 
-    validate_compatibility(&source_schema, &properties)?;
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,

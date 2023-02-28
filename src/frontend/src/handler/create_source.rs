@@ -172,7 +172,7 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-pub(crate) fn get_connector(with_properties: &HashMap<String, String>) -> String {
+fn get_connector(with_properties: &HashMap<String, String>) -> String {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
         .unwrap_or(&"".to_string())
@@ -192,7 +192,10 @@ pub(crate) async fn resolve_source_schema(
     pk_column_ids: &mut Vec<ColumnId>,
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
+    validate_compatibility(&source_schema, with_properties)?;
+
     let is_kafka = is_kafka_source(with_properties);
+
     let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
@@ -522,7 +525,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
     }
 }
 
-pub(super) fn validate_compatibility(
+fn validate_compatibility(
     source_schema: &SourceSchema,
     props: &HashMap<String, String>,
 ) -> Result<()> {
@@ -602,8 +605,6 @@ pub async fn handle_create_source(
         .into());
     }
 
-    validate_compatibility(&stmt.source_schema, &with_properties)?;
-
     let source_info = resolve_source_schema(
         stmt.source_schema,
         &mut columns,
@@ -663,7 +664,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kinesis')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
