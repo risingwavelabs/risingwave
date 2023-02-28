@@ -425,6 +425,7 @@ impl<S: MetaStore> HummockManager<S> {
         if table_ids.is_empty() {
             return Ok(());
         }
+        let table_ids = table_ids.iter().cloned().unique().collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
@@ -433,7 +434,7 @@ impl<S: MetaStore> HummockManager<S> {
             .levels
             .get(&parent_group_id)
             .ok_or_else(|| Error::CompactionGroup(format!("invalid group {}", parent_group_id)))?;
-        for table_id in table_ids {
+        for table_id in &table_ids {
             if !parent_group.member_table_ids.contains(table_id) {
                 return Err(Error::CompactionGroup(format!(
                     "table {} doesn't in group {}",
@@ -441,7 +442,7 @@ impl<S: MetaStore> HummockManager<S> {
                 )));
             }
         }
-        if table_ids.iter().unique().count() == parent_group.member_table_ids.len() {
+        if table_ids.len() == parent_group.member_table_ids.len() {
             return Err(Error::CompactionGroup(format!(
                 "invalid split attempt for group {}: all member tables are moved",
                 parent_group_id
@@ -455,7 +456,7 @@ impl<S: MetaStore> HummockManager<S> {
         );
 
         // Remove tables from parent group.
-        for table_id in table_ids.iter().unique() {
+        for table_id in &table_ids {
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(parent_group_id)
@@ -491,7 +492,7 @@ impl<S: MetaStore> HummockManager<S> {
                 group_config: Some(config),
                 group_id: new_group_id,
                 parent_group_id,
-                table_ids: table_ids.iter().cloned().collect_vec(),
+                table_ids,
             })),
         });
 
