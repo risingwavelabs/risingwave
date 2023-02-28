@@ -572,7 +572,8 @@ impl Condition {
                 .into_iter()
                 .map(|expr| rewriter.rewrite_expr(expr))
                 .collect(),
-        }.simplify()
+        }
+        .simplify()
     }
 
     pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
