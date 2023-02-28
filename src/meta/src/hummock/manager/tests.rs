@@ -1334,6 +1334,34 @@ async fn test_split_compaction_group_on_commit() {
             .member_table_ids,
         vec![101]
     );
+    let branched_ssts = hummock_manager
+        .versioning
+        .read(&["", "", ""])
+        .await
+        .branched_ssts
+        .clone();
+    assert_eq!(branched_ssts.len(), 1);
+    assert_eq!(branched_ssts.values().next().unwrap().len(), 2);
+    assert_eq!(
+        branched_ssts
+            .values()
+            .next()
+            .unwrap()
+            .get(&2)
+            .cloned()
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        branched_ssts
+            .values()
+            .next()
+            .unwrap()
+            .get(&3)
+            .cloned()
+            .unwrap(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -1460,6 +1488,34 @@ async fn test_split_compaction_group_on_demand() {
             .member_table_ids,
         vec![100, 101]
     );
+    let branched_ssts = hummock_manager
+        .versioning
+        .read(&["", "", ""])
+        .await
+        .branched_ssts
+        .clone();
+    assert_eq!(branched_ssts.len(), 2);
+    for sst_id in [10, 11] {
+        assert_eq!(branched_ssts.get(&sst_id).unwrap().len(), 2);
+        assert_eq!(
+            branched_ssts
+                .get(&sst_id)
+                .unwrap()
+                .get(&2)
+                .cloned()
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            branched_ssts
+                .get(&sst_id)
+                .unwrap()
+                .get(&new_group_id)
+                .cloned()
+                .unwrap(),
+            1
+        );
+    }
 }
 
 #[tokio::test]

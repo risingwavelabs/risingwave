@@ -768,6 +768,14 @@ export interface PinVersionResponse {
   pinnedVersion: HummockVersion | undefined;
 }
 
+export interface SplitCompactionGroupRequest {
+  groupId: number;
+  tableIds: number[];
+}
+
+export interface SplitCompactionGroupResponse {
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -4229,6 +4237,57 @@ export const PinVersionResponse = {
     message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
       ? HummockVersion.fromPartial(object.pinnedVersion)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseSplitCompactionGroupRequest(): SplitCompactionGroupRequest {
+  return { groupId: 0, tableIds: [] };
+}
+
+export const SplitCompactionGroupRequest = {
+  fromJSON(object: any): SplitCompactionGroupRequest {
+    return {
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: SplitCompactionGroupRequest): unknown {
+    const obj: any = {};
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupRequest>, I>>(object: I): SplitCompactionGroupRequest {
+    const message = createBaseSplitCompactionGroupRequest();
+    message.groupId = object.groupId ?? 0;
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseSplitCompactionGroupResponse(): SplitCompactionGroupResponse {
+  return {};
+}
+
+export const SplitCompactionGroupResponse = {
+  fromJSON(_: any): SplitCompactionGroupResponse {
+    return {};
+  },
+
+  toJSON(_: SplitCompactionGroupResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupResponse>, I>>(_: I): SplitCompactionGroupResponse {
+    const message = createBaseSplitCompactionGroupResponse();
     return message;
   },
 };
