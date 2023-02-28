@@ -214,6 +214,7 @@ pub struct AggChangesInfo {
 impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         group_key: Option<OwnedRow>,
         agg_calls: &[AggCall],
