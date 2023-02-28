@@ -171,7 +171,7 @@ pub async fn handle(
             temporary,
             name,
             args,
-            return_type,
+            returns,
             params,
         } => {
             create_function::handle_create_function(
@@ -180,7 +180,7 @@ pub async fn handle(
                 temporary,
                 name,
                 args,
-                return_type,
+                returns,
                 params,
             )
             .await

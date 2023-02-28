@@ -32,7 +32,7 @@ pub async fn handle_create_function(
     temporary: bool,
     name: ObjectName,
     args: Option<Vec<OperateFunctionArg>>,
-    return_type: Option<DataType>,
+    returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
 ) -> Result<RwPgResponse> {
     if or_replace {
@@ -75,7 +75,7 @@ pub async fn handle_create_function(
         )
         .into());
     };
-    let Some(return_type) = return_type else {
+    let Some(CreateFunctionReturns::Value(return_type)) = returns else {
         return Err(
             ErrorCode::InvalidParameterValue("return type must be specified".to_string()).into(),
         )

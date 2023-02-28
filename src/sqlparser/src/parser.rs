@@ -1768,7 +1768,23 @@ impl Parser {
         self.expect_token(&Token::RParen)?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
-            Some(self.parse_data_type()?)
+            if self.parse_keyword(Keyword::TABLE) {
+                self.expect_token(&Token::LParen)?;
+                let mut values = vec![];
+                loop {
+                    values.push(self.parse_table_column_def()?);
+                    let comma = self.consume_token(&Token::Comma);
+                    if self.consume_token(&Token::RParen) {
+                        // allow a trailing comma, even though it's not in standard
+                        break;
+                    } else if !comma {
+                        return self.expected("',' or ')'", self.peek_token());
+                    }
+                }
+                Some(CreateFunctionReturns::Table(values))
+            } else {
+                Some(CreateFunctionReturns::Value(self.parse_data_type()?))
+            }
         } else {
             None
         };
@@ -1780,8 +1796,15 @@ impl Parser {
             temporary,
             name,
             args,
-            return_type,
+            returns: return_type,
             params,
+        })
+    }
+
+    fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
+        Ok(TableColumnDef {
+            name: self.parse_identifier_non_reserved()?,
+            data_type: self.parse_data_type()?,
         })
     }
 
