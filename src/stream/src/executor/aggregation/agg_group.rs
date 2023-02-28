@@ -120,7 +120,7 @@ pub trait ChangesBuilder {
 impl ChangesBuilder for GlobalSimpleAgg {
     fn build_changes(
         prev_row_count: usize,
-        _curr_row_count: usize,
+        curr_row_count: usize,
         prev_outputs: Option<&OwnedRow>,
         curr_outputs: &OwnedRow,
         builders: &mut [ArrayBuilderImpl],
@@ -137,6 +137,10 @@ impl ChangesBuilder for GlobalSimpleAgg {
                 changes_builder::insert_new_outputs(curr_outputs, builders, new_ops)
             }
             Some(prev_outputs) => {
+                if prev_row_count == 0 && curr_row_count == 0 {
+                    // No rows exist.
+                    return 0;
+                }
                 changes_builder::update_outputs(prev_outputs, curr_outputs, builders, new_ops)
             }
         }
