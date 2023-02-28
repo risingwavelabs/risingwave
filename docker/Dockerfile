@@ -2,7 +2,7 @@ FROM ubuntu:22.04 as base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven git
 
 FROM base as builder
 
@@ -42,6 +42,8 @@ RUN for component in "risingwave" "compute-node" "meta-node" "frontend" "compact
 RUN cd risingwave-connector-node && mvn -B package -Dmaven.test.skip=true
 RUN tar -zxvf /risingwave/risingwave-connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
+RUN git worktree add /risingwave/ui origin/dashboard-artifact
+
 FROM ubuntu:22.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
@@ -52,5 +54,7 @@ COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
+# Set default dashboard UI to local path instead of github proxy
+ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
