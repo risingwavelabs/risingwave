@@ -22,7 +22,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
@@ -30,6 +30,7 @@ use crate::expr::{
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
     FunctionCall, InputRef,
 };
+use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Condition {
@@ -395,21 +396,37 @@ impl Condition {
 
             // analyze exprs in the group. scan_range is not updated
             for expr in group.clone() {
-                if let Some((input_ref, const_expr)) = expr.as_eq_const() &&
-                    let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
+                if let Some((input_ref, const_expr)) = expr.as_eq_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let Some(value) = const_expr.eval_row_const()? else {
-                        // column = NULL
+                    let new_expr = if let Ok(expr) = const_expr
+                        .clone()
+                        .cast_implicit(input_ref.data_type.clone())
+                    {
+                        expr
+                    } else {
+                        match self::cast_compare::cast_compare_for_eq(
+                            const_expr,
+                            input_ref.data_type,
+                        ) {
+                            Ok(ResultForEq::Success(expr)) => expr,
+                            Ok(ResultForEq::NeverEqual) => {
+                                return Ok(false_cond());
+                            }
+                            Err(_) => {
+                                other_conds.push(expr);
+                                continue;
+                            }
+                        }
+                    };
+
+                    let Some(new_cond) = new_expr.eval_row_const()? else {
+                        // column = NULL, the result is always NULL.
                         return Ok(false_cond());
                     };
-                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| if let Some(l) = l {
-                        l != value
-                    } else {
-                        true
-                    }) {
+                    if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
                         return Ok(false_cond());
                     }
-                    eq_conds = vec![Some(value)];
+                    eq_conds = vec![Some(new_cond)];
                 } else if let Some(input_ref) = expr.as_is_null() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l.is_some()) {
@@ -422,7 +439,9 @@ impl Condition {
                     for const_expr in in_const_list {
                         // The cast should succeed, because otherwise the input_ref is casted
                         // and thus `as_in_const_list` returns None.
-                        let const_expr = const_expr.cast_implicit(input_ref.data_type.clone()).unwrap();
+                        let const_expr = const_expr
+                            .cast_implicit(input_ref.data_type.clone())
+                            .unwrap();
                         let value = const_expr.eval_row_const()?;
                         let Some(value) = value else {
                             continue;
@@ -434,18 +453,55 @@ impl Condition {
                         return Ok(false_cond());
                     }
                     if !eq_conds.is_empty() {
-                        scalars = scalars.intersection(&HashSet::from_iter(eq_conds)).cloned().collect();
+                        scalars = scalars
+                            .intersection(&HashSet::from_iter(eq_conds))
+                            .cloned()
+                            .collect();
                         if scalars.is_empty() {
                             return Ok(false_cond());
                         }
                     }
                     // Sort to ensure a deterministic result for planner test.
                     eq_conds = scalars.into_iter().sorted().collect();
-                } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() &&
-                    let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
+                } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let Some(value) = const_expr.eval_row_const()? else {
-                        // column compare with NULL
+                    let new_expr = if let Ok(expr) = const_expr
+                        .clone()
+                        .cast_implicit(input_ref.data_type.clone())
+                    {
+                        expr
+                    } else {
+                        match self::cast_compare::cast_compare_for_cmp(
+                            const_expr,
+                            input_ref.data_type,
+                            op,
+                        ) {
+                            Ok(ResultForCmp::Success(expr)) => expr,
+                            Ok(ResultForCmp::OutUpperBound) => {
+                                if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual
+                                {
+                                    return Ok(false_cond());
+                                }
+                                // op == < and <= means result is always true, don't need any extra
+                                // work.
+                                continue;
+                            }
+                            Ok(ResultForCmp::OutLowerBound) => {
+                                if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
+                                    return Ok(false_cond());
+                                }
+                                // op == > and >= means result is always true, don't need any extra
+                                // work.
+                                continue;
+                            }
+                            Err(_) => {
+                                other_conds.push(expr);
+                                continue;
+                            }
+                        }
+                    };
+                    let Some(value) = new_expr.eval_row_const()? else {
+                        // column compare with NULL, the result is always  NULL.
                         return Ok(false_cond());
                     };
                     match op {
@@ -536,6 +592,20 @@ impl Condition {
                 conjunctions: other_conds,
             },
         ))
+    }
+
+    fn mutual_exclusive_with_eq_conds(
+        new_conds: &ScalarImpl,
+        eq_conds: &[Option<ScalarImpl>],
+    ) -> bool {
+        return !eq_conds.is_empty()
+            && eq_conds.iter().all(|l| {
+                if let Some(l) = l {
+                    l != new_conds
+                } else {
+                    true
+                }
+            });
     }
 
     /// Split the condition expressions into `N` groups.
@@ -674,6 +744,91 @@ impl fmt::Display for ConditionDisplay<'_> {
 impl fmt::Debug for ConditionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt(f)
+    }
+}
+
+/// `cast_compare` can be summarized as casting to target type which can be compared but can't be
+/// cast implicitly to, like:
+/// 1. bigger range -> smaller range in same type, e.g. int64 -> int32
+/// 2. different type, e.g. float type -> integral type
+mod cast_compare {
+    use risingwave_common::types::DataType;
+
+    use crate::expr::{Expr, ExprImpl, ExprType};
+
+    enum ShrinkResult {
+        OutUpperBound,
+        OutLowerBound,
+        InRange(ExprImpl),
+    }
+
+    pub enum ResultForEq {
+        Success(ExprImpl),
+        NeverEqual,
+    }
+
+    pub enum ResultForCmp {
+        Success(ExprImpl),
+        OutUpperBound,
+        OutLowerBound,
+    }
+
+    pub fn cast_compare_for_eq(const_expr: ExprImpl, target: DataType) -> Result<ResultForEq, ()> {
+        match (const_expr.return_type(), &target) {
+            (DataType::Int64, DataType::Int32)
+            | (DataType::Int64, DataType::Int16)
+            | (DataType::Int32, DataType::Int16) => match shrink_integral(const_expr, target)? {
+                ShrinkResult::InRange(expr) => Ok(ResultForEq::Success(expr)),
+                ShrinkResult::OutUpperBound | ShrinkResult::OutLowerBound => {
+                    Ok(ResultForEq::NeverEqual)
+                }
+            },
+            _ => Err(()),
+        }
+    }
+
+    pub fn cast_compare_for_cmp(
+        const_expr: ExprImpl,
+        target: DataType,
+        _op: ExprType,
+    ) -> Result<ResultForCmp, ()> {
+        match (const_expr.return_type(), &target) {
+            (DataType::Int64, DataType::Int32)
+            | (DataType::Int64, DataType::Int16)
+            | (DataType::Int32, DataType::Int16) => match shrink_integral(const_expr, target)? {
+                ShrinkResult::InRange(expr) => Ok(ResultForCmp::Success(expr)),
+                ShrinkResult::OutUpperBound => Ok(ResultForCmp::OutUpperBound),
+                ShrinkResult::OutLowerBound => Ok(ResultForCmp::OutLowerBound),
+            },
+            _ => Err(()),
+        }
+    }
+
+    fn shrink_integral(const_expr: ExprImpl, target: DataType) -> Result<ShrinkResult, ()> {
+        let (upper_bound, lower_bound) = match (const_expr.return_type(), &target) {
+            (DataType::Int64, DataType::Int32) => (i32::MAX as i64, i32::MIN as i64),
+            (DataType::Int64, DataType::Int16) | (DataType::Int32, DataType::Int16) => {
+                (i16::MAX as i64, i16::MIN as i64)
+            }
+            _ => unreachable!(),
+        };
+        match const_expr.eval_row_const().map_err(|_| ())? {
+            Some(scalar) => {
+                let value = scalar.as_integral();
+                if value > upper_bound {
+                    Ok(ShrinkResult::OutUpperBound)
+                } else if value < lower_bound {
+                    Ok(ShrinkResult::OutLowerBound)
+                } else {
+                    Ok(ShrinkResult::InRange(
+                        const_expr.cast_explicit(target).unwrap(),
+                    ))
+                }
+            }
+            None => Ok(ShrinkResult::InRange(
+                const_expr.cast_explicit(target).unwrap(),
+            )),
+        }
     }
 }
 
