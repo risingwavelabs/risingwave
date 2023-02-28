@@ -260,6 +260,38 @@ impl LogicalOptimizer {
         plan
     }
 
+    pub fn subquery_unnesting(
+        mut plan: PlanRef,
+        enable_share_plan: bool,
+        explain_trace: bool,
+        ctx: &OptimizerContextRef,
+    ) -> Result<PlanRef> {
+        // Simple Unnesting.
+        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
+        if HasMaxOneRowApply().visit(plan.clone()) {
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
+        }
+        // Predicate push down before translate apply, because we need to calculate the domain
+        // and predicate push down can reduce the size of domain.
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        // General Unnesting.
+        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
+        // join.
+        plan = if enable_share_plan {
+            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE)
+        } else {
+            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
+        };
+        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
+        if has_logical_apply(plan.clone()) {
+            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+        }
+        Ok(plan)
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -294,34 +326,9 @@ impl LogicalOptimizer {
             }
         }
 
-        // Simple Unnesting.
-        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
-
         plan = plan.optimize_by_rules(&UNION_MERGE);
 
-        // Predicate push down before translate apply, because we need to calculate the domain
-        // and predicate push down can reduce the size of domain.
-        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
-
-        // General Unnesting.
-        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
-        // join.
-        plan = if enable_share_plan {
-            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE)
-        } else {
-            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
-        };
-
-        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
+        plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
@@ -408,30 +415,9 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
-
-        // Simple Unnesting.
-        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
-
         plan = plan.optimize_by_rules(&UNION_MERGE);
 
-        // Predicate push down before translate apply, because we need to calculate the domain
-        // and predicate push down can reduce the size of domain.
-        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
-
-        // General Unnesting.
-        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
-        // join.
-        plan = plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE);
-        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
+        plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
