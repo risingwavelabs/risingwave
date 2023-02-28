@@ -200,6 +200,10 @@ impl DatabaseManager {
         self.tables.values().cloned().collect_vec()
     }
 
+    pub fn get_table(&self, table_id: TableId) -> Option<&Table> {
+        self.tables.get(&table_id)
+    }
+
     pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()

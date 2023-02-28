@@ -93,6 +93,7 @@ pub async fn handle_create_as(
             None,
             vec![],
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
+            vec![],        // No watermark should be defined in for `CREATE TABLE AS`
             Some(col_id_gen.into_version()),
         )?;
         let mut graph = build_graph(plan);

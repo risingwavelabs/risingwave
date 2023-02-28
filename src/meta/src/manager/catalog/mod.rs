@@ -21,7 +21,7 @@ use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
@@ -1434,6 +1434,83 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
+    }
+
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    pub async fn start_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_database_id(table.database_id)?;
+        database_core.ensure_schema_id(table.schema_id)?;
+
+        assert!(table.dependent_relations.is_empty());
+
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        let original_table = database_core
+            .get_table(table.id)
+            .context("table to alter must exist")?;
+
+        // Check whether the frontend is operating on the latest version of the table.
+        if table.get_version()?.version != original_table.get_version()?.version + 1 {
+            bail!("table version is stale");
+        }
+
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        // occur after it's created. We may need to add a new tracker for `alter` procedure.
+        if database_core.has_in_progress_creation(&key) {
+            bail!("table is in altering procedure");
+        } else {
+            database_core.mark_creating(&key);
+            Ok(())
+        }
+    }
+
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    pub async fn finish_replace_table_procedure(
+        &self,
+        table: &Table,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        assert!(
+            tables.contains_key(&table.id)
+                && database_core.in_progress_creation_tracker.contains(&key),
+            "table must exist and be in altering procedure"
+        );
+
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        database_core.in_progress_creation_tracker.remove(&key);
+
+        tables.insert(table.id, table.clone());
+        commit_meta!(self, tables)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
+            .await;
+
+        Ok(version)
+    }
+
+    /// This is used for `ALTER TABLE ADD/DROP COLUMN`.
+    pub async fn cancel_replace_table_procedure(&self, table: &Table) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+
+        assert!(table.dependent_relations.is_empty());
+
+        assert!(
+            database_core.tables.contains_key(&table.id)
+                && database_core.has_in_progress_creation(&key),
+            "table must exist and must be in altering procedure"
+        );
+
+        // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
+        // occur after it's created. We may need to add a new tracker for `alter` procedure.s
+        database_core.unmark_creating(&key);
+        Ok(())
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {

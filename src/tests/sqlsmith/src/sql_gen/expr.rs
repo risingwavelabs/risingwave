@@ -78,7 +78,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     let ty = column.data_type;
                     let expr = self.gen_simple_scalar(&ty); // WORKAROUND
                     let in_subquery_expr = Expr::InSubquery {
-                        expr: Box::new(expr),
+                        expr: Box::new(Expr::Nested(Box::new(expr))),
                         subquery: Box::new(query),
                         negated: self.flip_coin(),
                     };
