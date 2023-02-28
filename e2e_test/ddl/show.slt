@@ -90,7 +90,7 @@ show sources;
 query TT
 show create table t3;
 ----
-public.t3 CREATE TABLE t3 (v1 INT, v2 INT, v3 INT) append only
+public.t3 CREATE TABLE t3 (v1 INT, v2 INT, v3 INT) APPEND ONLY
 
 query TT
 show create materialized view mv3;
