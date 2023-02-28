@@ -406,7 +406,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -448,6 +448,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             vec![2],
             1,
         )
