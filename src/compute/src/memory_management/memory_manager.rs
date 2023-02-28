@@ -103,6 +103,7 @@ impl GlobalMemoryManager {
     ) {
         use std::time::Duration;
 
+        use pretty_bytes::converter::convert;
         use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
         let total_batch_memory_bytes =
@@ -115,6 +116,12 @@ impl GlobalMemoryManager {
             (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
         let stream_memory_threshold_aggressive =
             (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE) as usize;
+
+        tracing::info!(
+            "Total memory for batch tasks: {}, total memory for streaming tasks: {}",
+            convert(total_batch_memory_bytes as f64),
+            convert(total_stream_memory_bytes as f64)
+        );
 
         let mut watermark_time_ms = Epoch::physical_now();
         let mut last_stream_used_memory_bytes = 0;
@@ -144,7 +151,7 @@ impl GlobalMemoryManager {
             // TODO(Yuanxin): comment
             let batch_used_memory_bytes = batch_manager.total_mem_usage();
             if batch_used_memory_bytes > batch_memory_threshold {
-                batch_manager.kill_queries();
+                batch_manager.kill_queries("excessive batch memory usage".to_string());
             }
 
             // TODO(Yuanxin): Rewrite the comment.

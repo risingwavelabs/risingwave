@@ -234,7 +234,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
     let compute_memory_bytes =
-        (opts.total_memory_bytes - storage_memory_bytes - SYSTEM_RESERVED_MEMORY_MB) << 20;
+        opts.total_memory_bytes - storage_memory_bytes - (SYSTEM_RESERVED_MEMORY_MB << 20);
     let mgr = GlobalMemoryManager::new(
         compute_memory_bytes,
         system_params.barrier_interval_ms(),
