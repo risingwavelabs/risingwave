@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::catalog::ConflictBehavior;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
@@ -41,7 +42,19 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .collect();
 
         let table = node.get_table()?;
-        let handle_pk_conflict = node.get_handle_pk_conflict();
+
+        let conflict_behavior = match table.handle_pk_conflict_behavior() {
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheckUnspecified => {
+                ConflictBehavior::NoCheck
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
+                ConflictBehavior::OverWrite
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
+                ConflictBehavior::IgnoreConflict
+            }
+        };
+
         let executor = MaterializeExecutor::new(
             input,
             store,
@@ -51,7 +64,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.vnode_bitmap.map(Arc::new),
             table,
             stream.get_watermark_epoch(),
-            handle_pk_conflict,
+            conflict_behavior,
         )
         .await;
 
@@ -85,7 +98,17 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let handle_pk_conflict = node.get_handle_pk_conflict();
+        let conflict_behavior = match table.handle_pk_conflict_behavior() {
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheckUnspecified => {
+                ConflictBehavior::NoCheck
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
+                ConflictBehavior::OverWrite
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
+                ConflictBehavior::IgnoreConflict
+            }
+        };
         let executor = MaterializeExecutor::new(
             input,
             store,
@@ -95,7 +118,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             stream.get_watermark_epoch(),
-            handle_pk_conflict,
+            conflict_behavior,
         )
         .await;
 
