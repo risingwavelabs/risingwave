@@ -2511,14 +2511,14 @@
         └─LogicalProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr2] }
           └─LogicalScan { table: lineitem, output_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount], required_columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < ('1993-01-01':Date + '3 mons':Interval)) }
   stream_plan: |
-    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum($expr130)))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum($expr130)))], pk_conflict: "no check" }
+    StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum($expr80)))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum($expr80)))], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: sum($expr1) = max(max(sum($expr1))), output: all }
       ├─StreamExchange { dist: HashShard(sum($expr1)) }
       | └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr1), lineitem.l_suppkey] }
       |   ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
       |   | └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
       |   └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-      |     └─StreamShare { id = 1231 }
+      |     └─StreamShare { id = 820 }
       |       └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
       |         └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr1)] }
       |           └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
@@ -2532,7 +2532,7 @@
               └─StreamHashAgg { group_key: [$expr2], aggs: [count, max(sum($expr1))] }
                 └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1), Vnode(lineitem.l_suppkey) as $expr2] }
                   └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
-                    └─StreamShare { id = 1231 }
+                    └─StreamShare { id = 820 }
                       └─StreamProject { exprs: [lineitem.l_suppkey, sum($expr1)] }
                         └─StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr1)] }
                           └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
@@ -2541,18 +2541,18 @@
                                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum($expr130)))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum($expr130)))], pk_conflict: "no check" }
+      StreamMaterialize { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey(hidden), max(max(sum($expr80)))(hidden)], pk_columns: [s_suppkey, lineitem.l_suppkey, total_revenue, max(max(sum($expr80)))], pk_conflict: "no check" }
           materialized table: 4294967294
-        StreamHashJoin { type: Inner, predicate: sum($expr130) = max(max(sum($expr130))), output: all }
+        StreamHashJoin { type: Inner, predicate: sum($expr80) = max(max(sum($expr80))), output: all }
             left table: 0, right table 2, left degree table: 1, right degree table: 3,
           StreamExchange Hash([4]) from 1
           StreamExchange Hash([0]) from 5
 
     Fragment 1
-      StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr130), lineitem.l_suppkey] }
+      StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone, sum($expr80), lineitem.l_suppkey] }
           left table: 4, right table 6, left degree table: 5, right degree table: 7,
         StreamExchange Hash([0]) from 2
-        StreamProject { exprs: [lineitem.l_suppkey, sum($expr130)] }
+        StreamProject { exprs: [lineitem.l_suppkey, sum($expr80)] }
           StreamExchange Hash([0]) from 3
 
     Fragment 2
@@ -2561,45 +2561,45 @@
         BatchPlanNode
 
     Fragment 3
-      StreamProject { exprs: [lineitem.l_suppkey, sum($expr136)] }
-        StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr136)] }
+      StreamProject { exprs: [lineitem.l_suppkey, sum($expr86)] }
+        StreamHashAgg { group_key: [lineitem.l_suppkey], aggs: [count, sum($expr86)] }
             result table: 8, state tables: []
           StreamExchange Hash([0]) from 4
 
     Fragment 4
-      StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr136, lineitem.l_orderkey, lineitem.l_linenumber] }
+      StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr86, lineitem.l_orderkey, lineitem.l_linenumber] }
         StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < '1993-04-01 00:00:00':Timestamp) }
           Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode
 
     Fragment 5
-      StreamProject { exprs: [max(max(sum($expr130)))] }
-        StreamGlobalSimpleAgg { aggs: [count, max(max(sum($expr130)))] }
+      StreamProject { exprs: [max(max(sum($expr80)))] }
+        StreamGlobalSimpleAgg { aggs: [count, max(max(sum($expr80)))] }
             result table: 10, state tables: [9]
           StreamExchange Single from 6
 
     Fragment 6
-      StreamHashAgg { group_key: [$expr137], aggs: [count, max(sum($expr130))] }
+      StreamHashAgg { group_key: [$expr87], aggs: [count, max(sum($expr80))] }
           result table: 12, state tables: [11]
-        StreamProject { exprs: [lineitem.l_suppkey, sum($expr130), Vnode(lineitem.l_suppkey) as $expr137] }
-          StreamProject { exprs: [lineitem.l_suppkey, sum($expr130)] }
+        StreamProject { exprs: [lineitem.l_suppkey, sum($expr80), Vnode(lineitem.l_suppkey) as $expr87] }
+          StreamProject { exprs: [lineitem.l_suppkey, sum($expr80)] }
             StreamExchange Hash([0]) from 3
 
-     Table 0 { columns: [supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr130), lineitem_l_suppkey], primary key: [$4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [4] }
-     Table 1 { columns: [sum($expr130), supplier_s_suppkey, lineitem_l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
-     Table 2 { columns: [max(max(sum($expr130)))], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
-     Table 3 { columns: [max(max(sum($expr130))), _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 0 { columns: [supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone, sum($expr80), lineitem_l_suppkey], primary key: [$4 ASC, $0 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [4] }
+     Table 1 { columns: [sum($expr80), supplier_s_suppkey, lineitem_l_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
+     Table 2 { columns: [max(max(sum($expr80)))], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
+     Table 3 { columns: [max(max(sum($expr80))), _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4 { columns: [supplier_s_suppkey, supplier_s_name, supplier_s_address, supplier_s_phone], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
      Table 5 { columns: [supplier_s_suppkey, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 6 { columns: [lineitem_l_suppkey, sum($expr130)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 6 { columns: [lineitem_l_suppkey, sum($expr80)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 7 { columns: [lineitem_l_suppkey, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 8 { columns: [lineitem_l_suppkey, count, sum($expr136)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 9 { columns: [max(sum($expr130)), $expr137], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 10 { columns: [count, max(max(sum($expr130)))], primary key: [], value indices: [0, 1], distribution key: [] }
-     Table 11 { columns: [$expr137, sum($expr130), lineitem_l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 12 { columns: [$expr137, count, max(sum($expr130))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
-     Table 4294967294 { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey, max(max(sum($expr130)))], primary key: [$0 ASC, $5 ASC, $4 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [4] }
+     Table 8 { columns: [lineitem_l_suppkey, count, sum($expr86)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 9 { columns: [max(sum($expr80)), $expr87], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 10 { columns: [count, max(max(sum($expr80)))], primary key: [], value indices: [0, 1], distribution key: [] }
+     Table 11 { columns: [$expr87, sum($expr80), lineitem_l_suppkey], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 12 { columns: [$expr87, count, max(sum($expr80))], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
+     Table 4294967294 { columns: [s_suppkey, s_name, s_address, s_phone, total_revenue, lineitem.l_suppkey, max(max(sum($expr80)))], primary key: [$0 ASC, $5 ASC, $4 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [4] }
 - id: tpch_q16
   before:
   - create_tables
