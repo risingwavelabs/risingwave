@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockSstableId};
@@ -98,21 +98,10 @@ impl LevelHandler {
             .sum::<u64>()
     }
 
-    pub fn get_pending_next_level_file(&self) -> HashSet<u64> {
-        let mut pending_files = HashSet::default();
-        for t in &self.pending_tasks {
-            if t.target_level == self.level {
-                continue;
-            }
-            pending_files.extend(t.ssts.iter());
-        }
-        pending_files
-    }
-
-    pub fn get_pending_next_level_file_size(&self) -> u64 {
+    pub fn get_pending_output_file_size(&self, target_level: u32) -> u64 {
         self.pending_tasks
             .iter()
-            .filter(|task| task.target_level != self.level)
+            .filter(|task| task.target_level == target_level)
             .map(|task| task.total_file_size)
             .sum::<u64>()
     }

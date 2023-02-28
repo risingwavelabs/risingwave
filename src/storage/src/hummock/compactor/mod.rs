@@ -327,19 +327,6 @@ impl Compactor {
         }
     }
 
-    pub fn pre_process_task(_task: &mut Task, _workload: &CompactorWorkload) -> bool {
-        // TODO: enable task reject by workload
-        // const CPU_THRESHOLD: u32 = 85;
-        // if let Task::CompactTask(compact_task) = task {
-        //     if workload.cpu > CPU_THRESHOLD && compact_task.input_ssts[0].level_idx != 0 {
-        //         compact_task.set_task_status(TaskStatus::ManualCanceled);
-        //         return false;
-        //     }
-        // }
-
-        true
-    }
-
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
     #[cfg_attr(coverage, no_coverage)]
@@ -441,12 +428,7 @@ impl Compactor {
                     match message {
                         Some(Ok(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
-                                Some(mut task) => {
-                                    if !Self::pre_process_task(&mut task, &last_workload) {
-                                        tokio::time::sleep(Duration::from_secs(1)).await;
-                                    }
-                                    task
-                                }
+                                Some(task) => task,
                                 None => continue 'consume_stream,
                             };
 
@@ -457,38 +439,11 @@ impl Compactor {
                             executor.spawn(async move {
                             match task {
                                 Task::CompactTask(compact_task) => {
-                                    if matches!(
-                                        compact_task.task_status(),
-                                        TaskStatus::ManualCanceled
-                                    ) {
-                                        let table_stats_map = TableStatsMap::default();
-                                        if let Err(e) = meta_client
-                                            .report_compaction_task(
-                                                compact_task.clone(),
-                                                table_stats_map,
-                                            )
-                                            .await
-                                        {
-                                            tracing::warn!(
-                                                "Failed to cancel compaction task: {}, error: {} last_cpu {}",
-                                                compact_task.task_id,
-                                                e,
-                                                last_workload.cpu
-                                             );
-                                        } else {
-                                            tracing::debug!(
-                                                "ManualCancel by cpu {} compaction task: {}",
-                                                last_workload.cpu,
-                                                compact_task.task_id,
-                                            );
-                                        }
-                                    } else {
-                                        let (tx, rx) = tokio::sync::oneshot::channel();
-                                        let task_id = compact_task.task_id;
-                                        shutdown.lock().unwrap().insert(task_id, tx);
-                                        Compactor::compact(context, compact_task, rx).await;
-                                        shutdown.lock().unwrap().remove(&task_id);
-                                    }
+                                    let (tx, rx) = tokio::sync::oneshot::channel();
+                                    let task_id = compact_task.task_id;
+                                    shutdown.lock().unwrap().insert(task_id, tx);
+                                    Compactor::compact(context, compact_task, rx).await;
+                                    shutdown.lock().unwrap().remove(&task_id);
                                 }
                                     Task::VacuumTask(vacuum_task) => {
                                         Vacuum::vacuum(

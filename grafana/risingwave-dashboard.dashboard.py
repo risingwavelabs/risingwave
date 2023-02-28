@@ -271,7 +271,6 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            unit="ns",
             fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
