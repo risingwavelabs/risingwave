@@ -392,7 +392,7 @@
     └─LogicalAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
       └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   batch_plan: |
@@ -409,7 +409,7 @@
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
       └─LogicalProject { exprs: [t.v1, t.v3, t.v2] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr1] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
@@ -436,7 +436,7 @@
     └─LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.v1] }
     └─LogicalProject { exprs: [t.v1, t.v1] }
       └─LogicalAgg { group_key: [t.v1], aggs: [] }
@@ -456,7 +456,7 @@
     └─LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
       └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
     └─LogicalProject { exprs: [t.v3, t.v2, t.v2, min(t.v1), max(t.v1)] }
       └─LogicalAgg { group_key: [t.v3, t.v2], aggs: [min(t.v1), max(t.v1)] }
@@ -476,7 +476,7 @@
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
@@ -495,7 +495,7 @@
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
@@ -514,7 +514,7 @@
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
@@ -533,7 +533,7 @@
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
@@ -552,7 +552,7 @@
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
@@ -571,7 +571,7 @@
     └─LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
@@ -592,7 +592,7 @@
     └─LogicalAgg { aggs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
       └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
@@ -605,7 +605,7 @@
     └─LogicalAgg { aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
       └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
@@ -627,7 +627,7 @@
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.b, t.a] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
@@ -646,7 +646,7 @@
     └─LogicalAgg { aggs: [count filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.a, t.b] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count filter((t.a > t.b))] }
     └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |
@@ -700,7 +700,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 0:Int64)), sum(t.c) filter((count filter((t.c < 100:Int32)) > 0:Int64) AND (flag = 1:Int64))] }
     └─LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [count filter((t.c < 100:Int32))] }
       └─LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
@@ -709,7 +709,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c))] }
     └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
       └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
@@ -730,7 +730,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, count(distinct c) as distinct_c_sum, sum(c) as sum_c from t group by a;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), count(t.c) filter((flag = 0:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
     └─LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [sum(t.c)] }
       └─LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
@@ -753,7 +753,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
     └─LogicalAgg { group_key: [t.a, t.b], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
       └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
@@ -774,7 +774,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c) filter((t.b < 100:Int32)))] }
     └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
       └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
@@ -787,7 +787,7 @@
     └─LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
       └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
         └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
     └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
       └─LogicalScan { table: t, columns: [t.a, t.b] }
@@ -806,7 +806,7 @@
 - sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(t.v1)] }
     └─LogicalAgg { group_key: [t.v1], aggs: [] }
       └─LogicalScan { table: t, columns: [t.v1] }
@@ -829,7 +829,7 @@
   sql: |
     create table t(x int, y int);
     select count(x), sum(distinct y), sum(distinct y) from t;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
     └─LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y)] }
       └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
@@ -837,14 +837,14 @@
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [sum0(count(t.y)), sum(t.y)] }
     └─LogicalAgg { group_key: [t.y], aggs: [count(t.y)] }
       └─LogicalScan { table: t, columns: [t.y] }
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [count(t.x) filter((flag = 0:Int64)), sum(t.y) filter((flag = 1:Int64))] }
     └─LogicalAgg { group_key: [t.x, t.y, flag], aggs: [] }
       └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
@@ -859,7 +859,7 @@
   sql: |
     create table t(x int, y int);
     select max(distinct x), min(distinct y) from t;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { aggs: [max(t.x), min(t.y)] }
     └─LogicalScan { table: t, columns: [t.x, t.y] }
 - name: agg filter - subquery

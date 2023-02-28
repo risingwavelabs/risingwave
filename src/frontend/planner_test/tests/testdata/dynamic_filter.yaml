@@ -8,7 +8,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: (t1.v1 > max(t2.v2)), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
@@ -31,7 +31,7 @@
   - create_tables
   sql: |
     with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2] }
@@ -49,7 +49,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 + v1 > max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: ($expr1 > max(t2.v2)), output: [t1.v1] }
     ├─LogicalProject { exprs: [t1.v1, (t1.v1 + t1.v1) as $expr1] }
     | └─LogicalScan { table: t1, columns: [t1.v1] }
@@ -73,7 +73,7 @@
   - create_tables
   sql: |
     with max_v2 as (select v2 max from t2 order by v2 desc limit 2) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2] }
@@ -89,7 +89,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 > max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: (t1.v1 > max(t2.v2)), output: all }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
@@ -103,7 +103,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 = max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: (t1.v1 = max(t2.v2)), output: all }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalAgg { aggs: [max(t2.v2)] }
@@ -125,7 +125,7 @@
     create table t1 (v1 int);
     create table t2 (v2 bigint);
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: ($expr1 > max(t2.v2)), output: [t1.v1] }
     ├─LogicalProject { exprs: [t1.v1, t1.v1::Int64 as $expr1] }
     | └─LogicalScan { table: t1, columns: [t1.v1] }
@@ -165,7 +165,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > 2 * max;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_stream: |
     LogicalJoin { type: Inner, on: (t1.v1 > $expr1), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [(2:Int32 * max(t2.v2)) as $expr1] }
