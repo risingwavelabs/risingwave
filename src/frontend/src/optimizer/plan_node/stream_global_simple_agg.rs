@@ -15,7 +15,6 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -34,7 +33,12 @@ pub struct StreamGlobalSimpleAgg {
 }
 
 impl StreamGlobalSimpleAgg {
-    pub fn new(mut logical: LogicalAgg) -> Self {
+    pub fn new(logical: LogicalAgg, row_count_idx: usize) -> Self {
+        debug_assert_eq!(
+            logical.agg_calls()[row_count_idx],
+            PlanAggCall::count_star()
+        );
+
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let schema = logical.schema().clone();
@@ -48,23 +52,6 @@ impl StreamGlobalSimpleAgg {
         // Empty because watermark column(s) must be in group key and global simple agg have no
         // group key.
         let watermark_columns = FixedBitSet::with_capacity(schema.len());
-
-        // Simple agg executor requires a `count(*)` to correctly build changes, so append a
-        // `count(*)` if not exists.
-        let count_star = PlanAggCall::count_star();
-        let row_count_idx = if let Some((idx, _)) = logical
-            .agg_calls()
-            .iter()
-            .find_position(|&c| c == &count_star)
-        {
-            idx
-        } else {
-            let (mut agg_calls, group_key, input) = logical.decompose();
-            let idx = agg_calls.len();
-            agg_calls.push(count_star);
-            logical = LogicalAgg::new(agg_calls, group_key, input);
-            idx
-        };
 
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
@@ -107,7 +94,7 @@ impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(self.logical.clone_with_input(input), self.row_count_idx)
     }
 }
 impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
@@ -170,6 +157,7 @@ impl ExprRewritable for StreamGlobalSimpleAgg {
                 .as_logical_agg()
                 .unwrap()
                 .clone(),
+            self.row_count_idx,
         )
         .into()
     }

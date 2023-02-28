@@ -15,7 +15,6 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -39,7 +38,12 @@ pub struct StreamHashAgg {
 }
 
 impl StreamHashAgg {
-    pub fn new(mut logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
+    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>, row_count_idx: usize) -> Self {
+        debug_assert_eq!(
+            logical.agg_calls()[row_count_idx],
+            PlanAggCall::count_star()
+        );
+
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let schema = logical.schema().clone();
@@ -59,23 +63,6 @@ impl StreamHashAgg {
                 watermark_columns.insert(idx);
             }
         }
-
-        // Hash agg executor requires a `count(*)` to correctly build changes, so append a
-        // `count(*)` if not exists.
-        let count_star = PlanAggCall::count_star();
-        let row_count_idx = if let Some((idx, _)) = logical
-            .agg_calls()
-            .iter()
-            .find_position(|&c| c == &count_star)
-        {
-            idx
-        } else {
-            let (mut agg_calls, group_key, input) = logical.decompose();
-            let idx = agg_calls.len();
-            agg_calls.push(count_star);
-            logical = LogicalAgg::new(agg_calls, group_key, input);
-            idx
-        };
 
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
@@ -124,7 +111,11 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
+        Self::new(
+            self.logical.clone_with_input(input),
+            self.vnode_col_idx,
+            self.row_count_idx,
+        )
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
@@ -183,6 +174,7 @@ impl ExprRewritable for StreamHashAgg {
                 .unwrap()
                 .clone(),
             self.vnode_col_idx,
+            self.row_count_idx,
         )
         .into()
     }
