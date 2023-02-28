@@ -77,6 +77,7 @@ pub async fn compute_node_serve(
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config));
+
     info!("Starting compute node",);
     info!("> config: {:?}", config);
     info!(
@@ -107,11 +108,10 @@ pub async fn compute_node_serve(
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
-    validate_compute_node_memory_config(
-        opts.total_memory_bytes,
-        embedded_compactor_enabled,
-        &config.storage,
-    );
+    let storage_memory_bytes =
+        total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
+
+    validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -233,8 +233,10 @@ pub async fn compute_node_serve(
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
+    let compute_memory_bytes =
+        opts.total_memory_bytes - storage_memory_bytes - (SYSTEM_RESERVED_MEMORY_MB << 20);
     let mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
+        compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
     );
@@ -349,36 +351,38 @@ pub async fn compute_node_serve(
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
 /// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
 /// for other system usage. Otherwise, it is not allowed to start.
-fn validate_compute_node_memory_config(
-    cn_total_memory_bytes: usize,
-    embedded_compactor_enabled: bool,
-    storage_config: &StorageConfig,
-) {
-    let storage_memory_mb = {
-        let total_memory = storage_config.block_cache_capacity_mb
-            + storage_config.meta_cache_capacity_mb
-            + storage_config.shared_buffer_capacity_mb
-            + storage_config.file_cache.total_buffer_capacity_mb;
-        if embedded_compactor_enabled {
-            total_memory + storage_config.compactor_memory_limit_mb
-        } else {
-            total_memory
-        }
-    };
-    if storage_memory_mb << 20 > cn_total_memory_bytes {
+fn validate_compute_node_memory_config(cn_total_memory_bytes: usize, storage_memory_bytes: usize) {
+    if storage_memory_bytes > cn_total_memory_bytes {
         panic!(
-            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GiB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
             convert(cn_total_memory_bytes as _),
-            convert((storage_memory_mb << 20) as _)
+            convert(storage_memory_bytes as _)
         );
-    } else if (storage_memory_mb + MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20
+    } else if storage_memory_bytes + ((MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20)
         >= cn_total_memory_bytes
     {
         panic!(
-            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GiB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
             convert(cn_total_memory_bytes as _),
-            convert((storage_memory_mb << 20) as _)
+            convert(storage_memory_bytes as _)
         );
+    }
+}
+
+/// The maximal memory that storage components may use based on the configurations in bytes. Note
+/// that this is the total storage memory for one compute node instead of the whole cluster.
+fn total_storage_memory_limit_bytes(
+    storage_config: &StorageConfig,
+    embedded_compactor_enabled: bool,
+) -> usize {
+    let total_memory = storage_config.block_cache_capacity_mb
+        + storage_config.meta_cache_capacity_mb
+        + storage_config.shared_buffer_capacity_mb
+        + storage_config.file_cache.total_buffer_capacity_mb;
+    if embedded_compactor_enabled {
+        (total_memory + storage_config.compactor_memory_limit_mb) << 20
+    } else {
+        total_memory << 20
     }
 }
 

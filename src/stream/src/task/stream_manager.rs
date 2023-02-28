@@ -365,8 +365,8 @@ impl LocalStreamManager {
         guard.watermark_epoch = watermark_epoch;
     }
 
-    pub fn get_total_mem_val(&self) -> Arc<TrAdder<i64>> {
-        self.total_mem_val.clone()
+    pub fn total_mem_usage(&self) -> usize {
+        self.total_mem_val.get() as usize
     }
 }
 
