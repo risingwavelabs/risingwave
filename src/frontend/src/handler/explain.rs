@@ -29,7 +29,7 @@ use super::create_table::{
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::Convention;
+use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
@@ -68,6 +68,7 @@ pub async fn handle_explain(
                 columns,
                 constraints,
                 source_schema,
+                source_watermarks,
                 ..
             } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
                 Some(s) => {
@@ -77,6 +78,7 @@ pub async fn handle_explain(
                         columns,
                         constraints,
                         s,
+                        source_watermarks,
                         ColumnIdGenerator::new_initial(),
                     )
                     .await?
@@ -89,6 +91,7 @@ pub async fn handle_explain(
                         columns,
                         constraints,
                         ColumnIdGenerator::new_initial(),
+                        source_watermarks,
                     )?
                     .0
                 }

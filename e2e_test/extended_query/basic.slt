@@ -25,6 +25,11 @@ create materialized view mv1 as select sum(v) as sum_v1 from t;
 statement ok
 insert into t (v) values (1);
 
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT)
+
 query I
 select * from t;
 ----

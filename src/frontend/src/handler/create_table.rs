@@ -19,15 +19,18 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableVersionId, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
+    USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
+    WatermarkDesc,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, TableConstraint,
+    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
+    TableConstraint,
 };
 
 use super::create_source::resolve_source_schema;
@@ -35,7 +38,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::handler::create_source::{bind_source_watermark, UPSTREAM_SOURCE_KEY};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -284,22 +287,32 @@ pub(crate) async fn gen_create_table_plan_with_source(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     source_schema: SourceSchema,
+    source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = context.with_options().inner();
+    let properties = context.with_options().inner().clone().into_iter().collect();
 
-    let (mut columns, pk_column_ids, row_id_index) =
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
+    // TODO(yuhao): allow multiple watermark on source.
+    assert!(watermark_descs.len() <= 1);
 
     let definition = context.normalized_sql().to_owned();
 
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        properties,
-        row_id_index,
-        &pk_column_ids,
+        &properties,
+        &mut row_id_index,
+        &mut pk_column_ids,
         true,
     )
     .await?;
@@ -312,6 +325,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         row_id_index,
         Some(source_info),
         definition,
+        watermark_descs,
         Some(col_id_gen.into_version()),
     )
 }
@@ -324,9 +338,11 @@ pub(crate) fn gen_create_table_plan(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
+    source_watermarks: Vec<SourceWatermark>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
+
     gen_create_table_plan_without_bind(
         context,
         table_name,
@@ -334,6 +350,7 @@ pub(crate) fn gen_create_table_plan(
         pk_column_id_from_columns,
         constraints,
         definition,
+        source_watermarks,
         Some(col_id_gen.into_version()),
     )
 }
@@ -346,10 +363,18 @@ pub(crate) fn gen_create_table_plan_without_bind(
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
     definition: String,
+    source_watermarks: Vec<SourceWatermark>,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
 
     gen_table_plan_inner(
         context.into(),
@@ -359,6 +384,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         row_id_index,
         None,
         definition,
+        watermark_descs,
         version,
     )
 }
@@ -372,6 +398,7 @@ fn gen_table_plan_inner(
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
     definition: String,
+    watermark_descs: Vec<WatermarkDesc>,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
@@ -381,7 +408,7 @@ fn gen_table_plan_inner(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let source = source_info.map(|source_info| ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name: name.clone(),
@@ -391,10 +418,10 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: context.with_options().inner().clone(),
+        properties: context.with_options().inner().clone().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
-        watermark_descs: vec![],
+        watermark_descs: watermark_descs.clone(),
     });
 
     let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
@@ -407,6 +434,7 @@ fn gen_table_plan_inner(
         pk_column_ids,
         row_id_index,
         false,
+        true,
         context.clone(),
     )
     .into();
@@ -437,12 +465,21 @@ fn gen_table_plan_inner(
         .into());
     }
 
+    if !append_only && !watermark_descs.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "Defining watermarks on table requires the table to be append only.".to_owned(),
+            "Set the option `appendonly=true`".to_owned(),
+        )
+        .into());
+    }
+
     let materialize = plan_root.gen_table_plan(
         name,
         columns,
         definition,
         row_id_index,
         append_only,
+        watermark_descs,
         version,
     )?;
 
@@ -459,6 +496,7 @@ pub async fn handle_create_table(
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
     source_schema: Option<SourceSchema>,
+    source_watermarks: Vec<SourceWatermark>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -486,6 +524,7 @@ pub async fn handle_create_table(
                     columns,
                     constraints,
                     source_schema,
+                    source_watermarks,
                     col_id_gen,
                 )
                 .await?
@@ -496,6 +535,7 @@ pub async fn handle_create_table(
                 columns,
                 constraints,
                 col_id_gen,
+                source_watermarks,
             )?,
         };
         let mut graph = build_graph(plan);

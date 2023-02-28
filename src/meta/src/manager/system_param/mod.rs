@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod model;
-
+pub mod model;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -70,6 +69,14 @@ impl<S: MetaStore> SystemParamManager<S> {
         self.env.meta_store().txn(store_txn).await?;
 
         mem_txn.commit();
+
+        // Sync params to other managers on the meta node only once, since it's infallible.
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(super::LocalNotification::SystemParamsChange(
+                params.clone().into(),
+            ))
+            .await;
 
         Ok(())
     }

@@ -27,8 +27,7 @@ use risingwave_storage::hummock::compactor::{
     Compactor, ConcatSstableIterator, DummyCompactionFilter, TaskConfig,
 };
 use risingwave_storage::hummock::iterator::{
-    ConcatIterator, Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator,
-    UnorderedMergeIteratorInner,
+    ConcatIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
@@ -215,18 +214,10 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
-                HummockIteratorUnion::First(ConcatIterator::new(
-                    level1.clone(),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                )),
-                HummockIteratorUnion::First(ConcatIterator::new(
-                    level2.clone(),
-                    sstable_store.clone(),
-                    read_options.clone(),
-                )),
+                ConcatIterator::new(level1.clone(), sstable_store.clone(), read_options.clone()),
+                ConcatIterator::new(level2.clone(), sstable_store.clone(), read_options.clone()),
             ];
-            let iter = MultiSstIterator::for_compactor(sub_iters);
+            let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
             async move { compact(iter, sstable_store1).await }
         });
     });

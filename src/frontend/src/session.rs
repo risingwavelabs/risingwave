@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-// use tokio::sync::Mutex;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
@@ -70,7 +69,9 @@ use crate::planner::Planner;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::SchedulerError::QueryCancelError;
-use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::scheduler::{
+    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
+};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -130,6 +131,8 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
+            Arc::new(DistributedQueryMetrics::for_test()),
+            None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
@@ -204,6 +207,9 @@ impl FrontendEnv {
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
+        let registry = prometheus::Registry::new();
+        monitor_process(&registry).unwrap();
+
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
@@ -214,6 +220,8 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
+            Arc::new(DistributedQueryMetrics::new(registry.clone())),
+            batch_config.distributed_query_limit,
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -241,8 +249,6 @@ impl FrontendEnv {
 
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
-        let registry = prometheus::Registry::new();
-        monitor_process(&registry).unwrap();
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
@@ -802,6 +808,20 @@ impl Session<PgResponseStream> for SessionImpl {
                     )]
                 }
             },
+            Statement::ShowCreateObject { .. } => {
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Create Sql".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                ]
+            }
             Statement::ShowVariable { variable } => {
                 let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {

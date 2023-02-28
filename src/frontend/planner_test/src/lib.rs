@@ -32,8 +32,8 @@ use risingwave_frontend::handler::{
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
-    PlanRef, Planner,
+    build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
+    OptimizerContextRef, PlanRef, Planner,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -362,6 +362,7 @@ impl TestCase {
                     constraints,
                     if_not_exists,
                     source_schema,
+                    source_watermarks,
                     ..
                 } => {
                     create_table::handle_create_table(
@@ -371,6 +372,7 @@ impl TestCase {
                         constraints,
                         if_not_exists,
                         source_schema,
+                        source_watermarks,
                     )
                     .await?;
                 }
@@ -502,7 +504,9 @@ impl TestCase {
         };
 
         if self.optimized_logical_plan.is_some() || self.optimizer_error.is_some() {
-            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan() {
+            // TODO: separate `optimized_logical_plan` into `optimized_logical_plan_for_batch` and
+            // `optimized_logical_plan_for_stream`
+            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan_for_batch() {
                 Ok(optimized_logical_plan) => optimized_logical_plan,
                 Err(err) => {
                     ret.optimizer_error = Some(err.to_string());

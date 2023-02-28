@@ -8,6 +8,7 @@ export const WorkerType = {
   COMPUTE_NODE: "COMPUTE_NODE",
   RISE_CTL: "RISE_CTL",
   COMPACTOR: "COMPACTOR",
+  META: "META",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -30,6 +31,9 @@ export function workerTypeFromJSON(object: any): WorkerType {
     case 4:
     case "COMPACTOR":
       return WorkerType.COMPACTOR;
+    case 5:
+    case "META":
+      return WorkerType.META;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -49,6 +53,8 @@ export function workerTypeToJSON(object: WorkerType): string {
       return "RISE_CTL";
     case WorkerType.COMPACTOR:
       return "COMPACTOR";
+    case WorkerType.META:
+      return "META";
     case WorkerType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

@@ -23,7 +23,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
     pub base: PlanBase,
     input: PlanRef,
@@ -83,10 +83,11 @@ impl StreamNode for StreamExchange {
                     Distribution::Broadcast => DispatcherType::Broadcast,
                     _ => panic!("Do not allow Any or AnyShard in serialization process"),
                 } as i32,
-                column_indices: match &self.base.dist {
+                dist_key_indices: match &self.base.dist {
                     Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
                     _ => vec![],
                 },
+                output_indices: (0..self.schema().len() as u32).collect(),
             }),
         })
     }

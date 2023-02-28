@@ -158,6 +158,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -171,6 +172,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         let levels = Levels {
@@ -235,6 +237,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -245,6 +248,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         let levels = Levels {

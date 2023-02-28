@@ -26,6 +26,8 @@ use crate::HummockEpoch;
 
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
+// Max length for key overlap and diff length. See KeyPrefix::encode.
+pub const MAX_KEY_LEN: usize = u16::MAX as usize;
 
 pub type TableKeyRange = (Bound<TableKey<Vec<u8>>>, Bound<TableKey<Vec<u8>>>);
 pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);

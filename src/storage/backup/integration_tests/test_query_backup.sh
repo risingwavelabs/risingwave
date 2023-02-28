@@ -69,48 +69,35 @@ done
 echo "safe epoch after compaction: ${safe_epoch}"
 
 echo "QUERY_EPOCH=safe_epoch. It should fail because it's not covered by any backup"
-result=$(
-execute_sql "
-SET QUERY_EPOCH TO ${safe_epoch};
-select * from t1;
-" | grep "Read backup error backup include epoch ${safe_epoch} not found"
-)
-[ -n "${result}" ]
+execute_sql_and_expect \
+"SET QUERY_EPOCH TO ${safe_epoch};
+select * from t1;" \
+"Read backup error backup include epoch ${safe_epoch} not found"
 
 echo "QUERY_EPOCH=0 aka disabling query backup"
-result=$(
-execute_sql "
-SET QUERY_EPOCH TO 0;
-select * from t1;
-" | grep "1 row"
-)
-[ -n "${result}" ]
+execute_sql_and_expect \
+"SET QUERY_EPOCH TO 0;
+select * from t1;" \
+"1 row"
 
 echo "QUERY_EPOCH=backup_safe_epoch + 1, it's < safe_epoch but covered by backup"
 [ $((backup_safe_epoch + 1)) -eq 1 ]
-result=$(
-execute_sql "
-SET QUERY_EPOCH TO $((backup_safe_epoch + 1));
-select * from t1;
-" | grep "0 row"
-)
-[ -n "${result}" ]
+execute_sql_and_expect \
+"SET QUERY_EPOCH TO $((backup_safe_epoch + 1));
+select * from t1;" \
+"0 row"
 
 echo "QUERY_EPOCH=backup_mce < safe_epoch, it's < safe_epoch but covered by backup"
-result=$(
-execute_sql "
-SET QUERY_EPOCH TO $((backup_mce));
-select * from t1;
-" | grep "3 row"
-)
-[ -n "${result}" ]
+execute_sql_and_expect \
+"SET QUERY_EPOCH TO ${backup_mce};
+select * from t1;" \
+"3 row"
 
 echo "QUERY_EPOCH=future epoch. It should fail because it's not covered by any backup"
 future_epoch=18446744073709551615
-result=$(
-execute_sql "
-SET QUERY_EPOCH TO ${future_epoch};
-select * from t1;
-" | grep "Read backup error backup include epoch ${future_epoch} not found"
-)
-[ -n "${result}" ]
+execute_sql_and_expect \
+"SET QUERY_EPOCH TO ${future_epoch};
+select * from t1;" \
+"Read backup error backup include epoch ${future_epoch} not found"
+
+echo "test succeeded"

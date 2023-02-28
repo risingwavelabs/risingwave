@@ -123,7 +123,7 @@ impl FunctionalDependency {
 /// [`FunctionalDependencySet`] contains the functional dependencies.
 ///
 /// It is used in optimizer to track the dependencies between columns.
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Default)]
 pub struct FunctionalDependencySet {
     /// the number of columns
     column_count: usize,

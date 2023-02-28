@@ -53,7 +53,7 @@ use tokio::task::JoinHandle;
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions};
+use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_memory_use_for_compaction, generate_splits,
 };
@@ -63,8 +63,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, BloomFilterBuilder, DeleteRangeAggregator,
-    HummockError, RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, DeleteRangeAggregator, HummockError,
+    RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -155,9 +155,11 @@ impl Compactor {
 
         let need_quota = estimate_memory_use_for_compaction(&compact_task);
         tracing::info!(
-            "Ready to handle compaction task: {} need memory: {}",
+            "Ready to handle compaction task: {} need memory: {} target_level {} compression_algorithm {:?}",
             compact_task.task_id,
-            need_quota
+            need_quota,
+            compact_task.target_level,
+            compact_task.compression_algorithm,
         );
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
@@ -729,7 +731,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
-        let builder_factory = RemoteBuilderFactory::<F, BloomFilterBuilder> {
+        let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),

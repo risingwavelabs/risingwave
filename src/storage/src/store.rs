@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
@@ -239,7 +239,7 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
         todo!()
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_>;
 
     /// Validates whether store can serve `epoch` at the moment.
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
@@ -257,31 +257,48 @@ macro_rules! define_local_state_store_associated_type {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
+pub trait LocalStateStore: StaticSendSync {
+    type IterStream<'a>: StateStoreIterItemStream + 'a;
+
     type MayExistFuture<'a>: MayExistTrait<'a>;
+    type GetFuture<'a>: GetFutureTrait<'a>;
+    type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type FlushFuture<'a>: Future<Output = StorageResult<usize>> + Send + 'a;
+
+    /// Point gets a value from the state store.
+    /// The result is based on the latest written snapshot.
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
+
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on the latest written
+    /// snapshot.
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&self, _key: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-    /// Triggers a flush to persistent storage for the in-memory states.
-    fn flush(&self) -> StorageResult<usize> {
-        unimplemented!()
-    }
+    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_>;
+
+    fn epoch(&self) -> u64;
+
+    fn is_dirty(&self) -> bool;
+
+    fn init(&mut self, epoch: u64);
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn advance_write_epoch(&mut self, _new_epoch: u64) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn seal_current_epoch(&mut self, next_epoch: u64);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -330,4 +347,30 @@ pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
+}
+
+#[derive(Clone, Default)]
+pub struct NewLocalOptions {
+    pub table_id: TableId,
+    /// Whether the operation is consistent. The term `consistent` requires the following:
+    ///
+    /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
+    /// key or deleting an non-existing key is not allowed.
+    ///
+    /// 2. The old value passed from
+    /// `update` and `delete` should match the original stored value.
+    pub is_consistent_op: bool,
+    pub table_option: TableOption,
+}
+
+impl NewLocalOptions {
+    pub fn for_test(table_id: TableId) -> Self {
+        Self {
+            table_id,
+            is_consistent_op: false,
+            table_option: TableOption {
+                retention_seconds: None,
+            },
+        }
+    }
 }

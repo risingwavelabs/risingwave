@@ -22,11 +22,15 @@ use crate::for_all_scalar_variants;
 
 // Used to convert ScalarRef to text format
 pub trait ToText {
-    /// Write the text to the writer.
+    /// Write the text to the writer *regardless* of its data type
+    ///
+    /// See `ToText::to_text` for more details.
     fn write<W: Write>(&self, f: &mut W) -> Result;
 
+    /// Write the text to the writer according to its data type
     fn write_with_type<W: Write>(&self, _ty: &DataType, f: &mut W) -> Result;
 
+    /// Convert to text according to its data type
     fn to_text_with_type(&self, ty: &DataType) -> String {
         let mut s = String::new();
         self.write_with_type(ty, &mut s).unwrap();

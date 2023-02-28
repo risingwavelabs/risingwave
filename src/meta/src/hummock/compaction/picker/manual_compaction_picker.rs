@@ -319,7 +319,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
@@ -379,6 +379,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -392,6 +393,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         let mut levels = Levels {
@@ -555,6 +557,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
             Level {
                 level_idx: 2,
@@ -565,6 +568,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         // Set internal_table_ids.
@@ -607,6 +611,7 @@ pub mod tests {
             ],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let levels = Levels {
             levels,
@@ -627,6 +632,7 @@ pub mod tests {
             table_infos: vec![],
             total_file_size: 0,
             sub_level_id: 0,
+            uncompressed_file_size: 0,
         }];
         let levels = Levels {
             levels,
@@ -1165,6 +1171,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         assert_eq!(levels.len(), 4);
@@ -1196,6 +1203,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1231,6 +1239,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1272,6 +1281,7 @@ pub mod tests {
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
+                uncompressed_file_size: 0,
             },
         ];
         assert_eq!(levels.len(), 4);
@@ -1303,6 +1313,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);
@@ -1340,6 +1351,7 @@ pub mod tests {
                     &levels,
                     &mut levels_handler,
                     &mut local_stats,
+                    HashMap::default(),
                 )
                 .unwrap();
             assert_compaction_task(&task, &levels_handler);

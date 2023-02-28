@@ -14,12 +14,12 @@ alter table t add column v1 int primary key;
 statement error is not a table or cannot be altered
 alter table mv add column v1 int;
 
-statement ok
-drop materialized view mv;
-
 # Add column
 statement ok
 alter table t add column r real;
+
+statement ok
+create materialized view mv2 as select * from t;
 
 query IR
 select v, r from t;
@@ -33,6 +33,9 @@ public.t CREATE TABLE t (v INT, r REAL)
 statement ok
 alter table t add column s varchar;
 
+statement ok
+create materialized view mv3 as select * from t;
+
 query IRT
 select v, r, s from t;
 ----
@@ -41,6 +44,40 @@ query TT
 show create table t;
 ----
 public.t CREATE TABLE t (v INT, r REAL, s CHARACTER VARYING)
+
+# Insert data
+# TODO(#7906): alter after insert.
+statement ok
+insert into t values (1, 1.1, 'a');
+
+statement ok
+flush;
+
+# All materialized views should keep the schema when it's created.
+query I
+select * from mv;
+----
+1
+
+query IR
+select * from mv2;
+----
+1 1.1
+
+query IRT
+select * from mv3;
+----
+1 1.1 a
+
+# Drop columns
+statement ok
+drop materialized view mv;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
 
 statement ok
 drop table t;

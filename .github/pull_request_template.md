@@ -16,13 +16,18 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 -->
 
-## Checklist
+## Checklist For Contributors
 
 - [ ] I have written necessary rustdoc comments
 - [ ] I have added necessary unit tests and integration tests
-- [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features).
+- [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features #7934).
 - [ ] I have demonstrated that backward compatibility is not broken by breaking changes and created issues to track deprecated features to be removed in the future. (Please refer to the issue)
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
+
+## Checklist For Reviewers
+
+- [ ] I have requested macro/micro-benchmarks as this PR can affect performance substantially, and the results are shown.
+<!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
 
 ## Documentation
 

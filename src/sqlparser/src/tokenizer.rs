@@ -53,6 +53,8 @@ pub enum Token {
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
     HexStringLiteral(String),
+    /// Parameter symbols: i.e:  $1, $2
+    Parameter(String),
     /// Comma
     Comma,
     /// Whitespace (space, tab, etc)
@@ -140,6 +142,14 @@ pub enum Token {
     PGSquareRoot,
     /// `||/` , a cube root math operator in PostgreSQL
     PGCubeRoot,
+    /// `->`, access JSON object field or array element in PostgreSQL
+    Arrow,
+    /// `->>`, access JSON object field or array element as text in PostgreSQL
+    LongArrow,
+    /// `#>`, extract JSON sub-object at the specified path in PostgreSQL
+    HashArrow,
+    /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
+    HashLongArrow,
 }
 
 impl fmt::Display for Token {
@@ -153,6 +163,7 @@ impl fmt::Display for Token {
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
             Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
+            Token::Parameter(ref s) => write!(f, "${}", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -196,6 +207,10 @@ impl fmt::Display for Token {
             Token::ShiftRight => f.write_str(">>"),
             Token::PGSquareRoot => f.write_str("|/"),
             Token::PGCubeRoot => f.write_str("||/"),
+            Token::Arrow => f.write_str("->"),
+            Token::LongArrow => f.write_str("->>"),
+            Token::HashArrow => f.write_str("#>"),
+            Token::HashLongArrow => f.write_str("#>>"),
         }
     }
 }
@@ -347,7 +362,6 @@ impl<'a> Tokenizer<'a> {
 
     /// Get the next token or return None
     fn next_token(&self, chars: &mut Peekable<Chars<'_>>) -> Result<Option<Token>, TokenizerError> {
-        // println!("next_token: {:?}", chars.peek());
         match chars.peek() {
             Some(&ch) => match ch {
                 ' ' => self.consume_and_return(chars, Token::Whitespace(Whitespace::Space)),
@@ -503,6 +517,16 @@ impl<'a> Tokenizer<'a> {
                                 comment,
                             })))
                         }
+                        Some('>') => {
+                            chars.next(); // consume first '>'
+                            match chars.peek() {
+                                Some('>') => {
+                                    chars.next(); // consume second '>'
+                                    Ok(Some(Token::LongArrow))
+                                }
+                                _ => Ok(Some(Token::Arrow)),
+                            }
+                        }
                         // a regular '-' operator
                         _ => Ok(Some(Token::Minus)),
                     }
@@ -589,6 +613,13 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Colon)),
                     }
                 }
+                '$' => {
+                    if let Some(parameter) = self.tokenize_parameter(chars) {
+                        Ok(Some(parameter))
+                    } else {
+                        Ok(Some(Token::Char('$')))
+                    }
+                }
                 ';' => self.consume_and_return(chars, Token::SemiColon),
                 '\\' => self.consume_and_return(chars, Token::Backslash),
                 '[' => self.consume_and_return(chars, Token::LBracket),
@@ -604,7 +635,23 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Tilde)),
                     }
                 }
-                '#' => self.consume_and_return(chars, Token::Sharp),
+                '#' => {
+                    chars.next(); // consume the '#'
+                    match chars.peek() {
+                        Some('>') => {
+                            chars.next(); // consume first '>'
+                            match chars.peek() {
+                                Some('>') => {
+                                    chars.next(); // consume second '>'
+                                    Ok(Some(Token::HashLongArrow))
+                                }
+                                _ => Ok(Some(Token::HashArrow)),
+                            }
+                        }
+                        // a regular '#' operator
+                        _ => Ok(Some(Token::Sharp)),
+                    }
+                }
                 '@' => self.consume_and_return(chars, Token::AtSign),
                 other => self.consume_and_return(chars, Token::Char(other)),
             },
@@ -751,6 +798,17 @@ impl<'a> Tokenizer<'a> {
     ) -> Result<Option<Token>, TokenizerError> {
         chars.next();
         Ok(Some(t))
+    }
+
+    fn tokenize_parameter(&self, chars: &mut Peekable<Chars<'_>>) -> Option<Token> {
+        chars.next(); // consume '$'
+
+        let s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
+        if s.is_empty() {
+            None
+        } else {
+            Some(Token::Parameter(s))
+        }
     }
 }
 

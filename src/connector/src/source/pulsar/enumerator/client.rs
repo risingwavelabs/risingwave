@@ -68,7 +68,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         }
 
         Ok(PulsarSplitEnumerator {
-            admin_client: PulsarAdminClient::new(admin_url),
+            admin_client: PulsarAdminClient::new(admin_url, properties.auth_token),
             topic: parsed_topic,
             start_offset: scan_start_offset,
         })
@@ -146,6 +146,7 @@ mod test {
             service_url: "pulsar://localhost:6650".to_string(),
             scan_startup_mode: Some("earliest".to_string()),
             time_offset: None,
+            auth_token: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
         assert!(enumerator.list_splits().await.is_err());
@@ -162,6 +163,7 @@ mod test {
             service_url: "pulsar://localhost:6650".to_string(),
             scan_startup_mode: Some("earliest".to_string()),
             time_offset: None,
+            auth_token: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
         assert!(enumerator.list_splits().await.is_err());
@@ -182,6 +184,7 @@ mod test {
             service_url: "pulsar://localhost:6650".to_string(),
             scan_startup_mode: Some("earliest".to_string()),
             time_offset: None,
+            auth_token: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
@@ -209,6 +212,7 @@ mod test {
             service_url: "pulsar://localhost:6650".to_string(),
             scan_startup_mode: Some("earliest".to_string()),
             time_offset: None,
+            auth_token: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 

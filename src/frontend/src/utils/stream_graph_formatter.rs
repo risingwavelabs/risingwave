@@ -129,7 +129,7 @@ impl StreamGraphFormatter {
                     "StreamExchange {} from {}",
                     match dist.r#type() {
                         DispatcherType::Unspecified => unreachable!(),
-                        DispatcherType::Hash => format!("Hash({:?})", dist.column_indices),
+                        DispatcherType::Hash => format!("Hash({:?})", dist.dist_key_indices),
                         DispatcherType::Broadcast => "Broadcast".to_string(),
                         DispatcherType::Simple => "Single".to_string(),
                         DispatcherType::NoShuffle => "NoShuffle".to_string(),

@@ -94,7 +94,7 @@
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     create table t(x int);
-    select * from t JOIN (select t.x) as t1;
+    select * from t CROSS JOIN (select t.x) as t1;
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     create table ab (a int, b int);
@@ -188,7 +188,7 @@
           └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
   batch_plan: |
     BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
-    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr23, pg_user.name] }
+    └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, pg_user.name] }
       └─BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
         └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
           ├─BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
@@ -210,30 +210,30 @@
     LogicalProject { exprs: [auction.date_time, window_start, window_end] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
+      | └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
+      |   └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
       └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
         └─LogicalAgg { group_key: [$expr1], aggs: [] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalShare { id = 121 }
-    | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    |   └─LogicalScan { table: auction, columns: [auction.date_time] }
+    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    | └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
     └─LogicalProject { exprs: [auction.date_time] }
       └─LogicalAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
         └─LogicalJoin { type: Inner, on: true, output: [auction.date_time, auction.date_time] }
           ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          | └─LogicalShare { id = 121 }
-          |   └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-          |     └─LogicalScan { table: auction, columns: [auction.date_time] }
+          | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
+          |   └─LogicalScan { table: auction, columns: [auction.date_time], predicate: IsNotNull(auction.date_time) }
           └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
       ├─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
       | └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-      |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+      |   └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+      |     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
         └─BatchProject { exprs: [auction.date_time] }
           └─BatchHashAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
@@ -241,9 +241,10 @@
               └─BatchNestedLoopJoin { type: Inner, predicate: true, output: [auction.date_time, auction.date_time] }
                 ├─BatchExchange { order: [], dist: Single }
                 | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-                |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+                |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
                 |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-                |       └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                |       └─BatchFilter { predicate: IsNotNull(auction.date_time) }
+                |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
                 └─BatchValues { rows: [[]] }
   stream_error: |-
     Feature is not yet implemented: Stream values executor is unimplemented!

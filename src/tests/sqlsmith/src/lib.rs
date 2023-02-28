@@ -38,6 +38,16 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     format!("{}", gen.gen_batch_query_stmt())
 }
 
+/// Generate `INSERT`
+#[allow(dead_code)]
+pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> Vec<String> {
+    let mut gen = SqlGenerator::new(rng, vec![]);
+    tables
+        .into_iter()
+        .map(|table| format!("{}", gen.gen_insert_stmt(table, count)))
+        .collect()
+}
+
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
 pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
@@ -52,7 +62,6 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
 /// which can lead to stack overflow
 /// (a simple workaround is limit length of
 /// generated query when `QUERY_MODE=local`.
-#[allow(dead_code)]
 pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
     [
         "SET RW_ENABLE_TWO_PHASE_AGG TO TRUE",

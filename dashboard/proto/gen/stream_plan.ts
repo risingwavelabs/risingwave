@@ -827,9 +827,14 @@ export interface StreamNode {
   fields: Field[];
 }
 
+/**
+ * The property of an edge in the fragment graph.
+ * This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
+ */
 export interface DispatchStrategy {
   type: DispatcherType;
-  columnIndices: number[];
+  distKeyIndices: number[];
+  outputIndices: number[];
 }
 
 /**
@@ -842,7 +847,13 @@ export interface Dispatcher {
    * Indices of the columns to be used for hashing.
    * For dispatcher types other than HASH, this is ignored.
    */
-  columnIndices: number[];
+  distKeyIndices: number[];
+  /**
+   * Indices of the columns to output.
+   * In most cases, this contains all columns in the input. But for some cases like MV on MV or
+   * schema change, we may only output a subset of the columns.
+   */
+  outputIndices: number[];
   /**
    * The hash mapping for consistent hash.
    * For dispatcher types other than HASH, this is ignored.
@@ -894,7 +905,7 @@ export interface StreamFragmentGraph {
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
   /** edges between fragments. */
   edges: StreamFragmentGraph_StreamFragmentEdge[];
-  dependentTableIds: number[];
+  dependentRelationIds: number[];
   tableIdsCnt: number;
   env:
     | StreamEnvironment
@@ -3870,24 +3881,30 @@ export const StreamNode = {
 };
 
 function createBaseDispatchStrategy(): DispatchStrategy {
-  return { type: DispatcherType.UNSPECIFIED, columnIndices: [] };
+  return { type: DispatcherType.UNSPECIFIED, distKeyIndices: [], outputIndices: [] };
 }
 
 export const DispatchStrategy = {
   fromJSON(object: any): DispatchStrategy {
     return {
       type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : DispatcherType.UNSPECIFIED,
-      columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
+      distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
+      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
 
   toJSON(message: DispatchStrategy): unknown {
     const obj: any = {};
     message.type !== undefined && (obj.type = dispatcherTypeToJSON(message.type));
-    if (message.columnIndices) {
-      obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
+    if (message.distKeyIndices) {
+      obj.distKeyIndices = message.distKeyIndices.map((e) => Math.round(e));
     } else {
-      obj.columnIndices = [];
+      obj.distKeyIndices = [];
+    }
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
     }
     return obj;
   },
@@ -3895,7 +3912,8 @@ export const DispatchStrategy = {
   fromPartial<I extends Exact<DeepPartial<DispatchStrategy>, I>>(object: I): DispatchStrategy {
     const message = createBaseDispatchStrategy();
     message.type = object.type ?? DispatcherType.UNSPECIFIED;
-    message.columnIndices = object.columnIndices?.map((e) => e) || [];
+    message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
 };
@@ -3903,7 +3921,8 @@ export const DispatchStrategy = {
 function createBaseDispatcher(): Dispatcher {
   return {
     type: DispatcherType.UNSPECIFIED,
-    columnIndices: [],
+    distKeyIndices: [],
+    outputIndices: [],
     hashMapping: undefined,
     dispatcherId: 0,
     downstreamActorId: [],
@@ -3914,7 +3933,8 @@ export const Dispatcher = {
   fromJSON(object: any): Dispatcher {
     return {
       type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : DispatcherType.UNSPECIFIED,
-      columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
+      distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
+      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
       hashMapping: isSet(object.hashMapping) ? ActorMapping.fromJSON(object.hashMapping) : undefined,
       dispatcherId: isSet(object.dispatcherId) ? Number(object.dispatcherId) : 0,
       downstreamActorId: Array.isArray(object?.downstreamActorId)
@@ -3926,10 +3946,15 @@ export const Dispatcher = {
   toJSON(message: Dispatcher): unknown {
     const obj: any = {};
     message.type !== undefined && (obj.type = dispatcherTypeToJSON(message.type));
-    if (message.columnIndices) {
-      obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
+    if (message.distKeyIndices) {
+      obj.distKeyIndices = message.distKeyIndices.map((e) => Math.round(e));
     } else {
-      obj.columnIndices = [];
+      obj.distKeyIndices = [];
+    }
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
     }
     message.hashMapping !== undefined &&
       (obj.hashMapping = message.hashMapping ? ActorMapping.toJSON(message.hashMapping) : undefined);
@@ -3945,7 +3970,8 @@ export const Dispatcher = {
   fromPartial<I extends Exact<DeepPartial<Dispatcher>, I>>(object: I): Dispatcher {
     const message = createBaseDispatcher();
     message.type = object.type ?? DispatcherType.UNSPECIFIED;
-    message.columnIndices = object.columnIndices?.map((e) => e) || [];
+    message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.hashMapping = (object.hashMapping !== undefined && object.hashMapping !== null)
       ? ActorMapping.fromPartial(object.hashMapping)
       : undefined;
@@ -4041,7 +4067,7 @@ export const StreamEnvironment = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
+  return { fragments: {}, edges: [], dependentRelationIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -4059,8 +4085,8 @@ export const StreamFragmentGraph = {
       edges: Array.isArray(object?.edges)
         ? object.edges.map((e: any) => StreamFragmentGraph_StreamFragmentEdge.fromJSON(e))
         : [],
-      dependentTableIds: Array.isArray(object?.dependentTableIds)
-        ? object.dependentTableIds.map((e: any) => Number(e))
+      dependentRelationIds: Array.isArray(object?.dependentRelationIds)
+        ? object.dependentRelationIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
@@ -4081,10 +4107,10 @@ export const StreamFragmentGraph = {
     } else {
       obj.edges = [];
     }
-    if (message.dependentTableIds) {
-      obj.dependentTableIds = message.dependentTableIds.map((e) => Math.round(e));
+    if (message.dependentRelationIds) {
+      obj.dependentRelationIds = message.dependentRelationIds.map((e) => Math.round(e));
     } else {
-      obj.dependentTableIds = [];
+      obj.dependentRelationIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
@@ -4104,7 +4130,7 @@ export const StreamFragmentGraph = {
       return acc;
     }, {});
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
-    message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
+    message.dependentRelationIds = object.dependentRelationIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.env = (object.env !== undefined && object.env !== null)
       ? StreamEnvironment.fromPartial(object.env)

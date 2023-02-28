@@ -753,6 +753,7 @@ script = """
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
+echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
 
 [tasks.check-clippy-fix]
@@ -769,6 +770,7 @@ if [ $# -gt 0 ]; then
   cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
+  echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
   cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
 fi
 """
@@ -816,6 +818,7 @@ dependencies = [
 script = """
 #!/usr/bin/env bash
 
+echo "Tip: use the alias $(tput setaf 4)./risedev c$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
@@ -836,6 +839,7 @@ dependencies = [
 script = """
 #!/usr/bin/env bash
 
+echo "Tip: use the alias $(tput setaf 4)./risedev cf$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"

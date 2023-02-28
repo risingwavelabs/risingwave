@@ -17,7 +17,7 @@ use risingwave_common::catalog::{Field, Schema};
 
 use crate::expr::ExprVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{PlanRef, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{Explain, PlanRef, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 struct ExprVis<'a> {

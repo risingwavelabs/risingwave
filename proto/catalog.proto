@@ -16,6 +16,15 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
+// A mapping of column indices.
+message ColIndexMapping {
+  // The size of the target space.
+  uint64 target_size = 1;
+  // Each subscript is mapped to the corresponding element.
+  // For those not mapped, the value will be negative.
+  repeated int64 map = 2;
+}
+
 message WatermarkDesc {
   // The column idx the watermark is on
   uint32 watermark_idx = 1;
@@ -30,6 +39,7 @@ message StreamSourceInfo {
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
+  string upsert_avro_primary_key = 7;
 }
 
 message Source {
@@ -99,11 +109,12 @@ message Function {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
+  uint32 owner = 9;
   repeated data.DataType arg_types = 5;
   data.DataType return_type = 6;
   string language = 7;
-  string path = 8;
-  uint32 owner = 9;
+  string link = 8;
+  string identifier = 10;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

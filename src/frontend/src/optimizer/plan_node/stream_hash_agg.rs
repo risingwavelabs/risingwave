@@ -20,11 +20,11 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::generic::PlanAggCall;
 use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
     /// an optional column index which is the vnode of each row computed by the input's consistent
@@ -79,6 +79,10 @@ impl StreamHashAgg {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
+
+    pub(crate) fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.logical.i2o_col_mapping()
+    }
 }
 
 impl fmt::Display for StreamHashAgg {
@@ -114,7 +118,7 @@ impl StreamNode for StreamHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
 
             is_append_only: self.input().append_only(),
