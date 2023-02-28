@@ -28,10 +28,10 @@ use crate::expr::{BoxedExpression, Expression};
 
 macro_rules! gen_eval {
     { ($macro:ident, $macro_row:ident), $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
-        fn eval(&self, data_chunk: &DataChunk) -> $crate::Result<ArrayRef> {
+        async fn eval(&self, data_chunk: &DataChunk) -> $crate::Result<ArrayRef> {
             paste! {
                 $(
-                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk)?;
+                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk).await?;
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 
@@ -60,10 +60,10 @@ macro_rules! gen_eval {
 
         /// `eval_row()` first calls `eval_row()` on the inner expressions to get the resulting datums,
         /// then directly calls `$macro_row` to evaluate the current expression.
-        fn eval_row(&self, row: &OwnedRow) -> $crate::Result<Datum> {
+        async fn eval_row(&self, row: &OwnedRow) -> $crate::Result<Datum> {
             paste! {
                 $(
-                    let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
+                    let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row).await?;
                     let [<scalar_ref_ $arg:lower>] = [<datum_ $arg:lower>].as_ref().map(|s| s.as_scalar_ref_impl().try_into().unwrap());
                 )*
 
@@ -124,6 +124,7 @@ macro_rules! gen_expr_normal {
                 }
             }
 
+            #[async_trait::async_trait]
             impl<$($arg: Array, )*
                 OA: Array,
                 F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem> + Sync + Send,
@@ -211,6 +212,7 @@ macro_rules! gen_expr_bytes {
                 }
             }
 
+            #[async_trait::async_trait]
             impl<$($arg: Array, )*
                 F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
@@ -285,6 +287,7 @@ macro_rules! gen_expr_nullable {
                 }
             }
 
+            #[async_trait::async_trait]
             impl<$($arg: Array, )*
                 OA: Array,
                 F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sync + Send,

@@ -34,17 +34,17 @@ pub struct NestedConstructExpression {
     elements: Vec<BoxedExpression>,
 }
 
+#[async_trait::async_trait]
 impl Expression for NestedConstructExpression {
     fn return_type(&self) -> DataType {
         self.data_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let columns = self
-            .elements
-            .iter()
-            .map(|e| e.eval_checked(input))
-            .collect::<Result<Vec<_>>>()?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let mut columns = Vec::with_capacity(self.elements.len());
+        for e in self.elements.iter() {
+            columns.push(e.eval_checked(input).await?);
+        }
 
         if let DataType::Struct(t) = &self.data_type {
             let mut builder = StructArrayBuilder::with_meta(
@@ -80,12 +80,11 @@ impl Expression for NestedConstructExpression {
         }
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let datums = self
-            .elements
-            .iter()
-            .map(|e| e.eval_row(input))
-            .collect::<Result<Vec<Datum>>>()?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let mut datums = Vec::with_capacity(self.elements.len());
+        for e in self.elements.iter() {
+            datums.push(e.eval_row(input).await?);
+        }
         if let DataType::Struct { .. } = &self.data_type {
             Ok(Some(StructValue::new(datums).to_scalar_value()))
         } else if let DataType::List { datatype: _ } = &self.data_type {
@@ -135,8 +134,8 @@ mod tests {
     use super::NestedConstructExpression;
     use crate::expr::{BoxedExpression, Expression, LiteralExpression};
 
-    #[test]
-    fn test_eval_array_expr() {
+    #[tokio::test]
+    async fn test_eval_array_expr() {
         let expr = NestedConstructExpression {
             data_type: DataType::List {
                 datatype: DataType::Int32.into(),
@@ -144,12 +143,12 @@ mod tests {
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
-        let arr = expr.eval(&DataChunk::new_dummy(2)).unwrap();
+        let arr = expr.eval(&DataChunk::new_dummy(2)).await.unwrap();
         assert_eq!(arr.len(), 2);
     }
 
-    #[test]
-    fn test_eval_row_array_expr() {
+    #[tokio::test]
+    async fn test_eval_row_array_expr() {
         let expr = NestedConstructExpression {
             data_type: DataType::List {
                 datatype: DataType::Int32.into(),
@@ -157,7 +156,11 @@ mod tests {
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
-        let scalar_impl = expr.eval_row(&OwnedRow::new(vec![])).unwrap().unwrap();
+        let scalar_impl = expr
+            .eval_row(&OwnedRow::new(vec![]))
+            .await
+            .unwrap()
+            .unwrap();
         let expected = ListValue::new(vec![Some(1.into()), Some(2.into())]).to_scalar_value();
         assert_eq!(expected, scalar_impl);
     }

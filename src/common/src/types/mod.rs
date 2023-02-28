@@ -428,6 +428,8 @@ pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRe
 pub trait ScalarRef<'a>:
     Copy
     + std::fmt::Debug
+    + Send
+    + Sync
     + 'a
     + TryFrom<ScalarRefImpl<'a>, Error = ArrayError>
     + Into<ScalarRefImpl<'a>>

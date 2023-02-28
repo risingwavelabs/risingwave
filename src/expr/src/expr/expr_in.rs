@@ -66,13 +66,14 @@ impl InExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for InExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let input_array = self.left.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let input_array = self.left.eval_checked(input).await?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
         for (data, vis) in input_array.iter().zip_eq_fast(input.vis().iter()) {
             if vis {
@@ -85,8 +86,8 @@ impl Expression for InExpression {
         Ok(Arc::new(output_array.finish().into()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let data = self.left.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let data = self.left.eval_row(input).await?;
         let ret = self.exists(&data);
         Ok(ret.map(|b| b.to_scalar_value()))
     }
@@ -111,7 +112,9 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
         let data_chunk = DataChunk::new_dummy(1);
         for child in &children[1..] {
             let const_expr = build_from_prost(child)?;
-            let array = const_expr.eval(&data_chunk)?;
+            let array = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(const_expr.eval(&data_chunk))
+            })?;
             let datum = array.value_at(0).to_owned_datum();
             data.push(datum);
         }
@@ -182,8 +185,8 @@ mod tests {
         assert!(InExpression::try_from(&p).is_ok());
     }
 
-    #[test]
-    fn test_eval_search_expr() {
+    #[tokio::test]
+    async fn test_eval_search_expr() {
         let input_refs = [
             Box::new(InputRefExpression::new(DataType::Varchar, 0)),
             Box::new(InputRefExpression::new(DataType::Varchar, 0)),
@@ -226,6 +229,7 @@ mod tests {
             let vis = data_chunks[i].visibility();
             let res = search_expr
                 .eval(&data_chunks[i])
+                .await
                 .unwrap()
                 .compact(vis.unwrap(), expected[i].len());
 
@@ -235,8 +239,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_eval_row_search_expr() {
+    #[tokio::test]
+    async fn test_eval_row_search_expr() {
         let input_refs = [
             Box::new(InputRefExpression::new(DataType::Varchar, 0)),
             Box::new(InputRefExpression::new(DataType::Varchar, 0)),
@@ -267,7 +271,7 @@ mod tests {
             for (j, row_input) in row_inputs[i].iter().enumerate() {
                 let row_input = vec![row_input.map(|s| s.into())];
                 let row = OwnedRow::new(row_input);
-                let result = search_expr.eval_row(&row).unwrap();
+                let result = search_expr.eval_row(&row).await.unwrap();
                 assert_eq!(result, expected[i][j].map(ScalarImpl::Bool));
             }
         }

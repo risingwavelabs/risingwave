@@ -80,13 +80,14 @@ pub use self::expr_unary::new_unary_expr;
 use super::Result;
 
 /// Instance of an expression
+#[async_trait::async_trait]
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
     fn return_type(&self) -> DataType;
 
     /// Eval the result with extra checks.
-    fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let res = self.eval(input)?;
+    async fn eval_checked(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let res = self.eval(input).await?;
 
         // TODO: Decide to use assert or debug_assert by benchmarks.
         assert_eq!(res.len(), input.capacity());
@@ -99,10 +100,10 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// # Arguments
     ///
     /// * `input` - input data of the Project Executor
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
     /// Evaluate the expression in row-based execution.
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
     /// Wrap the expression in a Box.
     fn boxed(self) -> BoxedExpression

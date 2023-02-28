@@ -48,15 +48,15 @@ mod tests {
     use super::*;
     use crate::expr::LiteralExpression;
 
-    fn test_evals_dummy(expr: BoxedExpression, expected: Datum, is_negative_len: bool) {
-        let res = expr.eval(&DataChunk::new_dummy(1));
+    async fn test_evals_dummy(expr: BoxedExpression, expected: Datum, is_negative_len: bool) {
+        let res = expr.eval(&DataChunk::new_dummy(1)).await;
         if is_negative_len {
             assert!(res.is_err());
         } else {
             assert_eq!(res.unwrap().to_datum(), expected);
         }
 
-        let res = expr.eval_row(&OwnedRow::new(vec![]));
+        let res = expr.eval_row(&OwnedRow::new(vec![])).await;
         if is_negative_len {
             assert!(res.is_err());
         } else {
@@ -64,8 +64,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_overlay() {
+    #[tokio::test]
+    async fn test_overlay() {
         let cases = vec![
             ("aaa", "XY", 1, 0, "XYaaa"),
             ("aaa_aaa", "XYZ", 4, 1, "aaaXYZaaa"),
@@ -96,7 +96,7 @@ mod tests {
                 DataType::Varchar,
             );
 
-            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false);
+            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false).await;
         }
     }
 }
