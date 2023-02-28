@@ -504,7 +504,7 @@ impl TestCase {
         if self.optimized_logical_plan.is_some() || self.optimizer_error.is_some() {
             // TODO: separate `optimized_logical_plan` into `optimized_logical_plan_for_batch` and
             // `optimized_logical_plan_for_stream`
-            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan_for_stream()
+            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan_for_batch()
             {
                 Ok(optimized_logical_plan) => optimized_logical_plan,
                 Err(err) => {

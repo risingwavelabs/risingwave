@@ -701,15 +701,18 @@
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(distinct t.b), sum(distinct t.c) filter((t.c < 100:Int32))] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 0:Int64)), sum(t.c) filter((count filter((t.c < 100:Int32)) > 0:Int64) AND (flag = 1:Int64))] }
+    └─LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [count filter((t.c < 100:Int32))] }
+      └─LogicalExpand { column_subsets: [[t.a, t.b], [t.a, t.c]] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - name: single distinct agg and non-disintct agg
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(distinct t.b), sum(t.c)] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c))] }
+    └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c))] }
@@ -728,8 +731,10 @@
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, count(distinct c) as distinct_c_sum, sum(c) as sum_c from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(distinct t.b), count(distinct t.c), sum(t.c)] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), count(t.c) filter((flag = 0:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
+    └─LogicalAgg { group_key: [t.a, t.b, t.c, flag], aggs: [sum(t.c)] }
+      └─LogicalExpand { column_subsets: [[t.a, t.c], [t.a, t.b]] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashAgg { group_key: [t.a], aggs: [count(t.b) filter((flag = 1:Int64)), count(t.c) filter((flag = 0:Int64)), sum(sum(t.c)) filter((flag = 0:Int64))] }
@@ -749,8 +754,9 @@
     create table t(a int, b int, c int);
     select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(distinct t.b) filter((t.b < 100:Int32)), sum(t.c)] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
+    └─LogicalAgg { group_key: [t.a, t.b], aggs: [count filter((t.b < 100:Int32)), sum(t.c)] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashAgg { group_key: [t.a], aggs: [count(t.b) filter((count filter((t.b < 100:Int32)) > 0:Int64)), sum(sum(t.c))] }
@@ -769,8 +775,9 @@
     create table t(a int, b int, c int);
     select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [t.a], aggs: [count(distinct t.b), sum(t.c) filter((t.b < 100:Int32))] }
-    └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
+    LogicalAgg { group_key: [t.a], aggs: [count(t.b), sum(sum(t.c) filter((t.b < 100:Int32)))] }
+    └─LogicalAgg { group_key: [t.a, t.b], aggs: [sum(t.c) filter((t.b < 100:Int32))] }
+      └─LogicalScan { table: t, columns: [t.a, t.b, t.c] }
 - name: combined order by & filter clauses
   sql: |
     create table t(a varchar, b int);
