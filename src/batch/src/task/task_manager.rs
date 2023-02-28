@@ -365,7 +365,8 @@ mod tests {
                         ],
                         // This is a bit hacky as we want to make sure the task lasts long enough
                         // for us to abort it.
-                        return_type: Some(DataType::Int32.to_protobuf()),
+                        return_type: vec![DataType::Int32.to_protobuf()],
+                        rex_node: None,
                     }),
                 })),
             }),

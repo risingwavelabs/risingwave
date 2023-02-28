@@ -107,12 +107,10 @@ pub fn new_regexp_matches(
 ) -> Result<BoxedTableFunction> {
     ensure!(
         prost.return_type
-            == Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                }
-                .to_protobuf()
-            )
+            == vec![DataType::List {
+                datatype: Box::new(DataType::Varchar),
+            }
+            .to_protobuf()]
     );
     let mut args = prost.args.iter();
     let Some(text_node) = args.next() else {

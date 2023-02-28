@@ -156,7 +156,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
     prost: &TableFunctionProst,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
-    let return_type = DataType::from(prost.get_return_type().unwrap());
+    let return_type = DataType::from(&prost.get_return_type()[0]);
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 

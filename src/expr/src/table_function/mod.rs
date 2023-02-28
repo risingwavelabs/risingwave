@@ -64,6 +64,7 @@ pub fn build_from_prost(
         RegexpMatches => new_regexp_matches(prost, chunk_size),
         Range => new_generate_series::<false>(prost, chunk_size),
         Unspecified => unreachable!(),
+        Udtf => todo!("UDTF"),
     }
 }
 

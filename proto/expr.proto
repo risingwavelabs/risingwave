@@ -155,10 +155,15 @@ message TableFunction {
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // User defined table function
+    UDTF = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
-  data.DataType return_type = 3;
+  repeated data.DataType return_type = 3;
+  oneof rex_node {
+    UserDefinedTableFunction udtf = 4;
+  }
 }
 
 message InputRefExpr {
@@ -242,6 +247,13 @@ message AggCall {
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string link = 5;
+  string identifier = 6;
+}
+
+message UserDefinedTableFunction {
   repeated data.DataType arg_types = 3;
   string language = 4;
   string link = 5;

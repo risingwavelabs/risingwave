@@ -206,7 +206,8 @@ impl TableFunction {
         TableFunctionProst {
             function_type: self.function_type.to_protobuf() as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
-            return_type: Some(self.return_type.to_protobuf()),
+            return_type: vec![self.return_type.to_protobuf()],
+            rex_node: None,
         }
     }
 
