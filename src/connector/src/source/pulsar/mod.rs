@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod admin;
 pub mod enumerator;
 pub mod source;
 pub mod split;
@@ -28,9 +27,6 @@ pub const PULSAR_CONNECTOR: &str = "pulsar";
 pub struct PulsarProperties {
     #[serde(rename = "topic", alias = "pulsar.topic")]
     pub topic: String,
-
-    #[serde(rename = "admin.url", alias = "pulsar.admin.url")]
-    pub admin_url: String,
 
     #[serde(rename = "service.url", alias = "pulsar.service.url")]
     pub service_url: String,

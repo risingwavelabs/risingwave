@@ -47,7 +47,7 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11.0", features = ["no-recursion-limit"] }
 prost-reflect = "0.9.2"
 protobuf-native = "0.2.1"
-pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime"] }
+pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime", "telemetry"] }
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
