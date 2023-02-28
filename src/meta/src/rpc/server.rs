@@ -19,7 +19,7 @@ use std::time::Duration;
 use either::Either;
 use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
-use risingwave_common::monitor::process_prometheus::monitor_process;
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;

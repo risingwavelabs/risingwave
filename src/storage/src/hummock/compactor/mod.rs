@@ -37,7 +37,6 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::monitor::process_local::LocalProcessCollector;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -50,6 +49,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
+use sysinfo::{CpuExt, CpuRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
@@ -377,8 +377,11 @@ impl Compactor {
                 drop(config);
 
                 let executor = compactor_context.compaction_executor.clone();
-                let mut process_collector = LocalProcessCollector::new().unwrap();
                 let mut last_workload = CompactorWorkload::default();
+                let mut sys = System::new_with_specifics(
+                    RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
+                );
+
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
@@ -400,13 +403,9 @@ impl Compactor {
                         }
 
                         _ = workload_collect_interval.tick() => {
-                            let cpu = match process_collector.cpu_avg() {
-                                Ok(v) => (v * 100.0) as u32,
-                                Err(e) => {
-                                    tracing::warn!("Failed to collect process cpu. {e:?}");
-                                    0
-                                }
-                            };
+                            sys.refresh_cpu();
+                            let cpu = sys.global_cpu_info().cpu_usage() as u32;
+
                             tracing::info!("compactor cpu {cpu}");
                             let workload = CompactorWorkload {
                                 cpu,
@@ -437,14 +436,14 @@ impl Compactor {
                             let meta_client = hummock_meta_client.clone();
 
                             executor.spawn(async move {
-                            match task {
-                                Task::CompactTask(compact_task) => {
-                                    let (tx, rx) = tokio::sync::oneshot::channel();
-                                    let task_id = compact_task.task_id;
-                                    shutdown.lock().unwrap().insert(task_id, tx);
-                                    Compactor::compact(context, compact_task, rx).await;
-                                    shutdown.lock().unwrap().remove(&task_id);
-                                }
+                                match task {
+                                    Task::CompactTask(compact_task) => {
+                                        let (tx, rx) = tokio::sync::oneshot::channel();
+                                        let task_id = compact_task.task_id;
+                                        shutdown.lock().unwrap().insert(task_id, tx);
+                                        Compactor::compact(context, compact_task, rx).await;
+                                        shutdown.lock().unwrap().remove(&task_id);
+                                    }
                                     Task::VacuumTask(vacuum_task) => {
                                         Vacuum::vacuum(
                                             vacuum_task,

@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::monitor::process_prometheus::monitor_process;
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;

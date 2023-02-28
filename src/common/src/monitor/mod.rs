@@ -13,8 +13,7 @@
 // limitations under the License.
 
 pub mod my_stats;
-pub mod process_local;
-pub mod process_prometheus;
+pub mod process_linux;
 pub mod rwlock;
 
 use prometheus::core::{
