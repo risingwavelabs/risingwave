@@ -1847,9 +1847,26 @@ impl Parser {
             } else if self.parse_keyword(Keyword::RETURN) {
                 ensure_not_set(&body.return_, "RETURN")?;
                 body.return_ = Some(self.parse_expr()?);
+            } else if self.parse_keyword(Keyword::USING) {
+                ensure_not_set(&body.using, "USING")?;
+                body.using = Some(self.parse_create_function_using()?);
             } else {
                 return Ok(body);
             }
+        }
+    }
+
+    fn parse_create_function_using(&mut self) -> Result<CreateFunctionUsing, ParserError> {
+        let keyword = self.expect_one_of_keywords(&[Keyword::LINK])?;
+
+        let uri = self.parse_literal_string()?;
+
+        match keyword {
+            Keyword::LINK => Ok(CreateFunctionUsing::Link(uri)),
+            _ => self.expected(
+                "LINK, got {:?}",
+                Token::make_keyword(format!("{keyword:?}").as_str()),
+            ),
         }
     }
 

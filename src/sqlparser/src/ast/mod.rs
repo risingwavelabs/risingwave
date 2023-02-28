@@ -2200,6 +2200,8 @@ pub struct CreateFunctionBody {
     pub as_: Option<FunctionDefinition>,
     /// RETURN expression
     pub return_: Option<Expr>,
+    /// USING ...
+    pub using: Option<CreateFunctionUsing>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2216,7 +2218,25 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(expr) = &self.return_ {
             write!(f, " RETURN {expr}")?;
         }
+        if let Some(using) = &self.using {
+            write!(f, " {using}")?;
+        }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionUsing {
+    Link(String),
+}
+
+impl fmt::Display for CreateFunctionUsing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "USING ")?;
+        match self {
+            CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
+        }
     }
 }
 

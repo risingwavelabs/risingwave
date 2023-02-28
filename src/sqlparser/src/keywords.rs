@@ -279,6 +279,7 @@ define_keywords!(
     LEVEL,
     LIKE,
     LIMIT,
+    LINK,
     LN,
     LOCAL,
     LOCALTIME,
