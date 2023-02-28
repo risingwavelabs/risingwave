@@ -278,6 +278,6 @@ mod tests {
         assert!(
             set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_string())).is_ok()
         );
-        assert_eq!(p.barrier_interval_ms, Some(500));
+        assert_eq!(p.checkpoint_frequency, Some(500));
     }
 }
