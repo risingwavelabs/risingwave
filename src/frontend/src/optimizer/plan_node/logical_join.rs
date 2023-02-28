@@ -24,16 +24,15 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
-    ToStream,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
-    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
+    BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
+    LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
@@ -1060,6 +1059,8 @@ impl LogicalJoin {
 
         // Convert to Hash Join for equal joins
         // For inner joins, pull non-equal conditions to a filter operator on top of it
+        // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
+        // as opposed to the HashJoin, which applies the condition row-wise.
         let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
@@ -1189,33 +1190,7 @@ impl LogicalJoin {
         logical_join: LogicalJoin,
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        // Convert to Hash Join for equal joins
-        // For inner joins, pull non-equal conditions to a filter operator on top of it
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
-        if pull_filter {
-            let new_output_indices = logical_join.output_indices().clone();
-            let new_internal_column_num = logical_join.internal_column_num();
-            let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
-            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-            let eq_cond = EqJoinPredicate::new(
-                Condition::true_cond(),
-                predicate.eq_keys().to_vec(),
-                self.left().schema().len(),
-            );
-            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-            let plan = BatchFilter::new(logical_filter).into();
-            if self.output_indices() != &default_indices {
-                let logical_project =
-                    LogicalProject::with_out_col_idx(plan, new_output_indices.into_iter());
-                Ok(BatchProject::new(logical_project).into())
-            } else {
-                Ok(plan)
-            }
-        } else {
-            Ok(BatchHashJoin::new(logical_join, predicate).into())
-        }
+        Ok(BatchHashJoin::new(logical_join, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
@@ -1401,7 +1376,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
 
     /// Pruning
@@ -1693,18 +1668,20 @@ mod tests {
         // Perform `to_batch`
         let result = logical_join.to_batch().unwrap();
 
-        // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
-        let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(
-            ExprImpl::from(batch_filter.predicate().clone()),
-            non_eq_cond
-        );
-
-        let input = batch_filter.input();
-        let hash_join = input.as_batch_hash_join().unwrap();
+        // Expected plan:  HashJoin($1 = $3 AND $2 == 42)
+        let hash_join = result.as_batch_hash_join().unwrap();
         assert_eq!(
             ExprImpl::from(hash_join.eq_join_predicate().eq_cond()),
             eq_cond
+        );
+        assert_eq!(
+            *hash_join
+                .eq_join_predicate()
+                .non_eq_cond()
+                .conjunctions
+                .first()
+                .unwrap(),
+            non_eq_cond
         );
     }
 

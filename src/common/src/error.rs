@@ -455,6 +455,10 @@ impl ErrorSuppressor {
         }
     }
 
+    pub fn max(&self) -> usize {
+        self.max_unique
+    }
+
     fn try_reset(&mut self) {
         if self.last_reset_time.elapsed().unwrap() >= ERROR_SUPPRESSOR_RESET_DURATION {
             *self = Self::new(self.max_unique)

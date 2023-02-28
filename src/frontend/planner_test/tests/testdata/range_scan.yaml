@@ -87,7 +87,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id > 42 AND date = 1111 AND 2>1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: true:Boolean AND (orders_count_by_user.date = 1111:Int32) }
+    └─BatchFilter { predicate: (orders_count_by_user.date = 1111:Int32) }
       └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id > Int64(42)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv
@@ -95,7 +95,7 @@
     SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6 AND date <= 6666
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: true:Boolean }
+    └─BatchFilter { predicate: true }
       └─BatchScan { table: orders_count_by_user, columns: [orders_count_by_user.user_id, orders_count_by_user.date, orders_count_by_user.orders_count], scan_ranges: [orders_count_by_user.user_id = Int64(42) AND orders_count_by_user.date > Int32(1111) AND orders_count_by_user.date <= Int32(6666)], distribution: UpstreamHashShard(orders_count_by_user.user_id, orders_count_by_user.date) }
 - before:
   - create_table_and_mv

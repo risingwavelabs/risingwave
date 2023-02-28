@@ -33,8 +33,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
-    default_level_selector, DynamicLevelSelector, LevelSelector, ManualCompactionSelector,
-    SpaceReclaimCompactionSelector, TtlCompactionSelector,
+    default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, LevelSelector,
+    ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
@@ -313,17 +313,28 @@ pub fn create_compaction_task(
         let step = (input.target_level - base_level) / 2;
         compaction_config.target_file_size_base << step
     };
-    let compression_algorithm = if input.target_level == 0 {
-        compaction_config.compression_algorithm[0].clone()
-    } else {
-        let idx = input.target_level - base_level + 1;
-        compaction_config.compression_algorithm[idx].clone()
-    };
 
     CompactionTask {
+        compression_algorithm: get_compression_algorithm(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
         input,
-        compression_algorithm,
         target_file_size,
         compaction_task_type,
+    }
+}
+
+pub fn get_compression_algorithm(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> String {
+    if level == 0 || level < base_level {
+        compaction_config.compression_algorithm[0].clone()
+    } else {
+        let idx = level - base_level + 1;
+        compaction_config.compression_algorithm[idx].clone()
     }
 }

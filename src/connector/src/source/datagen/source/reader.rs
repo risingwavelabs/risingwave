@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -28,10 +27,9 @@ use crate::parser::{ParserConfig, SpecificParserConfig};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceInfo, SplitId, SplitImpl,
-    SplitMetaData, SplitReader,
+    BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceContextRef, SplitId,
+    SplitImpl, SplitMetaData, SplitReader,
 };
 
 impl_common_split_reader_logic!(DatagenSplitReader, DatagenProperties);
@@ -42,8 +40,7 @@ pub struct DatagenSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
@@ -55,8 +52,7 @@ impl SplitReader for DatagenSplitReader {
         properties: DatagenProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut assigned_split = DatagenSplit::default();
@@ -139,8 +135,7 @@ impl SplitReader for DatagenSplitReader {
             assigned_split,
             split_id,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -338,7 +333,6 @@ mod tests {
             state,
             Default::default(),
             Default::default(),
-            Default::default(),
             Some(mock_datum),
         )
         .await?
@@ -391,7 +385,6 @@ mod tests {
             state,
             Default::default(),
             Default::default(),
-            Default::default(),
             Some(mock_datum.clone()),
         )
         .await?
@@ -407,7 +400,6 @@ mod tests {
         let mut stream = DatagenSplitReader::new(
             properties,
             state,
-            Default::default(),
             Default::default(),
             Default::default(),
             Some(mock_datum),

@@ -78,7 +78,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     let ty = column.data_type;
                     let expr = self.gen_simple_scalar(&ty); // WORKAROUND
                     let in_subquery_expr = Expr::InSubquery {
-                        expr: Box::new(expr),
+                        expr: Box::new(Expr::Nested(Box::new(expr))),
                         subquery: Box::new(query),
                         negated: self.flip_coin(),
                     };
@@ -220,7 +220,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new(&col_def.name))
+            Expr::Identifier(Ident::new_unchecked(&col_def.name))
         }
     }
 
@@ -393,7 +393,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         while self.flip_coin() {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new(&column.name)),
+                expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
                 asc: Some(self.rng.gen_bool(0.5)),
                 nulls_first: None,
             })
@@ -617,7 +617,7 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
         .collect();
 
     Function {
-        name: ObjectName(vec![Ident::new(func_name)]),
+        name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         over: None,
         distinct: false,
@@ -641,7 +641,7 @@ fn make_agg_func(
         .collect();
 
     Function {
-        name: ObjectName(vec![Ident::new(func_name)]),
+        name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         over: None,
         distinct,

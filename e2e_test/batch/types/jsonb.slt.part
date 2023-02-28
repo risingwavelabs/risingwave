@@ -6,10 +6,10 @@ values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('
 ----
 1
 NULL
-[1,true]
+[1, true]
 null
 true
-{"a":[2,true,"",{}]}
+{"a": [2, true, "", {}]}
 
 statement ok
 create table t (v1 jsonb);
@@ -123,3 +123,27 @@ select jsonb_array_length('null');
 
 statement ok
 drop table t;
+
+# Tests moved from regress tests due to not matching exactly.
+
+# PostgreSQL sorts shorter key "two" before longer key "three"
+# https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING:~:text=shorter%20keys%20are%20stored%20before%20longer%20keys
+query T
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"three":
+		true}'::jsonb; -- OK
+----
+{"one": 1, "three": true, "two": "two"}
+
+# We do not support jsonb IS NULL yet.
+query TTTT
+SELECT
+  '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'ff',
+  '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'qq',
+  -- ('{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'Y') IS NULL AS f,
+  ('{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb ->> 'Y') IS NULL AS t,
+   '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'x';
+----
+{"a": 12, "b": 16} 123 t [1, 2]

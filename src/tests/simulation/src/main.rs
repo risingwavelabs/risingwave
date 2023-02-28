@@ -137,7 +137,6 @@ pub struct Args {
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
-    use std::env;
     use std::sync::Arc;
 
     use risingwave_simulation::client::RisingWave;

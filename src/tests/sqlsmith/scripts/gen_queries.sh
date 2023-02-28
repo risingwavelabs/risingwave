@@ -2,7 +2,7 @@
 
 set -euxo pipefail
 
-export TEST_NUM=32
+export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_FOLDER="src/tests/sqlsmith/tests"
@@ -32,10 +32,16 @@ generate_sqlsmith() {
     --generate "$OUTDIR/$1"
 }
 
+# Check which queries failed
+check_failing_queries() {
+  ls .risingwave/log | grep fuzz | sed -E 's/fuzzing\-([0-9]*).log/\1/'
+}
+
 main() {
   cd $RW_HOME
   build_madsim
   generate_deterministic
+  check_failing_queries
   cd -
 }
 

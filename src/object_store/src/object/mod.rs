@@ -848,6 +848,15 @@ pub async fn parse_remote_object_store(
                     .monitored(metrics),
             )
         }
+        webhdfs if webhdfs.starts_with("webhdfs://") => {
+            let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
+            let (endpoint, root) = webhdfs.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_webhdfs_engine(endpoint.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             ObjectStoreImpl::S3Compatible(
                 S3ObjectStore::new_s3_compatible(

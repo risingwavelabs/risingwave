@@ -423,7 +423,9 @@ pub trait Scalar:
     /// Get a reference to current scalar.
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 
-    fn to_scalar_value(self) -> ScalarImpl;
+    fn to_scalar_value(self) -> ScalarImpl {
+        self.into()
+    }
 }
 
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.

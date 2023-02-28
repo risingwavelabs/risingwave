@@ -38,6 +38,7 @@ pub enum EngineType {
     Hdfs,
     Gcs,
     Oss,
+    Webhdfs,
 }
 
 impl OpendalObjectStore {
@@ -184,6 +185,7 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Hdfs => "Hdfs",
             EngineType::Gcs => "Gcs",
             EngineType::Oss => "Oss",
+            EngineType::Webhdfs => "Webhdfs",
         }
     }
 }

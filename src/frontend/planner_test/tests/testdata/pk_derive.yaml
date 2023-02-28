@@ -56,13 +56,13 @@
       | └─StreamHashAgg { group_key: [t.id], aggs: [count, max(t.v)] }
       |   └─StreamExchange { dist: HashShard(t.id) }
       |     └─StreamProject { exprs: [t.id, t.v, t._row_id] }
-      |       └─StreamShare { id = 333 }
+      |       └─StreamShare { id = 325 }
       |         └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamProject { exprs: [min(t.v), t.id] }
         └─StreamHashAgg { group_key: [t.id], aggs: [count, min(t.v)] }
           └─StreamExchange { dist: HashShard(t.id) }
             └─StreamProject { exprs: [t.id, t.v, t._row_id] }
-              └─StreamShare { id = 333 }
+              └─StreamShare { id = 325 }
                 └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
