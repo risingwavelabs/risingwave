@@ -23,7 +23,7 @@ ENV IN_CONTAINER=1
 ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
 
-RUN wget https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
+RUN curl -O https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
 RUN tar -zxvf dashboard-artifact.zip && mv risingwave-dashboard-artifact ui && rm dashboard-artifact.zip
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
