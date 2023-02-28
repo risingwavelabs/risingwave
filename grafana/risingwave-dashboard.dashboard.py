@@ -1574,60 +1574,6 @@ def section_batch_exchange(outer_panels):
         ),
     ]
 
-def section_memory_manager(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed(
-            "Memory manager",
-            [
-                panels.timeseries_count(
-                    "LRU manager loop count per sec",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('lru_runtime_loop_count')}[$__rate_interval])",
-                            "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "LRU manager watermark steps",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('lru_watermark_step')}",
-                            "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_ms(
-                    "LRU manager watermark_time and physical_now",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('lru_current_watermark_time_ms')}",
-                            "",
-                        ),
-                        panels.target(
-                            f"{metric('lru_physical_now_ms')}",
-                            "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_memory(
-                    "The memory allocated by jemalloc",
-                    "",
-                    [
-                        panels.target(
-                            f"{metric('jemalloc_allocated_bytes')}",
-                            "",
-                        ),
-                    ],
-                ),
-            ],
-        ),
-    ]
-
 def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()
     return [
