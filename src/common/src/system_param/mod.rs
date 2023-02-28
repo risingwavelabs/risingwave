@@ -15,7 +15,6 @@
 pub mod local_manager;
 pub mod reader;
 
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::ops::RangeBounds;
 
@@ -27,9 +26,11 @@ pub type SystemParamsError = String;
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
 // Only includes undeprecated params.
-// Macro input is { field identifier, default value }
+// Macro input is { field identifier, type, default value }
 macro_rules! for_all_undeprecated_params {
-    ($macro:ident) => {
+    ($macro:ident
+        // Hack: match trailing fields to implement `for_all_params`
+        $(, { $field:ident, $type:ty, $default:expr })*) => {
         $macro! {
             { barrier_interval_ms, u32, 1000_u32 },
             { checkpoint_frequency, u64, 10_u64 },
@@ -40,15 +41,19 @@ macro_rules! for_all_undeprecated_params {
             { data_directory, String, "hummock_001".to_string() },
             { backup_storage_url, String, "memory".to_string() },
             { backup_storage_directory, String, "backup".to_string() },
+            $({ $field, $type, $default },)*
         }
     };
 }
 
-// Only includes deprecated params. Used to define key constants.
-// Macro input is { field identifier, default value }
-macro_rules! for_all_deprecated_params {
+// Includes all params.
+// Macro input is { field identifier, type default value }
+macro_rules! for_all_params {
     ($macro:ident) => {
-        $macro! {}
+        for_all_undeprecated_params!(
+            $macro /* Define future deprecated params here, such as
+                    * ,{ backup_storage_directory, String, "backup".to_string() } */
+        );
     };
 }
 
@@ -70,13 +75,12 @@ macro_rules! def_key {
     };
 }
 
-for_all_undeprecated_params!(def_key);
-for_all_deprecated_params!(def_key);
+for_all_params!(def_key);
 
 // Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
-        /// All undeprecated fields are guaranteed to be contained in the returned map.
+        /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
         pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
             let mut ret = Vec::with_capacity(9);
@@ -95,45 +99,50 @@ macro_rules! impl_system_params_to_kv {
     };
 }
 
+macro_rules! impl_derive_missing_fields {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        fn derive_missing_fields(params: &mut SystemParams) {
+            $(
+                if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
+                    params.$field = Some(v);
+                }
+            )*
+        }
+    };
+}
+
 // Derive deserialization from kv pairs.
 macro_rules! impl_system_params_from_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
-        /// For each field in `SystemParams`, one of these rules apply:
-        /// - Up-to-date: Guaranteed to be `Some`. If it is not present, may try to derive it from previous
-        ///   versions of this field.
-        /// - Deprecated: Guaranteed to be `None`.
-        /// - Unrecognized: Not allowed.
-        pub fn system_params_from_kv(kvs: Vec<(impl AsRef<[u8]>, impl AsRef<[u8]>)>) -> Result<SystemParams> {
+        /// Try to deserialize deprecated fields as well.
+        /// Return error if there are unrecognized fields
+        pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<SystemParams>
+        where
+            K: AsRef<[u8]> + Debug,
+            V: AsRef<[u8]> + Debug,
+        {
             let mut ret = SystemParams::default();
-            let mut expected_keys: HashSet<_> = [
-                $(key_of!($field),)*
-            ]
-            .iter()
-            .cloned()
-            .collect();
-            for (k, v) in kvs {
+            kvs.retain(|(k,v)| {
                 let k = std::str::from_utf8(k.as_ref()).unwrap();
                 let v = std::str::from_utf8(v.as_ref()).unwrap();
                 match k {
                     $(
-                        key_of!($field) => ret.$field = Some(v.parse().unwrap()),
+                        key_of!($field) => {
+                            ret.$field = Some(v.parse().unwrap());
+                            false
+                        }
                     )*
                     _ => {
-                        return Err(format!(
-                            "unrecognized system param {:?}",
-                            k
-                        ));
+                        true
                     }
                 }
-                expected_keys.remove(k);
+            });
+            derive_missing_fields(&mut ret);
+            if !kvs.is_empty() {
+                 Err(format!("unrecognized system params {:?}", kvs))
+            } else {
+                Ok(ret)
             }
-            if !expected_keys.is_empty() {
-                return Err(format!(
-                    "missing system param {:?}",
-                    expected_keys
-                ));
-            }
-            Ok(ret)
         }
     };
 }
@@ -170,6 +179,39 @@ macro_rules! impl_default_validation_on_set {
     }
 }
 
+// Define rules to derive a parameter from others. This is useful for parameter type change or
+// semantic change, where a new parameter has to be introduced. When the cluster upgrades to a newer
+// version, we need to ensure the effect of the new parameter is equal to its older versions.
+//
+// For example, if you had `interval_sec` and now you want finer granularity, you can introduce a
+// new param `interval_ms` and try to derive it from `interval_sec` by overriding `FromParams` trait
+// in `OverrideFromParams`:
+//
+// ```
+// impl FromParams for OverrideFromParams {
+//     fn interval_ms(params: &mut SystemParams) -> Option<u64> {
+//         if let Some(sec) = params.interval_sec {
+//             Some(sec * 1000)
+//         } else {
+//             None
+//         }
+//     }
+// }
+// ```
+//
+// Note that newer versions must be prioritized during derivation.
+macro_rules! impl_default_from_other_params {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        trait FromParams {
+            $(
+                fn $field(_params: &mut SystemParams) -> Option<$type> {
+                    None
+                }
+            )*
+        }
+    };
+}
+
 macro_rules! impl_set_system_param {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         pub fn set_system_param(params: &mut SystemParams, key: &str, value: Option<String>) -> Result<()> {
@@ -197,7 +239,9 @@ macro_rules! impl_set_system_param {
     };
 }
 
-for_all_undeprecated_params!(impl_system_params_from_kv);
+for_all_undeprecated_params!(impl_derive_missing_fields);
+
+for_all_params!(impl_system_params_from_kv);
 
 for_all_undeprecated_params!(impl_system_params_to_kv);
 
@@ -215,6 +259,11 @@ impl ValidateOnSet for OverrideValidateOnSet {
         Self::expect_range(*v, 1..)
     }
 }
+
+for_all_undeprecated_params!(impl_default_from_other_params);
+
+struct OverrideFromParams;
+impl FromParams for OverrideFromParams {}
 
 #[cfg(test)]
 mod tests {
@@ -238,9 +287,6 @@ mod tests {
         // To kv - missing field.
         let p = SystemParams::default();
         assert!(system_params_to_kv(&p).is_err());
-
-        // From kv - missing field.
-        assert!(system_params_from_kv(vec![(BARRIER_INTERVAL_MS_KEY, "1")]).is_err());
 
         // From kv - unrecognized field.
         assert!(system_params_from_kv(vec![("?", "?")]).is_err());
