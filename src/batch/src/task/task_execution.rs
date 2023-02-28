@@ -76,8 +76,10 @@ where
                 biased;
                 _ = monitor => unreachable!(),
                 output = future => {
-                    // TODO(Yuanxin)
-                    // Report bytes allocated when actor ends. Note we should not report 0, cuz actor may allocate memory in block cache and may not be dealloc.
+                    // NOTE: Report bytes allocated when the actor ends. We simply report 0 here,
+                    // assuming that all memory allocated by this batch task will be freed at some
+                    // time. Maybe we should introduce a better monitoring strategy for batch memory
+                    // usage.
                     BYTES_ALLOCATED.with(|_| context.store_mem_usage(0));
                     output
                 },

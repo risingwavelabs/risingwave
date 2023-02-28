@@ -26,9 +26,9 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation overhead,
 /// network buffer, etc.) in megabytes.
 pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-/// TODO(Yuanxin)
+/// The proportion of stream memory to all available memory for computing.
 const STREAM_MEMORY_PROPORTION: f64 = 0.7;
-/// TODO(Yuanxin)
+/// The proportion of batch memory to all available memory for computing.
 const BATCH_MEMORY_PROPORTION: f64 = 1.0 - STREAM_MEMORY_PROPORTION;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
@@ -148,27 +148,30 @@ impl GlobalMemoryManager {
             });
             last_jemalloc_allocated_mib = jemalloc_allocated_mib;
 
-            // TODO(Yuanxin): comment
+            // ## Batch memory control
+            //
+            // When the batch memory usage exceeds the threshold, we choose the query that uses the
+            // most memory and kills it.
+
             let batch_used_memory_bytes = batch_manager.total_mem_usage();
             if batch_used_memory_bytes > batch_memory_threshold {
                 batch_manager.kill_queries("excessive batch memory usage".to_string());
             }
 
-            // TODO(Yuanxin): Rewrite the comment.
-            // The strategy works as follow:
+            // ## Streaming memory control
             //
-            // 1. When the memory usage is below the graceful threshold, we do not evict any caches
-            // and reset the step to 0.
+            // 1. When the streaming memory usage is below the graceful threshold, we do not evict
+            // any caches, and simply reset the step to 0.
             //
             // 2. When the memory usage is between the graceful and aggressive threshold:
-            //   - If the last eviction memory usage decrease after last eviction, we set the
-            //     eviction step to 1
-            //   - or else we set the step to last_step + 1
+            //   - If the last eviction memory usage decreases after last eviction, we set the
+            //     eviction step to 1.
+            //   - Otherwise, we set the step to last_step + 1.
             //
-            // 3. When the memory usage exceeds aggressive threshold:
-            //   - If the memory usage decrease after last eviction, we set the eviction step to
-            //     last_step
-            //   - or else we set the step to last_step * 2
+            // 3. When the memory usage exceeds the aggressive threshold:
+            //   - If the memory usage decreases after the last eviction, we set the eviction step
+            //     to last_step.
+            //   - Otherwise, we set the step to last_step * 2.
 
             let cur_stream_used_memory_bytes = stream_manager.total_mem_usage();
             let last_step = step;

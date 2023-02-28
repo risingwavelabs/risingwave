@@ -153,7 +153,6 @@ impl BatchManager {
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
                 tracing::trace!("Removed task: {:?}", task.get_task_id());
-                // TODO(Yuanxin)
                 task.abort_task(msg);
                 self.metrics.task_num.dec()
             }
