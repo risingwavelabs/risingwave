@@ -90,6 +90,7 @@ impl Planner {
             pk_col_ids,
             row_id_index,
             gen_row_id,
+            false,
             self.ctx(),
         )
         .into())

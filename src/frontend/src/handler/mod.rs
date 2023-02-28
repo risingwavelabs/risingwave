@@ -197,6 +197,7 @@ pub async fn handle(
             temporary,
             if_not_exists,
             source_schema,
+            source_watermarks,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -229,6 +230,7 @@ pub async fn handle(
                 constraints,
                 if_not_exists,
                 source_schema,
+                source_watermarks,
             )
             .await
         }
