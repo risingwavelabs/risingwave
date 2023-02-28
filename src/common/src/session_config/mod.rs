@@ -75,6 +75,7 @@ const STREAMING_ENABLE_DELTA_JOIN: usize = 15;
 const ENABLE_TWO_PHASE_AGG: usize = 16;
 const FORCE_TWO_PHASE_AGG: usize = 17;
 const RW_ENABLE_SHARE_PLAN: usize = 18;
+const STREAMING_ENABLE_BUSHY_JOIN: usize = 19;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -271,6 +272,7 @@ type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
 type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
+type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
@@ -332,6 +334,8 @@ pub struct ConfigMap {
 
     /// Enable delta join in streaming query. Defaults to false.
     streaming_enable_delta_join: StreamingEnableDeltaJoin,
+
+    streaming_enable_bushy_join: StreamingEnableBushyJoin,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
@@ -613,6 +617,10 @@ impl ConfigMap {
 
     pub fn get_streaming_enable_delta_join(&self) -> bool {
         *self.streaming_enable_delta_join
+    }
+
+    pub fn get_streaming_enable_bushy_join(&self) -> bool {
+        *self.streaming_enable_bushy_join
     }
 
     pub fn get_enable_two_phase_agg(&self) -> bool {

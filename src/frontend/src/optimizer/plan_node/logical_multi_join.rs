@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
@@ -481,6 +482,143 @@ impl LogicalMultiJoin {
             }
         }
         Ok(join_ordering)
+    }
+
+    pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
+        // Join tree internal representation
+        #[derive(Clone, Default)]
+        struct JoinTreeNode {
+            idx: Option<usize>,
+            left: Option<Box<JoinTreeNode>>,
+            right: Option<Box<JoinTreeNode>>,
+            height: usize,
+        }
+
+        // join graph internal representation
+        #[derive(Clone)]
+        struct GraphNode {
+            id: usize,
+            join_tree: JoinTreeNode,
+            relations: HashSet<usize>,
+        }
+
+        let mut nodes: HashMap<_, _> = (0..self.inputs.len())
+            .map(|idx| GraphNode {
+                id: idx,
+                relations: HashSet::new(),
+                join_tree: JoinTreeNode {
+                    idx: Some(idx),
+                    left: None,
+                    right: None,
+                    height: 0,
+                },
+            })
+            .enumerate()
+            .collect();
+        let (eq_join_conditions, _) = self
+            .on
+            .clone()
+            .split_by_input_col_nums(&self.input_col_nums(), true);
+
+        for ((src, dst), _) in eq_join_conditions {
+            nodes.get_mut(&src).unwrap().relations.insert(dst);
+            nodes.get_mut(&dst).unwrap().relations.insert(src);
+        }
+
+        let mut optimized_bushy_tree = None;
+        let mut que = VecDeque::from([nodes]);
+
+        while let Some(mut nodes) = que.pop_front() {
+            if nodes.len() == 1 {
+                let node = nodes.into_values().next().unwrap();
+                optimized_bushy_tree = Some(optimized_bushy_tree.map_or(
+                    node.clone(),
+                    |old_tree: GraphNode| {
+                        if node.join_tree.height < old_tree.join_tree.height {
+                            node
+                        } else {
+                            old_tree
+                        }
+                    },
+                ));
+                continue;
+            }
+
+            let (idx, _) = nodes.iter().min_by_key(|(_, g)| g.relations.len()).unwrap();
+
+            let n = nodes.remove(&idx.clone()).unwrap();
+
+            if n.relations.is_empty() {
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "Connecting edge not found in join connected subgraph".into(),
+                )));
+            }
+
+            for merge_node in &n.relations {
+                let mut nodes = nodes.clone();
+                for adjacent_node in &n.relations {
+                    if *adjacent_node != *merge_node {
+                        nodes
+                            .get_mut(adjacent_node)
+                            .unwrap()
+                            .relations
+                            .remove(&n.id);
+                        nodes
+                            .get_mut(adjacent_node)
+                            .unwrap()
+                            .relations
+                            .insert(*merge_node);
+                    }
+                }
+                let mut merge_graph_node = nodes.get_mut(merge_node).unwrap();
+                merge_graph_node.relations.remove(&n.id);
+                let l_tree = n.join_tree.clone();
+                let r_tree = std::mem::take(&mut merge_graph_node.join_tree);
+                let new_height = usize::max(l_tree.height, r_tree.height) + 1;
+                merge_graph_node.join_tree = JoinTreeNode {
+                    idx: None,
+                    left: Some(Box::new(l_tree)),
+                    right: Some(Box::new(r_tree)),
+                    height: new_height,
+                };
+                que.push_back(nodes);
+            }
+        }
+
+        fn create_logical_join(
+            s: &LogicalMultiJoin,
+            mut join_tree: JoinTreeNode,
+        ) -> Result<PlanRef> {
+            Ok(match (join_tree.left.take(), join_tree.right.take()) {
+                (Some(l), Some(r)) => LogicalJoin::new(
+                    create_logical_join(s, *l)?,
+                    create_logical_join(s, *r)?,
+                    JoinType::Inner,
+                    Condition::true_cond(),
+                )
+                .into(),
+                (None, None) => {
+                    if let Some(idx) = join_tree.idx {
+                        s.inputs[idx].clone()
+                    } else {
+                        return Err(RwError::from(ErrorCode::InternalError(
+                            "id of the leaf node not found in the join tree".into(),
+                        )));
+                    }
+                }
+                (_, _) => {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "only leaf node can have None subtree".into(),
+                    )))
+                }
+            })
+        }
+        create_logical_join(
+            self,
+            optimized_bushy_tree
+                .expect("no optimized bushy tree node")
+                .join_tree,
+        )
     }
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
