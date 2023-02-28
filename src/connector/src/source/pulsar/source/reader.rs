@@ -120,7 +120,7 @@ impl SplitReader for PulsarSplitReader {
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
-            .with_topic(topic)
+            .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
                 "consumer-{}",
@@ -131,17 +131,35 @@ impl SplitReader for PulsarSplitReader {
             ));
 
         let builder = match split.start_offset.clone() {
-            PulsarEnumeratorOffset::Earliest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
-            ),
+            PulsarEnumeratorOffset::Earliest => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("Earliest offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                    )
+                }
+            }
             PulsarEnumeratorOffset::Latest => builder.with_options(
                 ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
-            PulsarEnumeratorOffset::MessageId(m) => builder.with_options(pulsar::ConsumerOptions {
-                durable: Some(false),
-                start_message_id: parse_message_id(m.as_str()).ok(),
-                ..Default::default()
-            }),
+            PulsarEnumeratorOffset::MessageId(m) => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("MessageId offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(pulsar::ConsumerOptions {
+                        durable: Some(false),
+                        start_message_id: parse_message_id(m.as_str()).ok(),
+                        ..Default::default()
+                    })
+                }
+            }
 
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
