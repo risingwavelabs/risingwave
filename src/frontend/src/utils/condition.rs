@@ -24,14 +24,13 @@ use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
-use risingwave_pb::expr::expr_node::Type;
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
     FunctionCall, InputRef,
 };
-use crate::utils::condition::execpetion_cast::{ResultForCmp, ResultForEq};
+use crate::utils::condition::cast_compare::{ResultForCmp, ResultForEq};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Condition {
@@ -405,7 +404,7 @@ impl Condition {
                     {
                         expr
                     } else {
-                        match self::execpetion_cast::cast_except_for_eq(
+                        match self::cast_compare::cast_compare_for_eq(
                             const_expr,
                             input_ref.data_type,
                         ) {
@@ -421,7 +420,7 @@ impl Condition {
                     };
 
                     let Some(new_cond) = new_expr.eval_row_const()? else {
-                        // column = NULL, PK column never be NULL
+                        // column = NULL, the result is always NULL.
                         return Ok(false_cond());
                     };
                     if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
@@ -472,22 +471,27 @@ impl Condition {
                     {
                         expr
                     } else {
-                        match self::execpetion_cast::cast_except_for_cmp(
+                        match self::cast_compare::cast_compare_for_cmp(
                             const_expr,
                             input_ref.data_type,
                             op,
                         ) {
                             Ok(ResultForCmp::Success(expr)) => expr,
                             Ok(ResultForCmp::OutUpperBound) => {
-                                if op == Type::GreaterThan || op == Type::GreaterThanOrEqual {
+                                if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual
+                                {
                                     return Ok(false_cond());
                                 }
+                                // op == < and <= means result is always true, don't need any extra
+                                // work.
                                 continue;
                             }
                             Ok(ResultForCmp::OutLowerBound) => {
-                                if op == Type::LessThan || op == Type::LessThanOrEqual {
+                                if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
                                     return Ok(false_cond());
                                 }
+                                // op == > and >= means result is always true, don't need any extra
+                                // work.
                                 continue;
                             }
                             Err(_) => {
@@ -497,7 +501,7 @@ impl Condition {
                         }
                     };
                     let Some(value) = new_expr.eval_row_const()? else {
-                        // column compare with NULL, PK column never be NULL
+                        // column compare with NULL, the result is always  NULL.
                         return Ok(false_cond());
                     };
                     match op {
@@ -742,11 +746,14 @@ impl fmt::Debug for ConditionDisplay<'_> {
     }
 }
 
-mod execpetion_cast {
+/// `cast_compare` can be summarized as casting to target type which can be compared but can't be
+/// cast implicitly to, like:
+/// 1. bigger range -> smaller range in same type, e.g. int64 -> int32
+/// 2. different type, e.g. float type -> integral type
+mod cast_compare {
     use risingwave_common::types::DataType;
-    use risingwave_pb::expr::expr_node::Type;
 
-    use crate::expr::{Expr, ExprImpl};
+    use crate::expr::{Expr, ExprImpl, ExprType};
 
     enum ShrinkResult {
         OutUpperBound,
@@ -765,7 +772,7 @@ mod execpetion_cast {
         OutLowerBound,
     }
 
-    pub fn cast_except_for_eq(const_expr: ExprImpl, target: DataType) -> Result<ResultForEq, ()> {
+    pub fn cast_compare_for_eq(const_expr: ExprImpl, target: DataType) -> Result<ResultForEq, ()> {
         match (const_expr.return_type(), &target) {
             (DataType::Int64, DataType::Int32)
             | (DataType::Int64, DataType::Int16)
@@ -779,10 +786,10 @@ mod execpetion_cast {
         }
     }
 
-    pub fn cast_except_for_cmp(
+    pub fn cast_compare_for_cmp(
         const_expr: ExprImpl,
         target: DataType,
-        _op: Type,
+        _op: ExprType,
     ) -> Result<ResultForCmp, ()> {
         match (const_expr.return_type(), &target) {
             (DataType::Int64, DataType::Int32)
@@ -797,7 +804,7 @@ mod execpetion_cast {
     }
 
     fn shrink_integral(const_expr: ExprImpl, target: DataType) -> Result<ShrinkResult, ()> {
-        let (upper_bound, lowwer_bound) = match (const_expr.return_type(), &target) {
+        let (upper_bound, lower_bound) = match (const_expr.return_type(), &target) {
             (DataType::Int64, DataType::Int32) => (i32::MAX as i64, i32::MIN as i64),
             (DataType::Int64, DataType::Int16) | (DataType::Int32, DataType::Int16) => {
                 (i16::MAX as i64, i16::MIN as i64)
@@ -809,7 +816,7 @@ mod execpetion_cast {
                 let value = scalar.as_integral();
                 if value > upper_bound {
                     Ok(ShrinkResult::OutUpperBound)
-                } else if value < lowwer_bound {
+                } else if value < lower_bound {
                     Ok(ShrinkResult::OutLowerBound)
                 } else {
                     Ok(ShrinkResult::InRange(
