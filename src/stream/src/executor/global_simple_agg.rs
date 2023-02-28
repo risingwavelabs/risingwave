@@ -20,7 +20,7 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::{AggExecutorArgs, ROW_COUNT_COLUMN};
+use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, AlwaysOutput,
     DistinctDeduplicater,
@@ -63,6 +63,9 @@ struct ExecutorInner<S: StateStore> {
 
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
+
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
 
     /// State storage for each agg calls.
     storages: Vec<AggStateStorage<S>>,
@@ -140,6 +143,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
@@ -311,7 +315,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 &this.storages,
                 &this.result_table,
                 &this.input_pk_indices,
-                ROW_COUNT_COLUMN,
+                this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
             )

@@ -29,7 +29,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::{AggExecutorArgs, ROW_COUNT_COLUMN};
+use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater,
     OnlyOutputIfHasInput,
@@ -83,6 +83,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
+
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
 
     /// State storages for each aggregation calls.
     /// `None` means the agg call need not to maintain a state table by itself.
@@ -197,6 +200,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: extra_args.group_key_indices,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
@@ -258,7 +262,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.storages,
                                 &this.result_table,
                                 &this.input_pk_indices,
-                                ROW_COUNT_COLUMN,
+                                this.row_count_index,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
