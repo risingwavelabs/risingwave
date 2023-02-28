@@ -88,15 +88,15 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
-        let topic_metadata = self
+        let topic_partitions = self
             .client
             .lookup_partitioned_topic_number(&self.topic.to_string())
             .await
             .map_err(|e| anyhow!(e))?;
 
-        let splits = if topic_metadata > 0 {
+        let splits = if topic_partitions > 0 {
             // partitioned topic
-            (0..topic_metadata as i32)
+            (0..topic_partitions as i32)
                 .map(|p| PulsarSplit {
                     topic: self.topic.sub_topic(p).unwrap(),
                     start_offset: offset.clone(),
