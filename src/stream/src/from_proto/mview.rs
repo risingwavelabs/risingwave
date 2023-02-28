@@ -44,7 +44,9 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let table = node.get_table()?;
 
         let conflict_behavior = match table.handle_pk_conflict_behavior() {
-            risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheckUnspecified => {
+                ConflictBehavior::NoCheck
+            }
             risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
                 ConflictBehavior::OverWrite
             }
@@ -97,7 +99,9 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior = match table.handle_pk_conflict_behavior() {
-            risingwave_pb::catalog::HandleConflictBehavior::NoCheck => ConflictBehavior::NoCheck,
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheckUnspecified => {
+                ConflictBehavior::NoCheck
+            }
             risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
                 ConflictBehavior::OverWrite
             }

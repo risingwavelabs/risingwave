@@ -186,7 +186,7 @@ message MaterializeNode {
 }
 
 enum HandleConflictBehavior {
-  NO_CHECK = 0;
+  NO_CHECK_UNSPECIFIED = 0;
   OVERWRITE = 1;
   IGNORE = 2;
 }

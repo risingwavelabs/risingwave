@@ -116,6 +116,7 @@ message Table {
     INDEX = 3;
     INTERNAL = 4;
   }
+
   message TableVersion {
     // The version number, which will be 0 by default and be increased by 1 for
     // each schema change in the frontend.
@@ -163,7 +164,7 @@ message Table {
 }
 
 enum HandleConflictBehavior {
-  NO_CHECK = 0;
+  NO_CHECK_UNSPECIFIED = 0;
   OVERWRITE = 1;
   IGNORE = 2;
 }

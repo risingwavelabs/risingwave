@@ -26,7 +26,7 @@ import { ConnectorSplits } from "./source";
 export const protobufPackage = "stream_plan";
 
 export const HandleConflictBehavior = {
-  NO_CHECK: "NO_CHECK",
+  NO_CHECK_UNSPECIFIED: "NO_CHECK_UNSPECIFIED",
   OVERWRITE: "OVERWRITE",
   IGNORE: "IGNORE",
   UNRECOGNIZED: "UNRECOGNIZED",
@@ -37,8 +37,8 @@ export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof 
 export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
   switch (object) {
     case 0:
-    case "NO_CHECK":
-      return HandleConflictBehavior.NO_CHECK;
+    case "NO_CHECK_UNSPECIFIED":
+      return HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     case 1:
     case "OVERWRITE":
       return HandleConflictBehavior.OVERWRITE;
@@ -54,8 +54,8 @@ export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehav
 
 export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
   switch (object) {
-    case HandleConflictBehavior.NO_CHECK:
-      return "NO_CHECK";
+    case HandleConflictBehavior.NO_CHECK_UNSPECIFIED:
+      return "NO_CHECK_UNSPECIFIED";
     case HandleConflictBehavior.OVERWRITE:
       return "OVERWRITE";
     case HandleConflictBehavior.IGNORE:
@@ -2125,7 +2125,12 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK };
+  return {
+    tableId: 0,
+    columnOrders: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const MaterializeNode = {
@@ -2138,7 +2143,7 @@ export const MaterializeNode = {
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NO_CHECK,
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -2161,7 +2166,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };
@@ -3127,7 +3132,7 @@ function createBaseArrangeNode(): ArrangeNode {
     tableInfo: undefined,
     distributionKey: [],
     table: undefined,
-    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
   };
 }
 
@@ -3139,7 +3144,7 @@ export const ArrangeNode = {
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NO_CHECK,
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -3165,7 +3170,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };

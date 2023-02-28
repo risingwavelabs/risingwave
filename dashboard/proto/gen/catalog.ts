@@ -60,7 +60,7 @@ export function sinkTypeToJSON(object: SinkType): string {
 }
 
 export const HandleConflictBehavior = {
-  NO_CHECK: "NO_CHECK",
+  NO_CHECK_UNSPECIFIED: "NO_CHECK_UNSPECIFIED",
   OVERWRITE: "OVERWRITE",
   IGNORE: "IGNORE",
   UNRECOGNIZED: "UNRECOGNIZED",
@@ -71,8 +71,8 @@ export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof 
 export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
   switch (object) {
     case 0:
-    case "NO_CHECK":
-      return HandleConflictBehavior.NO_CHECK;
+    case "NO_CHECK_UNSPECIFIED":
+      return HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     case 1:
     case "OVERWRITE":
       return HandleConflictBehavior.OVERWRITE;
@@ -88,8 +88,8 @@ export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehav
 
 export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
   switch (object) {
-    case HandleConflictBehavior.NO_CHECK:
-      return "NO_CHECK";
+    case HandleConflictBehavior.NO_CHECK_UNSPECIFIED:
+      return "NO_CHECK_UNSPECIFIED";
     case HandleConflictBehavior.OVERWRITE:
       return "OVERWRITE";
     case HandleConflictBehavior.IGNORE:
@@ -884,7 +884,7 @@ function createBaseTable(): Table {
     rowIdIndex: undefined,
     valueIndices: [],
     definition: "",
-    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     readPrefixLenHint: 0,
     watermarkIndices: [],
     version: undefined,
@@ -928,7 +928,7 @@ export const Table = {
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
         ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
-        : HandleConflictBehavior.NO_CHECK,
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
       watermarkIndices: Array.isArray(object?.watermarkIndices)
         ? object.watermarkIndices.map((e: any) => Number(e))
@@ -1045,7 +1045,7 @@ export const Table = {
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
-    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)
