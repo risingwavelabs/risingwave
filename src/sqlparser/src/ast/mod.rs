@@ -42,7 +42,7 @@ pub use self::query::{
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, TrimWhereField, Value};
+pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
