@@ -362,6 +362,7 @@ impl TestCase {
                     constraints,
                     if_not_exists,
                     source_schema,
+                    source_watermarks,
                     ..
                 } => {
                     create_table::handle_create_table(
@@ -371,6 +372,7 @@ impl TestCase {
                         constraints,
                         if_not_exists,
                         source_schema,
+                        source_watermarks,
                     )
                     .await?;
                 }

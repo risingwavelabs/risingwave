@@ -35,11 +35,12 @@ use property::Order;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
-    StreamRowIdGen, StreamSink,
+    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -700,6 +701,7 @@ impl PlanRoot {
         definition: String,
         row_id_index: Option<usize>,
         append_only: bool,
+        watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
@@ -711,6 +713,12 @@ impl PlanRoot {
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )
         .into();
+
+        // Add WatermarkFilter node.
+        if !watermark_descs.is_empty() {
+            stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
+        }
+
         // Add RowIDGen node if needed.
         if let Some(row_id_index) = row_id_index {
             stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
