@@ -563,6 +563,7 @@ impl Parser {
             }
             Token::Number(_)
             | Token::SingleQuotedString(_)
+            | Token::DollarQuotedString(_)
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_)
             | Token::CstyleEscapesString(_) => {
@@ -2472,6 +2473,7 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
+            Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone())),
             Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
@@ -2515,20 +2517,16 @@ impl Parser {
     }
 
     pub fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParserError> {
-        Ok(FunctionDefinition::SingleQuotedDef(
-            self.parse_literal_string()?,
-        ))
-        // TODO: support dollar quoted string
-        // let peek_token = self.peek_token();
-        // match peek_token {
-        //     Token::DollarQuotedString(value) if dialect_of!(self is PostgreSqlDialect) => {
-        //         self.next_token();
-        //         Ok(FunctionDefinition::DoubleDollarDef(value.value))
-        //     }
-        //     _ => Ok(FunctionDefinition::SingleQuotedDef(
-        //         self.parse_literal_string()?,
-        //     )),
-        // }
+        let peek_token = self.peek_token();
+        match peek_token {
+            Token::DollarQuotedString(value) => {
+                self.next_token();
+                Ok(FunctionDefinition::DoubleDollarDef(value.value))
+            }
+            _ => Ok(FunctionDefinition::SingleQuotedDef(
+                self.parse_literal_string()?,
+            )),
+        }
     }
 
     /// Parse a literal string
