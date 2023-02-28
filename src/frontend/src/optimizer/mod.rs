@@ -33,7 +33,7 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::catalog::WatermarkDesc;
@@ -382,6 +382,10 @@ impl PlanRoot {
             stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
         }
 
+        let conflict_behavior = match append_only {
+            true => ConflictBehavior::NoCheck,
+            false => ConflictBehavior::OverWrite,
+        };
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
@@ -389,7 +393,7 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            !append_only,
+            conflict_behavior,
             row_id_index,
             version,
         )
