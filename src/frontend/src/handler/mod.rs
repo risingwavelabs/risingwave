@@ -190,7 +190,6 @@ pub async fn handle(
             columns,
             constraints,
             query,
-
             with_options: _, // It is put in OptimizerContext
             // Not supported things
             or_replace,
@@ -198,6 +197,7 @@ pub async fn handle(
             if_not_exists,
             source_schema,
             source_watermarks,
+            append_only,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -220,6 +220,7 @@ pub async fn handle(
                     if_not_exists,
                     query,
                     columns,
+                    append_only,
                 )
                 .await;
             }
@@ -231,6 +232,7 @@ pub async fn handle(
                 if_not_exists,
                 source_schema,
                 source_watermarks,
+                append_only,
             )
             .await
         }

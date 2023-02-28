@@ -5,7 +5,7 @@
     create table T  (k int, v int, o int, s varchar);
     create index Tk on T(k) include(k, v, o, s);
     create materialized view S as select * from T order by o limit 100;
-    create table AO (k int, v int, o int, s varchar) with (appendonly = true);
+    create table AO (k int, v int, o int, s varchar) append only;
 - id: extreme_on_single
   before:
   - create_tables

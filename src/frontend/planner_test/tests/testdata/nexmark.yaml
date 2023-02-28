@@ -33,7 +33,7 @@
         "url" VARCHAR,
         "date_time" TIMESTAMP,
         "extra" VARCHAR
-    ) with (appendonly = true);
+    ) append only;
 - id: nexmark_q0
   before:
   - create_tables

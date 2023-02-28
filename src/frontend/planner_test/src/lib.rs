@@ -363,6 +363,7 @@ impl TestCase {
                     if_not_exists,
                     source_schema,
                     source_watermarks,
+                    append_only,
                     ..
                 } => {
                     create_table::handle_create_table(
@@ -373,6 +374,7 @@ impl TestCase {
                         if_not_exists,
                         source_schema,
                         source_watermarks,
+                        append_only,
                     )
                     .await?;
                 }
