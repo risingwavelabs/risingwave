@@ -26,11 +26,13 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead, WriteOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
-use crate::test_utils::HummockV2MixedStateStore;
+use crate::test_utils::TestIngestBatch;
 
 #[tokio::test]
 #[ignore]
@@ -56,7 +58,7 @@ async fn test_failpoints_state_store_read_upload() {
     .await
     .unwrap();
 
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
+    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
@@ -71,7 +73,8 @@ async fn test_failpoints_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
+    local.init(1);
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -82,6 +85,8 @@ async fn test_failpoints_state_store_read_upload() {
         )
         .await
         .unwrap();
+
+    local.seal_current_epoch(3);
 
     // Get the value after flushing to remote.
     let anchor_prefix_hint = {
@@ -107,7 +112,7 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
     assert_eq!(value, Bytes::from("111"));
     // // Write second batch.
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -118,6 +123,8 @@ async fn test_failpoints_state_store_read_upload() {
         )
         .await
         .unwrap();
+
+    local.seal_current_epoch(u64::MAX);
 
     // sync epoch1 test the read_error
     let ssts = hummock_storage

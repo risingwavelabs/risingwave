@@ -401,6 +401,10 @@ impl HummockVersionReader {
             state_store_metrics,
         }
     }
+
+    pub fn stats(&self) -> &Arc<HummockStateStoreMetrics> {
+        &self.state_store_metrics
+    }
 }
 
 impl HummockVersionReader {
@@ -741,6 +745,10 @@ impl HummockVersionReader {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
         local_stats.found_key = user_iter.is_valid();
+        local_stats.sub_iter_count = local_stats.staging_imm_iter_count
+            + local_stats.staging_sst_iter_count
+            + local_stats.overlapping_iter_count
+            + local_stats.non_overlapping_iter_count;
 
         Ok(HummockStorageIterator::new(
             user_iter,
@@ -759,7 +767,6 @@ impl HummockVersionReader {
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<bool> {
         let table_id = read_options.table_id;
-        let mut table_counts = 0;
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
         let mut stats_guard =
             MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
@@ -811,7 +818,7 @@ impl HummockVersionReader {
 
         // 2. order guarantee: imm -> sst
         for local_sst in &uncommitted_ssts {
-            table_counts += 1;
+            stats_guard.local_stats.may_exist_check_sstable_count += 1;
             if hit_sstable_bloom_filter(
                 self.sstable_store
                     .sstable(local_sst, &mut stats_guard.local_stats)
@@ -837,7 +844,7 @@ impl HummockVersionReader {
                     let sstable_infos =
                         prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
                     for sstable_info in sstable_infos {
-                        table_counts += 1;
+                        stats_guard.local_stats.may_exist_check_sstable_count += 1;
                         if hit_sstable_bloom_filter(
                             self.sstable_store
                                 .sstable(sstable_info, &mut stats_guard.local_stats)
@@ -855,7 +862,7 @@ impl HummockVersionReader {
                         prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range);
 
                     for table_info in table_infos {
-                        table_counts += 1;
+                        stats_guard.local_stats.may_exist_check_sstable_count += 1;
                         if hit_sstable_bloom_filter(
                             self.sstable_store
                                 .sstable(table_info, &mut stats_guard.local_stats)
@@ -871,7 +878,6 @@ impl HummockVersionReader {
             }
         }
 
-        stats_guard.local_stats.may_exist_check_sstable_count = table_counts;
         Ok(false)
     }
 }

@@ -15,18 +15,23 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::mem::swap;
-use std::ops::RangeBounds;
+use std::future::Future;
+use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::row::RowDeserializer;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
-use crate::error::StorageError;
+use crate::error::{StorageError, StorageResult};
+use crate::hummock::utils::{
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check,
+    filter_with_delete_range, ENABLE_SANITY_CHECK,
+};
+use crate::storage_value::StorageValue;
 use crate::store::*;
 
 #[derive(Clone, Debug)]
@@ -40,8 +45,8 @@ pub enum KeyOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    buffer: BTreeMap<Bytes, KeyOp>,
-    is_consistent_op: bool,
+    pub(crate) buffer: BTreeMap<Bytes, KeyOp>,
+    pub(crate) is_consistent_op: bool,
 }
 
 #[derive(Error, Debug)]
@@ -61,9 +66,7 @@ impl MemTable {
     }
 
     pub fn drain(&mut self) -> Self {
-        let mut temp = Self::new(self.is_consistent_op);
-        swap(&mut temp, self);
-        temp
+        std::mem::replace(self, Self::new(self.is_consistent_op))
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -221,7 +224,7 @@ impl KeyOp {
 }
 
 #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-pub async fn merge_stream<'a>(
+pub(crate) async fn merge_stream<'a>(
     mem_table_iter: impl Iterator<Item = (&'a Bytes, &'a KeyOp)> + 'a,
     inner_stream: impl StateStoreReadIterStream,
     table_id: TableId,
@@ -306,4 +309,191 @@ pub async fn merge_stream<'a>(
     }
 }
 
-const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+pub struct MemtableLocalStateStore<S: StateStoreWrite + StateStoreRead> {
+    mem_table: MemTable,
+    inner: S,
+
+    epoch: Option<u64>,
+
+    table_id: TableId,
+    is_consistent_op: bool,
+    table_option: TableOption,
+}
+
+impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
+    pub fn new(inner: S, option: NewLocalOptions) -> Self {
+        Self {
+            inner,
+            mem_table: MemTable::new(option.is_consistent_op),
+            epoch: None,
+            table_id: option.table_id,
+            is_consistent_op: option.is_consistent_op,
+            table_option: option.table_option,
+        }
+    }
+
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+}
+
+impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalStateStore<S> {
+    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
+    type GetFuture<'a> = impl GetFutureTrait<'a>;
+    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+
+    define_local_state_store_associated_type!();
+
+    fn may_exist(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::MayExistFuture<'_> {
+        async { Ok(true) }
+    }
+
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        async move {
+            match self.mem_table.buffer.get(key) {
+                None => self.inner.get(key, self.epoch(), read_options).await,
+                Some(op) => match op {
+                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
+                    KeyOp::Delete(_) => Ok(None),
+                },
+            }
+        }
+    }
+
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        async move {
+            let stream = self
+                .inner
+                .iter(key_range.clone(), self.epoch(), read_options)
+                .await?;
+            let (l, r) = key_range;
+            let key_range = (l.map(Bytes::from), r.map(Bytes::from));
+            Ok(merge_stream(
+                self.mem_table.iter(key_range),
+                stream,
+                self.table_id,
+                self.epoch(),
+            ))
+        }
+    }
+
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+        match old_val {
+            None => self.mem_table.insert(key, new_val)?,
+            Some(old_val) => self.mem_table.update(key, old_val, new_val)?,
+        };
+        Ok(())
+    }
+
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        Ok(self.mem_table.delete(key, old_val)?)
+    }
+
+    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+        async move {
+            debug_assert!(delete_ranges.iter().map(|(key, _)| key).is_sorted());
+            let buffer = self.mem_table.drain().into_parts();
+            let mut kv_pairs = Vec::with_capacity(buffer.len());
+            for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter())
+            {
+                match key_op {
+                    // Currently, some executors do not strictly comply with these semantics. As
+                    // a workaround you may call disable the check by initializing the
+                    // state store with `is_consistent_op=false`.
+                    KeyOp::Insert(value) => {
+                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                            do_insert_sanity_check(
+                                &key,
+                                &value,
+                                &self.inner,
+                                self.epoch(),
+                                self.table_id,
+                                self.table_option,
+                            )
+                            .await?;
+                        }
+                        kv_pairs.push((key, StorageValue::new_put(value)));
+                    }
+                    KeyOp::Delete(old_value) => {
+                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                            do_delete_sanity_check(
+                                &key,
+                                &old_value,
+                                &self.inner,
+                                self.epoch(),
+                                self.table_id,
+                                self.table_option,
+                            )
+                            .await?;
+                        }
+                        kv_pairs.push((key, StorageValue::new_delete()));
+                    }
+                    KeyOp::Update((old_value, new_value)) => {
+                        if ENABLE_SANITY_CHECK && self.is_consistent_op {
+                            do_update_sanity_check(
+                                &key,
+                                &old_value,
+                                &new_value,
+                                &self.inner,
+                                self.epoch(),
+                                self.table_id,
+                                self.table_option,
+                            )
+                            .await?;
+                        }
+                        kv_pairs.push((key, StorageValue::new_put(new_value)));
+                    }
+                }
+            }
+            self.inner
+                .ingest_batch(
+                    kv_pairs,
+                    delete_ranges,
+                    WriteOptions {
+                        epoch: self.epoch(),
+                        table_id: self.table_id,
+                    },
+                )
+                .await
+        }
+    }
+
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch")
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.mem_table.is_dirty()
+    }
+
+    fn init(&mut self, epoch: u64) {
+        assert!(
+            self.epoch.replace(epoch).is_none(),
+            "local state store of table id {:?} is init for more than once",
+            self.table_id
+        );
+    }
+
+    fn seal_current_epoch(&mut self, next_epoch: u64) {
+        assert!(!self.is_dirty());
+        let prev_epoch = self
+            .epoch
+            .replace(next_epoch)
+            .expect("should have init epoch before seal the first epoch");
+        assert!(
+            next_epoch > prev_epoch,
+            "new epoch {} should be greater than current epoch: {}",
+            next_epoch,
+            prev_epoch
+        );
+    }
+}

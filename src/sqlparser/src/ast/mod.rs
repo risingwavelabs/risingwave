@@ -951,6 +951,8 @@ pub enum Statement {
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
         source_schema: Option<SourceSchema>,
+        /// The watermark defined on source.
+        source_watermarks: Vec<SourceWatermark>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
     },
@@ -1300,6 +1302,7 @@ impl fmt::Display for Statement {
                 if_not_exists,
                 temporary,
                 source_schema,
+                source_watermarks,
                 query,
             } => {
                 // We want to allow the following options
@@ -1318,11 +1321,7 @@ impl fmt::Display for Statement {
                     name = name,
                 )?;
                 if !columns.is_empty() || !constraints.is_empty() {
-                    write!(f, " ({}", display_comma_separated(columns))?;
-                    if !columns.is_empty() && !constraints.is_empty() {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{})", display_comma_separated(constraints))?;
+                    write!(f, " {}", fmt_create_items(columns, constraints, source_watermarks)?)?;
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
@@ -2200,6 +2199,8 @@ pub struct CreateFunctionBody {
     pub as_: Option<FunctionDefinition>,
     /// RETURN expression
     pub return_: Option<Expr>,
+    /// USING ...
+    pub using: Option<CreateFunctionUsing>,
 }
 
 impl fmt::Display for CreateFunctionBody {
@@ -2216,7 +2217,25 @@ impl fmt::Display for CreateFunctionBody {
         if let Some(expr) = &self.return_ {
             write!(f, " RETURN {expr}")?;
         }
+        if let Some(using) = &self.using {
+            write!(f, " {using}")?;
+        }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionUsing {
+    Link(String),
+}
+
+impl fmt::Display for CreateFunctionUsing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "USING ")?;
+        match self {
+            CreateFunctionUsing::Link(uri) => write!(f, "LINK '{uri}'"),
+        }
     }
 }
 
