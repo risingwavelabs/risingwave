@@ -154,6 +154,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        if chunk.cardinality() == 0 {
+            // If the chunk is empty, do nothing.
+            return Ok(());
+        }
+
         // Decompose the input chunk.
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
@@ -220,7 +225,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if vars.state_changed {
+        if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush agg states.
             vars.agg_group
                 .flush_state_if_needed(&mut this.storages)
@@ -317,18 +322,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
             cache.update_epoch(barrier.epoch.curr);
         });
-
-        if vars.agg_group.is_uninitialized() {
-            let data_types = this
-                .input_schema
-                .fields
-                .iter()
-                .map(|f| f.data_type())
-                .collect::<Vec<_>>();
-            let chunk = StreamChunk::from_rows(&[], &data_types[..]);
-            // Apply empty chunk
-            Self::apply_chunk(&mut this, &mut vars, chunk).await?;
-        }
 
         yield Message::Barrier(barrier);
 
