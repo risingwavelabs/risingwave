@@ -26,8 +26,10 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation overhead,
 /// network buffer, etc.) in megabytes.
 pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
+#[cfg(any())]
 /// The proportion of stream memory to all available memory for computing.
 const STREAM_MEMORY_PROPORTION: f64 = 0.7;
+#[cfg(any())]
 /// The proportion of batch memory to all available memory for computing.
 const BATCH_MEMORY_PROPORTION: f64 = 1.0 - STREAM_MEMORY_PROPORTION;
 
@@ -49,6 +51,7 @@ pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
 impl GlobalMemoryManager {
     #[cfg(target_os = "linux")]
+    #[cfg(any())]
     const BATCH_KILL_QUERY_THRESHOLD: f64 = 0.8;
     #[cfg(target_os = "linux")]
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
@@ -103,25 +106,37 @@ impl GlobalMemoryManager {
     ) {
         use std::time::Duration;
 
-        use pretty_bytes::converter::convert;
         use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
-        let total_batch_memory_bytes =
-            self.total_compute_memory_bytes as f64 * BATCH_MEMORY_PROPORTION;
-        let batch_memory_threshold =
-            (total_batch_memory_bytes as f64 * Self::BATCH_KILL_QUERY_THRESHOLD) as usize;
-        let total_stream_memory_bytes =
-            self.total_compute_memory_bytes as f64 * STREAM_MEMORY_PROPORTION;
-        let stream_memory_threshold_graceful =
-            (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
-        let stream_memory_threshold_aggressive =
-            (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE) as usize;
+        // Turn off memory control by default.
+        #[cfg(any())]
+        {
+            use pretty_bytes::converter::convert;
 
-        tracing::debug!(
-            "Total memory for batch tasks: {}, total memory for streaming tasks: {}",
-            convert(total_batch_memory_bytes),
-            convert(total_stream_memory_bytes)
-        );
+            let total_batch_memory_bytes =
+                self.total_compute_memory_bytes as f64 * BATCH_MEMORY_PROPORTION;
+            let batch_memory_threshold =
+                (total_batch_memory_bytes * Self::BATCH_KILL_QUERY_THRESHOLD) as usize;
+            let total_stream_memory_bytes =
+                self.total_compute_memory_bytes as f64 * STREAM_MEMORY_PROPORTION;
+            let stream_memory_threshold_graceful =
+                (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
+            let stream_memory_threshold_aggressive =
+                (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE) as usize;
+
+            tracing::debug!(
+                "Total memory for batch tasks: {}, total memory for streaming tasks: {}",
+                convert(total_batch_memory_bytes),
+                convert(total_stream_memory_bytes)
+            );
+        }
+
+        let stream_memory_threshold_graceful = (self.total_compute_memory_bytes as f64
+            * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL)
+            as usize;
+        let stream_memory_threshold_aggressive = (self.total_compute_memory_bytes as f64
+            * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE)
+            as usize;
 
         let mut watermark_time_ms = Epoch::physical_now();
         let mut last_stream_used_memory_bytes = 0;
@@ -154,6 +169,8 @@ impl GlobalMemoryManager {
             // most memory and kills it.
 
             let batch_used_memory_bytes = batch_manager.total_mem_usage();
+            // We currently turn this off until batch memory control becomes stable.
+            #[cfg(any())]
             if batch_used_memory_bytes > batch_memory_threshold {
                 batch_manager.kill_queries("excessive batch memory usage".to_string());
             }
@@ -173,7 +190,10 @@ impl GlobalMemoryManager {
             //     to last_step.
             //   - Otherwise, we set the step to last_step * 2.
 
+            #[cfg(any())]
             let cur_stream_used_memory_bytes = stream_manager.total_mem_usage();
+            // We use the memory stats collected by jemalloc as available streaming memory for now.
+            let cur_stream_used_memory_bytes = jemalloc_allocated_mib;
             let last_step = step;
             step = if cur_stream_used_memory_bytes < stream_memory_threshold_graceful {
                 // Do not evict if the memory usage is lower than `mem_threshold_graceful`
@@ -219,7 +239,7 @@ impl GlobalMemoryManager {
                 .set(jemalloc_allocated_mib as i64);
             self.metrics
                 .stream_total_mem_usage
-                .set(cur_stream_used_memory_bytes as i64);
+                .set(stream_manager.total_mem_usage() as i64);
             self.metrics
                 .batch_total_mem_usage
                 .set(batch_used_memory_bytes as i64);
