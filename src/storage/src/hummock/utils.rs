@@ -19,13 +19,17 @@ use std::ops::RangeBounds;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableId;
+use bytes::Bytes;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
+use crate::error::StorageResult;
+use crate::mem_table::{KeyOp, MemTableError};
+use crate::store::{ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -328,6 +332,174 @@ pub fn check_subset_preserve_order<T: Eq>(
         }
     }
     true
+}
+
+pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+
+/// Make sure the key to insert should not exist in storage.
+pub(crate) async fn do_insert_sanity_check(
+    key: &[u8],
+    value: &[u8],
+    inner: &impl StateStoreRead,
+    epoch: u64,
+    table_id: TableId,
+    table_option: TableOption,
+) -> StorageResult<()> {
+    let read_options = ReadOptions {
+        prefix_hint: None,
+        retention_seconds: table_option.retention_seconds,
+        table_id,
+        ignore_range_tombstone: false,
+        read_version_from_backup: false,
+    };
+    let stored_value = inner.get(key, epoch, read_options).await?;
+
+    if let Some(stored_value) = stored_value {
+        return Err(Box::new(MemTableError::InconsistentOperation {
+            key: Bytes::copy_from_slice(key),
+            prev: KeyOp::Insert(stored_value),
+            new: KeyOp::Insert(Bytes::copy_from_slice(value)),
+        })
+        .into());
+    }
+    Ok(())
+}
+
+/// Make sure that the key to delete should exist in storage and the value should be matched.
+pub(crate) async fn do_delete_sanity_check(
+    key: &[u8],
+    old_value: &[u8],
+    inner: &impl StateStoreRead,
+    epoch: u64,
+    table_id: TableId,
+    table_option: TableOption,
+) -> StorageResult<()> {
+    let read_options = ReadOptions {
+        prefix_hint: None,
+        retention_seconds: table_option.retention_seconds,
+        table_id,
+        ignore_range_tombstone: false,
+        read_version_from_backup: false,
+    };
+    match inner.get(key, epoch, read_options).await? {
+        None => Err(Box::new(MemTableError::InconsistentOperation {
+            key: Bytes::copy_from_slice(key),
+            prev: KeyOp::Delete(Bytes::default()),
+            new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+        })
+        .into()),
+        Some(stored_value) => {
+            if stored_value != old_value {
+                Err(Box::new(MemTableError::InconsistentOperation {
+                    key: Bytes::copy_from_slice(key),
+                    prev: KeyOp::Insert(stored_value),
+                    new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+                })
+                .into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Make sure that the key to update should exist in storage and the value should be matched
+pub(crate) async fn do_update_sanity_check(
+    key: &[u8],
+    old_value: &[u8],
+    new_value: &[u8],
+    inner: &impl StateStoreRead,
+    epoch: u64,
+    table_id: TableId,
+    table_option: TableOption,
+) -> StorageResult<()> {
+    let read_options = ReadOptions {
+        prefix_hint: None,
+        ignore_range_tombstone: false,
+        retention_seconds: table_option.retention_seconds,
+        table_id,
+        read_version_from_backup: false,
+    };
+
+    match inner.get(key, epoch, read_options).await? {
+        None => Err(Box::new(MemTableError::InconsistentOperation {
+            key: Bytes::copy_from_slice(key),
+            prev: KeyOp::Delete(Bytes::default()),
+            new: KeyOp::Update((
+                Bytes::copy_from_slice(old_value),
+                Bytes::copy_from_slice(new_value),
+            )),
+        })
+        .into()),
+        Some(stored_value) => {
+            if stored_value != old_value {
+                Err(Box::new(MemTableError::InconsistentOperation {
+                    key: Bytes::copy_from_slice(key),
+                    prev: KeyOp::Insert(stored_value),
+                    new: KeyOp::Update((
+                        Bytes::copy_from_slice(old_value),
+                        Bytes::copy_from_slice(new_value),
+                    )),
+                })
+                .into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+
+pub(crate) fn filter_with_delete_range<'a>(
+    kv_iter: impl Iterator<Item = (Bytes, KeyOp)> + 'a,
+    mut delete_ranges_iter: impl Iterator<Item = &'a (Bytes, Bytes)> + 'a,
+) -> impl Iterator<Item = (Bytes, KeyOp)> + 'a {
+    let mut range = delete_ranges_iter.next();
+    if let Some((range_start, range_end)) = range {
+        assert!(
+            range_start <= range_end,
+            "range_end {:?} smaller than range_start {:?}",
+            range_start,
+            range_end
+        );
+    }
+    kv_iter.filter(move |(ref key, _)| {
+        if let Some((range_start, range_end)) = range {
+            if key < range_start {
+                true
+            } else if key < range_end {
+                false
+            } else {
+                // Key has exceeded the current key range. Advance to the next range.
+                loop {
+                    range = delete_ranges_iter.next();
+                    if let Some((range_start, range_end)) = range {
+                        assert!(
+                            range_start <= range_end,
+                            "range_end {:?} smaller than range_start {:?}",
+                            range_start,
+                            range_end
+                        );
+                        if key < range_start {
+                            // Not fall in the next delete range
+                            break true;
+                        } else if key < range_end {
+                            // Fall in the next delete range
+                            break false;
+                        } else {
+                            // Exceed the next delete range. Go to the next delete range if there is
+                            // any in the next loop
+                            continue;
+                        }
+                    } else {
+                        // No more delete range.
+                        break true;
+                    }
+                }
+            }
+        } else {
+            true
+        }
+    })
 }
 
 #[cfg(test)]

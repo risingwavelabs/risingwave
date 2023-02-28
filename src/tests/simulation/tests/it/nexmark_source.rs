@@ -28,7 +28,8 @@ use risingwave_simulation::utils::AssertResult;
 async fn nexmark_source() -> Result<()> {
     let events = 20 * THROUGHPUT;
 
-    let mut cluster = NexmarkCluster::new(Configuration::for_scale(), 6, Some(events)).await?;
+    let mut cluster =
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(events), false).await?;
 
     // Materialize all sources so that we can also check whether the row id generator is working
     // correctly after scaling.

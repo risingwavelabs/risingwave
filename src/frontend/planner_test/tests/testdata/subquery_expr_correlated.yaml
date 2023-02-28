@@ -139,7 +139,7 @@
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
         ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
         └─LogicalProject { exprs: [(count + count) as $expr1] }
-          └─LogicalAgg { aggs: [count, count] }
+          └─LogicalAgg { aggs: [count] }
             └─LogicalProject { exprs: [] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
                 └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
@@ -148,7 +148,7 @@
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64 as $expr1] }
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t1.y, (count(1:Int32) + count(1:Int32)) as $expr2] }
-      └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32), count(1:Int32)] }
+      └─LogicalAgg { group_key: [t1.y], aggs: [count(1:Int32)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, 1:Int32] }
           ├─LogicalAgg { group_key: [t1.y], aggs: [] }
           | └─LogicalScan { table: t1, columns: [t1.y] }

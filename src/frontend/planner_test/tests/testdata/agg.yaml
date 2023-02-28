@@ -830,8 +830,8 @@
     create table t(x int, y int);
     select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
-    LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
-    └─LogicalProject { exprs: [t.y, t.y, count(t.x)] }
+    LogicalProject { exprs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
+    └─LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y)] }
       └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
         └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
@@ -1012,28 +1012,28 @@
     select stddev_samp(v1), stddev_pop(v1) from t;
   logical_plan: |
     LogicalProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal::Float64, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))::Float64, 0.5:Float64) as $expr3] }
-    └─LogicalAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
+    └─LogicalAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Float64, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))::Float64, 0.5:Float64) as $expr3] }
-    └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
+    └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
+        └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
           └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
             └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   batch_local_plan: |
     BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Float64, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / (count(t.v1) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1))) / count(t.v1))::Float64, 0.5:Float64) as $expr3] }
-    └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
+    └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1] }
           └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [stddev_samp, stddev_pop], pk_columns: [], pk_conflict: "no check" }
     └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Float64, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / (sum0(count(t.v1)) - 1:Int64))::Float64, 0.5:Float64)) as $expr2, Pow(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1)))) / sum0(count(t.v1)))::Float64, 0.5:Float64) as $expr3] }
-      └─StreamGlobalSimpleAgg { aggs: [count, sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr1), sum(t.v1), count(t.v1), sum($expr1), sum(t.v1), count(t.v1)] }
+          └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr1), sum(t.v1), count(t.v1)] }
             └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: force two phase aggregation should succeed with UpstreamHashShard and SomeShard (batch only).

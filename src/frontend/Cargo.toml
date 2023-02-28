@@ -17,6 +17,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
+arrow-schema = "34"
 async-recursion = "1.0.2"
 async-trait = "0.1"
 bk-tree = "0.4.0"
@@ -31,6 +32,7 @@ fixedbitset = "0.4.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
+lazy_static = "1"
 maplit = "1"
 md5 = "0.7.0"
 num-integer = "0.1"
@@ -54,6 +56,7 @@ risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 risingwave_storage = { path = "../storage" }
+risingwave_udf = { path = "../udf" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.2"
