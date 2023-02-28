@@ -184,6 +184,8 @@ impl<S: StateStore> AggGroup<S> {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
+            // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
+            // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
             self.reset();
         }
         futures::future::try_join_all(
