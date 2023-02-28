@@ -23,6 +23,7 @@ use risingwave_storage::StateStore;
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, DistinctDeduplicater,
+    GlobalSimpleAgg,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -96,7 +97,7 @@ impl<S: StateStore> ExecutorInner<S> {
 
 struct ExecutionVars<S: StateStore> {
     /// The single [`AggGroup`].
-    agg_group: AggGroup<S>,
+    agg_group: AggGroup<S, GlobalSimpleAgg>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
