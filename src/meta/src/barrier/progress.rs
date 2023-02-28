@@ -32,21 +32,19 @@ use crate::storage::MetaStore;
 type CreateMviewEpoch = Epoch;
 type ConsumedRows = u64;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum ChainState {
-    ConsumingSnapshot,
+    Init,
     ConsumingUpstream(Epoch, ConsumedRows),
     Done,
 }
 
 /// Progress of all actors containing chain nodes while creating mview.
+#[derive(Debug)]
 struct Progress {
     states: HashMap<ActorId, ChainState>,
 
     done_count: usize,
-
-    /// From 0 to 1.
-    progress: f64,
 
     /// Creating mv id.
     creating_mv_id: TableId,
@@ -72,14 +70,13 @@ impl Progress {
     ) -> Self {
         let states = actors
             .into_iter()
-            .map(|a| (a, ChainState::ConsumingSnapshot))
+            .map(|a| (a, ChainState::Init))
             .collect::<HashMap<_, _>>();
         assert!(!states.is_empty());
 
         Self {
             states,
             done_count: 0,
-            progress: 0.0,
             creating_mv_id,
             upstream_mv_count,
             upstream_total_key_count,
@@ -91,7 +88,7 @@ impl Progress {
     fn update(&mut self, actor: ActorId, new_state: ChainState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
         match self.states.get_mut(&actor).unwrap() {
-            state @ (ChainState::ConsumingSnapshot | ChainState::ConsumingUpstream(_, _)) => {
+            state @ (ChainState::Init | ChainState::ConsumingUpstream(_, _)) => {
                 if matches!(new_state, ChainState::Done) {
                     self.done_count += 1;
                 }
@@ -114,8 +111,8 @@ impl Progress {
     }
 
     /// `progress` = `done_ratio` + (1 - `done_ratio`) * (`consumed_rows` / `remaining_rows`).
-    fn calculate_progress(&mut self) -> f64 {
-        if self.states.is_empty() {
+    fn calculate_progress(&self) -> f64 {
+        if self.is_done() || self.states.is_empty() {
             return 1.0;
         }
         let done_ratio: f64 = (self.done_count) as f64 / self.states.len() as f64;
@@ -131,15 +128,12 @@ impl Progress {
                 _ => 0,
             })
             .sum();
-        let calculate_progress =
+        let mut progress =
             done_ratio + (1_f64 - done_ratio) * consumed_rows as f64 / remaining_rows;
-        if self.progress < calculate_progress {
-            self.progress = calculate_progress;
-            if self.progress > 1.0 {
-                self.progress = 1.0;
-            }
+        if progress >= 1.0 {
+            progress = 0.99;
         }
-        self.progress
+        progress
     }
 }
 
@@ -171,12 +165,13 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     }
 
     pub fn gen_ddl_progress(&self) -> Vec<DdlProgress> {
+        self.progress_map.values().for_each(|progress| println!("{:?}", progress.0));
         self.progress_map
             .values()
             .map(|(x, _)| DdlProgress {
                 id: x.creating_mv_id.table_id as u64,
                 statement: x.definition.clone(),
-                progress: format!("{:.2}%", x.progress * 100.0),
+                progress: format!("{:.2}%", x.calculate_progress() * 100.0),
             })
             .collect()
     }
