@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -27,10 +28,13 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamGlobalSimpleAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
+
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 
 impl StreamGlobalSimpleAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
+    pub fn new(mut logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let schema = logical.schema().clone();
@@ -45,6 +49,23 @@ impl StreamGlobalSimpleAgg {
         // group key.
         let watermark_columns = FixedBitSet::with_capacity(schema.len());
 
+        // Simple agg executor requires a `count(*)` to correctly build changes, so append a
+        // `count(*)` if not exists.
+        let count_star = PlanAggCall::count_star();
+        let row_count_idx = if let Some((idx, _)) = logical
+            .agg_calls()
+            .iter()
+            .find_position(|&c| c == &count_star)
+        {
+            idx
+        } else {
+            let (mut agg_calls, group_key, input) = logical.decompose();
+            let idx = agg_calls.len();
+            agg_calls.push(count_star);
+            logical = LogicalAgg::new(agg_calls, group_key, input);
+            idx
+        };
+
         // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
@@ -55,7 +76,11 @@ impl StreamGlobalSimpleAgg {
             false,
             watermark_columns,
         );
-        StreamGlobalSimpleAgg { base, logical }
+        StreamGlobalSimpleAgg {
+            base,
+            logical,
+            row_count_idx,
+        }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -128,6 +153,7 @@ impl StreamNode for StreamGlobalSimpleAgg {
                     )
                 })
                 .collect(),
+            row_count_index: self.row_count_idx as u32,
         })
     }
 }

@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -27,14 +28,18 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
-    /// an optional column index which is the vnode of each row computed by the input's consistent
-    /// hash distribution
-    vnode_col_idx: Option<usize>,
     logical: LogicalAgg,
+
+    /// An optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution.
+    vnode_col_idx: Option<usize>,
+
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 
 impl StreamHashAgg {
-    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
+    pub fn new(mut logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let schema = logical.schema().clone();
@@ -55,6 +60,23 @@ impl StreamHashAgg {
             }
         }
 
+        // Hash agg executor requires a `count(*)` to correctly build changes, so append a
+        // `count(*)` if not exists.
+        let count_star = PlanAggCall::count_star();
+        let row_count_idx = if let Some((idx, _)) = logical
+            .agg_calls()
+            .iter()
+            .find_position(|&c| c == &count_star)
+        {
+            idx
+        } else {
+            let (mut agg_calls, group_key, input) = logical.decompose();
+            let idx = agg_calls.len();
+            agg_calls.push(count_star);
+            logical = LogicalAgg::new(agg_calls, group_key, input);
+            idx
+        };
+
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
@@ -67,8 +89,9 @@ impl StreamHashAgg {
         );
         StreamHashAgg {
             base,
-            vnode_col_idx,
             logical,
+            vnode_col_idx,
+            row_count_idx,
         }
     }
 
@@ -142,6 +165,7 @@ impl StreamNode for StreamHashAgg {
                     )
                 })
                 .collect(),
+            row_count_index: self.row_count_idx as u32,
         })
     }
 }
