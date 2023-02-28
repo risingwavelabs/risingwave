@@ -165,7 +165,6 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     }
 
     pub fn gen_ddl_progress(&self) -> Vec<DdlProgress> {
-        self.progress_map.values().for_each(|progress| println!("{:?}", progress.0));
         self.progress_map
             .values()
             .map(|(x, _)| DdlProgress {
