@@ -159,7 +159,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
                     match self.conflict_behavior {
-                        ConflictBehavior::OverWrite => {
+                        ConflictBehavior::OverWrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
@@ -175,7 +175,11 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .overwrite_conflict(buffer, &self.state_table)
+                                .handlle_conflict(
+                                    buffer,
+                                    &self.state_table,
+                                    &self.conflict_behavior,
+                                )
                                 .await?;
 
                             // TODO(st1page): when materialize partial columns(), we should
@@ -192,36 +196,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 None => continue,
                             }
                         }
-                        ConflictBehavior::IgnoreConflict => {
-                            // create MaterializeBuffer from chunk
-                            let buffer = MaterializeBuffer::fill_buffer_from_chunk(
-                                chunk,
-                                self.state_table.value_indices(),
-                                self.state_table.pk_indices(),
-                                self.state_table.pk_serde(),
-                            );
 
-                            if buffer.is_empty() {
-                                // empty chunk
-                                continue;
-                            }
-
-                            let fixed_changes = self
-                                .materialize_cache
-                                .ignore_conflict(buffer, &self.state_table)
-                                .await?;
-                            if self.state_table.value_indices().is_some() {
-                                panic!("materialize executor with data check can not handle only materialize partial columns")
-                            }
-
-                            match generate_output(fixed_changes, data_types.clone())? {
-                                Some(output_chunk) => {
-                                    self.state_table.write_chunk(output_chunk.clone());
-                                    Message::Chunk(output_chunk)
-                                }
-                                None => continue,
-                            }
-                        }
                         ConflictBehavior::NoCheck => {
                             self.state_table.write_chunk(chunk.clone());
                             Message::Chunk(chunk)
@@ -441,64 +416,16 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub async fn overwrite_conflict<'a, S: StateStore>(
-        &mut self,
-        changes: MaterializeBuffer,
-        table: &StateTable<S>,
-    ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
-        // fill cache
-        self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
-            .await?;
-
-        let fixed_changes = self.handle_conflict_inner(changes, ConflictBehavior::OverWrite);
-        Ok(fixed_changes)
-    }
-
-    pub async fn ignore_conflict<'a, S: StateStore>(
-        &mut self,
-        changes: MaterializeBuffer,
-        table: &StateTable<S>,
-    ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
-        // fill cache
-        self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
-            .await?;
-
-        let fixed_changes = self.handle_conflict_inner(changes, ConflictBehavior::IgnoreConflict);
-
-        Ok(fixed_changes)
-    }
-
-    async fn fetch_keys<'a, S: StateStore>(
-        &mut self,
-        keys: impl Iterator<Item = &'a [u8]>,
-        table: &StateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        let mut futures = vec![];
-        for key in keys {
-            if self.data.contains(key) {
-                continue;
-            }
-
-            futures.push(async {
-                let key_row = table.pk_serde().deserialize(key).unwrap();
-                (key.to_vec(), table.get_compacted_row(&key_row).await)
-            });
-        }
-
-        let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
-        while let Some(result) = buffered.next().await {
-            let (key, value) = result;
-            self.data.push(key, value?);
-        }
-
-        Ok(())
-    }
-
-    fn handle_conflict_inner(
+    pub async fn handlle_conflict<'a, S: StateStore>(
         &mut self,
         buffer: MaterializeBuffer,
-        conflict_behavior: ConflictBehavior,
-    ) -> Vec<(Vec<u8>, KeyOp)> {
+        table: &StateTable<S>,
+        conflict_behavior: &ConflictBehavior,
+    ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
+        // fill cache
+        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table)
+            .await?;
+
         let mut fixed_changes = vec![];
         for (key, row_op) in buffer.into_parts() {
             let mut update_cache = false;
@@ -585,7 +512,33 @@ impl MaterializeCache {
                 }
             }
         }
-        fixed_changes
+        Ok(fixed_changes)
+    }
+
+    async fn fetch_keys<'a, S: StateStore>(
+        &mut self,
+        keys: impl Iterator<Item = &'a [u8]>,
+        table: &StateTable<S>,
+    ) -> StreamExecutorResult<()> {
+        let mut futures = vec![];
+        for key in keys {
+            if self.data.contains(key) {
+                continue;
+            }
+
+            futures.push(async {
+                let key_row = table.pk_serde().deserialize(key).unwrap();
+                (key.to_vec(), table.get_compacted_row(&key_row).await)
+            });
+        }
+
+        let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
+        while let Some(result) = buffered.next().await {
+            let (key, value) = result;
+            self.data.push(key, value?);
+        }
+
+        Ok(())
     }
 
     pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
