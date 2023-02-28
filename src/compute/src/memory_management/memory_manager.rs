@@ -107,7 +107,7 @@ impl GlobalMemoryManager {
         use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
         let total_batch_memory_bytes =
-            (self.total_compute_memory_bytes as f64 * BATCH_MEMORY_PROPORTION) as usize;
+            self.total_compute_memory_bytes as f64 * BATCH_MEMORY_PROPORTION;
         let batch_memory_threshold =
             (total_batch_memory_bytes as f64 * Self::BATCH_KILL_QUERY_THRESHOLD) as usize;
         let total_stream_memory_bytes =
@@ -117,10 +117,10 @@ impl GlobalMemoryManager {
         let stream_memory_threshold_aggressive =
             (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE) as usize;
 
-        tracing::info!(
+        tracing::debug!(
             "Total memory for batch tasks: {}, total memory for streaming tasks: {}",
-            convert(total_batch_memory_bytes as f64),
-            convert(total_stream_memory_bytes as f64)
+            convert(total_batch_memory_bytes),
+            convert(total_stream_memory_bytes)
         );
 
         let mut watermark_time_ms = Epoch::physical_now();

@@ -301,7 +301,7 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// Shutdown signal sender.
+    /// Shutdown signal sender, which sends the reason for task failure.
     shutdown_tx: Mutex<Option<Sender<String>>>,
 
     /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
