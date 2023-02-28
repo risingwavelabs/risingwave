@@ -667,7 +667,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo check -p risingwave_simulation "$@"
+cargo check -p risingwave_simulation --all-targets "$@"
 """
 
 [tasks.sslt]

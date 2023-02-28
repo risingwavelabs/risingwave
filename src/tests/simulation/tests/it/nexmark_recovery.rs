@@ -29,7 +29,7 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     //     .init();
 
     let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20)).await?;
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
 
     // get the output without failures as the standard result
     cluster.run(create).await?;
