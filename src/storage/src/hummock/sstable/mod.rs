@@ -36,7 +36,6 @@ pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
 use bytes::{Buf, BufMut};
-use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
@@ -155,19 +154,6 @@ impl Sstable {
         !self.filter_reader.is_empty()
     }
 
-    pub fn may_match(&self, dist_key: &[u8]) -> bool {
-        let enable_bloom_filter: fn() -> bool = || {
-            fail_point!("disable_bloom_filter", |_| false);
-            true
-        };
-        if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = xxh64::xxh64(dist_key, 0);
-            self.may_match_hash(hash)
-        } else {
-            true
-        }
-    }
-
     #[inline(always)]
     pub fn hash_for_bloom_filter_u32(dist_key: &[u8], table_id: u32) -> u32 {
         let dist_key_hash = xxh32::xxh32(dist_key, 0);
@@ -193,7 +179,7 @@ impl Sstable {
 
     #[inline]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size()
+        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
 
     #[cfg(test)]
@@ -211,6 +197,7 @@ impl Sstable {
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
             divide_version: 0,
+            uncompressed_file_size: self.meta.estimated_size as u64,
             min_epoch: 0,
             max_epoch: 0,
         }

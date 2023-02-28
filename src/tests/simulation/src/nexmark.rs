@@ -37,11 +37,14 @@ impl NexmarkCluster {
         conf: Configuration,
         split_num: usize,
         event_num: Option<usize>,
+        watermark: bool,
     ) -> Result<Self> {
         let mut cluster = Self {
             cluster: Cluster::start(conf).await?,
         };
-        cluster.create_nexmark_source(split_num, event_num).await?;
+        cluster
+            .create_nexmark_source(split_num, event_num, watermark)
+            .await?;
         Ok(cluster)
     }
 
@@ -50,7 +53,14 @@ impl NexmarkCluster {
         &mut self,
         split_num: usize,
         event_num: Option<usize>,
+        watermark: bool,
     ) -> Result<()> {
+        let watermark_column = if watermark {
+            ", WATERMARK FOR date_time AS date_time - INTERVAL '4' SECOND"
+        } else {
+            ""
+        };
+
         let extra_args = {
             let mut output = String::new();
             write!(
@@ -68,6 +78,7 @@ impl NexmarkCluster {
 
         self.run(format!(
             include_str!("nexmark/create_source.sql"),
+            watermark_column = watermark_column,
             extra_args = extra_args
         ))
         .await?;
@@ -151,6 +162,24 @@ pub mod queries {
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
+    pub mod q15 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q15.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q15 ORDER BY day ASC, total_bids DESC;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q15;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q18 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q18.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q18 ORDER BY auction, bidder, price DESC;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q18;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
     pub mod q101 {
         use super::*;
         pub const CREATE: &str = include_str!("nexmark/q101.sql");
@@ -192,6 +221,15 @@ pub mod queries {
         pub const CREATE: &str = include_str!("nexmark/q105.sql");
         pub const SELECT: &str = "SELECT * FROM nexmark_q105;";
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q105;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q106 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q106.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q106;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q106;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }

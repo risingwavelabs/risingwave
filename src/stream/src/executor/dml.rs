@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::Either;
-use futures::stream::select;
+use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
-use risingwave_connector::source::StreamChunkWithState;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
+use super::stream_reader::StreamReaderWithPause;
 use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices,
-    PkIndicesRef,
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, Mutation,
+    PkIndices, PkIndicesRef,
 };
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
@@ -92,31 +91,40 @@ impl DmlExecutor {
             .dml_manager
             .register_reader(self.table_id, self.table_version_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader
-            .stream_reader()
-            .into_stream()
-            .map(Either::Right);
+        let batch_reader = batch_reader.stream_reader().into_stream();
+
+        // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
+        // barrier, we should stop receiving the data from DML. We poll data from the two streams in
+        // a round robin way.
+        let mut stream = StreamReaderWithPause::<false>::new(upstream, batch_reader);
+
+        // If the first barrier is configuration change, then the DML executor must be newly
+        // created, and we should start with the paused state.
+        if barrier.is_update() {
+            stream.pause_stream();
+        }
 
         yield Message::Barrier(barrier);
 
-        // Stream data from the upstream executor.
-        let upstream = upstream.map(Either::Left);
-
-        // Merge the two streams.
-        let stream = select(upstream, batch_reader);
-
-        #[for_await]
-        for input_msg in stream {
-            match input_msg {
+        while let Some(input_msg) = stream.next().await {
+            match input_msg? {
                 Either::Left(msg) => {
-                    // Stream data.
-                    let msg: Message = msg?;
+                    // Stream messages.
+                    if let Message::Barrier(barrier) = &msg {
+                        // We should handle barrier messages here to pause or resume the data from
+                        // DML.
+                        if let Some(mutation) = barrier.mutation.as_deref() {
+                            match mutation {
+                                Mutation::Pause => stream.pause_stream(),
+                                Mutation::Resume => stream.resume_stream(),
+                                _ => {}
+                            }
+                        }
+                    }
                     yield msg;
                 }
                 Either::Right(chunk) => {
                     // Batch data.
-                    let chunk: StreamChunkWithState =
-                        chunk.map_err(StreamExecutorError::connector_error)?;
                     yield Message::Chunk(chunk.chunk);
                 }
             }

@@ -130,8 +130,14 @@ export const ExprNode_Type = {
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
   FORMAT_TYPE: "FORMAT_TYPE",
+  /** JSONB_ACCESS_INNER - jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb */
+  JSONB_ACCESS_INNER: "JSONB_ACCESS_INNER",
+  /** JSONB_ACCESS_STR - jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text */
+  JSONB_ACCESS_STR: "JSONB_ACCESS_STR",
+  JSONB_TYPEOF: "JSONB_TYPEOF",
+  JSONB_ARRAY_LENGTH: "JSONB_ARRAY_LENGTH",
   /**
-   * VNODE - Non-pure functions below (> 600)
+   * VNODE - Non-pure functions below (> 1000)
    * ------------------------
    * Internal functions
    */
@@ -402,6 +408,18 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 534:
     case "FORMAT_TYPE":
       return ExprNode_Type.FORMAT_TYPE;
+    case 600:
+    case "JSONB_ACCESS_INNER":
+      return ExprNode_Type.JSONB_ACCESS_INNER;
+    case 601:
+    case "JSONB_ACCESS_STR":
+      return ExprNode_Type.JSONB_ACCESS_STR;
+    case 602:
+    case "JSONB_TYPEOF":
+      return ExprNode_Type.JSONB_TYPEOF;
+    case 603:
+    case "JSONB_ARRAY_LENGTH":
+      return ExprNode_Type.JSONB_ARRAY_LENGTH;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -590,6 +608,14 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_PREPEND";
     case ExprNode_Type.FORMAT_TYPE:
       return "FORMAT_TYPE";
+    case ExprNode_Type.JSONB_ACCESS_INNER:
+      return "JSONB_ACCESS_INNER";
+    case ExprNode_Type.JSONB_ACCESS_STR:
+      return "JSONB_ACCESS_STR";
+    case ExprNode_Type.JSONB_TYPEOF:
+      return "JSONB_TYPEOF";
+    case ExprNode_Type.JSONB_ARRAY_LENGTH:
+      return "JSONB_ARRAY_LENGTH";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
@@ -841,7 +867,8 @@ export interface UserDefinedFunction {
   name: string;
   argTypes: DataType[];
   language: string;
-  path: string;
+  link: string;
+  identifier: string;
 }
 
 function createBaseExprNode(): ExprNode {
@@ -1176,7 +1203,7 @@ export const AggCall_OrderByField = {
 };
 
 function createBaseUserDefinedFunction(): UserDefinedFunction {
-  return { children: [], name: "", argTypes: [], language: "", path: "" };
+  return { children: [], name: "", argTypes: [], language: "", link: "", identifier: "" };
 }
 
 export const UserDefinedFunction = {
@@ -1186,7 +1213,8 @@ export const UserDefinedFunction = {
       name: isSet(object.name) ? String(object.name) : "",
       argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
       language: isSet(object.language) ? String(object.language) : "",
-      path: isSet(object.path) ? String(object.path) : "",
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
     };
   },
 
@@ -1204,7 +1232,8 @@ export const UserDefinedFunction = {
       obj.argTypes = [];
     }
     message.language !== undefined && (obj.language = message.language);
-    message.path !== undefined && (obj.path = message.path);
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
     return obj;
   },
 
@@ -1214,7 +1243,8 @@ export const UserDefinedFunction = {
     message.name = object.name ?? "";
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.language = object.language ?? "";
-    message.path = object.path ?? "";
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
     return message;
   },
 };

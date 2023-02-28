@@ -103,6 +103,10 @@ impl XorFilterReader {
         }
     }
 
+    pub fn estimate_size(&self) -> usize {
+        self.filter.fingerprints.len() * std::mem::size_of::<u16>()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.filter.block_length == 0
     }

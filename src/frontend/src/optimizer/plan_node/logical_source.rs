@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
-use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanNode;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
     generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
@@ -46,7 +46,7 @@ use crate::TableCatalog;
 pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
     pub base: PlanBase,
     pub core: generic::Source,
@@ -62,6 +62,7 @@ impl LogicalSource {
         pk_col_ids: Vec<ColumnId>,
         row_id_index: Option<usize>,
         gen_row_id: bool,
+        for_table: bool,
         ctx: OptimizerContextRef,
     ) -> Self {
         let core = generic::Source {
@@ -70,6 +71,7 @@ impl LogicalSource {
             pk_col_ids,
             row_id_index,
             gen_row_id,
+            for_table,
         };
 
         let schema = core.schema();
@@ -326,7 +328,6 @@ impl PredicatePushdown for LogicalSource {
 
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
-            let expr = self.base.ctx().expr_with_session_timezone(expr);
             if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
                 // Not recognized, so push back
                 new_conjunctions.push(e);
@@ -357,9 +358,11 @@ impl ToBatch for LogicalSource {
 impl ToStream for LogicalSource {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef = StreamSource::new(self.clone()).into();
-        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty(){
+        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty() && !self.core.for_table{
             plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
         }
+
+        assert!(!(self.core.gen_row_id && self.core.for_table));
         if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
             plan = StreamRowIdGen::new(plan, row_id_index).into();
         }

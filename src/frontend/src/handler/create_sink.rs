@@ -176,7 +176,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>');"#.to_string();
+                        mysql.password = '<password>', format = 'append_only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

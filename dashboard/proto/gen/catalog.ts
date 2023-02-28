@@ -68,6 +68,17 @@ export interface ColumnIndex {
   index: number;
 }
 
+/** A mapping of column indices. */
+export interface ColIndexMapping {
+  /** The size of the target space. */
+  targetSize: number;
+  /**
+   * Each subscript is mapped to the corresponding element.
+   * For those not mapped, the value will be negative.
+   */
+  map: number[];
+}
+
 export interface WatermarkDesc {
   /** The column idx the watermark is on */
   watermarkIdx: number;
@@ -82,6 +93,7 @@ export interface StreamSourceInfo {
   protoMessageName: string;
   csvDelimiter: number;
   csvHasHeader: boolean;
+  upsertAvroPrimaryKey: string;
 }
 
 export interface Source {
@@ -164,11 +176,12 @@ export interface Function {
   schemaId: number;
   databaseId: number;
   name: string;
+  owner: number;
   argTypes: DataType[];
   returnType: DataType | undefined;
   language: string;
-  path: string;
-  owner: number;
+  link: string;
+  identifier: string;
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -344,6 +357,37 @@ export const ColumnIndex = {
   },
 };
 
+function createBaseColIndexMapping(): ColIndexMapping {
+  return { targetSize: 0, map: [] };
+}
+
+export const ColIndexMapping = {
+  fromJSON(object: any): ColIndexMapping {
+    return {
+      targetSize: isSet(object.targetSize) ? Number(object.targetSize) : 0,
+      map: Array.isArray(object?.map) ? object.map.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: ColIndexMapping): unknown {
+    const obj: any = {};
+    message.targetSize !== undefined && (obj.targetSize = Math.round(message.targetSize));
+    if (message.map) {
+      obj.map = message.map.map((e) => Math.round(e));
+    } else {
+      obj.map = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ColIndexMapping>, I>>(object: I): ColIndexMapping {
+    const message = createBaseColIndexMapping();
+    message.targetSize = object.targetSize ?? 0;
+    message.map = object.map?.map((e) => e) || [];
+    return message;
+  },
+};
+
 function createBaseWatermarkDesc(): WatermarkDesc {
   return { watermarkIdx: 0, expr: undefined };
 }
@@ -379,6 +423,7 @@ function createBaseStreamSourceInfo(): StreamSourceInfo {
     protoMessageName: "",
     csvDelimiter: 0,
     csvHasHeader: false,
+    upsertAvroPrimaryKey: "",
   };
 }
 
@@ -391,6 +436,7 @@ export const StreamSourceInfo = {
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
       csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
       csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
+      upsertAvroPrimaryKey: isSet(object.upsertAvroPrimaryKey) ? String(object.upsertAvroPrimaryKey) : "",
     };
   },
 
@@ -402,6 +448,7 @@ export const StreamSourceInfo = {
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
     message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
     message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
+    message.upsertAvroPrimaryKey !== undefined && (obj.upsertAvroPrimaryKey = message.upsertAvroPrimaryKey);
     return obj;
   },
 
@@ -413,6 +460,7 @@ export const StreamSourceInfo = {
     message.protoMessageName = object.protoMessageName ?? "";
     message.csvDelimiter = object.csvDelimiter ?? 0;
     message.csvHasHeader = object.csvHasHeader ?? false;
+    message.upsertAvroPrimaryKey = object.upsertAvroPrimaryKey ?? "";
     return message;
   },
 };
@@ -758,11 +806,12 @@ function createBaseFunction(): Function {
     schemaId: 0,
     databaseId: 0,
     name: "",
+    owner: 0,
     argTypes: [],
     returnType: undefined,
     language: "",
-    path: "",
-    owner: 0,
+    link: "",
+    identifier: "",
   };
 }
 
@@ -773,11 +822,14 @@ export const Function = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+      argTypes: Array.isArray(object?.argTypes)
+        ? object.argTypes.map((e: any) => DataType.fromJSON(e))
+        : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       language: isSet(object.language) ? String(object.language) : "",
-      path: isSet(object.path) ? String(object.path) : "",
-      owner: isSet(object.owner) ? Number(object.owner) : 0,
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
     };
   },
 
@@ -787,6 +839,7 @@ export const Function = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
     if (message.argTypes) {
       obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
     } else {
@@ -795,8 +848,8 @@ export const Function = {
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.language !== undefined && (obj.language = message.language);
-    message.path !== undefined && (obj.path = message.path);
-    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
     return obj;
   },
 
@@ -806,13 +859,14 @@ export const Function = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
+    message.owner = object.owner ?? 0;
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.language = object.language ?? "";
-    message.path = object.path ?? "";
-    message.owner = object.owner ?? 0;
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
     return message;
   },
 };

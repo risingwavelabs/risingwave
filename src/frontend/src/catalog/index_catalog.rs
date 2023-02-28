@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -26,7 +26,7 @@ use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
 use crate::optimizer::property::FieldOrder;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
     pub id: IndexId,
 
@@ -41,9 +41,9 @@ pub struct IndexCatalog {
 
     pub primary_table: Arc<TableCatalog>,
 
-    pub primary_to_secondary_mapping: HashMap<usize, usize>,
+    pub primary_to_secondary_mapping: BTreeMap<usize, usize>,
 
-    pub secondary_to_primary_mapping: HashMap<usize, usize>,
+    pub secondary_to_primary_mapping: BTreeMap<usize, usize>,
 
     pub original_columns: Vec<ColumnId>,
 }
@@ -126,12 +126,12 @@ impl IndexCatalog {
     }
 
     /// a mapping maps column index of secondary index to column index of primary table
-    pub fn secondary_to_primary_mapping(&self) -> &HashMap<usize, usize> {
+    pub fn secondary_to_primary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.secondary_to_primary_mapping
     }
 
     /// a mapping maps column index of primary table to column index of secondary index
-    pub fn primary_to_secondary_mapping(&self) -> &HashMap<usize, usize> {
+    pub fn primary_to_secondary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.primary_to_secondary_mapping
     }
 

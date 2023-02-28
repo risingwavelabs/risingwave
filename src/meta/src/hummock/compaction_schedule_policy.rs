@@ -546,6 +546,7 @@ mod tests {
                     stale_key_count: 0,
                     total_key_count: 0,
                     divide_version: 0,
+                    uncompressed_file_size: input_file_size,
                     min_epoch: 0,
                     max_epoch: 0,
                 }],

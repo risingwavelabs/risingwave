@@ -305,12 +305,18 @@ impl DispatcherImpl {
             .map(|&down_id| new_output(context, actor_id, down_id))
             .collect::<StreamResult<Vec<_>>>()?;
 
+        let output_indices = dispatcher
+            .output_indices
+            .iter()
+            .map(|&i| i as usize)
+            .collect_vec();
+
         use risingwave_pb::stream_plan::DispatcherType::*;
         let dispatcher_impl = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
-                let column_indices = dispatcher
-                    .column_indices
+                let dist_key_indices = dispatcher
+                    .dist_key_indices
                     .iter()
                     .map(|i| *i as usize)
                     .collect();
@@ -320,18 +326,24 @@ impl DispatcherImpl {
 
                 DispatcherImpl::Hash(HashDataDispatcher::new(
                     outputs,
-                    column_indices,
+                    dist_key_indices,
+                    output_indices,
                     hash_mapping,
                     dispatcher.dispatcher_id,
                 ))
             }
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
                 outputs,
+                output_indices,
                 dispatcher.dispatcher_id,
             )),
             Simple | NoShuffle => {
                 let [output]: [_; 1] = outputs.try_into().unwrap();
-                DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
+                DispatcherImpl::Simple(SimpleDispatcher::new(
+                    output,
+                    output_indices,
+                    dispatcher.dispatcher_id,
+                ))
             }
             Unspecified => unreachable!(),
         };
@@ -509,6 +521,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 pub struct HashDataDispatcher {
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
+    output_indices: Vec<usize>,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
     /// different downstream actors.
     hash_mapping: ExpandedActorMapping,
@@ -529,12 +542,14 @@ impl HashDataDispatcher {
     pub fn new(
         outputs: Vec<BoxedOutput>,
         keys: Vec<usize>,
+        output_indices: Vec<usize>,
         hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs,
             keys,
+            output_indices,
             hash_mapping,
             dispatcher_id,
         }
@@ -592,6 +607,8 @@ impl Dispatcher for HashDataDispatcher {
             let mut last_vnode_when_update_delete = None;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
+            // Apply output indices after calculating the vnode.
+            let chunk = chunk.reorder_columns(&self.output_indices);
             // TODO: refactor with `Vis`.
             let (ops, columns, visibility) = chunk.into_inner();
 
@@ -690,16 +707,19 @@ impl Dispatcher for HashDataDispatcher {
 #[derive(Debug)]
 pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, BoxedOutput>,
+    output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
 }
 
 impl BroadcastDispatcher {
     pub fn new(
         outputs: impl IntoIterator<Item = BoxedOutput>,
+        output_indices: Vec<usize>,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
             outputs: Self::into_pairs(outputs).collect(),
+            output_indices,
             dispatcher_id,
         }
     }
@@ -718,6 +738,7 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
+            let chunk = chunk.reorder_columns(&self.output_indices);
             for output in self.outputs.values_mut() {
                 output.send(Message::Chunk(chunk.clone())).await?;
             }
@@ -779,13 +800,19 @@ pub struct SimpleDispatcher {
     /// Therefore, when dispatching data, we assert that there's exactly one output by
     /// `Self::output`.
     output: SmallVec<[BoxedOutput; 2]>,
+    output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
 }
 
 impl SimpleDispatcher {
-    pub fn new(output: BoxedOutput, dispatcher_id: DispatcherId) -> Self {
+    pub fn new(
+        output: BoxedOutput,
+        output_indices: Vec<usize>,
+        dispatcher_id: DispatcherId,
+    ) -> Self {
         Self {
             output: smallvec![output],
+            output_indices,
             dispatcher_id,
         }
     }
@@ -817,6 +844,7 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
+            let chunk = chunk.reorder_columns(&self.output_indices);
             output.send(Message::Chunk(chunk)).await
         }
     }
@@ -919,8 +947,13 @@ mod tests {
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
-        let mut hash_dispatcher =
-            HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping, 0);
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            key_indices.to_vec(),
+            vec![0, 1, 2],
+            hash_mapping,
+            0,
+        );
 
         let chunk = StreamChunk::from_pretty(
             "  I I I
@@ -1147,8 +1180,13 @@ mod tests {
             .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
-        let mut hash_dispatcher =
-            HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping.clone(), 0);
+        let mut hash_dispatcher = HashDataDispatcher::new(
+            outputs,
+            key_indices.to_vec(),
+            (0..dimension).collect(),
+            hash_mapping.clone(),
+            0,
+        );
 
         let mut ops = Vec::new();
         for idx in 0..cardinality {

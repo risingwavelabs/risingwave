@@ -29,8 +29,8 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
-    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt,
+    get_compaction_group_ids, get_member_table_ids, try_get_compaction_group_id_by_table_id,
+    HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
@@ -58,8 +58,8 @@ use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
-    trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state, trigger_sst_stat,
-    trigger_version_stat,
+    trigger_lsm_stat, trigger_pin_unpin_snapshot_state, trigger_pin_unpin_version_state,
+    trigger_sst_stat, trigger_version_stat,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{
@@ -1142,7 +1142,6 @@ where
             for group_id in original_keys {
                 if !current_version.levels.contains_key(&group_id) {
                     compact_statuses.remove(group_id);
-                    compaction.compaction_selectors.remove(&group_id);
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
@@ -1988,16 +1987,15 @@ where
         };
         for (group_id, status) in &compaction.compaction_statuses {
             if let Some(levels) = version.levels.get(group_id) {
-                if let Some(config) = self.compaction_config(*group_id).await {
-                    let info = status.get_compaction_info(levels, config);
-                    global_info.add(&info);
-                }
+                let cg = self.get_compaction_group_config(*group_id).await;
+                let info = status.get_compaction_info(levels, cg.compaction_config());
+                global_info.add(&info);
             }
         }
         global_info
     }
 
-    fn notify_last_version_delta(&self, versioning: &mut Versioning) {
+    fn notify_last_version_delta(&self, versioning: &Versioning) {
         self.env
             .notification_manager()
             .notify_hummock_without_version(
@@ -2011,6 +2009,54 @@ where
                         .clone()],
                 }),
             );
+    }
+
+    #[named]
+    pub async fn start_lsm_stat_report(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+        use crate::hummock::model::CompactionGroup;
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {
+                    },
+                    // Shutdown
+                    _ = &mut shutdown_rx => {
+                        tracing::info!("Lsm stat reporter is stopped");
+                        return;
+                    }
+                }
+
+                let id_to_config = hummock_manager.get_compaction_group_map().await;
+                let current_version = {
+                    let mut versioning_guard =
+                        write_lock!(hummock_manager.as_ref(), versioning).await;
+                    versioning_guard.deref_mut().current_version.clone()
+                };
+
+                let compaction_group_ids_from_version = get_compaction_group_ids(&current_version);
+                let default_config = CompactionConfigBuilder::new().build();
+                for compaction_group_id in &compaction_group_ids_from_version {
+                    let compaction_group_config = id_to_config
+                        .get(compaction_group_id)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            CompactionGroup::new(*compaction_group_id, default_config.clone())
+                        });
+
+                    trigger_lsm_stat(
+                        &hummock_manager.metrics,
+                        compaction_group_config.compaction_config(),
+                        current_version
+                            .get_compaction_group_levels(compaction_group_config.group_id()),
+                        compaction_group_config.group_id(),
+                    )
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 }
 

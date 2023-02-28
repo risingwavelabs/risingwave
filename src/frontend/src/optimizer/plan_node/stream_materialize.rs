@@ -27,12 +27,12 @@ use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
-use crate::optimizer::plan_node::{PlanBase, PlanNode};
+use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
     pub base: PlanBase,
     /// Child of Materialize plan
@@ -235,6 +235,13 @@ impl fmt::Display for StreamMaterialize {
         if pk_column_names != order_descs {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
+
+        let pk_conflict_behavior = match self.table.handle_pk_conflict() {
+            true => "overwrite",
+            false => "no check",
+        };
+        builder.field("pk_conflict", &pk_conflict_behavior);
+
         builder.finish()
     }
 }

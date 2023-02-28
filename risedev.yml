@@ -22,7 +22,6 @@ profile:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
 
-      
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
@@ -128,6 +127,21 @@ profile:
       - use: compactor
       # - use: prometheus
       # - use: grafana
+  webhdfs:
+    steps:
+      # - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      # If you want to use hdfs as storage backend, configure hdfs namenode and root path:
+      - use: opendal
+        engine: webhdfs
+        namenode: "127.0.0.1:9870"
+        root: risingwave
+      - use: compactor
+      # - use: prometheus
+      # - use: grafana
+
   gcs:
     steps:
       # - use: etcd
@@ -175,7 +189,6 @@ profile:
         persist-data: true
       - use: kafka
         persist-data: true
-
 
   3etcd-3meta:
     steps:

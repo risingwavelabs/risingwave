@@ -68,7 +68,7 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
-
+    // TODO: this will be read from system param channel and should be removed to avoid misuse
     pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.

@@ -86,13 +86,12 @@ impl<S: MetaStore> HummockManager<S> {
         get_compaction_group_ids(&read_lock!(self, versioning).await.current_version)
     }
 
-    pub async fn compaction_config(&self, id: CompactionGroupId) -> Option<Arc<CompactionConfig>> {
+    pub async fn get_compaction_group_map(&self) -> BTreeMap<CompactionGroupId, CompactionGroup> {
         self.compaction_group_manager
             .read()
             .await
             .compaction_groups
-            .get(&id)
-            .map(|group| group.compaction_config.clone())
+            .clone()
     }
 
     /// Registers `table_fragments` to compaction groups.

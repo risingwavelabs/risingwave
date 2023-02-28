@@ -231,11 +231,8 @@ impl CompactStatus {
             .map(|handler| handler.get_pending_file_size())
             .sum::<u64>();
 
-        // let waiting_compaction_bytes = self
-        //     .create_level_selector(compaction_config)
-        //     .waiting_schedule_compaction_bytes(levels, &self.level_handlers);
         let dynamic_core = DynamicLevelSelectorCore::new(compaction_config);
-        let waiting_compaction_bytes = dynamic_core.waiting_schedule_compaction_bytes(levels);
+        let waiting_compaction_bytes = dynamic_core.compact_pending_bytes_needed(levels);
         ScaleCompactorInfo {
             running_cores: 0,
             total_cores: 0,
@@ -380,17 +377,28 @@ pub fn create_compaction_task(
         let step = (input.target_level - base_level) / 2;
         compaction_config.target_file_size_base << step
     };
-    let compression_algorithm = if input.target_level == 0 {
-        compaction_config.compression_algorithm[0].clone()
-    } else {
-        let idx = input.target_level - base_level + 1;
-        compaction_config.compression_algorithm[idx].clone()
-    };
 
     CompactionTask {
+        compression_algorithm: get_compression_algorithm(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
         input,
-        compression_algorithm,
         target_file_size,
         compaction_task_type,
+    }
+}
+
+pub fn get_compression_algorithm(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> String {
+    if level == 0 || level < base_level {
+        compaction_config.compression_algorithm[0].clone()
+    } else {
+        let idx = level - base_level + 1;
+        compaction_config.compression_algorithm[idx].clone()
     }
 }

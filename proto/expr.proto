@@ -120,7 +120,16 @@ message ExprNode {
     ARRAY_PREPEND = 533;
     FORMAT_TYPE = 534;
 
-    // Non-pure functions below (> 600)
+    // Jsonb functions
+
+    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
+    JSONB_ACCESS_INNER = 600;
+    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    JSONB_ACCESS_STR = 601;
+    JSONB_TYPEOF = 602;
+    JSONB_ARRAY_LENGTH = 603;
+
+    // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
@@ -235,5 +244,6 @@ message UserDefinedFunction {
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  string path = 5;
+  string link = 5;
+  string identifier = 6;
 }

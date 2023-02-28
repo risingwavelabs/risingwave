@@ -45,7 +45,7 @@ struct Inner {
     /// Force checkpoint in next barrier.
     force_checkpoint: AtomicBool,
 
-    checkpoint_frequency: usize,
+    checkpoint_frequency: AtomicUsize,
 }
 
 /// The sender side of the barrier scheduling queue.
@@ -73,7 +73,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
             queue: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
             num_uncheckpointed_barrier: AtomicUsize::new(0),
-            checkpoint_frequency,
+            checkpoint_frequency: AtomicUsize::new(checkpoint_frequency),
             force_checkpoint: AtomicBool::new(false),
         });
 
@@ -154,7 +154,9 @@ impl<S: MetaStore> BarrierScheduler<S> {
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
-    /// multiple commands is executed continuously and atomically.
+    /// multiple commands are executed continuously.
+    ///
+    /// TODO: atomicity of multiple commands is not guaranteed.
     pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<()> {
         struct Context {
             collect_rx: oneshot::Receiver<MetaResult<()>>,
@@ -203,6 +205,13 @@ impl<S: MetaStore> BarrierScheduler<S> {
         }
 
         Ok(())
+    }
+
+    /// Run a command with a `Pause` command before and `Resume` command after it. Used for
+    /// configuration change.
+    pub async fn run_command_with_paused(&self, command: Command) -> MetaResult<()> {
+        self.run_multiple_commands(vec![Command::pause(), command, Command::resume()])
+            .await
     }
 
     /// Run a command and return when it's completely finished.
@@ -281,13 +290,20 @@ impl ScheduledBarriers {
         self.inner
             .num_uncheckpointed_barrier
             .load(Ordering::Relaxed)
-            >= self.inner.checkpoint_frequency
+            >= self.inner.checkpoint_frequency.load(Ordering::Relaxed)
             || self.inner.force_checkpoint.load(Ordering::Relaxed)
     }
 
     /// Make the `checkpoint` of the next barrier must be true
     pub(crate) fn force_checkpoint_in_next_barrier(&self) {
         self.inner.force_checkpoint.store(true, Ordering::Relaxed)
+    }
+
+    /// Update the `checkpoint_frequency`
+    pub fn set_checkpoint_frequency(&self, frequency: usize) {
+        self.inner
+            .checkpoint_frequency
+            .store(frequency, Ordering::Relaxed);
     }
 
     /// Update the `num_uncheckpointed_barrier`
