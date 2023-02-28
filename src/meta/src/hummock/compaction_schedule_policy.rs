@@ -308,12 +308,7 @@ impl ScoredPolicy {
             let running_task = *compactor_assigned_task_num
                 .get(&compactor.context_id())
                 .unwrap_or(&0);
-            println!(
-                "compactor_id {:?} running_task {} max_concurrent_task_number {}",
-                compactor.context_id(),
-                running_task,
-                compactor.max_concurrent_task_number()
-            );
+
             if running_task >= compactor.max_concurrent_task_number() {
                 continue;
             }
@@ -329,11 +324,6 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        println!(
-            "compactor_assigned_task_num {:?}",
-            compactor_assigned_task_num
-        );
-
         if let Some(compactor) = self.fetch_idle_compactor(compactor_assigned_task_num) {
             return Some(compactor);
         }
