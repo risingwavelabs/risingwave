@@ -6002,6 +6002,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "itertools",
+ "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",

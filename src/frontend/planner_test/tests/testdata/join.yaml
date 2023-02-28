@@ -200,14 +200,14 @@
       └─StreamProject { exprs: [Coalesce(i.x, i.x) as $expr1, i.t._row_id, i.t._row_id, i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.x] }
         └─StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.x, i.t._row_id, i.t._row_id, i.x] }
           ├─StreamProject { exprs: [i.x, i.t._row_id, i.t._row_id, i.x] }
-          | └─StreamShare { id = 513 }
+          | └─StreamShare { id = 503 }
           |   └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id, i.x] }
           |     ├─StreamExchange { dist: HashShard(i.x) }
           |     | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
           |     └─StreamExchange { dist: HashShard(i.x) }
           |       └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
           └─StreamProject { exprs: [i.x, i.t._row_id, i.t._row_id, i.x] }
-            └─StreamShare { id = 513 }
+            └─StreamShare { id = 503 }
               └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id, i.x] }
                 ├─StreamExchange { dist: HashShard(i.x) }
                 | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
@@ -503,7 +503,7 @@
               └─BatchExchange { order: [], dist: HashShard(b.x) }
                 └─BatchScan { table: b, columns: [b.x], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [y, z, $expr159(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], pk_columns: [a._row_id, b._row_id, a.x, b.x], order_descs: [$expr159, a._row_id, b._row_id, a.x, b.x], pk_conflict: "no check" }
+    StreamMaterialize { columns: [y, z, $expr153(hidden), a._row_id(hidden), b._row_id(hidden), a.x(hidden), b.x(hidden)], pk_columns: [a._row_id, b._row_id, a.x, b.x], order_descs: [$expr153, a._row_id, b._row_id, a.x, b.x], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(a._row_id, b._row_id, a.x, b.x) }
       └─StreamProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr3, a._row_id, b._row_id, a.x, b.x] }
         └─StreamFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
@@ -602,7 +602,7 @@
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
         └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr29(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr29, v2], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), $expr28(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, $expr28, v2], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: $expr1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, $expr1, t2._row_id] }
       ├─StreamExchange { dist: HashShard($expr1) }
       | └─StreamProject { exprs: [t1.v1, t1.v1::Int64 as $expr1, t1._row_id] }
