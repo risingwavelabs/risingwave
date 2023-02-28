@@ -24,7 +24,8 @@ pub struct FunctionCatalog {
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
     pub language: String,
-    pub path: String,
+    pub identifier: String,
+    pub link: String,
 }
 
 impl From<&ProstFunction> for FunctionCatalog {
@@ -36,7 +37,8 @@ impl From<&ProstFunction> for FunctionCatalog {
             arg_types: prost.arg_types.iter().map(|arg| arg.into()).collect(),
             return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),
-            path: prost.path.clone(),
+            identifier: prost.identifier.clone(),
+            link: prost.link.clone(),
         }
     }
 }

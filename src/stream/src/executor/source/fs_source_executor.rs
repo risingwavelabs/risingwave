@@ -102,12 +102,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
             source_desc.metrics.clone(),
         );
         source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
-        let steam_reader = source_desc
+        let stream_reader = source_desc
             .source
             .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(steam_reader.into_stream())
+        Ok(stream_reader.into_stream())
     }
 
     async fn apply_split_change<const BIASED: bool>(

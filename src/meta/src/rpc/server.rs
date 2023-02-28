@@ -530,7 +530,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
         .await,
     );
-    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
+    sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
 
     if cfg!(not(test)) {
         sub_tasks.push(

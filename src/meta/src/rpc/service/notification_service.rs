@@ -221,7 +221,7 @@ where
 
         self.env
             .notification_manager()
-            .notify_snapshot(worker_key, meta_snapshot);
+            .notify_snapshot(worker_key, subscribe_type, meta_snapshot);
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
