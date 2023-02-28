@@ -78,6 +78,7 @@ define_keywords!(
     ANALYZE,
     AND,
     ANY,
+    APPEND,
     ARE,
     ARRAY,
     ARRAY_AGG,
