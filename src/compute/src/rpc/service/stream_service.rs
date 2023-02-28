@@ -26,7 +26,7 @@ use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -138,6 +138,18 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
+        let actor_ids = self.mgr.all_actor_ids().await;
+        if req
+            .actor_ids_to_collect
+            .iter()
+            .any(|id| !actor_ids.contains(id))
+        {
+            tracing::warn!("to collect actors not found, it should be cleaned when recovery.");
+            return Err(Status::new(
+                Code::InvalidArgument,
+                "to collect actors not found",
+            ));
+        }
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
 
