@@ -207,10 +207,6 @@ for_all_undeprecated_params!(impl_default_validation_on_set);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {
-    fn barrier_interval_ms(v: &u32) -> Result<()> {
-        Self::expect_range(*v, 1..)
-    }
-
     fn checkpoint_frequency(v: &u64) -> Result<()> {
         Self::expect_range(*v, 1..)
     }
@@ -259,13 +255,17 @@ mod tests {
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
-        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("-1".to_string())).is_err());
+        assert!(
+            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("-1".to_string())).is_err()
+        );
         // Set immutable.
         assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_string())).is_err());
         // Parse error.
-        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("?".to_string())).is_err());
         // Normal set.
-        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("500".to_string())).is_ok());
+        assert!(
+            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_string())).is_ok()
+        );
         assert_eq!(p.barrier_interval_ms, Some(500));
     }
 }
