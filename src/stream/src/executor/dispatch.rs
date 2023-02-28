@@ -18,7 +18,7 @@ use std::future::Future;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -269,7 +269,7 @@ impl StreamConsumer for DispatchExecutor {
                 };
                 self.inner
                     .dispatch(msg)
-                    .verbose_stack_trace(if barrier.is_some() {
+                    .verbose_instrument_await(if barrier.is_some() {
                         "dispatch_barrier"
                     } else if is_watermark {
                         "dispatch_watermark"

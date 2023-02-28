@@ -418,22 +418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async_stack_trace"
-version = "0.1.0"
-dependencies = [
- "coarsetime",
- "futures",
- "futures-async-stream",
- "indextree",
- "itertools",
- "madsim-tokio",
- "pin-project",
- "tracing",
- "triomphe",
- "workspace-hack",
-]
-
-[[package]]
 name = "atomic"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -506,6 +490,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aef8da1805e028a172334c3b680f93e71126f2327622faef2ec3d893c0a4ad77"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "await-tree"
+version = "0.1.0"
+dependencies = [
+ "coarsetime",
+ "compact_str",
+ "derive_builder",
+ "indextree",
+ "itertools",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1233,6 +1232,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2698f953def977c68f935bb0dfa959375ad4638570e969e2f1e9f433cbf1af6"
 
 [[package]]
+name = "castaway"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a17ed5635fc8536268e5d4de1e22e81ac34419e5f052d4d51f4e01dcc263fcc"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1447,6 +1455,19 @@ dependencies = [
  "strum",
  "strum_macros",
  "unicode-width",
+]
+
+[[package]]
+name = "compact_str"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bff0805f79ecb1b35163f3957a6934ea8d04fcd36ef98b52e7316f63e72e73d1"
+dependencies = [
+ "castaway 0.2.2",
+ "cfg-if",
+ "itoa",
+ "ryu",
+ "static_assertions",
 ]
 
 [[package]]
@@ -1979,6 +2000,37 @@ checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
 dependencies = [
  "proc-macro2",
  "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_builder"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d67778784b508018359cbc8696edb3db78160bab2c2a28ba7f56ef6932997f8"
+dependencies = [
+ "derive_builder_macro",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c11bdc11a0c47bc7d37d582b5285da6849c96681023680b906673c5707af7b0f"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebcda35c7a396850a55ffeac740804b40ffec779b98fffbb1738f4033f0ee79e"
+dependencies = [
+ "derive_builder_core",
  "syn",
 ]
 
@@ -3120,7 +3172,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "334e04b4d781f436dc315cb1e7515bd96826426345d498149e4bde36b67f8ee9"
 dependencies = [
  "async-channel",
- "castaway",
+ "castaway 0.1.2",
  "crossbeam-utils",
  "curl",
  "curl-sys",
@@ -5822,7 +5874,7 @@ name = "risingwave_compute"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
- "async_stack_trace",
+ "await-tree",
  "clap 3.2.23",
  "either",
  "futures",
@@ -6172,7 +6224,7 @@ name = "risingwave_object_store"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
- "async_stack_trace",
+ "await-tree",
  "aws-config",
  "aws-smithy-http",
  "aws-smithy-types",
@@ -6271,7 +6323,7 @@ dependencies = [
 name = "risingwave_rt"
 version = "0.2.0-alpha"
 dependencies = [
- "async_stack_trace",
+ "await-tree",
  "console",
  "console-subscriber",
  "futures",
@@ -6392,8 +6444,8 @@ version = "0.2.0-alpha"
 dependencies = [
  "arc-swap",
  "async-trait",
- "async_stack_trace",
  "auto_enums",
+ "await-tree",
  "bytes",
  "criterion",
  "crossbeam",
@@ -6450,7 +6502,7 @@ dependencies = [
  "async-recursion",
  "async-stream",
  "async-trait",
- "async_stack_trace",
+ "await-tree",
  "bytes",
  "derivative",
  "dyn-clone",

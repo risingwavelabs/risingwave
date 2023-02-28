@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_recursion::async_recursion;
-use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
 use futures::FutureExt;
 use hytra::TrAdder;
 use itertools::Itertools;
@@ -83,7 +82,7 @@ pub struct LocalStreamManagerCore {
     pub(crate) config: StreamingConfig,
 
     /// Manages the stack traces of all actors.
-    stack_trace_manager: Option<StackTraceManager<ActorId>>,
+    stack_trace_manager: Option<await_tree::Registry<ActorId>>,
 
     /// Watermark epoch number.
     watermark_epoch: AtomicU64Ref,
@@ -167,7 +166,7 @@ impl LocalStreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
-        async_stack_trace_config: Option<TraceConfig>,
+        async_stack_trace_config: Option<await_tree::Config>,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -195,19 +194,19 @@ impl LocalStreamManager {
                     .stack_trace_manager
                     .as_mut()
                     .expect("async stack trace not enabled")
-                    .get_all()
+                    .iter()
                 {
-                    writeln!(o, ">> Actor {}\n\n{}", k, &*trace).ok();
+                    writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
                 }
             }
         })
     }
 
     /// Get stack trace reports for all actors.
-    pub async fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
+    pub async fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
         let mut core = self.core.lock().await;
         match &mut core.stack_trace_manager {
-            Some(mgr) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
+            Some(mgr) => mgr.iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }
     }
@@ -376,7 +375,7 @@ impl LocalStreamManagerCore {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
-        async_stack_trace_config: Option<TraceConfig>,
+        async_stack_trace_config: Option<await_tree::Config>,
     ) -> Self {
         let context = SharedContext::new(addr, state_store.clone(), &config);
         Self::new_inner(
@@ -393,7 +392,7 @@ impl LocalStreamManagerCore {
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
-        async_stack_trace_config: Option<TraceConfig>,
+        async_stack_trace_config: Option<await_tree::Config>,
     ) -> Self {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
@@ -417,7 +416,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
-            stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
+            stack_trace_manager: async_stack_trace_config.map(await_tree::Registry::new),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
             total_mem_val: Arc::new(TrAdder::new()),
         }
@@ -651,8 +650,11 @@ impl LocalStreamManagerCore {
                 };
                 let traced = match &mut self.stack_trace_manager {
                     Some(m) => m
-                        .register(actor_id)
-                        .trace(actor, format!("Actor {actor_id}: `{}`", mview_definition))
+                        .register(
+                            actor_id,
+                            format!("Actor {actor_id}: `{}`", mview_definition),
+                        )
+                        .instrument(actor)
                         .left_future(),
                     None => actor.right_future(),
                 };
@@ -794,7 +796,7 @@ impl LocalStreamManagerCore {
         self.actors.clear();
         self.context.clear_channels();
         if let Some(m) = self.stack_trace_manager.as_mut() {
-            m.reset()
+            m.clear();
         }
         self.actor_monitor_tasks.clear();
         self.context.actor_infos.write().clear();

@@ -60,7 +60,7 @@ impl MonitorService for MonitorServiceImpl {
         let rpc_traces = if let Some(m) = &self.grpc_stack_trace_mgr {
             m.lock()
                 .await
-                .get_all()
+                .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect()
         } else {
@@ -112,7 +112,6 @@ pub mod grpc_middleware {
     use std::sync::Arc;
     use std::task::{Context, Poll};
 
-    use async_stack_trace::{SpanValue, StackTraceManager};
     use futures::Future;
     use hyper::Body;
     use tokio::sync::Mutex;
@@ -121,7 +120,7 @@ pub mod grpc_middleware {
     use tower::{Layer, Service};
 
     /// Manages the stack trace of `gRPC` requests that are currently served by the compute node.
-    pub type GrpcStackTraceManagerRef = Arc<Mutex<StackTraceManager<u64>>>;
+    pub type GrpcStackTraceManagerRef = Arc<Mutex<await_tree::Registry<u64>>>;
 
     #[derive(Clone)]
     pub struct StackTraceMiddlewareLayer {
@@ -189,10 +188,12 @@ pub mod grpc_middleware {
             let manager = self.manager.clone();
 
             async move {
-                let sender = manager.lock().await.register(id);
-                let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
+                let root = manager
+                    .lock()
+                    .await
+                    .register(id, format!("{}:{}", req.uri().path(), id));
 
-                sender.trace(inner.call(req), root_span).await
+                root.instrument(inner.call(req)).await
             }
         }
     }

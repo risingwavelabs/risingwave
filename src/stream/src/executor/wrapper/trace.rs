@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use async_stack_trace::{SpanValue, StackTrace};
+use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use minitrace::prelude::*;
@@ -115,9 +115,14 @@ pub async fn stack_trace(
 ) {
     pin_mut!(input);
 
-    let span: SpanValue = pretty_identity(&info.identity, actor_id, executor_id).into();
+    let span: await_tree::Span = pretty_identity(&info.identity, actor_id, executor_id).into();
 
-    while let Some(message) = input.next().stack_trace(span.clone()).await.transpose()? {
+    while let Some(message) = input
+        .next()
+        .instrument_await(span.clone())
+        .await
+        .transpose()?
+    {
         yield message;
     }
 }

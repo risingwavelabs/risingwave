@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use itertools::Itertools;
 use risingwave_common::error::tonic_err;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
@@ -156,7 +156,7 @@ impl StreamService for StreamServiceImpl {
         let (collect_result, checkpoint) = self
             .mgr
             .collect_barrier(req.prev_epoch)
-            .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
+            .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await
             .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
         // Must finish syncing data written in the epoch before respond back to ensure persistence
@@ -164,7 +164,7 @@ impl StreamService for StreamServiceImpl {
         let synced_sstables = if checkpoint {
             self.mgr
                 .sync_epoch(req.prev_epoch)
-                .stack_trace(format!("sync_epoch (epoch {})", req.prev_epoch))
+                .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
                 .await?
         } else {
             vec![]
@@ -205,7 +205,7 @@ impl StreamService for StreamServiceImpl {
 
             store
                 .try_wait_epoch(HummockReadEpoch::Committed(epoch))
-                .stack_trace(format!("wait_epoch_commit (epoch {})", epoch))
+                .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
                 .await
                 .map_err(tonic_err)?;
         });

@@ -16,7 +16,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_stack_trace::StackTraceManager;
 use pretty_bytes::converter::convert;
 use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
@@ -210,11 +209,10 @@ pub async fn compute_node_serve(
 
     let async_stack_trace_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
-        c => Some(async_stack_trace::TraceConfig {
-            report_detached: true,
-            verbose: matches!(c, AsyncStackTraceOption::Verbose),
-            interval: Duration::from_secs(1),
-        }),
+        c => await_tree::ConfigBuilder::default()
+            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .build()
+            .ok(),
     };
 
     // Initialize the managers.
@@ -227,7 +225,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
-        async_stack_trace_config,
+        async_stack_trace_config.clone(),
     ));
 
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
@@ -247,7 +245,7 @@ pub async fn compute_node_serve(
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
     let grpc_stack_trace_mgr = async_stack_trace_config
-        .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
+        .map(|config| GrpcStackTraceManagerRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
 
     // Initialize batch environment.

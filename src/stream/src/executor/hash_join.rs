@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -630,7 +630,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         while let Some(msg) = aligned_stream
             .next()
-            .stack_trace("hash_join_barrier_align")
+            .instrument_await("hash_join_barrier_align")
             .await
         {
             self.metrics
