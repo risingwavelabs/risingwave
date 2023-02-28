@@ -2592,6 +2592,16 @@ def section_memory_manager(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_memory(
+                    "The memory allocated by batch",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem_usage')}",
+                            "",
+                        ),
+                    ],
+                ),
             ],
         ),
     ]
