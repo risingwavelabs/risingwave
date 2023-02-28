@@ -292,6 +292,32 @@ impl LogicalOptimizer {
         Ok(plan)
     }
 
+    pub fn column_pruning(
+        mut plan: PlanRef,
+        explain_trace: bool,
+        ctx: &OptimizerContextRef,
+    ) -> PlanRef {
+        let required_cols = (0..plan.schema().len()).collect_vec();
+        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
+        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+        // Column pruning may introduce additional projects, and filter can be pushed again.
+        if explain_trace {
+            ctx.trace("Prune Columns:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        if column_pruning_ctx.need_second_round() {
+            // Second round of column pruning and reuse the column pruning context.
+            // Try to replace original share operator with the new one.
+            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+            if explain_trace {
+                ctx.trace("Prune Columns (For DAG):");
+                ctx.trace(plan.explain_to_string().unwrap());
+            }
+        }
+        plan
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -352,24 +378,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
 
         // Prune Columns
-        let required_cols = (0..plan.schema().len()).collect_vec();
-        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-        // Column pruning may introduce additional projects, and filter can be pushed again.
-        if explain_trace {
-            ctx.trace("Prune Columns:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        if column_pruning_ctx.need_second_round() {
-            // Second round of column pruning and reuse the column pruning context.
-            // Try to replace original share operator with the new one.
-            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-            if explain_trace {
-                ctx.trace("Prune Columns (For DAG):");
-                ctx.trace(plan.explain_to_string().unwrap());
-            }
-        }
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
@@ -438,14 +447,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
 
         // Prune Columns
-        let required_cols = (0..plan.schema().len()).collect_vec();
-        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-        // Column pruning may introduce additional projects, and filter can be pushed again.
-        if explain_trace {
-            ctx.trace("Prune Columns:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
