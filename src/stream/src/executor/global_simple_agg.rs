@@ -20,7 +20,7 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, ROW_COUNT_COLUMN};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, AlwaysOutput,
     DistinctDeduplicater,
@@ -311,6 +311,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 &this.storages,
                 &this.result_table,
                 &this.input_pk_indices,
+                ROW_COUNT_COLUMN,
                 this.extreme_cache_size,
                 &this.input_schema,
             )

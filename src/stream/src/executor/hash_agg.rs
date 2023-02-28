@@ -29,7 +29,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::agg_common::AggExecutorArgs;
+use super::agg_common::{AggExecutorArgs, ROW_COUNT_COLUMN};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater,
     OnlyOutputIfHasInput,
@@ -258,6 +258,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.storages,
                                 &this.result_table,
                                 &this.input_pk_indices,
+                                ROW_COUNT_COLUMN,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )

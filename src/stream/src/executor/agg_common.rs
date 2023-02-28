@@ -24,6 +24,9 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
 use crate::task::AtomicU64Ref;
 
+/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
+pub const ROW_COUNT_COLUMN: usize = 0;
+
 /// Arguments needed to construct an `XxxAggExecutor`.
 pub struct AggExecutorArgs<S: StateStore> {
     // basic
