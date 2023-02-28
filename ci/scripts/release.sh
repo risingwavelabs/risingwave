@@ -32,7 +32,8 @@ unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
-cd target/release && chmod +x risingwave
+cargo build --bin risectl --features "static-link static-log-level" --profile release
+cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
@@ -53,9 +54,13 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   echo "--- Release create"
   gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
 
-  echo "--- Release upload asset"
+  echo "--- Release upload risingwave asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+
+  echo "--- Release upload risingwave asset"
+  tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
+  gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
   git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
