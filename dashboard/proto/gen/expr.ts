@@ -867,7 +867,8 @@ export interface UserDefinedFunction {
   name: string;
   argTypes: DataType[];
   language: string;
-  path: string;
+  link: string;
+  identifier: string;
 }
 
 function createBaseExprNode(): ExprNode {
@@ -1202,7 +1203,7 @@ export const AggCall_OrderByField = {
 };
 
 function createBaseUserDefinedFunction(): UserDefinedFunction {
-  return { children: [], name: "", argTypes: [], language: "", path: "" };
+  return { children: [], name: "", argTypes: [], language: "", link: "", identifier: "" };
 }
 
 export const UserDefinedFunction = {
@@ -1212,7 +1213,8 @@ export const UserDefinedFunction = {
       name: isSet(object.name) ? String(object.name) : "",
       argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
       language: isSet(object.language) ? String(object.language) : "",
-      path: isSet(object.path) ? String(object.path) : "",
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
     };
   },
 
@@ -1230,7 +1232,8 @@ export const UserDefinedFunction = {
       obj.argTypes = [];
     }
     message.language !== undefined && (obj.language = message.language);
-    message.path !== undefined && (obj.path = message.path);
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
     return obj;
   },
 
@@ -1240,7 +1243,8 @@ export const UserDefinedFunction = {
     message.name = object.name ?? "";
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.language = object.language ?? "";
-    message.path = object.path ?? "";
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
     return message;
   },
 };
