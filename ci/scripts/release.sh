@@ -58,15 +58,15 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
-  echo "--- Release upload risingwave asset"
+  echo "--- Release upload risectl asset"
   tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
-  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
-  cd risingwave-connector-node && git checkout ${connector_node_version} && mvn -B package -Dmaven.test.skip=true
-  cd assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
-  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+#  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
+#  cd risingwave-connector-node && git checkout ${connector_node_version} && mvn -B package -Dmaven.test.skip=true
+#  cd assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+#  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
 
 
