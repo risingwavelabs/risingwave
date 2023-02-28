@@ -24,8 +24,10 @@ pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
+mod xor_filter;
 pub use bloom::BloomFilterBuilder;
-use bloom::BloomFilterReader;
+pub use xor_filter::XorFilterBuilder;
+use xor_filter::XorFilterReader;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -56,7 +58,7 @@ pub use filter::FilterBuilder;
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
-use xxhash_rust::xxh32;
+use xxhash_rust::{xxh32, xxh64};
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
@@ -125,7 +127,7 @@ impl DeleteRangeTombstone {
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
-    pub filter_reader: BloomFilterReader,
+    pub filter_reader: XorFilterReader,
 }
 
 impl Debug for Sstable {
@@ -140,7 +142,7 @@ impl Debug for Sstable {
 impl Sstable {
     pub fn new(id: HummockSstableId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
-        let filter_reader = BloomFilterReader::new(filter_data);
+        let filter_reader = XorFilterReader::new(filter_data);
         Self {
             id,
             meta,
@@ -148,6 +150,7 @@ impl Sstable {
         }
     }
 
+    #[inline(always)]
     pub fn has_bloom_filter(&self) -> bool {
         !self.filter_reader.is_empty()
     }
@@ -158,7 +161,7 @@ impl Sstable {
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = xxh32::xxh32(dist_key, 0);
+            let hash = xxh64::xxh64(dist_key, 0);
             self.may_match_hash(hash)
         } else {
             true
@@ -166,13 +169,21 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u32 {
+    pub fn hash_for_bloom_filter_u32(dist_key: &[u8], table_id: u32) -> u32 {
         let dist_key_hash = xxh32::xxh32(dist_key, 0);
+        // congyi adds this because he aims to dedup keys in different tables
         table_id.bitxor(dist_key_hash)
     }
 
     #[inline(always)]
-    pub fn may_match_hash(&self, hash: u32) -> bool {
+    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u64 {
+        let dist_key_hash = xxh64::xxh64(dist_key, 0);
+        // congyi adds this because he aims to dedup keys in different tables
+        (table_id as u64).bitxor(dist_key_hash)
+    }
+
+    #[inline(always)]
+    pub fn may_match_hash(&self, hash: u64) -> bool {
         self.filter_reader.may_match(hash)
     }
 
@@ -182,7 +193,7 @@ impl Sstable {
 
     #[inline]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size()
+        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
     }
 
     #[cfg(test)]

@@ -162,7 +162,6 @@ profile:
       - use: kafka
         persist-data: true
 
-
   3etcd-3meta:
     steps:
       - use: etcd

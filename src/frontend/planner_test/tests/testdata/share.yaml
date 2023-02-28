@@ -104,16 +104,20 @@
           |   └─BatchHashAgg { group_key: [window_start, auction], aggs: [count] }
           |     └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
           |       └─BatchExchange { order: [], dist: HashShard(auction) }
-          |         └─BatchProject { exprs: [auction, date_time] }
-          |           └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+          |         └─BatchFilter { predicate: IsNotNull(date_time) }
+          |           └─BatchProject { exprs: [auction, date_time] }
+          |             └─BatchFilter { predicate: IsNotNull(date_time) }
+          |               └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
           └─BatchProject { exprs: [max(count), window_start] }
             └─BatchHashAgg { group_key: [window_start], aggs: [max(count)] }
               └─BatchExchange { order: [], dist: HashShard(window_start) }
                 └─BatchHashAgg { group_key: [auction, window_start], aggs: [count] }
                   └─BatchHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start] }
                     └─BatchExchange { order: [], dist: HashShard(auction) }
-                      └─BatchProject { exprs: [auction, date_time] }
-                        └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+                      └─BatchFilter { predicate: IsNotNull(date_time) }
+                        └─BatchProject { exprs: [auction, date_time] }
+                          └─BatchFilter { predicate: IsNotNull(date_time) }
+                            └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
   stream_plan: |
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], pk_columns: [window_start, auction, window_start#1] }
     └─StreamProject { exprs: [auction, count, window_start, window_start] }
@@ -124,11 +128,13 @@
           |   └─StreamAppendOnlyHashAgg { group_key: [window_start, auction], aggs: [count, count] }
           |     └─StreamExchange { dist: HashShard(auction, window_start) }
           |       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
-          |         └─StreamProject { exprs: [auction, date_time, _row_id] }
-          |           └─StreamShare { id = 754 }
-          |             └─StreamProject { exprs: [auction, date_time, _row_id] }
-          |               └─StreamRowIdGen { row_id_index: 7 }
-          |                 └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+          |         └─StreamFilter { predicate: IsNotNull(date_time) }
+          |           └─StreamProject { exprs: [auction, date_time, _row_id] }
+          |             └─StreamShare { id = 919 }
+          |               └─StreamProject { exprs: [auction, date_time, _row_id] }
+          |                 └─StreamFilter { predicate: IsNotNull(date_time) }
+          |                   └─StreamRowIdGen { row_id_index: 7 }
+          |                     └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
           └─StreamProject { exprs: [max(count), window_start] }
             └─StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
               └─StreamExchange { dist: HashShard(window_start) }
@@ -136,11 +142,13 @@
                   └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count, count] }
                     └─StreamExchange { dist: HashShard(auction, window_start) }
                       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
-                        └─StreamProject { exprs: [auction, date_time, _row_id] }
-                          └─StreamShare { id = 754 }
-                            └─StreamProject { exprs: [auction, date_time, _row_id] }
-                              └─StreamRowIdGen { row_id_index: 7 }
-                                └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+                        └─StreamFilter { predicate: IsNotNull(date_time) }
+                          └─StreamProject { exprs: [auction, date_time, _row_id] }
+                            └─StreamShare { id = 919 }
+                              └─StreamProject { exprs: [auction, date_time, _row_id] }
+                                └─StreamFilter { predicate: IsNotNull(date_time) }
+                                  └─StreamRowIdGen { row_id_index: 7 }
+                                    └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
 - sql: |
     set rw_enable_share_plan=true;
     create table t(a int, b int);

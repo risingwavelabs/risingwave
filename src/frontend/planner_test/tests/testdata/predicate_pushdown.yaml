@@ -54,14 +54,15 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, t.ts, window_start, window_end] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.ts >= '1997-07-01':Date) AND (window_start >= '1997-07-02':Date) AND (window_end >= '1997-07-03':Date) AND (window_start >= (t.ts + '1 day':Interval)) AND (window_end > (t.ts + '4 days':Interval)) }
-      └─LogicalShare { id = 4 }
+      └─LogicalShare { id = 5 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, t.ts, window_start, window_end] }
           └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
-            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
+            └─LogicalFilter { predicate: IsNotNull(t.ts) }
+              └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
     LogicalFilter { predicate: (window_start >= '1997-07-02':Date) AND (window_end >= '1997-07-03':Date) AND (window_start >= (t.ts + '1 day':Interval)) AND (window_end > (t.ts + '4 days':Interval)) }
     └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.ts >= '1997-07-01':Date) }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.ts >= '1997-07-01':Date) AND IsNotNull(t.ts) }
 - name: filter hop transpose with non-trivial output-indices
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
@@ -70,15 +71,16 @@
   logical_plan: |
     LogicalProject { exprs: [window_end, t.v4, t.v2] }
     └─LogicalFilter { predicate: (window_end > '2022-01-01':Date) AND (t.v4 = 10:Int32) AND (t.v2 > 20:Int32) }
-      └─LogicalShare { id = 4 }
+      └─LogicalShare { id = 5 }
         └─LogicalProject { exprs: [window_end, t.v4, t.v2] }
           └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
-            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
+            └─LogicalFilter { predicate: IsNotNull(t.ts) }
+              └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [window_end, t.v4, t.v2] }
     └─LogicalFilter { predicate: (window_end > '2022-01-01':Date) }
       └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: [t.v2, t.v4, window_end] }
-        └─LogicalScan { table: t, columns: [t.v2, t.v4, t.ts], predicate: (t.v4 = 10:Int32) AND (t.v2 > 20:Int32) }
+        └─LogicalScan { table: t, columns: [t.v2, t.v4, t.ts], predicate: (t.v4 = 10:Int32) AND (t.v2 > 20:Int32) AND IsNotNull(t.ts) }
 - name: filter union transpose
   sql: |
     create table t1 (v1 int, v2 int, v3 int);

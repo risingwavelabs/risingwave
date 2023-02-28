@@ -22,10 +22,10 @@ use risingwave_common::types::{DataType, IntervalUnit};
 
 use super::generic::GenericPlanNode;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::InputRef;
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -40,6 +40,8 @@ pub struct LogicalHopWindow {
 }
 
 impl LogicalHopWindow {
+    /// just used in optimizer and the function will not check if the `time_col`'s value is NULL
+    /// compared with `LogicalHopWindow::create`
     fn new(
         input: PlanRef,
         time_col: InputRef,
@@ -117,13 +119,20 @@ impl LogicalHopWindow {
         self.core.into_parts()
     }
 
-    /// the function will check if the cond is bool expression
+    /// used for binder and planner. The function will add a filter operator to ignore records with
+    /// NULL time value. <https://github.com/risingwavelabs/risingwave/issues/8130>
     pub fn create(
         input: PlanRef,
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
     ) -> PlanRef {
+        let input = LogicalFilter::create_with_expr(
+            input,
+            FunctionCall::new(ExprType::IsNotNull, vec![time_col.clone().into()])
+                .unwrap()
+                .into(),
+        );
         Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
