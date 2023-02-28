@@ -780,7 +780,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let mut watermarks_to_emit = vec![];
         for idx in wm_in_jk {
             let buffers = self.watermark_buffers.entry(idx).or_insert_with(|| {
-                BufferedWatermarks::with_ids(vec![SideType::Left, SideType::Right])
+                BufferedWatermarks::with_ids([SideType::Left, SideType::Right])
             });
             if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
                 let empty_indices = vec![];
