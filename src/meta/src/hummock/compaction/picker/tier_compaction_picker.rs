@@ -145,8 +145,7 @@ impl TierCompactionPicker {
                 select_level_inputs.push(cur_level);
             }
 
-            if select_level_inputs.len() < self.config.level0_tier_compact_file_number
-            {
+            if select_level_inputs.len() < self.config.level0_tier_compact_file_number as usize {
                 stats.skip_by_count_limit += 1;
                 continue;
             }
