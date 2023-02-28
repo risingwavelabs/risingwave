@@ -120,20 +120,20 @@
       l_linestatus;
   logical_plan: |
     LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32) as $expr5, count] }
-    └─LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
+    └─LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
       └─LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)) as $expr2, lineitem.l_discount] }
         └─LogicalFilter { predicate: (lineitem.l_shipdate <= ('1998-12-01':Date - '71 days':Interval)) }
           └─LogicalScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate, lineitem.l_shipinstruct, lineitem.l_shipmode, lineitem.l_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32) as $expr5, count] }
-    └─LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
+    └─LogicalAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
       └─LogicalProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)) as $expr2, lineitem.l_discount] }
         └─LogicalScan { table: lineitem, output_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus], required_columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_shipdate], predicate: (lineitem.l_shipdate <= ('1998-12-01':Date - '71 days':Interval)) }
   batch_plan: |
     BatchExchange { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC], dist: Single }
     └─BatchProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32) as $expr5, count] }
       └─BatchSort { order: [lineitem.l_returnflag ASC, lineitem.l_linestatus ASC] }
-        └─BatchHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
+        └─BatchHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
           └─BatchExchange { order: [], dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
             └─BatchProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)) as $expr2, lineitem.l_discount] }
               └─BatchFilter { predicate: (lineitem.l_shipdate <= '1998-09-21 00:00:00':Timestamp) }
@@ -141,7 +141,7 @@
   stream_plan: |
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], pk_columns: [l_returnflag, l_linestatus], pk_conflict: "no check" }
     └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32) as $expr3, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32) as $expr4, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32) as $expr5, count] }
-      └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
+      └─StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr1), sum($expr2), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
         └─StreamExchange { dist: HashShard(lineitem.l_returnflag, lineitem.l_linestatus) }
           └─StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) * (1:Int32 + lineitem.l_tax)) as $expr2, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
             └─StreamFilter { predicate: (lineitem.l_shipdate <= '1998-09-21 00:00:00':Timestamp) }
@@ -151,7 +151,7 @@
       StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], pk_columns: [l_returnflag, l_linestatus], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr363), sum($expr364), RoundDigit((sum(lineitem.l_quantity) / count(lineitem.l_quantity)), 4:Int32) as $expr365, RoundDigit((sum(lineitem.l_extendedprice) / count(lineitem.l_extendedprice)), 4:Int32) as $expr366, RoundDigit((sum(lineitem.l_discount) / count(lineitem.l_discount)), 4:Int32) as $expr367, count] }
-          StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr363), sum($expr364), sum(lineitem.l_quantity), count(lineitem.l_quantity), sum(lineitem.l_extendedprice), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
+          StreamHashAgg { group_key: [lineitem.l_returnflag, lineitem.l_linestatus], aggs: [count, sum(lineitem.l_quantity), sum(lineitem.l_extendedprice), sum($expr363), sum($expr364), count(lineitem.l_quantity), count(lineitem.l_extendedprice), sum(lineitem.l_discount), count(lineitem.l_discount), count] }
               result table: 0, state tables: []
             StreamExchange Hash([0, 1]) from 1
 
@@ -162,7 +162,7 @@
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [lineitem_l_returnflag, lineitem_l_linestatus, count, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr363), sum($expr364), sum(lineitem_l_quantity)_0, count(lineitem_l_quantity), sum(lineitem_l_extendedprice)_0, count(lineitem_l_extendedprice), sum(lineitem_l_discount), count(lineitem_l_discount), count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0, 1] }
+     Table 0 { columns: [lineitem_l_returnflag, lineitem_l_linestatus, count, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr363), sum($expr364), count(lineitem_l_quantity), count(lineitem_l_extendedprice), sum(lineitem_l_discount), count(lineitem_l_discount), count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11], distribution key: [0, 1] }
      Table 4294967294 { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
 - id: tpch_q2
   before:
@@ -1979,7 +1979,7 @@
     LogicalProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
     └─LogicalFilter { predicate: (sum($expr1) > $expr3) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), sum($expr1)] }
+        ├─LogicalAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1)] }
         | └─LogicalProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty) as $expr1] }
         |   └─LogicalFilter { predicate: (partsupp.ps_suppkey = supplier.s_suppkey) AND (supplier.s_nationkey = nation.n_nationkey) AND (nation.n_name = 'ARGENTINA':Varchar) }
         |     └─LogicalJoin { type: Inner, on: true, output: all }
@@ -1998,7 +1998,7 @@
                   └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
-    ├─LogicalAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), sum($expr1)] }
+    ├─LogicalAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1)] }
     | └─LogicalProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty) as $expr1] }
     |   └─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost] }
     |     ├─LogicalJoin { type: Inner, on: (partsupp.ps_suppkey = supplier.s_suppkey), output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey] }
@@ -2017,7 +2017,7 @@
     BatchSort { order: [sum($expr1) DESC] }
     └─BatchNestedLoopJoin { type: Inner, predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
       ├─BatchExchange { order: [], dist: Single }
-      | └─BatchHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1), sum($expr1)] }
+      | └─BatchHashAgg { group_key: [partsupp.ps_partkey], aggs: [sum($expr1)] }
       |   └─BatchExchange { order: [], dist: HashShard(partsupp.ps_partkey) }
       |     └─BatchProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty) as $expr1] }
       |       └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey AND (nation.n_name = 'ARGENTINA':Varchar), output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost] }
@@ -2037,54 +2037,52 @@
                         └─BatchScan { table: partsupp, columns: [partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey], pk_conflict: "no check" }
-    └─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
-      └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1), sum($expr1)] }
-        ├─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1), sum($expr1)] }
-        | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum($expr1), sum($expr1)] }
-        |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-        |     └─StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty) as $expr1, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
-        |       └─StreamShare { id = 1495 }
-        |         └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
-        |           ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
-        |           | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
-        |           |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-        |           |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-        |           |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-        |           |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-        |           └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-        |             └─StreamProject { exprs: [nation.n_nationkey] }
-        |               └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-        |                 └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
-        └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [(sum(sum($expr2)) * 0.0001000000:Decimal) as $expr3] }
-            └─StreamGlobalSimpleAgg { aggs: [count, sum(sum($expr2))] }
-              └─StreamExchange { dist: Single }
-                └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr2)] }
-                  └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
-                    └─StreamShare { id = 1495 }
-                      └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
-                        ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
-                        | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
-                        |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-                        |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-                        |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-                        |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-                        └─StreamExchange { dist: HashShard(nation.n_nationkey) }
-                          └─StreamProject { exprs: [nation.n_nationkey] }
-                            └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-                              └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
+    └─StreamDynamicFilter { predicate: (sum($expr1) > $expr3), output: [partsupp.ps_partkey, sum($expr1)] }
+      ├─StreamProject { exprs: [partsupp.ps_partkey, sum($expr1)] }
+      | └─StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum($expr1)] }
+      |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
+      |     └─StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty) as $expr1, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
+      |       └─StreamShare { id = 1485 }
+      |         └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+      |           ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
+      |           | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+      |           |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+      |           |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+      |           |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
+      |           |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+      |           └─StreamExchange { dist: HashShard(nation.n_nationkey) }
+      |             └─StreamProject { exprs: [nation.n_nationkey] }
+      |               └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
+      |                 └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [(sum(sum($expr2)) * 0.0001000000:Decimal) as $expr3] }
+          └─StreamGlobalSimpleAgg { aggs: [count, sum(sum($expr2))] }
+            └─StreamExchange { dist: Single }
+              └─StreamStatelessLocalSimpleAgg { aggs: [count, sum($expr2)] }
+                └─StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
+                  └─StreamShare { id = 1485 }
+                    └─StreamHashJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, partsupp.ps_suppkey, supplier.s_suppkey, supplier.s_nationkey, nation.n_nationkey] }
+                      ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
+                      | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [partsupp.ps_partkey, partsupp.ps_availqty, partsupp.ps_supplycost, supplier.s_nationkey, partsupp.ps_suppkey, supplier.s_suppkey] }
+                      |   ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                      |   | └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+                      |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
+                      |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+                      └─StreamExchange { dist: HashShard(nation.n_nationkey) }
+                        └─StreamProject { exprs: [nation.n_nationkey] }
+                          └─StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
+                            └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
   stream_dist_plan: |
     Fragment 0
       StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey], pk_conflict: "no check" }
           materialized table: 4294967294
-        StreamProject { exprs: [partsupp.ps_partkey, sum($expr221)] }
-          StreamDynamicFilter { predicate: (sum($expr221) > $expr223), output: [partsupp.ps_partkey, sum($expr221), sum($expr221)] }
-              left table: 0, right table 1
-            StreamProject { exprs: [partsupp.ps_partkey, sum($expr221), sum($expr221)] }
-              StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum($expr221), sum($expr221)] }
-                  result table: 2, state tables: []
-                StreamExchange Hash([0]) from 1
-            StreamExchange Broadcast from 7
+        StreamDynamicFilter { predicate: (sum($expr221) > $expr223), output: [partsupp.ps_partkey, sum($expr221)] }
+            left table: 0, right table 1
+          StreamProject { exprs: [partsupp.ps_partkey, sum($expr221)] }
+            StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum($expr221)] }
+                result table: 2, state tables: []
+              StreamExchange Hash([0]) from 1
+          StreamExchange Broadcast from 7
 
     Fragment 1
       StreamProject { exprs: [partsupp.ps_partkey, (partsupp.ps_supplycost * partsupp.ps_availqty) as $expr221, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
@@ -2130,9 +2128,9 @@
         StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty) as $expr222, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
           StreamExchange Hash([5]) from 2
 
-     Table 0 { columns: [partsupp_ps_partkey, sum($expr221), sum($expr221)_0], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [partsupp_ps_partkey, sum($expr221)], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
      Table 1 { columns: [$expr223], primary key: [], value indices: [0], distribution key: [] }
-     Table 2 { columns: [partsupp_ps_partkey, count, sum($expr221), sum($expr221)_0], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
+     Table 2 { columns: [partsupp_ps_partkey, count, sum($expr221)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 3 { columns: [partsupp_ps_partkey, partsupp_ps_availqty, partsupp_ps_supplycost, supplier_s_nationkey, partsupp_ps_suppkey, supplier_s_suppkey], primary key: [$3 ASC, $0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3] }
      Table 4 { columns: [supplier_s_nationkey, partsupp_ps_partkey, partsupp_ps_suppkey, supplier_s_suppkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
      Table 5 { columns: [nation_n_nationkey], primary key: [$0 ASC], value indices: [0], distribution key: [0] }

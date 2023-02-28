@@ -40,7 +40,7 @@ async fn nexmark_chaos_common_inner(
     multiple: bool,
 ) -> Result<()> {
     let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT)).await?;
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT), false).await?;
     cluster.run(create).await?;
     sleep(Duration::from_secs(30)).await;
     let final_result = cluster.run(select).await?;
@@ -159,6 +159,8 @@ test!(q7);
 test!(q8);
 test!(q9);
 // q10+: duplicated or unsupported
+test!(q15);
+test!(q18);
 
 // Self made queries.
 test!(q101);
@@ -166,3 +168,4 @@ test!(q102);
 test!(q103);
 test!(q104);
 test!(q105);
+test!(q106);

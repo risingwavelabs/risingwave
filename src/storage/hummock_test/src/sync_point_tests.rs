@@ -36,8 +36,8 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::hummock::SstableIdManager;
-use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::StateStore;
 use serial_test::serial;
 
 use super::compactor_tests::tests::{
@@ -258,53 +258,83 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
     compactor_manager.add_compactor(worker_node.id, u64::MAX);
 
+    let mut local = storage
+        .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+        .await;
+
     // 1. add sstables
     let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
     let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 100,
-        table_id: existing_table_id.into(),
-    });
+
+    local.init(100);
     let mut start_key = b"aaa".to_vec();
     for _ in 0..10 {
-        local.put(&start_key, StorageValue::new_put(val0.clone()));
+        local
+            .insert(
+                Bytes::copy_from_slice(start_key.as_slice()),
+                val0.clone(),
+                None,
+            )
+            .unwrap();
         start_key = next_key(&start_key);
     }
-    local.put(b"ggg", StorageValue::new_put(val0.clone()));
-    local.put(b"hhh", StorageValue::new_put(val0.clone()));
-    local.put(b"kkk", StorageValue::new_put(val0.clone()));
-    local.ingest().await.unwrap();
+    local
+        .insert(Bytes::from(b"ggg".as_slice()), val0.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"hhh".as_slice()), val0.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"kkk".as_slice()), val0.clone(), None)
+        .unwrap();
+    local.flush(Vec::new()).await.unwrap();
+    local.seal_current_epoch(101);
     flush_and_commit(&hummock_meta_client, &storage, 100).await;
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 101,
-        table_id: existing_table_id.into(),
-    });
-    local.put(b"aaa", StorageValue::new_put(val1.clone()));
-    local.put(b"bbb", StorageValue::new_put(val1.clone()));
-    local.delete_range(b"ggg", b"hhh");
-    local.ingest().await.unwrap();
+
+    local
+        .insert(Bytes::from(b"aaa".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"bbb".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .flush(vec![(
+            Bytes::from(b"ggg".as_slice()),
+            Bytes::from(b"hhh".as_slice()),
+        )])
+        .await
+        .unwrap();
+    local.seal_current_epoch(102);
     flush_and_commit(&hummock_meta_client, &storage, 101).await;
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 102,
-        table_id: existing_table_id.into(),
-    });
-    local.put(b"hhh", StorageValue::new_put(val1.clone()));
-    local.put(b"iii", StorageValue::new_put(val1.clone()));
-    local.delete_range(b"jjj", b"kkk");
-    local.ingest().await.unwrap();
+
+    local
+        .insert(Bytes::from(b"hhh".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"iii".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .flush(vec![(
+            Bytes::from(b"jjj".as_slice()),
+            Bytes::from(b"kkk".as_slice()),
+        )])
+        .await
+        .unwrap();
+    local.seal_current_epoch(103);
     flush_and_commit(&hummock_meta_client, &storage, 102).await;
     // move this two file to the same level.
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
 
-    let mut local = storage.local.start_write_batch(WriteOptions {
-        epoch: 103,
-        table_id: existing_table_id.into(),
-    });
-    local.put(b"lll", StorageValue::new_put(val1.clone()));
-    local.put(b"mmm", StorageValue::new_put(val1.clone()));
-    local.ingest().await.unwrap();
+    local
+        .insert(Bytes::from(b"lll".as_slice()), val1.clone(), None)
+        .unwrap();
+    local
+        .insert(Bytes::from(b"mmm".as_slice()), val1.clone(), None)
+        .unwrap();
+    local.flush(Vec::new()).await.unwrap();
+    local.seal_current_epoch(u64::MAX);
     flush_and_commit(&hummock_meta_client, &storage, 103).await;
     // move this two file to the same level.
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;

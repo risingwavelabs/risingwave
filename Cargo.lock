@@ -6300,6 +6300,7 @@ dependencies = [
  "madsim-rdkafka",
  "madsim-tokio",
  "paste",
+ "pretty_assertions",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_compactor",
