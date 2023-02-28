@@ -46,6 +46,7 @@ impl ArrowFlightUdfClient {
         let info = response.into_inner();
         let full_schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
+        // TODO: only support one return value for now
         let (input_fields, return_fields) =
             full_schema.fields.split_at(full_schema.fields.len() - 1);
         let actual_input_types: Vec<_> = input_fields.iter().map(|f| f.data_type()).collect();
