@@ -190,11 +190,12 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         source.id = id;
 
+        // resolve private links before starting the DDL procedure
+        self.resolve_private_link_info(&mut source).await?;
+
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await?;
-
-        self.resolve_stream_source_info(&mut source).await?;
 
         if let Err(e) = self.source_manager.register_source(&source).await {
             self.catalog_manager
@@ -632,11 +633,11 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn resolve_stream_source_info(&self, source: &mut Source) -> MetaResult<()> {
+    async fn resolve_private_link_info(&self, source: &mut Source) -> MetaResult<()> {
         let mut dns_entries = vec![];
         const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private.links";
         if let Some(prop) = source.properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
-            let links: AwsPrivateLinks = serde_json::from_str(prop).unwrap();
+            let links: AwsPrivateLinks = serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
 
             // if private link is required, get connection info from catalog
             for link in links.infos.iter() {
