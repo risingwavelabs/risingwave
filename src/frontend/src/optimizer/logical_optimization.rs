@@ -276,7 +276,7 @@ impl LogicalOptimizer {
         }
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        plan = Self::predicate_pushdown(plan, explain_trace, ctx);
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
