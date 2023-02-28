@@ -27,7 +27,7 @@ use crate::optimizer::plan_visitor::{
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
-use crate::Explain;
+use crate::{Explain, OptimizerContextRef};
 
 impl PlanRef {
     pub(crate) fn optimize_by_rules(self, stage: &OptimizationStage) -> PlanRef {
@@ -244,6 +244,22 @@ lazy_static! {
 }
 
 impl LogicalOptimizer {
+    pub fn predicate_pushdown(
+        plan: PlanRef,
+        explain_trace: bool,
+        ctx: &OptimizerContextRef,
+    ) -> PlanRef {
+        let plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
+        if explain_trace {
+            ctx.trace("Predicate Push Down:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -291,14 +307,7 @@ impl LogicalOptimizer {
 
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
@@ -315,14 +324,7 @@ impl LogicalOptimizer {
         }
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Merge inner joins and intermediate filters into multijoin
         // This rule assumes that filters have already been pushed down near to
@@ -334,14 +336,7 @@ impl LogicalOptimizer {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // For stream, push down predicates with now into a left-semi join
         plan = plan.optimize_by_rules(&FILTER_WITH_NOW_TO_JOIN);
@@ -369,14 +364,7 @@ impl LogicalOptimizer {
             }
         }
 
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
@@ -434,14 +422,7 @@ impl LogicalOptimizer {
 
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
@@ -453,14 +434,7 @@ impl LogicalOptimizer {
         }
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Merge inner joins and intermediate filters into multijoin
         // This rule assumes that filters have already been pushed down near to
@@ -472,14 +446,7 @@ impl LogicalOptimizer {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
@@ -494,14 +461,7 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
