@@ -524,18 +524,20 @@
           ├─LogicalScan { table: test, columns: [test.a, test.b, test._row_id] }
           └─LogicalScan { table: test2, columns: [test2.a, test2.c, test2._row_id] }
   optimized_logical_plan_for_batch: |
-    LogicalJoin { type: Inner, on: (test.a = test2.a) AND (test.b <> test2.c), output: [test.a, test.b, test2.c, test.a] }
-    ├─LogicalScan { table: test, columns: [test.a, test.b] }
-    └─LogicalScan { table: test2, columns: [test2.a, test2.c] }
+    LogicalProject { exprs: [test.a, test.b, test2.c, test.a] }
+    └─LogicalJoin { type: Inner, on: (test.a = test2.a) AND (test.b <> test2.c), output: [test.a, test.b, test2.c] }
+      ├─LogicalScan { table: test, columns: [test.a, test.b] }
+      └─LogicalScan { table: test2, columns: [test2.a, test2.c] }
   batch_plan: |
     BatchProject { exprs: [test.a, test.b, test2.c] }
     └─BatchExchange { order: [test.a ASC], dist: Single }
-      └─BatchSort { order: [test.a ASC] }
-        └─BatchHashJoin { type: Inner, predicate: test.a = test2.a AND (test.b <> test2.c), output: [test.a, test.b, test2.c, test.a] }
-          ├─BatchExchange { order: [], dist: HashShard(test.a) }
-          | └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
-          └─BatchExchange { order: [], dist: HashShard(test2.a) }
-            └─BatchScan { table: test2, columns: [test2.a, test2.c], distribution: SomeShard }
+      └─BatchProject { exprs: [test.a, test.b, test2.c, test.a] }
+        └─BatchSort { order: [test.a ASC] }
+          └─BatchHashJoin { type: Inner, predicate: test.a = test2.a AND (test.b <> test2.c), output: [test.a, test.b, test2.c] }
+            ├─BatchExchange { order: [], dist: HashShard(test.a) }
+            | └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
+            └─BatchExchange { order: [], dist: HashShard(test2.a) }
+              └─BatchScan { table: test2, columns: [test2.a, test2.c], distribution: SomeShard }
 - name: Use lookup join with predicate
   sql: |
     create table t1 (v1 int, v2 int);
@@ -609,3 +611,15 @@
       |   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+- name: Repeated columns in project should not interfere with join result (https://github.com/risingwavelabs/risingwave/issues/8216)
+  sql: |
+    create table t(x int);
+    SELECT t.x x1, t.x x2 FROM t join t tt ON t.x=tt.x;
+  stream_plan: |
+    StreamMaterialize { columns: [x1, x2, t._row_id(hidden), t._row_id#1(hidden), t.x(hidden)], pk_columns: [t._row_id, t._row_id#1, x2, t.x], pk_conflict: "no check" }
+    └─StreamProject { exprs: [t.x, t.x, t._row_id, t._row_id, t.x] }
+      └─StreamHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t._row_id, t._row_id, t.x] }
+        ├─StreamExchange { dist: HashShard(t.x) }
+        | └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

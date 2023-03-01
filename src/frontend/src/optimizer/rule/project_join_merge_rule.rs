@@ -29,10 +29,19 @@ impl Rule for ProjectJoinMergeRule {
         let join = input.as_logical_join()?;
         let outer_output_indices = project.try_as_projection()?;
         let inner_output_indices = join.output_indices();
+
+        // We cannot deal with repeated output indices in join
+        if has_repeated_element(&outer_output_indices) {
+            return None;
+        }
         let output_indices: Vec<usize> = outer_output_indices
             .into_iter()
             .map(|i| inner_output_indices[i])
             .collect();
         Some(join.clone_with_output_indices(output_indices).into())
     }
+}
+
+pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
+    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
 }

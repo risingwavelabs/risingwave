@@ -588,10 +588,11 @@
   optimized_logical_plan_for_batch: |
     LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) AND IsNotDistinctFrom(t1.x, t1.x) AND IsNotDistinctFrom(t1.y, t1.y), output: all }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalJoin { type: Inner, on: (t1.x = t2.x), output: [t1.x, t1.y, t1.y] }
-      ├─LogicalAgg { group_key: [t1.x, t1.y], aggs: [] }
-      | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-      └─LogicalScan { table: t2, columns: [t2.x] }
+    └─LogicalProject { exprs: [t1.x, t1.y, t1.y] }
+      └─LogicalJoin { type: Inner, on: (t1.x = t2.x), output: [t1.x, t1.y] }
+        ├─LogicalAgg { group_key: [t1.x, t1.y], aggs: [] }
+        | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
+        └─LogicalScan { table: t2, columns: [t2.x] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -674,10 +675,11 @@
     ├─LogicalJoin { type: Inner, on: (t1.b = t2.b), output: [t1.a, t2.c] }
     | ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
     | └─LogicalScan { table: t2, columns: [t2.b, t2.c] }
-    └─LogicalJoin { type: Inner, on: true, output: [t1.a, t1.a] }
-      ├─LogicalAgg { group_key: [t1.a], aggs: [] }
-      | └─LogicalScan { table: t1, columns: [t1.a] }
-      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    └─LogicalProject { exprs: [t1.a, t1.a] }
+      └─LogicalJoin { type: Inner, on: true, output: all }
+        ├─LogicalAgg { group_key: [t1.a], aggs: [] }
+        | └─LogicalScan { table: t1, columns: [t1.a] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
