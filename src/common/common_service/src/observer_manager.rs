@@ -49,6 +49,13 @@ impl SubscribeTypeEnum for SubscribeCompactor {
     }
 }
 
+pub struct SubscribeCompute {}
+impl SubscribeTypeEnum for SubscribeCompute {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::Compute
+    }
+}
+
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// We can write the notification logic by implementing `ObserverNodeImpl`.
@@ -132,6 +139,7 @@ where
             }
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
+            Info::SystemParams(_) => true,
             Info::Snapshot(_) => unreachable!(),
         });
 

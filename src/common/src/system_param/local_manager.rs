@@ -22,6 +22,7 @@ use tokio::sync::watch::{channel, Receiver, Sender};
 use super::reader::SystemParamsReader;
 
 pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
+pub type LocalSystemParamManagerRef = Arc<LocalSystemParamManager>;
 
 /// The system parameter manager on worker nodes. It provides two methods for other components to
 /// read the latest system parameters:
@@ -56,7 +57,7 @@ impl LocalSystemParamManager {
         }
     }
 
-    pub fn watch_parmams(&self) -> Receiver<SystemParamsReaderRef> {
+    pub fn watch_params(&self) -> Receiver<SystemParamsReaderRef> {
         self.tx.subscribe()
     }
 }
@@ -76,7 +77,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut params_rx = manager.watch_parmams();
+        let mut params_rx = manager.watch_params();
 
         manager.try_set_params(new_params.clone());
         params_rx.changed().await.unwrap();
