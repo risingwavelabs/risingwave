@@ -396,17 +396,30 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             let avg_key_size = self
                 .table_stats
                 .values()
-                .map(|s| s.total_key_size as usize)
+                .map(|s| {
+                    if s.total_key_count == 0 {
+                        0
+                    } else {
+                        s.total_key_size as usize / s.total_key_count as usize
+                    }
+                })
                 .sum::<usize>()
                 / self.table_stats.len();
             let avg_value_size = self
                 .table_stats
                 .values()
-                .map(|s| s.total_value_size as usize)
+                .map(|s| {
+                    if s.total_key_count == 0 {
+                        0
+                    } else {
+                        s.total_value_size as usize / s.total_key_count as usize
+                    }
+                })
                 .sum::<usize>()
                 / self.table_stats.len();
             (avg_key_size, avg_value_size)
         };
+
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
             sst_info: LocalSstableInfo::with_stats(sst_info, self.table_stats),

@@ -171,7 +171,7 @@ impl CompactorMetrics {
         let opts = histogram_opts!(
             "compactor_sstable_avg_value_size",
             "Total bytes gotten from sstable_avg_value_size, for observing sstable_avg_value_size",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+            exponential_buckets(1.0, 2.0, 26).unwrap() // max 32MB
         );
 
         let sstable_avg_value_size = register_histogram_with_registry!(opts, registry).unwrap();
