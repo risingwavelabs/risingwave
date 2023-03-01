@@ -202,3 +202,21 @@ pub fn datasize(path: impl AsRef<Path>) -> Result<usize> {
 
     Ok(size)
 }
+
+/// Create a temporary directory.  If the env var `RISINGWAVE_CI` is `true` the temp directory
+/// will be created in `/risingwave`, otherwise it will be created in `/tmp/`
+pub fn tempdir() -> tempfile::TempDir {
+    let ci: bool = std::env::var("RISINGWAVE_CI")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse()
+        .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
+
+    if ci {
+        tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
+    } else {
+        // tempfile::tempdir().unwrap()
+        tempfile::Builder::new()
+            .tempdir_in("/home/erichgess/tmp")
+            .unwrap()
+    }
+}
