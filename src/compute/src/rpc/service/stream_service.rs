@@ -138,18 +138,24 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().unwrap()).map_err(StreamError::from)?;
 
+        // The barrier might be outdated and been injected after recovery in some certain extreme
+        // scenarios. So some newly creating actors in the barrier are possibly not rebuilt during
+        // recovery. Check it here and return an error here if some actors are not found to
+        // avoid collection hang. We need some refine in meta side to remove this workaround since
+        // it will cause another round of unnecessary recovery.
         let actor_ids = self.mgr.all_actor_ids().await;
         if req
             .actor_ids_to_collect
             .iter()
             .any(|id| !actor_ids.contains(id))
         {
-            tracing::warn!("to collect actors not found, it should be cleaned when recovery.");
+            tracing::warn!("to collect actors not found, they should be cleaned when recovery.");
             return Err(Status::new(
                 Code::InvalidArgument,
                 "to collect actors not found",
             ));
         }
+
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)?;
 
