@@ -6361,6 +6361,7 @@ dependencies = [
 name = "risingwave_sqlsmith"
 version = "0.2.0-alpha"
 dependencies = [
+ "anyhow",
  "chrono",
  "clap 3.2.23",
  "itertools",
