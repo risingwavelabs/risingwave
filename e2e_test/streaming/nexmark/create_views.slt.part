@@ -21,3 +21,4 @@ include ./views/q102.slt.part
 include ./views/q103.slt.part
 include ./views/q104.slt.part
 include ./views/q105.slt.part
+include ./views/q106.slt.part

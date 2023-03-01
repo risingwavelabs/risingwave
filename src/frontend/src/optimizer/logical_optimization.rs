@@ -27,7 +27,7 @@ use crate::optimizer::plan_visitor::{
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
-use crate::Explain;
+use crate::{Explain, OptimizerContextRef};
 
 impl PlanRef {
     pub(crate) fn optimize_by_rules(self, stage: &OptimizationStage) -> PlanRef {
@@ -244,6 +244,80 @@ lazy_static! {
 }
 
 impl LogicalOptimizer {
+    pub fn predicate_pushdown(
+        plan: PlanRef,
+        explain_trace: bool,
+        ctx: &OptimizerContextRef,
+    ) -> PlanRef {
+        let plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
+        if explain_trace {
+            ctx.trace("Predicate Push Down:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan
+    }
+
+    pub fn subquery_unnesting(
+        mut plan: PlanRef,
+        enable_share_plan: bool,
+        explain_trace: bool,
+        ctx: &OptimizerContextRef,
+    ) -> Result<PlanRef> {
+        // Simple Unnesting.
+        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
+        if HasMaxOneRowApply().visit(plan.clone()) {
+            return Err(ErrorCode::InternalError(
+                "Scalar subquery might produce more than one row.".into(),
+            )
+            .into());
+        }
+        // Predicate push down before translate apply, because we need to calculate the domain
+        // and predicate push down can reduce the size of domain.
+        plan = Self::predicate_pushdown(plan, explain_trace, ctx);
+        // General Unnesting.
+        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
+        // join.
+        plan = if enable_share_plan {
+            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE)
+        } else {
+            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
+        };
+        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
+        if has_logical_apply(plan.clone()) {
+            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
+        }
+        Ok(plan)
+    }
+
+    pub fn column_pruning(
+        mut plan: PlanRef,
+        explain_trace: bool,
+        ctx: &OptimizerContextRef,
+    ) -> PlanRef {
+        let required_cols = (0..plan.schema().len()).collect_vec();
+        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
+        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+        // Column pruning may introduce additional projects, and filter can be pushed again.
+        if explain_trace {
+            ctx.trace("Prune Columns:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        if column_pruning_ctx.need_second_round() {
+            // Second round of column pruning and reuse the column pruning context.
+            // Try to replace original share operator with the new one.
+            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+            if explain_trace {
+                ctx.trace("Prune Columns (For DAG):");
+                ctx.trace(plan.explain_to_string().unwrap());
+            }
+        }
+        plan
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -278,51 +352,12 @@ impl LogicalOptimizer {
             }
         }
 
-        // Simple Unnesting.
-        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
-
         plan = plan.optimize_by_rules(&UNION_MERGE);
 
-        // Predicate push down before translate apply, because we need to calculate the domain
-        // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // General Unnesting.
-        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
-        // join.
-        plan = if enable_share_plan {
-            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITH_SHARE)
-        } else {
-            plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE)
-        };
-
-        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
+        plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Merge inner joins and intermediate filters into multijoin
         // This rule assumes that filters have already been pushed down near to
@@ -334,14 +369,7 @@ impl LogicalOptimizer {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // For stream, push down predicates with now into a left-semi join
         plan = plan.optimize_by_rules(&FILTER_WITH_NOW_TO_JOIN);
@@ -350,33 +378,9 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
 
         // Prune Columns
-        let required_cols = (0..plan.schema().len()).collect_vec();
-        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-        // Column pruning may introduce additional projects, and filter can be pushed again.
-        if explain_trace {
-            ctx.trace("Prune Columns:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
 
-        if column_pruning_ctx.need_second_round() {
-            // Second round of column pruning and reuse the column pruning context.
-            // Try to replace original share operator with the new one.
-            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-            if explain_trace {
-                ctx.trace("Prune Columns (For DAG):");
-                ctx.trace(plan.explain_to_string().unwrap());
-            }
-        }
-
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
@@ -420,47 +424,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
-
-        // Simple Unnesting.
-        plan = plan.optimize_by_rules(&SIMPLE_UNNESTING);
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
-
         plan = plan.optimize_by_rules(&UNION_MERGE);
 
-        // Predicate push down before translate apply, because we need to calculate the domain
-        // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // General Unnesting.
-        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
-        // join.
-        plan = plan.optimize_by_rules(&GENERAL_UNNESTING_TRANS_APPLY_WITHOUT_SHARE);
-        plan = plan.optimize_by_rules_until_fix_point(&GENERAL_UNNESTING_PUSH_DOWN_APPLY);
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
+        plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Merge inner joins and intermediate filters into multijoin
         // This rule assumes that filters have already been pushed down near to
@@ -472,36 +441,15 @@ impl LogicalOptimizer {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Push down the calculation of inputs of join's condition.
         plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN);
 
         // Prune Columns
-        let required_cols = (0..plan.schema().len()).collect_vec();
-        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-        // Column pruning may introduce additional projects, and filter can be pushed again.
-        if explain_trace {
-            ctx.trace("Prune Columns:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
 
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
