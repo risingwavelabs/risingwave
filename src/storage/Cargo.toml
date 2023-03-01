@@ -48,7 +48,7 @@ scopeguard = "1"
 sled = "0.34.7"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
-sysinfo = "0.26"
+sysinfo = { version = "0.26", default-features = false }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
