@@ -45,8 +45,8 @@ impl CompactionConfigBuilder {
                 target_file_size_base: DEFAULT_TARGET_FILE_SIZE_BASE,
                 compaction_mode: CompactionMode::Range as i32,
                 // support compression setting per level
-                // L0 and L1 do not use compression algorithms
-                // L2 - L4 use Lz4, else use Zstd
+                // L0/L1 and L2 do not use compression algorithms
+                // L3 - L4 use Lz4, else use Zstd
                 compression_algorithm: vec![
                     "None".to_string(),
                     "None".to_string(),
@@ -103,6 +103,7 @@ builder_field! {
     compaction_mode: i32,
     compression_algorithm: Vec<String>,
     compaction_filter_mask: u32,
+    target_file_size_base: u64,
     max_sub_compaction: u32,
     max_space_reclaim_bytes: u64,
 }

@@ -270,6 +270,12 @@ impl TierCompactionPicker {
                 continue;
             }
 
+            if select_tables.iter().map(|sst| sst.file_size).sum::<u64>()
+                < self.config.target_file_size_base
+            {
+                continue;
+            }
+
             let input_levels = vec![
                 InputLevel {
                     level_idx: 0,
@@ -345,6 +351,7 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
+                .target_file_size_base(30)
                 .build(),
         );
         let mut picker =
