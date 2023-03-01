@@ -91,7 +91,7 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
     for _ in 0..count {
         let session_sql = test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
         let skipped =
             validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response)
@@ -107,7 +107,7 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
     for _ in 0..count {
         let session_sql = test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
         let skipped =
             validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response)
