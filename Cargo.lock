@@ -3590,7 +3590,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=06a7af8#06a7af899bb5bb1610efda9a6428ce9d78199683"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=43e025d#43e025db997df923cf6b891cfb874fe6dabba994"
 dependencies = [
  "async-channel",
  "async-trait",
