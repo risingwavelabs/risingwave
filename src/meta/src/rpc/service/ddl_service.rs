@@ -664,8 +664,8 @@ where
             }
         }
 
-        // store the rewrite rules in Source
-        if is_kafka_source(properties) {
+        // store the rewrite rules in properties
+        if is_kafka_source(properties) && !dns_entries.is_empty() {
             let broker_key = kafka_props_broker_key(&properties);
             let servers = properties
                 .get(broker_key)
