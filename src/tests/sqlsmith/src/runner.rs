@@ -21,6 +21,7 @@ use anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use tokio_postgres::Client;
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_common::error::anyhow_error;
@@ -36,7 +37,7 @@ type PgResult<A> = std::result::Result<A, PgError>;
 type Result<A> = anyhow::Result<A>;
 
 /// e2e test runner for pre-generated queries from sqlsmith
-pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
+pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let ddl_path = format!("{}/ddl.sql", outdir);
     let queries_path = format!("{}/queries.sql", outdir);
     let ddl = std::fs::read_to_string(ddl_path).unwrap();
@@ -64,10 +65,10 @@ pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
 /// Query Generator
 /// If we encounter an expected error, just skip.
 /// If we encounter an unexpected error,
-/// sqlsmith should stop execution, but return ddl and queries so far.
-/// Then it should log the number of queries written to stdout, so external process
+/// sqlsmith should stop execution, but writeout ddl and queries so far.
+/// It should log the number of queries written to stdout, so external process
 /// can still generate more to make up the shortfall if necessary.
-pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: usize, outdir: &str) {
+pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &str) {
     let mut rng = rand::rngs::SmallRng::from_entropy();
     let (tables, base_tables, mviews, setup_sql) =
         create_tables(&mut rng, testdata, client).await.unwrap();
@@ -125,6 +126,18 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
     write_to_file(outdir, "queries.sql", &queries);
 }
 
+fn append_to_file(outdir: &str, name: &str, sql: &str) {
+    let resolved = format!("{}/{}", outdir, name);
+    let mut file = match File::options().append(true).open(resolved) {
+        Err(e) => panic!("couldn't create {}: {}", resolved, e),
+        Ok(file) => file,
+    };
+    match file.write_all(sql.as_bytes()) {
+        Err(why) => panic!("couldn't write to {}: {}", path.display(), why),
+        Ok(_) => tracing::info!("successfully wrote to {}", path.display()),
+    }
+}
+
 fn write_to_file(outdir: &str, name: &str, sql: &str) {
     let resolved = format!("{}/{}", outdir, name);
     let path = Path::new(&resolved);
@@ -139,7 +152,7 @@ fn write_to_file(outdir: &str, name: &str, sql: &str) {
 }
 
 /// e2e test runner for sqlsmith
-pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
+pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64>) {
     #[cfg(madsim)]
     let mut rng = if let Some(seed) = seed {
         ChaChaRng::seed_from_u64(seed)
@@ -194,7 +207,7 @@ pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, 
 
 #[allow(dead_code)]
 async fn populate_tables<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     base_tables: Vec<Table>,
     row_count: usize,
@@ -209,7 +222,7 @@ async fn populate_tables<R: Rng>(
 
 /// Sanity checks for sqlsmith
 async fn test_sqlsmith<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
     setup_sql: &str,
@@ -253,14 +266,14 @@ async fn test_sqlsmith<R: Rng>(
     }
 }
 
-async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &str) -> String {
+async fn set_variable(client: &Client, variable: &str, value: &str) -> String {
     let s = format!("SET {variable} TO {value};");
     tracing::info!("[EXECUTING SET_VAR]: {}", s);
     client.simple_query(&s).await.unwrap();
     s
 }
 
-async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) -> String {
+async fn test_session_variable<R: Rng>(client: &Client, rng: &mut R) -> String {
     let session_sql = session_sql_gen(rng);
     tracing::info!("[EXECUTING TEST SESSION_VAR]: {}", session_sql);
     client.simple_query(session_sql.as_str()).await.unwrap();
@@ -270,7 +283,7 @@ async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mu
 /// Expects at least 50% of inserted rows included.
 #[allow(dead_code)]
 async fn test_population_count(
-    client: &tokio_postgres::Client,
+    client: &Client,
     base_tables: Vec<Table>,
     expected_count: usize,
 ) {
@@ -293,7 +306,7 @@ async fn test_population_count(
 /// Runs in distributed mode, since queries can be complex and cause overflow in local execution
 /// mode.
 async fn test_batch_queries<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
     setup_sql: &str,
@@ -312,7 +325,7 @@ async fn test_batch_queries<R: Rng>(
 
 /// Test stream queries, returns skipped query statistics
 async fn test_stream_queries<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
     setup_sql: &str,
@@ -343,7 +356,7 @@ fn get_seed_table_sql(testdata: &str) -> String {
 async fn create_tables(
     rng: &mut impl Rng,
     testdata: &str,
-    client: &tokio_postgres::Client,
+    client: &Client,
 ) -> Result<(Vec<Table>, Vec<Table>, Vec<Table>, String)> {
     tracing::info!("Preparing tables...");
 
@@ -386,7 +399,7 @@ fn format_drop_mview(mview: &Table) -> String {
 }
 
 /// Drops mview tables.
-async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
+async fn drop_mview_table(mview: &Table, client: &Client) {
     client
         .simple_query(&format_drop_mview(mview))
         .await
@@ -394,7 +407,7 @@ async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
 }
 
 /// Drops mview tables and seed tables
-async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::Client) {
+async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     tracing::info!("Cleaning tables...");
 
     for mview in mviews.iter().rev() {
@@ -448,4 +461,8 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: PgResult<_Row
             Err(anyhow_error!(error_msg))
         }
     }
+}
+
+async fn infalliable_query(client: &Client, query: &str) {
+
 }
