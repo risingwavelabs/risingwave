@@ -34,13 +34,6 @@ use crate::executor::PkIndices;
 /// We assume the first state of aggregation is always `StreamingRowCountAgg`.
 const ROW_COUNT_COLUMN: usize = 0;
 
-pub trait Strategy: ChangesBuilder {}
-
-pub struct GlobalSimpleAgg;
-impl Strategy for GlobalSimpleAgg {}
-pub struct HashAgg;
-impl Strategy for HashAgg {}
-
 mod changes_builder {
     use super::*;
 
@@ -106,7 +99,7 @@ mod changes_builder {
     }
 }
 
-pub trait ChangesBuilder {
+pub trait Strategy {
     fn build_changes(
         prev_row_count: usize,
         curr_row_count: usize,
@@ -117,7 +110,13 @@ pub trait ChangesBuilder {
     ) -> usize;
 }
 
-impl ChangesBuilder for GlobalSimpleAgg {
+/// The strategy that always outputs the aggregation result no matter there're input rows or not.
+pub struct AlwaysOutput;
+/// The strategy that only outputs the aggregation result when there're input rows. If row count
+/// drops to 0, the output row will be deleted.
+pub struct OnlyOutputIfHasInput;
+
+impl Strategy for AlwaysOutput {
     fn build_changes(
         prev_row_count: usize,
         curr_row_count: usize,
@@ -147,7 +146,7 @@ impl ChangesBuilder for GlobalSimpleAgg {
     }
 }
 
-impl ChangesBuilder for HashAgg {
+impl Strategy for OnlyOutputIfHasInput {
     fn build_changes(
         prev_row_count: usize,
         curr_row_count: usize,

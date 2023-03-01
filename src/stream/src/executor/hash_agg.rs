@@ -31,7 +31,8 @@ use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater, HashAgg,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater,
+    OnlyOutputIfHasInput,
 };
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
@@ -46,7 +47,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
-type BoxedAggGroup<S> = Box<AggGroup<S, HashAgg>>;
+type BoxedAggGroup<S> = Box<AggGroup<S, OnlyOutputIfHasInput>>;
 type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
