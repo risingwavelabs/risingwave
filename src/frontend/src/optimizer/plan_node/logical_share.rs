@@ -25,8 +25,8 @@ use super::{
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
-    StreamShare, ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -168,11 +168,11 @@ impl ToStream for LogicalShare {
 
                 // FIXME: Add an identity project here to avoid parent exchange connecting directly
                 // to the share operator.
-                let identity = ColIndexMapping::identity(new_share.schema().len());
-                let project: PlanRef = LogicalProject::with_mapping(new_share, identity).into();
+                // let identity = ColIndexMapping::identity(new_share.schema().len());
+                // let project: PlanRef = LogicalProject::with_mapping(new_share, identity).into();
 
-                ctx.add_rewrite_result(self.id(), project.clone(), col_change.clone());
-                Ok((project, col_change))
+                ctx.add_rewrite_result(self.id(), new_share.clone(), col_change.clone());
+                Ok((new_share, col_change))
             }
             Some(cache) => Ok(cache.clone()),
         }
