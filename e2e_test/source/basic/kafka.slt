@@ -244,6 +244,18 @@ create source s18 with (
 ) row format avro 
 row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
+
+# we cannot use confluent schema registry when connector is not kafka
+statement error
+create table s19 
+with (
+  connector = 'kinesis',
+  topic = 'topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+)
+row format avro
+row schema location confluent schema registry 'http://127.0.0.1:8081'
+
 statement ok
 flush;
 
