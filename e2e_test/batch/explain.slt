@@ -1,5 +1,5 @@
 statement ok
-create table t (v int) with ( appendonly = 'true' );
+create table t (v int) append only;
 
 statement ok
 explain create index i on t(v);
