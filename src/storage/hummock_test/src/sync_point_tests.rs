@@ -31,7 +31,7 @@ use risingwave_meta::hummock::test_utils::{
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
@@ -181,10 +181,7 @@ async fn test_syncpoints_test_local_notification_receiver() {
 
     // Test release hummock contexts
     env.notification_manager()
-        .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(WorkerNode {
-            id: context_id,
-            ..Default::default()
-        }))
+        .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
         .await;
     sync_point::wait_timeout(
         "AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC",
