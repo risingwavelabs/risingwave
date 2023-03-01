@@ -506,7 +506,7 @@ impl MemoryStateStore {
 impl<R: RangeKv> RangeKvStateStore<R> {
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         table_id: TableId,
         limit: Option<usize>,
@@ -563,7 +563,7 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {

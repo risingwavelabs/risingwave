@@ -27,7 +27,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
-use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
@@ -148,11 +147,14 @@ impl StagingVersion {
         impl Iterator<Item = &ImmutableMemtable> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
+        let (ref left, ref right) = table_key_range;
+        let left = left.as_ref().map(|key| TableKey(key.0.as_ref()));
+        let right = right.as_ref().map(|key| TableKey(key.0.as_ref()));
         let overlapped_imms = self.imm.iter().filter(move |imm| {
             imm.epoch() <= max_epoch_inclusive
                 && imm.table_id == table_id
                 && imm.epoch() > min_epoch_exclusive
-                && range_overlap(table_key_range, imm.start_table_key(), imm.end_table_key())
+                && range_overlap(&(left, right), &imm.start_table_key(), &imm.end_table_key())
         });
 
         // TODO: Remove duplicate sst based on sst id
@@ -457,7 +459,6 @@ impl HummockVersionReader {
         // 3. read from committed_version sst file
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
-        let encoded_user_key = full_key.user_key.encode();
         assert!(committed_version.is_valid());
         for level in committed_version.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
@@ -489,16 +490,22 @@ impl HummockVersionReader {
                     }
                 }
                 LevelType::Nonoverlapping => {
-                    let mut table_info_idx = search_sst_idx(&level.table_infos, &encoded_user_key);
+                    let mut table_info_idx =
+                        search_sst_idx(&level.table_infos, full_key.user_key.as_ref());
                     if table_info_idx == 0 {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = level.table_infos[table_info_idx]
-                        .key_range
-                        .as_ref()
-                        .unwrap()
-                        .compare_right_with_user_key(&encoded_user_key);
+                    let ord = FullKey::decode(
+                        level.table_infos[table_info_idx]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .right
+                            .as_slice(),
+                    )
+                    .user_key
+                    .cmp(&full_key.user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
                     if ord == Ordering::Less {
                         sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
@@ -586,9 +593,9 @@ impl HummockVersionReader {
         // Because SST meta records encoded key range,
         // the filter key range needs to be encoded as well.
         let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
-        let encoded_user_key_range = (
-            user_key_range.0.as_ref().map(UserKey::encode),
-            user_key_range.1.as_ref().map(UserKey::encode),
+        let user_key_range_ref = (
+            user_key_range.0.as_ref().map(UserKey::as_ref),
+            user_key_range.1.as_ref().map(UserKey::as_ref),
         );
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
@@ -600,8 +607,7 @@ impl HummockVersionReader {
             }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
-                let table_infos =
-                    prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range);
+                let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
 
                 let fetch_meta_req = table_infos
                     .filter(|sstable_info| {
@@ -730,6 +736,11 @@ impl HummockVersionReader {
                 ),
         );
 
+        let user_key_range = (
+            user_key_range.0.map(|key| key.cloned()),
+            user_key_range.1.map(|key| key.cloned()),
+        );
+
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let mut user_iter = UserIterator::new(
@@ -779,9 +790,9 @@ impl HummockVersionReader {
         }
 
         let user_key_range = bound_table_key_range(read_options.table_id, &table_key_range);
-        let encoded_user_key_range = (
-            user_key_range.0.as_ref().map(UserKey::encode),
-            user_key_range.1.as_ref().map(UserKey::encode),
+        let user_key_range_ref = (
+            user_key_range.0.as_ref().map(UserKey::as_ref),
+            user_key_range.1.as_ref().map(UserKey::as_ref),
         );
         let bloom_filter_prefix_hash = if let Some(prefix_hint) = read_options.prefix_hint {
             Sstable::hash_for_bloom_filter(&prefix_hint, table_id.table_id)
@@ -804,7 +815,7 @@ impl HummockVersionReader {
                         }
                     }
                     LevelType::Nonoverlapping => {
-                        if prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range)
+                        if prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref)
                             .next()
                             .is_some()
                         {
@@ -859,7 +870,7 @@ impl HummockVersionReader {
                 }
                 LevelType::Nonoverlapping => {
                     let table_infos =
-                        prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range);
+                        prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
 
                     for table_info in table_infos {
                         stats_guard.local_stats.may_exist_check_sstable_count += 1;

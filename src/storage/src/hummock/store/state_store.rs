@@ -126,7 +126,7 @@ impl LocalHummockStorage {
 
     pub async fn may_exist_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         let bytes_key_range = (
@@ -169,7 +169,7 @@ impl StateStoreRead for LocalHummockStorage {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -189,7 +189,7 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn may_exist(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         self.may_exist_inner(key_range, read_options)
@@ -210,11 +210,7 @@ impl LocalStateStore for LocalHummockStorage {
         }
     }
 
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
         async move {
             let stream = self
                 .iter_inner(
