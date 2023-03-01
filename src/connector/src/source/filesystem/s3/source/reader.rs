@@ -231,6 +231,7 @@ mod tests {
             match_pattern: None,
             access: None,
             secret: None,
+            endpoint_url: None,
         };
         let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
         let splits = enumerator.list_splits().await.unwrap();
