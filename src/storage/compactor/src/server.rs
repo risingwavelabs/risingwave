@@ -109,9 +109,9 @@ pub async fn compactor_serve(
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    let system_param_manager = Arc::new(LocalSystemParamManager::new(system_params_reader));
+    let system_params_manager = Arc::new(LocalSystemParamManager::new(system_params_reader));
     let compactor_observer_node =
-        CompactorObserverNode::new(filter_key_extractor_manager.clone(), system_param_manager);
+        CompactorObserverNode::new(filter_key_extractor_manager.clone(), system_params_manager);
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 

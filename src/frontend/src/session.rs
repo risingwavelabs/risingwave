@@ -233,7 +233,7 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let system_param_manager = Arc::new(LocalSystemParamManager::new(system_params_reader));
+        let system_params_manager = Arc::new(LocalSystemParamManager::new(system_params_reader));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -241,7 +241,7 @@ impl FrontendEnv {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
-            system_param_manager,
+            system_params_manager,
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)

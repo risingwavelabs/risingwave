@@ -26,7 +26,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 pub struct CompactorObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    system_param_manager: LocalSystemParamManagerRef,
+    system_params_manager: LocalSystemParamManagerRef,
     version: u64,
 }
 
@@ -53,7 +53,7 @@ impl ObserverState for CompactorObserverNode {
             }
             Info::HummockVersionDeltas(_) => {}
             Info::SystemParams(p) => {
-                self.system_param_manager.try_set_params(p);
+                self.system_params_manager.try_set_params(p);
             }
             _ => {
                 panic!("error type notification");
@@ -74,11 +74,11 @@ impl ObserverState for CompactorObserverNode {
 impl CompactorObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        system_param_manager: LocalSystemParamManagerRef,
+        system_params_manager: LocalSystemParamManagerRef,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
-            system_param_manager,
+            system_params_manager,
             version: 0,
         }
     }

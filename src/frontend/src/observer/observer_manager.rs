@@ -37,7 +37,7 @@ pub struct FrontendObserverNode {
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
-    system_param_manager: LocalSystemParamManagerRef,
+    system_params_manager: LocalSystemParamManagerRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -60,7 +60,7 @@ impl ObserverState for FrontendObserverNode {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
-                self.update_worker_node_manager(resp.operation(), node.clone());
+                self.update_worker_node_manager(resp.operation(), node);
             }
             Info::User(_) => {
                 self.handle_user_notification(resp);
@@ -82,7 +82,7 @@ impl ObserverState for FrontendObserverNode {
                 panic!("frontend node should not receive MetaBackupManifestId");
             }
             Info::SystemParams(p) => {
-                self.system_param_manager.try_set_params(p);
+                self.system_params_manager.try_set_params(p);
             }
         }
     }
@@ -160,7 +160,7 @@ impl FrontendObserverNode {
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
-        system_param_manager: LocalSystemParamManagerRef,
+        system_params_manager: LocalSystemParamManagerRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -169,7 +169,7 @@ impl FrontendObserverNode {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager,
-            system_param_manager,
+            system_params_manager,
         }
     }
 

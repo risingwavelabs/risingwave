@@ -18,7 +18,7 @@ use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct ComputeObserverNode {
-    system_param_manager: LocalSystemParamManagerRef,
+    system_params_manager: LocalSystemParamManagerRef,
 }
 
 impl ObserverState for ComputeObserverNode {
@@ -30,7 +30,7 @@ impl ObserverState for ComputeObserverNode {
         };
 
         match info.to_owned() {
-            Info::SystemParams(p) => self.system_param_manager.try_set_params(p),
+            Info::SystemParams(p) => self.system_params_manager.try_set_params(p),
             _ => {
                 panic!("error type notification");
             }
@@ -41,9 +41,9 @@ impl ObserverState for ComputeObserverNode {
 }
 
 impl ComputeObserverNode {
-    pub fn new(system_param_manager: LocalSystemParamManagerRef) -> Self {
+    pub fn new(system_params_manager: LocalSystemParamManagerRef) -> Self {
         Self {
-            system_param_manager,
+            system_params_manager,
         }
     }
 }

@@ -252,8 +252,8 @@ pub async fn compute_node_serve(
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
     // Initialize observer manager.
-    let system_param_manager = Arc::new(LocalSystemParamManager::new(system_params));
-    let compute_observer_node = ComputeObserverNode::new(system_param_manager.clone());
+    let system_params_manager = Arc::new(LocalSystemParamManager::new(system_params));
+    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
     join_handle_vec.push(observer_manager.start().await);

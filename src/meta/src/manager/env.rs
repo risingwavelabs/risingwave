@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
-use super::{SystemParamManager, SystemParamManagerRef};
+use super::{SystemParamManagerRef, SystemParamsManager};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -51,7 +51,7 @@ where
     idle_manager: IdleManagerRef,
 
     /// system param manager.
-    system_param_manager: SystemParamManagerRef<S>,
+    system_params_manager: SystemParamManagerRef<S>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -134,8 +134,8 @@ where
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
-        let system_param_manager = Arc::new(
-            SystemParamManager::new(
+        let system_params_manager = Arc::new(
+            SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
                 init_system_params,
@@ -149,7 +149,7 @@ where
             notification_manager,
             stream_client_pool,
             idle_manager,
-            system_param_manager,
+            system_params_manager,
             opts: opts.into(),
         })
     }
@@ -186,12 +186,12 @@ where
         self.idle_manager.deref()
     }
 
-    pub fn system_param_manager_ref(&self) -> SystemParamManagerRef<S> {
-        self.system_param_manager.clone()
+    pub fn system_params_manager_ref(&self) -> SystemParamManagerRef<S> {
+        self.system_params_manager.clone()
     }
 
-    pub fn system_param_manager(&self) -> &SystemParamManager<S> {
-        self.system_param_manager.deref()
+    pub fn system_params_manager(&self) -> &SystemParamsManager<S> {
+        self.system_params_manager.deref()
     }
 
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
@@ -217,8 +217,8 @@ impl MetaSrvEnv<MemStore> {
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
-        let system_param_manager = Arc::new(
-            SystemParamManager::new(
+        let system_params_manager = Arc::new(
+            SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
                 risingwave_common::system_param::default_system_params(),
@@ -233,7 +233,7 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
-            system_param_manager,
+            system_params_manager,
             opts,
         }
     }

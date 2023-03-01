@@ -51,6 +51,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    SystemParamsManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
@@ -319,7 +320,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
-    let system_params_manager = env.system_param_manager_ref();
+    let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
 
     let cluster_manager = Arc::new(
@@ -525,6 +526,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
         .await,
     );
+    sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
     sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
 
