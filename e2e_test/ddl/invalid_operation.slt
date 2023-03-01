@@ -362,7 +362,7 @@ statement error view.*exists
 create table v(v int);
 
 # 8. create with unsupport format
-statement error
+statement error connector datagen does not support row format DebeziumJson
 create table err_t1 (v int) with (
     connector = 'datagen',
     fields.v.kind = 'sequence',
