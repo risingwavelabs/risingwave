@@ -27,6 +27,7 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 
 // Only includes undeprecated params.
 // Macro input is { field identifier, type, default value }
+#[macro_export]
 macro_rules! for_all_undeprecated_params {
     ($macro:ident
         // Hack: match trailing fields to implement `for_all_params`
@@ -58,6 +59,7 @@ macro_rules! for_all_params {
 }
 
 /// Convert field name to string.
+#[macro_export]
 macro_rules! key_of {
     ($field:ident) => {
         stringify!($field)
@@ -76,6 +78,21 @@ macro_rules! def_key {
 }
 
 for_all_params!(def_key);
+
+// Define default value functions.
+macro_rules! def_default {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        pub mod default {
+            $(
+                pub fn $field() -> $type {
+                    $default
+                }
+            )*
+        }
+    };
+}
+
+for_all_undeprecated_params!(def_default);
 
 // Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {

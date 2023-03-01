@@ -51,8 +51,7 @@ impl SystemParamsModel for SystemParams {
         }
     }
 
-    /// All undeprecated fields must be `Some`.
-    /// Return error if there are missing fields.
+    /// Missing fields will fallback to default values.
     async fn insert<S>(&self, store: &S) -> MetadataModelResult<()>
     where
         S: MetaStore,
