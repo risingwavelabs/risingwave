@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
@@ -25,18 +25,17 @@ use risingwave_sqlparser::ast::{
 mod options {
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 
-    pub const APPEND_ONLY: &str = "appendonly";
     pub const RETENTION_SECONDS: &str = PROPERTIES_RETENTION_SECOND_KEY;
 }
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct WithOptions {
-    inner: HashMap<String, String>,
+    inner: BTreeMap<String, String>,
 }
 
 impl std::ops::Deref for WithOptions {
-    type Target = HashMap<String, String>;
+    type Target = BTreeMap<String, String>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -46,17 +45,19 @@ impl std::ops::Deref for WithOptions {
 impl WithOptions {
     /// Create a new [`WithOptions`] from a [`HashMap`].
     pub fn new(inner: HashMap<String, String>) -> Self {
-        Self { inner }
+        Self {
+            inner: inner.into_iter().collect(),
+        }
     }
 
     /// Get the reference of the inner map.
-    pub fn inner(&self) -> &HashMap<String, String> {
+    pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner
     }
 
     /// Take the value of the inner map.
-    pub fn into_inner(self) -> HashMap<String, String> {
-        self.inner
+    pub fn into_inner(self) -> BTreeMap<String, String> {
+        self.inner.into_iter().collect()
     }
 
     /// Parse the retention seconds from the options.
@@ -64,11 +65,6 @@ impl WithOptions {
         self.inner
             .get(options::RETENTION_SECONDS)
             .and_then(|s| s.parse().ok())
-    }
-
-    /// Parse the append only property from the options.
-    pub fn append_only(&self) -> bool {
-        self.value_eq_ignore_case(options::APPEND_ONLY, "true")
     }
 
     /// Get a subset of the options from the given keys.

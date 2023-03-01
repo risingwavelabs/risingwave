@@ -36,7 +36,9 @@ pub struct OpendalObjectStore {
 pub enum EngineType {
     Memory,
     Hdfs,
+    Gcs,
     Oss,
+    Webhdfs,
 }
 
 impl OpendalObjectStore {
@@ -149,9 +151,7 @@ impl ObjectStore for OpendalObjectStore {
     /// Deletes the objects with the given paths permanently from the storage. If an object
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        for path in paths {
-            self.op.object(path).delete().await?;
-        }
+        self.op.batch().remove(paths.to_vec()).await?;
         Ok(())
     }
 
@@ -183,7 +183,9 @@ impl ObjectStore for OpendalObjectStore {
         match self.engine_type {
             EngineType::Memory => "Memory",
             EngineType::Hdfs => "Hdfs",
+            EngineType::Gcs => "Gcs",
             EngineType::Oss => "Oss",
+            EngineType::Webhdfs => "Webhdfs",
         }
     }
 }
@@ -285,29 +287,26 @@ mod tests {
         obj_store.delete(&path).await.unwrap();
     }
 
-    // Currently OpenDAL does not support delete objects operation, but they are planning this
-    // feature. So let's not delete this unit test now. https://github.com/datafuselabs/opendal/issues/1279
+    #[tokio::test]
+    async fn test_memory_delete_objects() {
+        let block1 = Bytes::from("123456");
+        let block2 = Bytes::from("987654");
+        let store = OpendalObjectStore::new_memory_engine().unwrap();
+        store.upload("abc", block1).await.unwrap();
+        store.upload("/klm", block2).await.unwrap();
 
-    // #[tokio::test]
-    // async fn test_memory_delete_objects() {
-    //     let block1 = Bytes::from("123456");
-    //     let block2 = Bytes::from("987654");
-    //     let store = OpendalObjectStore::new_memory_engine().unwrap();
-    //     store.upload("/abc", block1).await.unwrap();
-    //     store.upload("/klm", block2).await.unwrap();
+        assert_eq!(store.list("").await.unwrap().len(), 2);
 
-    //     assert_eq!(store.list("").await.unwrap().len(), 2);
+        let str_list = [
+            String::from("abc"),
+            String::from("klm"),
+            String::from("xyz"),
+        ];
 
-    //     let str_list = [
-    //         String::from("/abc"),
-    //         String::from("/klm"),
-    //         String::from("/xyz"),
-    //     ];
+        store.delete_objects(&str_list).await.unwrap();
 
-    //     store.delete_objects(&str_list).await.unwrap();
-
-    //     assert_eq!(store.list("").await.unwrap().len(), 0);
-    // }
+        assert_eq!(store.list("").await.unwrap().len(), 0);
+    }
 
     #[tokio::test]
     async fn test_memory_read_multi_block() {

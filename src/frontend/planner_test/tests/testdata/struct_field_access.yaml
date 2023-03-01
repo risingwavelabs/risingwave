@@ -44,7 +44,7 @@
 - sql: |
     create table t1(c STRUCT<x INTEGER, y INTEGER>);
     create table t2(c STRUCT<x INTEGER, y INTEGER>);
-    select (c).x from t1 join t2;
+    select (c).x from t1 cross join t2;
   binder_error: 'internal error: Ambiguous column name: c'
 - sql: |
     create table t1(c STRUCT<x INTEGER, y INTEGER>);

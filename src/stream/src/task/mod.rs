@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use parking_lot::{Mutex, MutexGuard, RwLock};
+use parking_lot::{MappedMutexGuard, Mutex, MutexGuard, RwLock};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
@@ -116,60 +116,52 @@ impl SharedContext {
         }
     }
 
-    #[inline]
-    fn lock_channel_map(&self) -> MutexGuard<'_, HashMap<UpDownActorIds, ConsumableChannelPair>> {
-        self.channel_map.lock()
-    }
-
     pub fn lock_barrier_manager(&self) -> MutexGuard<'_, LocalBarrierManager> {
         self.barrier_manager.lock()
     }
 
-    #[inline]
+    /// Get the channel pair for the given actor ids. If the channel pair does not exist, create one
+    /// with the configured permits.
+    fn get_or_insert_channels(
+        &self,
+        ids: UpDownActorIds,
+    ) -> MappedMutexGuard<'_, ConsumableChannelPair> {
+        MutexGuard::map(self.channel_map.lock(), |map| {
+            map.entry(ids).or_insert_with(|| {
+                let (tx, rx) = permit::channel(
+                    self.config.developer.stream_exchange_initial_permits,
+                    self.config.developer.stream_exchange_batched_permits,
+                );
+                (Some(tx), Some(rx))
+            })
+        })
+    }
+
     pub fn take_sender(&self, ids: &UpDownActorIds) -> StreamResult<Sender> {
-        self.lock_channel_map()
-            .get_mut(ids)
-            .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
+        self.get_or_insert_channels(*ids)
             .0
             .take()
-            .ok_or_else(|| anyhow!("sender from {} to {} does no exist", ids.0, ids.1).into())
+            .ok_or_else(|| anyhow!("sender for {ids:?} has already been taken").into())
     }
 
-    #[inline]
     pub fn take_receiver(&self, ids: &UpDownActorIds) -> StreamResult<Receiver> {
-        self.lock_channel_map()
-            .get_mut(ids)
-            .ok_or_else(|| anyhow!("channel between {} and {} does not exist", ids.0, ids.1))?
+        self.get_or_insert_channels(*ids)
             .1
             .take()
-            .ok_or_else(|| anyhow!("receiver from {} to {} does not exist", ids.0, ids.1).into())
-    }
-
-    #[inline]
-    pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
-        let (tx, rx) = permit::channel(
-            self.config.developer.stream_exchange_initial_permits,
-            self.config.developer.stream_exchange_batched_permits,
-        );
-        assert!(
-            self.lock_channel_map()
-                .insert(ids, (Some(tx), Some(rx)))
-                .is_none(),
-            "channel already exists: {:?}",
-            ids
-        );
+            .ok_or_else(|| anyhow!("receiver for {ids:?} has already been taken").into())
     }
 
     pub fn retain_channel<F>(&self, mut f: F)
     where
         F: FnMut(&(u32, u32)) -> bool,
     {
-        self.lock_channel_map()
+        self.channel_map
+            .lock()
             .retain(|up_down_ids, _| f(up_down_ids));
     }
 
     pub fn clear_channels(&self) {
-        self.lock_channel_map().clear();
+        self.channel_map.lock().clear()
     }
 
     pub fn get_actor_info(&self, actor_id: &ActorId) -> StreamResult<ActorInfo> {

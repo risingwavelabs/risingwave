@@ -84,6 +84,20 @@ select max(ARRAY[1, v1*2]) from t;
 ----
 {1,6}
 
+query T
+select CAST(NULL as bool[]) from t;
+----
+NULL
+NULL
+NULL
+
+query T
+select array[false, false] from t;
+----
+{f,f}
+{f,f}
+{f,f}
+
 statement ok
 drop table t;
 

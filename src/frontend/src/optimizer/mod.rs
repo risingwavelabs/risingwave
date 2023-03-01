@@ -11,9 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::ops::DerefMut;
 
 pub mod plan_node;
-pub use plan_node::PlanRef;
+pub use plan_node::{Explain, PlanRef};
 pub mod property;
 
 mod delta_join_solver;
@@ -22,39 +23,40 @@ mod plan_rewriter;
 pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
+mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
 mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
+pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
-use plan_rewriter::ShareSourceRewriter;
 use property::Order;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_pb::catalog::WatermarkDesc;
 
-use self::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
+use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
-    StreamSink,
+    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
+    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{
-    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update, has_logical_apply,
-    has_logical_over_agg, HasMaxOneRowApply,
+    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update,
 };
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
-    BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
-    RewriteExprsRecursive,
+    BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
 use crate::optimizer::property::Distribution;
-use crate::utils::Condition;
+use crate::utils::ColIndexMappingRewriteExt;
 use crate::WithOptions;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
@@ -144,345 +146,40 @@ impl PlanRoot {
         LogicalProject::with_out_fields(self.plan, &self.out_fields).into()
     }
 
-    fn optimize_by_rules(
-        &self,
-        plan: PlanRef,
-        stage_name: String,
-        rules: Vec<BoxedRule>,
-        apply_order: ApplyOrder,
-    ) -> PlanRef {
-        let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
-        let plan = heuristic_optimizer.optimize(plan);
-        let stats = heuristic_optimizer.get_stats();
-
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-        if explain_trace && stats.has_applied_rule() {
-            ctx.trace(format!("{}:", stage_name));
-            ctx.trace(format!("{}", stats));
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        plan
+    /// Apply logical optimization to the plan for stream.
+    pub fn gen_optimized_logical_plan_for_stream(&self) -> Result<PlanRef> {
+        LogicalOptimizer::gen_optimized_logical_plan_for_stream(self.plan.clone())
     }
 
-    fn optimize_by_rules_until_fix_point(
-        &self,
-        plan: PlanRef,
-        stage_name: String,
-        rules: Vec<BoxedRule>,
-        apply_order: ApplyOrder,
-    ) -> PlanRef {
-        let mut output_plan = plan;
-        loop {
-            let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
-            output_plan = heuristic_optimizer.optimize(output_plan);
-            let stats = heuristic_optimizer.get_stats();
-
-            let ctx = output_plan.ctx();
-            let explain_trace = ctx.is_explain_trace();
-            if explain_trace && stats.has_applied_rule() {
-                ctx.trace(format!("{}:", stage_name));
-                ctx.trace(format!("{}", stats));
-                ctx.trace(output_plan.explain_to_string().unwrap());
-            }
-
-            if !stats.has_applied_rule() {
-                return output_plan;
-            }
-        }
-    }
-
-    /// Apply logical optimization to the plan.
-    pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
-        self.gen_optimized_logical_plan_inner(false)
-    }
-
-    fn gen_optimized_logical_plan_inner(&self, for_stream: bool) -> Result<PlanRef> {
-        let mut plan = self.plan.clone();
-        let ctx = plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
-
-        if explain_trace {
-            ctx.trace("Begin:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // If share plan is disable, we need to remove all the share operator generated by the
-        // binder, e.g. CTE and View. However, we still need to share source to ensure self
-        // source join can return correct result.
-        if !ctx.session_ctx().config().get_enable_share_plan() {
-            plan = self.optimize_by_rules(
-                plan,
-                "DAG To Tree".to_string(),
-                vec![DagToTreeRule::create()],
-                ApplyOrder::TopDown,
-            );
-        }
-
-        // Replace source to share source.
-        // Perform share source at the beginning so that we can benefit from predicate pushdown
-        // and column pruning for the share operator.
-        plan = ShareSourceRewriter::share_source(plan);
-        if explain_trace {
-            ctx.trace("Share Source:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Simple Unnesting.
-        plan = self.optimize_by_rules(
-            plan,
-            "Simple Unnesting".to_string(),
-            vec![
-                // Eliminate max one row
-                MaxOneRowEliminateRule::create(),
-                // Convert apply to join.
-                ApplyToJoinRule::create(),
-                // Pull correlated predicates up the algebra tree to unnest simple subquery.
-                PullUpCorrelatedPredicateRule::create(),
-            ],
-            ApplyOrder::TopDown,
-        );
-        if HasMaxOneRowApply().visit(plan.clone()) {
-            return Err(ErrorCode::InternalError(
-                "Scalar subquery might produce more than one row.".into(),
-            )
-            .into());
-        }
-
-        plan = self.optimize_by_rules(
-            plan,
-            "Union Merge".to_string(),
-            vec![UnionMergeRule::create()],
-            ApplyOrder::BottomUp,
-        );
-
-        // Predicate push down before translate apply, because we need to calculate the domain
-        // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // General Unnesting.
-        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
-        // join.
-        plan = self.optimize_by_rules(
-            plan,
-            "General Unnesting(Translate Apply)".to_string(),
-            vec![TranslateApplyRule::create()],
-            ApplyOrder::BottomUp,
-        );
-        plan = self.optimize_by_rules_until_fix_point(
-            plan,
-            "General Unnesting(Push Down Apply)".to_string(),
-            vec![
-                ApplyAggTransposeRule::create(),
-                ApplyFilterTransposeRule::create(),
-                ApplyProjectTransposeRule::create(),
-                ApplyJoinTransposeRule::create(),
-                ApplyShareEliminateRule::create(),
-                ApplyScanRule::create(),
-            ],
-            ApplyOrder::TopDown,
-        );
-        if has_logical_apply(plan.clone()) {
-            return Err(ErrorCode::InternalError("Subquery can not be unnested.".into()).into());
-        }
-
-        // Predicate Push-down
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Merge inner joins and intermediate filters into multijoin
-        // This rule assumes that filters have already been pushed down near to
-        // their relevant joins.
-        plan = self.optimize_by_rules(
-            plan,
-            "To MultiJoin".to_string(),
-            vec![MergeMultiJoinRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        // Reorder multijoin into left-deep join tree.
-        plan = self.optimize_by_rules(
-            plan,
-            "Join Reorder".to_string(),
-            vec![ReorderMultiJoinRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        // Predicate Push-down: apply filter pushdown rules again since we pullup all join
-        // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // If for stream, push down predicates with now into a left-semi join
-        if for_stream {
-            plan = self.optimize_by_rules(
-                plan,
-                "Push down filter with now into a left semijoin".to_string(),
-                vec![FilterWithNowToJoinRule::create()],
-                ApplyOrder::TopDown,
-            );
-        }
-
-        // Push down the calculation of inputs of join's condition.
-        plan = self.optimize_by_rules(
-            plan,
-            "Push Down the Calculation of Inputs of Join's Condition".to_string(),
-            vec![PushCalculationOfJoinRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        // Prune Columns
-        //
-        // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
-        // they shouldn't be a part of output columns, so we use `out_fields` to control the
-        // visibility of these expressions. To avoid these expressions being pruned, we can't use
-        // `self.out_fields` as `required_cols` here.
-        let required_cols = (0..self.plan.schema().len()).collect_vec();
-        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-        // Column pruning may introduce additional projects, and filter can be pushed again.
-        if explain_trace {
-            ctx.trace("Prune Columns:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        if column_pruning_ctx.need_second_round() {
-            // Second round of column pruning and reuse the column pruning context.
-            // Try to replace original share operator with the new one.
-            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
-            if explain_trace {
-                ctx.trace("Prune Columns (For DAG):");
-                ctx.trace(plan.explain_to_string().unwrap());
-            }
-        }
-
-        plan = plan.predicate_pushdown(
-            Condition::true_cond(),
-            &mut PredicatePushdownContext::new(plan.clone()),
-        );
-        if explain_trace {
-            ctx.trace("Predicate Push Down:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Convert distinct aggregates.
-        plan = self.optimize_by_rules(
-            plan,
-            "Convert Distinct Aggregation".to_string(),
-            vec![UnionToDistinctRule::create(), DistinctAggRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        plan = self.optimize_by_rules(
-            plan,
-            "Join Commute".to_string(),
-            vec![JoinCommuteRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        plan = self.optimize_by_rules(
-            plan,
-            "Project Remove".to_string(),
-            vec![
-                // merge should be applied before eliminate
-                ProjectMergeRule::create(),
-                ProjectEliminateRule::create(),
-                TrivialProjectToValuesRule::create(),
-                // project-join merge should be applied after merge
-                // eliminate and to values
-                ProjectJoinMergeRule::create(),
-                AggProjectMergeRule::create(),
-            ],
-            ApplyOrder::BottomUp,
-        );
-
-        plan = self.optimize_by_rules(
-            plan,
-            "Convert Window Aggregation".to_string(),
-            vec![
-                OverAggToTopNRule::create(),
-                ProjectMergeRule::create(),
-                ProjectEliminateRule::create(),
-                TrivialProjectToValuesRule::create(),
-            ],
-            ApplyOrder::TopDown,
-        );
-
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
-
-        plan = self.optimize_by_rules(
-            plan,
-            "Dedup Group keys".to_string(),
-            vec![AggDedupGroupKeyRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
-
-        ctx.store_logical(plan.explain_to_string().unwrap());
-
-        Ok(plan)
+    /// Apply logical optimization to the plan for batch.
+    pub fn gen_optimized_logical_plan_for_batch(&self) -> Result<PlanRef> {
+        LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone())
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
-        let mut plan = self.gen_optimized_logical_plan()?;
-
-        // Convert the dag back to the tree, because we don't support physical dag plan for now.
-        plan = self.optimize_by_rules(
-            plan,
-            "DAG To Tree".to_string(),
-            vec![DagToTreeRule::create()],
-            ApplyOrder::TopDown,
-        );
-
-        plan = self.optimize_by_rules(
-            plan,
-            "Agg on Index".to_string(),
-            vec![TopNOnIndexRule::create()],
-            ApplyOrder::TopDown,
-        );
+        let mut plan = self.gen_optimized_logical_plan_for_batch()?;
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
-        // TODO: SessionTimezone substitution
-        // Const eval of exprs at the last minute
-        // plan = const_eval_exprs(plan)?;
+        let ctx = plan.ctx();
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
-        // let ctx = plan.ctx();
-        // if ctx.is_explain_trace() {
-        //     ctx.trace("Const eval exprs:");
-        //     ctx.trace(plan.explain_to_string().unwrap());
-        // }
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline Session Timezone:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -588,10 +285,6 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    pub fn gen_optimized_logical_plan_for_stream(&self) -> Result<PlanRef> {
-        self.gen_optimized_logical_plan_inner(true)
-    }
-
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
@@ -628,21 +321,28 @@ impl PlanRoot {
         if ctx.session_ctx().config().get_streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
-            plan = self.optimize_by_rules(
-                plan,
-                "To IndexDeltaJoin".to_string(),
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "To IndexDeltaJoin",
                 vec![IndexDeltaJoinRule::create()],
                 ApplyOrder::BottomUp,
-            );
+            ));
+        }
+
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline session timezone:");
+            ctx.trace(plan.explain_to_string().unwrap());
         }
 
         // Const eval of exprs at the last minute
-        // plan = const_eval_exprs(plan)?;
+        plan = const_eval_exprs(plan)?;
 
-        // if ctx.is_explain_trace() {
-        //     ctx.trace("Const eval exprs:");
-        //     ctx.trace(plan.explain_to_string().unwrap());
-        // }
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -659,6 +359,7 @@ impl PlanRoot {
         definition: String,
         row_id_index: Option<usize>,
         append_only: bool,
+        watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
@@ -670,11 +371,21 @@ impl PlanRoot {
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )
         .into();
+
+        // Add WatermarkFilter node.
+        if !watermark_descs.is_empty() {
+            stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
+        }
+
         // Add RowIDGen node if needed.
         if let Some(row_id_index) = row_id_index {
             stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
         }
 
+        let conflict_behavior = match append_only {
+            true => ConflictBehavior::NoCheck,
+            false => ConflictBehavior::OverWrite,
+        };
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
@@ -682,7 +393,7 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            !append_only,
+            conflict_behavior,
             row_id_index,
             version,
         )
@@ -735,9 +446,26 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_stream_plan()?;
 
-        StreamMaterialize::create(
+        // Add a project node if there is hidden column(s).
+        let input_fields = stream_plan.schema().fields();
+        if input_fields.len() != self.out_fields.count_ones(..) {
+            let exprs = input_fields
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, field)| {
+                    if self.out_fields.contains(idx) {
+                        Some(InputRef::new(idx, field.data_type.clone()).into())
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            stream_plan = StreamProject::new(LogicalProject::new(stream_plan, exprs)).into();
+        }
+
+        StreamSink::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
@@ -745,10 +473,8 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
-            // Note: we first plan it like a materialized view, and then rewrite it into a sink.
-            TableType::MaterializedView,
+            properties,
         )
-        .and_then(|plan| plan.rewrite_into_sink(properties))
     }
 
     /// Set the plan root's required dist.
@@ -757,7 +483,6 @@ impl PlanRoot {
     }
 }
 
-#[allow(dead_code)]
 fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     let mut const_eval_rewriter = ConstEvalRewriter { error: None };
 
@@ -765,6 +490,11 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
     if let Some(error) = const_eval_rewriter.error {
         return Err(error);
     }
+    Ok(plan)
+}
+
+fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
+    let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
     Ok(plan)
 }
 

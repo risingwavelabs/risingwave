@@ -1,0 +1,58 @@
+# Before running this test:
+#   python3 e2e_test/udf/test.py
+
+# Create a function.
+statement ok
+create function int_42() returns int language python as int_42 using link 'http://localhost:8815';
+
+# Argument or return type mismatch.
+statement error argument mismatch
+create function foo(int) returns int language python as int_42 using link 'http://localhost:8815';
+
+statement error return type mismatch
+create function foo() returns real language python as int_42 using link 'http://localhost:8815';
+
+# Create another function.
+statement ok
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+
+# Create a function with the same name but different arguments.
+statement ok
+create function gcd(int, int, int) returns int language python as gcd3 using link 'http://localhost:8815';
+
+# Create a function with the same name and arguments.
+statement error exists
+create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
+
+query I
+select int_42();
+----
+42
+
+query I
+select gcd(25, 15);
+----
+5
+
+query I
+select gcd(25, 15, 3);
+----
+1
+
+# TODO: drop function without arguments
+
+# # Drop a function but ambiguous.
+# statement error is not unique
+# drop function gcd;
+
+# Drop a function
+statement ok
+drop function int_42();
+
+# Drop a function
+statement ok
+drop function gcd(int, int);
+
+# Drop a function
+statement ok
+drop function gcd(int, int, int);

@@ -17,8 +17,8 @@ normal = ["workspace-hack"]
 [dependencies]
 aho-corasick = "0.7"
 anyhow = "1"
-arrow-array = "31"
-arrow-schema = "31"
+arrow-array = "34"
+arrow-schema = "34"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 dyn-clone = "1"

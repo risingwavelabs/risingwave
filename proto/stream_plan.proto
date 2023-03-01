@@ -181,8 +181,14 @@ message MaterializeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  // Used to handle pk conflict, open it when upstream executor is source executor.
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
+}
+
+enum HandleConflictBehavior {
+  NO_CHECK_UNSPECIFIED = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message AggCallState {
@@ -411,7 +417,7 @@ message ArrangeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -553,9 +559,12 @@ enum DispatcherType {
   NO_SHUFFLE = 4;
 }
 
+// The property of an edge in the fragment graph.
+// This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
 message DispatchStrategy {
   DispatcherType type = 1;
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  repeated uint32 output_indices = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -564,7 +573,11 @@ message Dispatcher {
   DispatcherType type = 1;
   // Indices of the columns to be used for hashing.
   // For dispatcher types other than HASH, this is ignored.
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  // Indices of the columns to output.
+  // In most cases, this contains all columns in the input. But for some cases like MV on MV or
+  // schema change, we may only output a subset of the columns.
+  repeated uint32 output_indices = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
@@ -650,7 +663,7 @@ message StreamFragmentGraph {
   // edges between fragments.
   repeated StreamFragmentEdge edges = 2;
 
-  repeated uint32 dependent_table_ids = 3;
+  repeated uint32 dependent_relation_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.

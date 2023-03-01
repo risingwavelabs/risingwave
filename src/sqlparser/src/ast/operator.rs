@@ -86,6 +86,10 @@ pub enum BinaryOperator {
     PGRegexIMatch,
     PGRegexNotMatch,
     PGRegexNotIMatch,
+    Arrow,
+    LongArrow,
+    HashArrow,
+    HashLongArrow,
 }
 
 impl fmt::Display for BinaryOperator {
@@ -121,6 +125,10 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::PGRegexIMatch => "~*",
             BinaryOperator::PGRegexNotMatch => "!~",
             BinaryOperator::PGRegexNotIMatch => "!~*",
+            BinaryOperator::Arrow => "->",
+            BinaryOperator::LongArrow => "->>",
+            BinaryOperator::HashArrow => "#>",
+            BinaryOperator::HashLongArrow => "#>>",
         })
     }
 }

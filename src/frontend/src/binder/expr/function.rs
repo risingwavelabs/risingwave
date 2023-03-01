@@ -372,7 +372,16 @@ impl Binder {
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
+                ("array_join", raw_call(ExprType::ArrayToString)),
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
+                ("array_to_string", raw_call(ExprType::ArrayToString)),
+                // jsonb
+                ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
+                ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // System information operations.
                 (
                     "pg_typeof",

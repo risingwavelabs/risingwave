@@ -15,13 +15,13 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use arrow_schema::{Field, Schema};
+use arrow_schema::{Field, Schema, SchemaRef};
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
-use risingwave_udf::{ArrowFlightUdfClient, FunctionId};
+use risingwave_udf::ArrowFlightUdfClient;
 
 use super::{build_from_prost, BoxedExpression};
 use crate::expr::Expression;
@@ -30,11 +30,11 @@ use crate::{bail, ensure, ExprError, Result};
 #[derive(Debug)]
 pub struct UdfExpression {
     children: Vec<BoxedExpression>,
-    // name: String,
     arg_types: Vec<DataType>,
     return_type: DataType,
+    arg_schema: SchemaRef,
     client: ArrowFlightUdfClient,
-    function_id: FunctionId,
+    identifier: String,
 }
 
 // TODO: make evaluation functions async
@@ -51,12 +51,15 @@ impl Expression for UdfExpression {
         let columns: Vec<_> = self
             .children
             .iter()
-            .map(|c| c.eval_checked(input).map(|a| ("", a.as_ref().into())))
+            .map(|c| c.eval_checked(input).map(|a| a.as_ref().into()))
             .try_collect()?;
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
         let input =
-            arrow_array::RecordBatch::try_from_iter(columns).expect("failed to build record batch");
+            arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
+                .expect("failed to build record batch");
         let output = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.client.call(&self.function_id, input))
+            tokio::runtime::Handle::current().block_on(self.client.call(&self.identifier, input))
         })?;
         let arrow_array = output
             .columns()
@@ -86,28 +89,23 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let RexNode::Udf(udf) = prost.get_rex_node().unwrap() else {
             bail!("expect UDF");
         };
-        // connect to UDF service and check the function
-        let (client, function_id) = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let client = ArrowFlightUdfClient::connect(&udf.path).await?;
-                let args = Schema::new(
-                    udf.arg_types
-                        .iter()
-                        .map(|t| Field::new("", DataType::from(t).into(), true))
-                        .collect(),
-                );
-                let returns = Schema::new(vec![Field::new("", (&return_type).into(), true)]);
-                let id = client.check(&udf.name, &args, &returns).await?;
-                Ok((client, id)) as risingwave_udf::Result<_>
-            })
+        // connect to UDF service
+        let arg_schema = Arc::new(Schema::new(
+            udf.arg_types
+                .iter()
+                .map(|t| Field::new("", DataType::from(t).into(), true))
+                .collect(),
+        ));
+        let client = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(&udf.link))
         })?;
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
-            // name: udf.name.clone(),
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
+            arg_schema,
             client,
-            function_id,
+            identifier: udf.identifier.clone(),
         })
     }
 }

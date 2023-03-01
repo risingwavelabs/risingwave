@@ -22,7 +22,8 @@ use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage,
+    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, AlwaysOutput,
+    DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -30,6 +31,7 @@ use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
+use crate::task::AtomicU64Ref;
 
 /// `GlobalSimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -74,13 +76,31 @@ struct ExecutorInner<S: StateStore> {
     /// One table per distinct column (may be shared by multiple agg calls).
     distinct_dedup_tables: HashMap<usize, StateTable<S>>,
 
+    /// Watermark epoch.
+    watermark_epoch: AtomicU64Ref,
+
     /// Extreme state cache size
     extreme_cache_size: usize,
 }
 
+impl<S: StateStore> ExecutorInner<S> {
+    fn all_state_tables_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
+        iter_table_storage(&mut self.storages)
+            .chain(self.distinct_dedup_tables.values_mut())
+            .chain(std::iter::once(&mut self.result_table))
+    }
+
+    fn all_state_tables_except_result_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
+        iter_table_storage(&mut self.storages).chain(self.distinct_dedup_tables.values_mut())
+    }
+}
+
 struct ExecutionVars<S: StateStore> {
     /// The single [`AggGroup`].
-    agg_group: AggGroup<S>,
+    agg_group: AggGroup<S, AlwaysOutput>,
+
+    /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
+    distinct_dedup: DistinctDeduplicater<S>,
 
     /// Mark the agg state is changed in the current epoch or not.
     state_changed: bool,
@@ -123,6 +143,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
+                watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
             },
         })
@@ -133,8 +154,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
-        // Mark state as changed.
-        vars.state_changed = true;
+        if chunk.cardinality() == 0 {
+            // If the chunk is empty, do nothing.
+            return Ok(());
+        }
 
         // Decompose the input chunk.
         let capacity = chunk.capacity();
@@ -175,16 +198,24 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 }
             });
 
-        // Apply chunk to each of the state (per agg_call)
-        vars.agg_group
-            .apply_chunk(
-                &mut this.storages,
+        // Deduplicate for distinct columns.
+        let visibilities = vars
+            .distinct_dedup
+            .dedup_chunk(
                 &ops,
                 &columns,
                 visibilities,
                 &mut this.distinct_dedup_tables,
+                None,
             )
             .await?;
+
+        // Apply chunk to each of the state (per agg_call).
+        vars.agg_group
+            .apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
+
+        // Mark state as changed.
+        vars.state_changed = true;
 
         Ok(())
     }
@@ -194,16 +225,19 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if vars.state_changed {
+        if vars.state_changed || vars.agg_group.is_uninitialized() {
+            // Flush agg states.
             vars.agg_group
-                .flush_state_if_needed(&mut this.storages, &mut this.distinct_dedup_tables)
+                .flush_state_if_needed(&mut this.storages)
                 .await?;
+
+            // Flush distinct dedup state.
+            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
-                iter_table_storage(&mut this.storages)
-                    .chain(this.distinct_dedup_tables.values_mut())
-                    .map(|state_table| state_table.commit(epoch)),
+                this.all_state_tables_except_result_mut()
+                    .map(|table| table.commit(epoch)),
             )
             .await?;
 
@@ -249,12 +283,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(&mut this.storages)
-                .chain(this.distinct_dedup_tables.values_mut())
-                .for_each(|state_table| {
-                    state_table.commit_no_data_expected(epoch);
-                });
-            this.result_table.commit_no_data_expected(epoch);
+            this.all_state_tables_mut().for_each(|table| {
+                table.commit_no_data_expected(epoch);
+            });
             Ok(None)
         }
     }
@@ -268,12 +299,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut this.storages)
-            .chain(this.distinct_dedup_tables.values_mut())
-            .for_each(|state_table| {
-                state_table.init_epoch(barrier.epoch);
-            });
-        this.result_table.init_epoch(barrier.epoch);
+        this.all_state_tables_mut().for_each(|table| {
+            table.init_epoch(barrier.epoch);
+        });
 
         let mut vars = ExecutionVars {
             // Create `AggGroup`. This will fetch previous agg result from the result table.
@@ -287,20 +315,13 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 &this.input_schema,
             )
             .await?,
+            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             state_changed: false,
         };
 
-        if vars.agg_group.is_uninitialized() {
-            let data_types = this
-                .input_schema
-                .fields
-                .iter()
-                .map(|f| f.data_type())
-                .collect::<Vec<_>>();
-            let chunk = StreamChunk::from_rows(&[], &data_types[..]);
-            // Apply empty chunk
-            Self::apply_chunk(&mut this, &mut vars, chunk).await?;
-        }
+        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
 
         yield Message::Barrier(barrier);
 
@@ -318,6 +339,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                     {
                         yield Message::Chunk(chunk);
                     }
+                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+                        cache.update_epoch(barrier.epoch.curr);
+                    });
                     yield Message::Barrier(barrier);
                 }
             }

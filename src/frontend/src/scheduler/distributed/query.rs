@@ -31,7 +31,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::{QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
+use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -91,6 +91,8 @@ struct QueryRunner {
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
+
+    query_metrics: Arc<DistributedQueryMetrics>,
 }
 
 impl QueryExecution {
@@ -114,6 +116,7 @@ impl QueryExecution {
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
     /// cancel request (from ctrl-c, cli, ui etc).
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
         context: ExecutionContextRef,
@@ -122,6 +125,7 @@ impl QueryExecution {
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
+        query_metrics: Arc<DistributedQueryMetrics>,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -153,6 +157,7 @@ impl QueryExecution {
                     scheduled_stages_count: 0,
                     compute_client_pool,
                     query_execution_info,
+                    query_metrics,
                 };
 
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
@@ -229,6 +234,12 @@ impl QueryExecution {
     }
 }
 
+impl Drop for QueryRunner {
+    fn drop(&mut self) {
+        self.query_metrics.running_query_num.dec();
+    }
+}
+
 impl Debug for QueryRunner {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut graph = Graph::<String, String>::new();
@@ -258,6 +269,7 @@ impl Debug for QueryRunner {
 
 impl QueryRunner {
     async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
+        self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -451,7 +463,8 @@ pub(crate) mod tests {
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::{
-        ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot, QueryExecutionInfo,
+        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
+        QueryExecutionInfo,
     };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
@@ -482,6 +495,7 @@ pub(crate) mod tests {
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
+                Arc::new(DistributedQueryMetrics::for_test()),
             )
             .await
             .is_err());

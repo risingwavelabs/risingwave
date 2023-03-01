@@ -14,9 +14,12 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use reqwest::Url;
-use risingwave_common::error::ErrorCode::{InvalidParameterValue, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, InvalidParameterValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+
+use crate::parser::WriteGuard;
 
 /// get kafka topic name
 pub(super) fn get_kafka_topic(props: &HashMap<String, String>) -> Result<&String> {
@@ -54,4 +57,34 @@ pub(super) async fn download_from_http(location: &Url) -> Result<Bytes> {
     res.bytes()
         .await
         .map_err(|e| InvalidParameterValue(format!("failed to read HTTP body: {}", e)).into())
+}
+
+// `results.len()` should greater that zero
+// if all results are errors, return err
+// if all ok, return ok
+// if part of them are errors, log err and return ok
+#[inline]
+pub(super) fn at_least_one_ok(mut results: Vec<Result<WriteGuard>>) -> Result<WriteGuard> {
+    let errors = results
+        .iter()
+        .filter_map(|r| r.as_ref().err())
+        .collect_vec();
+    let first_ok_index = results.iter().position(|r| r.is_ok());
+    let err_message = errors
+        .into_iter()
+        .map(|r| r.to_string())
+        .collect_vec()
+        .join(", ");
+
+    if let Some(first_ok_index) = first_ok_index {
+        if !err_message.is_empty() {
+            tracing::error!("failed to parse some columns: {}", err_message)
+        }
+        results.remove(first_ok_index)
+    } else {
+        Err(RwError::from(InternalError(format!(
+            "failed to parse all columns: {}",
+            err_message
+        ))))
+    }
 }

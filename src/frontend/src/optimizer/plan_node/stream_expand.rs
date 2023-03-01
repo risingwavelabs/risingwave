@@ -23,7 +23,7 @@ use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary,
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
     pub base: PlanBase,
     logical: LogicalExpand,

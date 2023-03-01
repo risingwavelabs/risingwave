@@ -19,12 +19,10 @@ use futures::future::{try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, HangingChannel,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
@@ -62,7 +60,7 @@ pub struct CreateStreamingJobContext {
     pub existing_locations: Locations,
 
     /// The properties of the streaming job.
-    // TODO: directly store `StreamingJob here.
+    // TODO: directly store `StreamingJob` here.
     pub table_properties: HashMap<String, String>,
 
     /// DDL definition.
@@ -129,6 +127,9 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
+    /// The old table fragments to be replaced.
+    pub old_table_fragments: TableFragments,
+
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
 
@@ -309,19 +310,11 @@ where
         res
     }
 
-    async fn create_streaming_job_impl(
+    async fn build_actors(
         &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        table_fragments: TableFragments,
-        CreateStreamingJobContext {
-            dispatchers,
-            upstream_mview_actors,
-            table_properties,
-            building_locations,
-            existing_locations,
-            definition,
-            ..
-        }: CreateStreamingJobContext,
+        table_fragments: &TableFragments,
+        building_locations: &Locations,
+        existing_locations: &Locations,
     ) -> MetaResult<()> {
         let actor_map = table_fragments.actor_map();
 
@@ -334,48 +327,7 @@ where
             .chain(existing_locations.actor_infos())
             .collect_vec();
 
-        let building_actor_infos = building_locations.actor_info_map();
         let building_worker_actors = building_locations.worker_actors();
-        let existing_worker_actors = existing_locations.worker_actors();
-
-        // Hanging channels for each worker node.
-        let mut hanging_channels = {
-            // upstream_actor_id -> Vec<downstream_actor_info>
-            let up_id_to_down_info = dispatchers
-                .iter()
-                .map(|(&up_id, dispatchers)| {
-                    let down_infos = dispatchers
-                        .iter()
-                        .flat_map(|d| d.downstream_actor_id.iter())
-                        .map(|down_id| building_actor_infos[down_id].clone())
-                        .collect_vec();
-                    (up_id, down_infos)
-                })
-                .collect::<HashMap<_, _>>();
-
-            existing_worker_actors
-                .iter()
-                .map(|(&worker_id, up_ids)| {
-                    (
-                        worker_id,
-                        up_ids
-                            .iter()
-                            .flat_map(|up_id| {
-                                up_id_to_down_info[up_id]
-                                    .iter()
-                                    .map(|down_info| HangingChannel {
-                                        upstream: Some(ActorInfo {
-                                            actor_id: *up_id,
-                                            host: None,
-                                        }),
-                                        downstream: Some(down_info.clone()),
-                                    })
-                            })
-                            .collect_vec(),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-        };
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
@@ -402,41 +354,9 @@ where
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: stream_actors.clone(),
-                    hanging_channels: hanging_channels.remove(worker_id).unwrap_or_default(),
                 })
                 .await?;
         }
-
-        // Build **remaining** hanging channels on compute nodes.
-        for (worker_id, hanging_channels) in hanging_channels {
-            let worker_node = building_locations.worker_locations.get(&worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(worker_node).await?;
-
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: vec![],
-                    hanging_channels,
-                })
-                .await?;
-        }
-
-        // Register to compaction group beforehand.
-        let hummock_manager_ref = self.hummock_manager.clone();
-        let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(&table_fragments, &table_properties)
-            .await?;
-        debug_assert_eq!(
-            registered_table_ids.len(),
-            table_fragments.all_table_ids().count()
-        );
-        revert_funcs.push(Box::pin(async move {
-            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
-            }
-        }));
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
@@ -453,6 +373,41 @@ where
                 })
                 .await?;
         }
+
+        Ok(())
+    }
+
+    async fn create_streaming_job_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        table_fragments: TableFragments,
+        CreateStreamingJobContext {
+            dispatchers,
+            upstream_mview_actors,
+            table_properties,
+            building_locations,
+            existing_locations,
+            definition,
+            ..
+        }: CreateStreamingJobContext,
+    ) -> MetaResult<()> {
+        // Register to compaction group beforehand.
+        let hummock_manager_ref = self.hummock_manager.clone();
+        let registered_table_ids = hummock_manager_ref
+            .register_table_fragments(&table_fragments, &table_properties)
+            .await?;
+        debug_assert_eq!(
+            registered_table_ids.len(),
+            table_fragments.all_table_ids().count()
+        );
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+            }
+        }));
+
+        self.build_actors(&table_fragments, &building_locations, &existing_locations)
+            .await?;
 
         // Add table fragments to meta store with state: `State::Initial`.
         self.fragment_manager
@@ -476,6 +431,45 @@ where
         {
             self.fragment_manager
                 .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                .await?;
+            return Err(err);
+        }
+
+        Ok(())
+    }
+
+    pub async fn replace_table(
+        &self,
+        table_fragments: TableFragments,
+        ReplaceTableContext {
+            old_table_fragments,
+            merge_updates,
+            building_locations,
+            existing_locations,
+            table_properties: _,
+        }: ReplaceTableContext,
+    ) -> MetaResult<()> {
+        self.build_actors(&table_fragments, &building_locations, &existing_locations)
+            .await?;
+
+        // Add table fragments to meta store with state: `State::Initial`.
+        self.fragment_manager
+            .start_create_table_fragments(table_fragments.clone())
+            .await?;
+
+        let dummy_table_id = table_fragments.table_id();
+
+        if let Err(err) = self
+            .barrier_scheduler
+            .run_command_with_paused(Command::ReplaceTable {
+                old_table_fragments,
+                new_table_fragments: table_fragments,
+                merge_updates,
+            })
+            .await
+        {
+            self.fragment_manager
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(dummy_table_id)))
                 .await?;
             return Err(err);
         }

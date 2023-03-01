@@ -32,6 +32,7 @@ use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -218,18 +219,35 @@ pub async fn handle_query(
         }
 
         // update some metrics
-        if query_mode == QueryMode::Local {
-            session
-                .env()
-                .frontend_metrics
-                .latency_local_execution
-                .observe(query_start_time.elapsed().as_secs_f64());
+        match query_mode {
+            QueryMode::Local => {
+                session
+                    .env()
+                    .frontend_metrics
+                    .latency_local_execution
+                    .observe(query_start_time.elapsed().as_secs_f64());
 
-            session
-                .env()
-                .frontend_metrics
-                .query_counter_local_execution
-                .inc();
+                session
+                    .env()
+                    .frontend_metrics
+                    .query_counter_local_execution
+                    .inc();
+            }
+            QueryMode::Distributed => {
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .query_latency
+                    .observe(query_start_time.elapsed().as_secs_f64());
+
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .completed_query_counter
+                    .inc();
+            }
         }
 
         Ok(())

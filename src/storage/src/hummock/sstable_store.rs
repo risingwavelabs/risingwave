@@ -346,7 +346,7 @@ impl SstableStore {
                         .map_err(HummockError::object_io_error)?;
                     let meta = SstableMeta::decode(&mut &buf[..])?;
                     let sst = Sstable::new(sst_id, meta);
-                    let charge = sst.meta.encoded_size();
+                    let charge = sst.estimate_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                     stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
                     Ok((Box::new(sst), charge))
@@ -871,17 +871,10 @@ mod tests {
     ) {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
-        let mut filter_data = std::mem::take(&mut meta.bloom_filter);
-        if !filter_data.is_empty() {
-            filter_data.pop();
-        }
+        std::mem::take(&mut meta.bloom_filter);
         assert_eq!(holder.value().meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
-        assert_eq!(
-            filter_data.as_slice(),
-            holder.value().filter_reader.get_raw_data()
-        );
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,

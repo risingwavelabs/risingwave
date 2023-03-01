@@ -60,7 +60,7 @@ mod tests {
 
         assert_eq!(prost_array.values.len(), 1);
 
-        let decoded_array = ArrayImpl::from_protobuf(&prost_array, 4)
+        let decoded_array = ArrayImpl::from_protobuf(&prost_array, 8)
             .unwrap()
             .into_decimal();
 

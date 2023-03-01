@@ -37,10 +37,6 @@ macro_rules! impl_all_native_scalar {
                 fn as_scalar_ref(&self) -> Self {
                     *self
                 }
-
-                fn to_scalar_value(self) -> ScalarImpl {
-                    ScalarImpl::$variant_name(self)
-                }
             }
 
             impl<'scalar> ScalarRef<'scalar> for $scalar_type {
@@ -68,10 +64,6 @@ impl Scalar for Box<str> {
     fn as_scalar_ref(&self) -> &str {
         self.as_ref()
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Utf8(self)
-    }
 }
 
 /// Implement `Scalar` for `Bytes`.
@@ -80,10 +72,6 @@ impl Scalar for Box<[u8]> {
 
     fn as_scalar_ref(&self) -> &[u8] {
         self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Bytea(self)
     }
 }
 
@@ -94,10 +82,6 @@ impl Scalar for StructValue {
     fn as_scalar_ref(&self) -> StructRef<'_> {
         StructRef::ValueRef { val: self }
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Struct(self)
-    }
 }
 
 /// Implement `Scalar` for `ListValue`.
@@ -106,10 +90,6 @@ impl Scalar for ListValue {
 
     fn as_scalar_ref(&self) -> ListRef<'_> {
         ListRef::ValueRef { val: self }
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::List(self)
     }
 }
 
@@ -164,10 +144,6 @@ impl Scalar for bool {
     fn as_scalar_ref(&self) -> bool {
         *self
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Bool(self)
-    }
 }
 
 /// Implement `ScalarRef` for `bool`.
@@ -189,10 +165,6 @@ impl Scalar for Decimal {
 
     fn as_scalar_ref(&self) -> Decimal {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Decimal(self)
     }
 }
 
@@ -216,10 +188,6 @@ impl Scalar for IntervalUnit {
     fn as_scalar_ref(&self) -> IntervalUnit {
         *self
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::Interval(self)
-    }
 }
 
 /// Implement `ScalarRef` for `IntervalUnit`.
@@ -241,10 +209,6 @@ impl Scalar for NaiveDateWrapper {
 
     fn as_scalar_ref(&self) -> NaiveDateWrapper {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::NaiveDate(self)
     }
 }
 
@@ -268,10 +232,6 @@ impl Scalar for NaiveDateTimeWrapper {
     fn as_scalar_ref(&self) -> NaiveDateTimeWrapper {
         *self
     }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::NaiveDateTime(self)
-    }
 }
 
 /// Implement `ScalarRef` for `NaiveDateTimeWrapper`.
@@ -293,10 +253,6 @@ impl Scalar for NaiveTimeWrapper {
 
     fn as_scalar_ref(&self) -> NaiveTimeWrapper {
         *self
-    }
-
-    fn to_scalar_value(self) -> ScalarImpl {
-        ScalarImpl::NaiveTime(self)
     }
 }
 

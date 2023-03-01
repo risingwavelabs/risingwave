@@ -92,7 +92,7 @@
       └─LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
         └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id], predicate: (t.x > t.y) }
@@ -104,7 +104,7 @@
           └─BatchFilter { predicate: (t.x > t.y) }
             └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
@@ -116,7 +116,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank<=3;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -132,7 +132,7 @@
         └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y, t._row_id], distribution: UpstreamHashShard(t._row_id) }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.x ASC]", limit: 3, offset: 0, group_key: [1], with_ties: true }
@@ -155,7 +155,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank>3;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 9223372036854775807, offset: 3, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -165,7 +165,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank>=3;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 9223372036854775807, offset: 2, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -174,7 +174,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 <= rank AND rank <= 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 3, offset: 2, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -183,7 +183,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank BETWEEN 3 AND 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 3, offset: 2, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -192,7 +192,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank <= 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 3, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -201,7 +201,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 <= rank AND rank < 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 2, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -210,7 +210,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank < 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 3, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -219,7 +219,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank < 6 AND rank >= 4 AND rank < 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 3, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -228,7 +228,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank = 4 AND rank <= 5;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 3, group_key: [1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
@@ -288,13 +288,13 @@
       )
     ) WHERE rownum <= 3;
   stream_plan: |
-    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], pk_columns: [window_start, window_end, supplier_id] }
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], pk_columns: [window_start, window_end, supplier_id], pk_conflict: "no check" }
     └─StreamGroupTopN { order: "[sum(bid.price) DESC]", limit: 3, offset: 0, group_key: [0, 1] }
-      └─StreamExchange { dist: HashShard($expr47, $expr48) }
-        └─StreamProject { exprs: [$expr47, $expr48, bid.supplier_id, sum(bid.price), count] }
-          └─StreamHashAgg { group_key: [$expr47, $expr48, bid.supplier_id], aggs: [count, sum(bid.price), count] }
-            └─StreamExchange { dist: HashShard($expr47, $expr48, bid.supplier_id) }
-              └─StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr47, (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) as $expr48, bid.supplier_id, bid.price, bid._row_id] }
+      └─StreamExchange { dist: HashShard($expr1, $expr2) }
+        └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, sum(bid.price), count] }
+          └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [count, sum(bid.price), count] }
+            └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
+              └─StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
                 └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
@@ -308,12 +308,12 @@
           TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
     ) WHERE rownum <= 3;
   stream_plan: |
-    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], pk_columns: [bid._row_id] }
+    StreamMaterialize { columns: [window_start, window_end, supplier_id, price, bid._row_id(hidden)], pk_columns: [bid._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(bid._row_id) }
-      └─StreamProject { exprs: [$expr45, $expr46, bid.supplier_id, bid.price, bid._row_id] }
+      └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, bid.price, bid._row_id] }
         └─StreamGroupTopN { order: "[bid.price DESC]", limit: 3, offset: 0, group_key: [5, 6] }
-          └─StreamExchange { dist: HashShard($expr45, $expr46) }
-            └─StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr45, (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) as $expr46] }
+          └─StreamExchange { dist: HashShard($expr1, $expr2) }
+            └─StreamProject { exprs: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id, TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) as $expr2] }
               └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - name: Deduplication
   sql: |
@@ -327,12 +327,12 @@
       └─LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
         └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.y ASC NULLS LAST) }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id] }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
     └─StreamExchange { dist: HashShard(t._row_id) }
       └─StreamProject { exprs: [t.x, t.y, t._row_id] }
         └─StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
