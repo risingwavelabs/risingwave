@@ -318,6 +318,12 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Add identity project between exchange and share",
+            vec![AvoidExchangeShareRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         if ctx.session_ctx().config().get_streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
