@@ -42,6 +42,6 @@ impl Rule for ProjectJoinMergeRule {
     }
 }
 
-pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
+fn has_repeated_element(slice: &[usize]) -> bool {
     (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
 }
