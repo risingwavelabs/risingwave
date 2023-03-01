@@ -68,6 +68,9 @@ pub(crate) fn derive_columns(
         })
         .collect_vec();
 
+    // We should use up all of the `out_name`s
+    assert_eq!(out_name_iter.next(), None);
+
     Ok(columns)
 }
 
