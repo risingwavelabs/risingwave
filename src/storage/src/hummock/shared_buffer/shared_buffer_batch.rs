@@ -63,27 +63,27 @@ pub(crate) struct SharedBufferBatchInner {
 impl SharedBufferBatchInner {
     pub(crate) fn new(
         epoch: HummockEpoch,
-        items: Vec<SharedBufferItem>,
+        payload: Vec<SharedBufferItem>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        let (mut smallest_table_key, mut largest_table_key, range_tombstones) =
+        let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
             Self::get_table_key_ends(range_tombstone_list);
-        if let Some(item) = items.last() {
+
+        if let Some(item) = payload.last() {
             if item.0.gt(&largest_table_key) {
                 largest_table_key.clear();
                 largest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
-        if let Some(item) = items.first() {
-            if smallest_table_key.is_empty() || item.0.lt(&smallest_table_key) {
+        if let Some(item) = payload.first() {
+            if smallest_empty || item.0.lt(&smallest_table_key) {
                 smallest_table_key.clear();
                 smallest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
-
-        let items = items
+        let items = payload
             .into_iter()
             .map(|(k, v)| (k, vec![(epoch, v)]))
             .collect_vec();
@@ -92,7 +92,7 @@ impl SharedBufferBatchInner {
             payload: items,
             epoch,
             imm_ids: vec![],
-            epochs: vec![],
+            epochs: vec![epoch],
             range_tombstone_list: range_tombstones,
             size,
             largest_table_key,
@@ -102,34 +102,33 @@ impl SharedBufferBatchInner {
         }
     }
 
-    // todo: largest_table_key, smallest_table_key的处理需要参考一下SSTableMeta
     pub(crate) fn new_with_multi_epoch_items(
         min_epoch: HummockEpoch,
         epochs: Vec<HummockEpoch>,
-        items: Vec<SharedBufferEntry>,
+        payload: Vec<SharedBufferEntry>,
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
-        let (mut smallest_table_key, mut largest_table_key, range_tombstones) =
+        let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
             Self::get_table_key_ends(range_tombstone_list);
 
-        if let Some(item) = items.last() {
+        if let Some(item) = payload.last() {
             if item.0.gt(&largest_table_key) {
                 largest_table_key.clear();
                 largest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
-        if let Some(item) = items.first() {
-            if smallest_table_key.is_empty() || item.0.lt(&smallest_table_key) {
+        if let Some(item) = payload.first() {
+            if smallest_empty || item.0.lt(&smallest_table_key) {
                 smallest_table_key.clear();
                 smallest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
 
         Self {
-            payload: items,
+            payload,
             epoch: min_epoch,
             epochs,
             imm_ids,
@@ -144,11 +143,10 @@ impl SharedBufferBatchInner {
 
     fn get_table_key_ends(
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
-    ) -> (Vec<u8>, Vec<u8>, Vec<DeleteRangeTombstone>) {
+    ) -> (bool, Vec<u8>, Vec<u8>, Vec<DeleteRangeTombstone>) {
         let mut largest_table_key = vec![];
         let mut smallest_table_key = vec![];
         let mut smallest_empty = true;
-
         if !range_tombstone_list.is_empty() {
             range_tombstone_list.sort();
             let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
@@ -177,7 +175,12 @@ impl SharedBufferBatchInner {
             }
             range_tombstone_list = range_tombstones;
         }
-        (smallest_table_key, largest_table_key, range_tombstone_list)
+        (
+            smallest_empty,
+            smallest_table_key,
+            largest_table_key,
+            range_tombstone_list,
+        )
     }
 
     // If the key is deleted by a epoch greater than the read epoch, return None
