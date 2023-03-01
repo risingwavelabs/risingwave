@@ -93,12 +93,21 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
-        let skipped =
-            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response)
-                .unwrap();
-        if skipped == 0 {
-            generated_queries += 1;
-            queries.push_str(&format!("{};\n", &sql));
+        match validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response) {
+            Err(_e) => {
+                generated_queries += 1;
+                queries.push_str(&format!("-- {};\n", &sql));
+                write_to_file(outdir, "ddl.sql", &setup_sql);
+                write_to_file(outdir, "queries.sql", &queries);
+                tracing::info!("Generated {} batch queries", generated_queries);
+                tracing::error!("Unrecoverable error encountered.");
+                return;
+            },
+            Ok(skipped) if skipped == 1 => {
+                generated_queries += 1;
+                queries.push_str(&format!("{};\n", &sql));
+            }
+            _ => {}
         }
     }
     tracing::info!("Generated {} batch queries", generated_queries);
@@ -109,34 +118,32 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
-        let skipped =
-            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response)
-                .unwrap();
-        drop_mview_table(&table, client).await;
-        if skipped == 0 {
-            generated_queries += 1;
-            queries.push_str(&format!("{};\n", &sql));
+        match validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response) {
+            Err(_e) => {
+                generated_queries += 1;
+                queries.push_str(&format!("-- {};\n", &sql));
+                queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
+                write_to_file(outdir, "ddl.sql", &setup_sql);
+                write_to_file(outdir, "queries.sql", &queries);
+                tracing::info!("Generated {} stream queries", generated_queries);
+                tracing::error!("Unrecoverable error encountered.");
+                return;
+            },
+            Ok(skipped) if skipped == 1 => {
+                generated_queries += 1;
+                queries.push_str(&format!("{};\n", &sql));
+                            queries.push_str(&format!("{};\n", &sql));
             queries.push_str(&format!("{};\n", format_drop_mview(&table)));
+            }
+            _ => {}
         }
+        drop_mview_table(&table, client).await;
     }
     tracing::info!("Generated {} stream queries", generated_queries);
 
     drop_tables(&mviews, testdata, client).await;
     write_to_file(outdir, "ddl.sql", &setup_sql);
     write_to_file(outdir, "queries.sql", &queries);
-}
-
-fn append_to_file(outdir: &str, name: &str, sql: &str) {
-    let resolved = format!("{}/{}", outdir, name);
-    let path = Path::new(&resolved);
-    let mut file = match File::options().append(true).open(path) {
-        Err(e) => panic!("couldn't create {}: {}", resolved, e),
-        Ok(file) => file,
-    };
-    match file.write_all(sql.as_bytes()) {
-        Err(why) => panic!("couldn't write to {}: {}", path.display(), why),
-        Ok(_) => tracing::info!("successfully wrote to {}", path.display()),
-    }
 }
 
 fn write_to_file(outdir: &str, name: &str, sql: &str) {
@@ -462,8 +469,4 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: PgResult<_Row
             Err(anyhow_error!(error_msg))
         }
     }
-}
-
-async fn infalliable_query(client: &Client, query: &str) {
-
 }
