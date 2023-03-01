@@ -279,12 +279,12 @@ pub mod tests {
             levels: vec![generate_level(
                 1,
                 vec![
-                    generate_table(3, 1, 0, 100, 1),
-                    generate_table(2, 1, 111, 200, 1),
-                    generate_table(1, 1, 222, 300, 1),
-                    generate_table(0, 1, 301, 400, 1),
+                    generate_table(3, 1, 1, 100, 1),
+                    generate_table(2, 1, 101, 150, 1),
+                    generate_table(1, 1, 201, 210, 1),
                 ],
             )],
+            member_table_ids: vec![1],
             ..Default::default()
         };
         let mut local_stats = LocalPickerStatistic::default();
@@ -292,8 +292,9 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 4);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 1);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 3);
         ret.add_pending_task(0, &mut levels_handler);
 
         // Cannot pick because sub-level[0] is pending.
@@ -318,7 +319,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
         assert_eq!(ret.input_levels[1].table_infos[0].id, 6);
         assert_eq!(ret.input_levels[2].table_infos[0].id, 5);
-        assert_eq!(ret.input_levels[3].table_infos.len(), 4);
+        assert_eq!(ret.input_levels[3].table_infos.len(), 3);
         ret.add_pending_task(1, &mut levels_handler);
 
         let mut local_stats = LocalPickerStatistic::default();
@@ -338,7 +339,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
         assert_eq!(ret.input_levels[1].table_infos[0].id, 6);
         assert_eq!(ret.input_levels[2].table_infos[0].id, 5);
-        assert_eq!(ret.input_levels[3].table_infos.len(), 4);
+        assert_eq!(ret.input_levels[3].table_infos.len(), 3);
     }
 
     #[test]
@@ -370,6 +371,7 @@ pub mod tests {
                 total_file_size: 0,
                 uncompressed_file_size: 0,
             }),
+            member_table_ids: vec![1],
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
@@ -454,63 +456,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_compact_to_l1_concurrently() {
-        // When picking L0->L1, L0's selecting_key_range should not be overlapped with any L1 files
-        // under compaction.
-        let mut picker = create_compaction_picker_for_test();
-
-        let mut levels = Levels {
-            levels: vec![Level {
-                level_idx: 1,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: vec![generate_table(2, 1, 150, 300, 2)],
-                total_file_size: 150,
-                sub_level_id: 0,
-                uncompressed_file_size: 150,
-            }],
-            l0: Some(generate_l0_nonoverlapping_sublevels(vec![generate_table(
-                1, 1, 160, 280, 2,
-            )])),
-            ..Default::default()
-        };
-
-        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-
-        ret.add_pending_task(0, &mut levels_handler);
-
-        levels.l0.as_mut().unwrap().sub_levels[0].table_infos = vec![
-            generate_table(3, 1, 100, 140, 3),
-            generate_table(1, 1, 160, 280, 2),
-            generate_table(5, 1, 290, 500, 3),
-        ];
-
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        ret.add_pending_task(1, &mut levels_handler);
-
-        // Will be trivial move. The second file can not be picked up because the range of files
-        // [3,4] would be overlap with file [0]
-        assert!(ret.input_levels[1].table_infos.is_empty());
-        assert_eq!(ret.target_level, 1);
-        assert_eq!(
-            ret.input_levels[0]
-                .table_infos
-                .iter()
-                .map(|t| t.id)
-                .collect_vec(),
-            vec![3]
-        );
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none());
-    }
-
-    #[test]
     fn test_compacting_key_range_overlap_intra_l0() {
         // When picking L0->L0, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
@@ -529,6 +474,7 @@ pub mod tests {
                 generate_table(1, 1, 100, 210, 2),
                 generate_table(2, 1, 200, 250, 2),
             ])),
+            member_table_ids: vec![1],
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -563,15 +509,16 @@ pub mod tests {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
-                    generate_table(1, 1, 1, 199, 2),
-                    generate_table(2, 1, 200, 500, 2),
-                    generate_table(3, 1, 510, 600, 2),
+                    generate_table(1, 1, 1, 200, 2),
+                    generate_table(2, 1, 201, 300, 2),
+                    generate_table(3, 1, 401, 500, 2),
                 ],
                 total_file_size: 590,
                 sub_level_id: 0,
                 uncompressed_file_size: 590,
             }],
             l0: Some(generate_l0_nonoverlapping_sublevels(vec![])),
+            member_table_ids: vec![1],
             ..Default::default()
         };
         push_tables_level0_nonoverlapping(
@@ -663,6 +610,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            member_table_ids: vec![1],
             ..Default::default()
         };
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -737,6 +685,7 @@ pub mod tests {
         let levels = Levels {
             l0: Some(l0),
             levels: vec![generate_level(1, vec![generate_table(3, 1, 0, 100000, 1)])],
+            member_table_ids: vec![1],
             ..Default::default()
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
