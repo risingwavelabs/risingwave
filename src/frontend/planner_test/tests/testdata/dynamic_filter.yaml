@@ -19,9 +19,9 @@
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
-          └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: |
@@ -63,9 +63,9 @@
         | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
-            └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+            └─StreamGlobalSimpleAgg { aggs: [max(max(t2.v2)), count] }
               └─StreamExchange { dist: Single }
-                └─StreamHashAgg { group_key: [$expr2], aggs: [count, max(t2.v2)] }
+                └─StreamHashAgg { group_key: [$expr2], aggs: [max(t2.v2), count] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr2] }
                     └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Ensure error on multiple rows on inner side
@@ -115,9 +115,9 @@
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
         └─StreamProject { exprs: [max(max(t2.v2))] }
-          └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Dynamic filter join on unequal types
@@ -139,9 +139,9 @@
         | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
-            └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+            └─StreamGlobalSimpleAgg { aggs: [max(max(t2.v2)), count] }
               └─StreamExchange { dist: Single }
-                └─StreamHashAgg { group_key: [$expr2], aggs: [count, max(t2.v2)] }
+                └─StreamHashAgg { group_key: [$expr2], aggs: [max(t2.v2), count] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr2] }
                     └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Dynamic filter on semi join
@@ -155,9 +155,9 @@
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
-          └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Complex expression on RHS of condition will still result in dynamic filter
@@ -177,8 +177,8 @@
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(2:Int32 * max(max(t2.v2))) as $expr2] }
-          └─StreamGlobalSimpleAgg { aggs: [count, max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [max(max(t2.v2)), count] }
             └─StreamExchange { dist: Single }
-              └─StreamHashAgg { group_key: [$expr1], aggs: [count, max(t2.v2)] }
+              └─StreamHashAgg { group_key: [$expr1], aggs: [max(t2.v2), count] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
                   └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

@@ -53,6 +53,7 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_pb::meta::SystemParams;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -206,10 +207,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
-        let barrier_interval = Duration::from_millis(config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
-        let checkpoint_frequency = config.streaming.checkpoint_frequency;
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -226,10 +225,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             config.meta.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
-                barrier_interval,
                 in_flight_barrier_nums,
                 max_idle_ms,
-                checkpoint_frequency,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
@@ -241,19 +238,23 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
-                backup_storage_url: config.backup.storage_url,
-                backup_storage_directory: config.backup.storage_directory,
-                sstable_size_mb: config.storage.sstable_size_mb,
-                block_size_kb: config.storage.block_size_kb,
-                bloom_false_positive: config.storage.bloom_false_positive,
-                state_store: opts.state_store,
-                data_directory: config.storage.data_directory,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+            },
+            SystemParams {
+                barrier_interval_ms: Some(config.streaming.barrier_interval_ms),
+                checkpoint_frequency: Some(config.streaming.checkpoint_frequency as u64),
+                sstable_size_mb: Some(config.storage.sstable_size_mb),
+                block_size_kb: Some(config.storage.block_size_kb),
+                bloom_false_positive: Some(config.storage.bloom_false_positive),
+                state_store: Some(opts.state_store.unwrap_or_default()),
+                data_directory: Some(config.storage.data_directory),
+                backup_storage_url: Some(config.backup.storage_url),
+                backup_storage_directory: Some(config.backup.storage_directory),
             },
         )
         .await

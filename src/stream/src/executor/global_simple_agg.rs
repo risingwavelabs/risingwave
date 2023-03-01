@@ -22,7 +22,8 @@ use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, DistinctDeduplicater,
+    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, AlwaysOutput,
+    DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -63,6 +64,9 @@ struct ExecutorInner<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
+
     /// State storage for each agg calls.
     storages: Vec<AggStateStorage<S>>,
 
@@ -96,7 +100,7 @@ impl<S: StateStore> ExecutorInner<S> {
 
 struct ExecutionVars<S: StateStore> {
     /// The single [`AggGroup`].
-    agg_group: AggGroup<S>,
+    agg_group: AggGroup<S, AlwaysOutput>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
     distinct_dedup: DistinctDeduplicater<S>,
@@ -139,6 +143,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
@@ -153,6 +158,11 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        if chunk.cardinality() == 0 {
+            // If the chunk is empty, do nothing.
+            return Ok(());
+        }
+
         // Decompose the input chunk.
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
@@ -219,7 +229,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if vars.state_changed {
+        if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush agg states.
             vars.agg_group
                 .flush_state_if_needed(&mut this.storages)
@@ -305,6 +315,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 &this.storages,
                 &this.result_table,
                 &this.input_pk_indices,
+                this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
             )
@@ -316,18 +327,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
             cache.update_epoch(barrier.epoch.curr);
         });
-
-        if vars.agg_group.is_uninitialized() {
-            let data_types = this
-                .input_schema
-                .fields
-                .iter()
-                .map(|f| f.data_type())
-                .collect::<Vec<_>>();
-            let chunk = StreamChunk::from_rows(&[], &data_types[..]);
-            // Apply empty chunk
-            Self::apply_chunk(&mut this, &mut vars, chunk).await?;
-        }
 
         yield Message::Barrier(barrier);
 
@@ -407,7 +406,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -449,6 +448,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             vec![2],
             1,
         )
