@@ -179,6 +179,8 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core,
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GlobalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
 
@@ -193,10 +195,12 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GroupTopN, co
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HashAgg {
-    /// an optional column index which is the vnode of each row computed by the input's consistent
-    /// hash distribution
-    pub vnode_col_idx: Option<usize>,
     pub core: generic::Agg<PlanRef>,
+    /// An optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution.
+    vnode_col_idx: Option<usize>,
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HashAgg, core, input);
 
@@ -540,20 +544,25 @@ pub fn to_stream_prost_body(
             })
         }
         Node::GlobalSimpleAgg(me) => {
-            let me = &me.core;
-            let result_table = me.infer_result_table(base, None);
-            let agg_states = me.infer_stream_agg_state(base, None);
-            let distinct_dedup_tables = me.infer_distinct_dedup_tables(base, None);
+            let result_table = me.core.infer_result_table(base, None);
+            let agg_states = me.core.infer_stream_agg_state(base, None);
+            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
-                agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
+                agg_calls: me
+                    .core
+                    .agg_calls
+                    .iter()
+                    .map(PlanAggCall::to_protobuf)
+                    .collect(),
+                row_count_index: me.row_count_idx as u32,
                 distribution_key: base
                     .dist
                     .dist_column_indices()
                     .iter()
                     .map(|&idx| idx as u32)
                     .collect(),
-                is_append_only: me.input.0.append_only,
+                is_append_only: me.core.input.0.append_only,
                 agg_call_states: agg_states
                     .into_iter()
                     .map(|s| s.into_prost(state))
@@ -598,7 +607,7 @@ pub fn to_stream_prost_body(
                     .iter()
                     .map(PlanAggCall::to_protobuf)
                     .collect(),
-
+                row_count_index: me.row_count_idx as u32,
                 is_append_only: me.core.input.0.append_only,
                 agg_call_states: agg_states
                     .into_iter()
@@ -686,6 +695,7 @@ pub fn to_stream_prost_body(
             let me = &me.core;
             ProstNode::LocalSimpleAgg(SimpleAggNode {
                 agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
+                row_count_index: u32::MAX, // this is not used
                 distribution_key: base
                     .dist
                     .dist_column_indices()

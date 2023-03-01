@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::Write;
 use std::sync::atomic::AtomicU64;
@@ -210,6 +210,11 @@ impl LocalStreamManager {
             Some(mgr) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
             None => Default::default(),
         }
+    }
+
+    /// Get all existing actor ids.
+    pub async fn all_actor_ids(&self) -> HashSet<ActorId> {
+        self.core.lock().await.handles.keys().cloned().collect()
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager

@@ -37,6 +37,7 @@ pub struct AggExecutorArgs<S: StateStore> {
 
     // agg common things
     pub agg_calls: Vec<AggCall>,
+    pub row_count_index: usize,
     pub storages: Vec<AggStateStorage<S>>,
     pub result_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
