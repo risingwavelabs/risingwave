@@ -17,8 +17,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 
-/// Add an identity project to avoid parent exchange connecting directly
-/// to the share operator.
+/// Add an identity project to avoid parent exchange connecting directly to the share operator.
 pub struct AvoidExchangeShareRule {}
 
 impl Rule for AvoidExchangeShareRule {
@@ -27,8 +26,7 @@ impl Rule for AvoidExchangeShareRule {
         let input = stream_exchange.input();
         let stream_share: &StreamShare = input.as_stream_share()?;
 
-        // Keep the DAG intact.
-
+        // Remember to keep the DAG intact.
         let identity = ColIndexMapping::identity(stream_share.schema().len());
         let logical_project = LogicalProject::with_mapping(input, identity);
         let stream_project = StreamProject::new(logical_project);
