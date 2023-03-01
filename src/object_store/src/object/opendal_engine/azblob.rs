@@ -18,17 +18,23 @@ use opendal::Operator;
 use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
-    /// create opendal zblob engine.
-    pub fn new_azblob_engine(bucket: String, root: String) -> ObjectResult<Self> {
-        // Create gzblobcs backend builder.
+    /// create opendal azblob engine.
+    pub fn new_azblob_engine(containe_name: String, root: String) -> ObjectResult<Self> {
+        // Create azblob backend builder.
         let mut builder = Azblob::default();
-        builder.root("/path/to/dir");
-        builder.container("test");
+        builder.root(&root);
+        builder.container(&containe_name);
 
-        
-        builder.endpoint("http://127.0.0.1:10000/risingwave");
-        builder.account_name("risingwave");
-        builder.account_key("CJ/VCZAYlctrub6FEjIhTzDcMLLhjA2cV+vRw6iVWNcIDCKxXmaKdsUT3aGRUHIzMjs4p1/QdV+4+AStLz4LXg==");
+        let endpoint = std::env::var("AZBLOB_ENDPOINT")
+            .unwrap_or_else(|_| panic!("AZBLOB_ENDPOINT not found from environment variables"));
+        let account_name = std::env::var("AZBLOB_ACCOUNT_NAME")
+            .unwrap_or_else(|_| panic!("AZBLOB_ACCOUNT_NAME not found from environment variables"));
+        let account_key = std::env::var("AZBLOB_ACCOUNT_KEY")
+            .unwrap_or_else(|_| panic!("AZBLOB_ACCOUNT_KEY not found from environment variables"));
+
+        builder.endpoint(&endpoint);
+        builder.account_name(&account_name);
+        builder.account_key(&account_key);
         let op: Operator = Operator::create(builder)?.finish();
         Ok(Self {
             op,

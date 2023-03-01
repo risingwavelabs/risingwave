@@ -39,7 +39,7 @@ pub enum EngineType {
     Gcs,
     Oss,
     Webhdfs,
-    Azblob
+    Azblob,
 }
 
 impl OpendalObjectStore {
