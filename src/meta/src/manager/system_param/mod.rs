@@ -80,9 +80,15 @@ impl<S: MetaStore> SystemParamManager<S> {
             .await;
 
         // Notify worker nodes.
-        self.env
-            .notification_manager()
+        let notification_manager = self.env.notification_manager();
+        notification_manager
+            .notify_frontend(Operation::Update, Info::SystemParams(params.clone()))
+            .await;
+        notification_manager
             .notify_compute(Operation::Update, Info::SystemParams(params.clone()))
+            .await;
+        notification_manager
+            .notify_compactor(Operation::Update, Info::SystemParams(params.clone()))
             .await;
 
         Ok(())

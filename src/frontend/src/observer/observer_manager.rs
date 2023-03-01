@@ -17,6 +17,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::system_param::local_manager::LocalSystemParamManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -36,6 +37,7 @@ pub struct FrontendObserverNode {
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    system_param_manager: LocalSystemParamManagerRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -46,7 +48,7 @@ impl ObserverState for FrontendObserverNode {
             return;
         };
 
-        match info {
+        match info.to_owned() {
             Info::Database(_)
             | Info::Schema(_)
             | Info::Table(_)
@@ -79,8 +81,8 @@ impl ObserverState for FrontendObserverNode {
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
             }
-            Info::SystemParams(_) => {
-                todo!()
+            Info::SystemParams(p) => {
+                self.system_param_manager.try_set_params(p);
             }
         }
     }
@@ -158,6 +160,7 @@ impl FrontendObserverNode {
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
+        system_param_manager: LocalSystemParamManagerRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -166,6 +169,7 @@ impl FrontendObserverNode {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager,
+            system_param_manager,
         }
     }
 

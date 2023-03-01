@@ -28,7 +28,7 @@ impl ObserverState for ComputeObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
-        println!("INFO: {:?}", info);
+
         match info.to_owned() {
             Info::SystemParams(p) => self.system_param_manager.try_set_params(p),
             _ => {
