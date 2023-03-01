@@ -338,6 +338,7 @@ pub mod agg_executor {
         store: S,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
@@ -374,6 +375,7 @@ pub mod agg_executor {
             extreme_cache_size: 1024,
 
             agg_calls,
+            row_count_index,
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),

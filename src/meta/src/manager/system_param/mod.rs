@@ -17,13 +17,14 @@ pub mod model;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{default, set_system_param};
 use risingwave_common::{for_all_undeprecated_params, key_of};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::RwLock;
 
 use self::model::SystemParamsModel;
-use super::MetaSrvEnv;
+use super::NotificationManagerRef;
 use crate::model::{ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
@@ -31,14 +32,18 @@ use crate::{MetaError, MetaResult};
 pub type SystemParamManagerRef<S> = Arc<SystemParamManager<S>>;
 
 pub struct SystemParamManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+    meta_store: Arc<S>,
+    notification_manager: NotificationManagerRef<S>,
     params: RwLock<SystemParams>,
 }
 
 impl<S: MetaStore> SystemParamManager<S> {
     /// Return error if `init_params` conflict with persisted system params.
-    pub async fn new(env: MetaSrvEnv<S>, init_params: SystemParams) -> MetaResult<Self> {
-        let meta_store = env.meta_store_ref();
+    pub async fn new(
+        meta_store: Arc<S>,
+        notification_manager: NotificationManagerRef<S>,
+        init_params: SystemParams,
+    ) -> MetaResult<Self> {
         let persisted = SystemParams::get(meta_store.as_ref()).await?;
 
         let params = if let Some(persisted) = persisted {
@@ -50,13 +55,18 @@ impl<S: MetaStore> SystemParamManager<S> {
         SystemParams::insert(&params, meta_store.as_ref()).await?;
 
         Ok(Self {
-            env,
+            meta_store,
+            notification_manager,
             params: RwLock::new(params),
         })
     }
 
-    pub async fn get_params(&self) -> SystemParams {
+    pub async fn get_pb_params(&self) -> SystemParams {
         self.params.read().await.clone()
+    }
+
+    pub async fn get_params(&self) -> SystemParamsReader {
+        self.params.read().await.clone().into()
     }
 
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
@@ -68,13 +78,12 @@ impl<S: MetaStore> SystemParamManager<S> {
 
         let mut store_txn = Transaction::default();
         mem_txn.apply_to_txn(&mut store_txn)?;
-        self.env.meta_store().txn(store_txn).await?;
+        self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
 
         // Sync params to other managers on the meta node only once, since it's infallible.
-        self.env
-            .notification_manager()
+        self.notification_manager
             .notify_local_subscribers(super::LocalNotification::SystemParamsChange(
                 params.clone().into(),
             ))

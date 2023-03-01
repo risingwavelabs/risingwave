@@ -91,6 +91,8 @@ mod union_input_values_merge_rule;
 pub use union_input_values_merge_rule::*;
 mod rewrite_like_expr_rule;
 pub use rewrite_like_expr_rule::*;
+mod avoid_exchange_share_rule;
+pub use avoid_exchange_share_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -127,6 +129,7 @@ macro_rules! for_all_rules {
             , { TrivialProjectToValuesRule }
             , { UnionInputValuesMergeRule }
             , { RewriteLikeExprRule }
+            , { AvoidExchangeShareRule }
         }
     };
 }
